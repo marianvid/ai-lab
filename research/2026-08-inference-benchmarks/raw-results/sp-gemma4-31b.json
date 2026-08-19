@@ -1,0 +1,28 @@
+{
+  "label": "gemma4-31b",
+  "model": "/models/gguf/gemma-4-31b/gemma-4-31B-it-UD-Q4_K_XL.gguf",
+  "runs": [
+    {
+      "test": "short prompt (~500 tok)",
+      "prompt_tokens": 358,
+      "output_tokens": 245,
+      "ttft_s": 0.413,
+      "total_s": 6.98,
+      "prefill_tok_s": 866.0,
+      "decode_tok_s": 37.2
+    },
+    {
+      "test": "medium prompt (~9k tok)",
+      "prompt_tokens": 9166,
+      "output_tokens": 216,
+      "ttft_s": 7.443,
+      "total_s": 14.31,
+      "prefill_tok_s": 1231.6,
+      "decode_tok_s": 31.3
+    },
+    {
+      "test": "long prompt (~32k tok)",
+      "error": "<HTTPError 400: 'Bad Request'>"
+    }
+  ]
+}

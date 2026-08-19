@@ -1,0 +1,33 @@
+{
+  "label": "qwen36-nvfp4",
+  "model": "qwen3.6-35b-a3b",
+  "runs": [
+    {
+      "test": "short prompt (~500 tok)",
+      "prompt_tokens": 338,
+      "output_tokens": 202,
+      "ttft_s": 0.084,
+      "total_s": 1.03,
+      "prefill_tok_s": 4016.0,
+      "decode_tok_s": 211.8
+    },
+    {
+      "test": "medium prompt (~9k tok)",
+      "prompt_tokens": 8566,
+      "output_tokens": 188,
+      "ttft_s": 0.616,
+      "total_s": 1.54,
+      "prefill_tok_s": 13915.9,
+      "decode_tok_s": 201.5
+    },
+    {
+      "test": "long prompt (~32k tok)",
+      "prompt_tokens": 31406,
+      "output_tokens": 197,
+      "ttft_s": 2.409,
+      "total_s": 3.49,
+      "prefill_tok_s": 13035.4,
+      "decode_tok_s": 180.6
+    }
+  ]
+}

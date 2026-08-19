@@ -1,0 +1,33 @@
+{
+  "label": "vLLM | Qwen3-Coder-30B-A3B NVFP4 | all-VRAM",
+  "model": "qwen3-coder-30b-a3b",
+  "runs": [
+    {
+      "test": "short prompt (~500 tok)",
+      "prompt_tokens": 309,
+      "output_tokens": 194,
+      "ttft_s": 0.016,
+      "total_s": 1.03,
+      "prefill_tok_s": 18936.6,
+      "decode_tok_s": 189.8
+    },
+    {
+      "test": "medium prompt (~9k tok)",
+      "prompt_tokens": 7841,
+      "output_tokens": 190,
+      "ttft_s": 0.422,
+      "total_s": 1.59,
+      "prefill_tok_s": 18563.6,
+      "decode_tok_s": 161.5
+    },
+    {
+      "test": "long prompt (~32k tok)",
+      "prompt_tokens": 28761,
+      "output_tokens": 211,
+      "ttft_s": 3.05,
+      "total_s": 4.9,
+      "prefill_tok_s": 9430.4,
+      "decode_tok_s": 113.7
+    }
+  ]
+}

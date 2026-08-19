@@ -1,0 +1,33 @@
+# One unit for every engine instance. %i is the instance id.
+#
+# Instances are created from the interface at runtime, so the command line
+# cannot live in this file. The manager writes it to
+# /var/lib/ai-lab/launch/%i.json and ai-lab-run reads it and execs.
+#
+# This runs as ai-lab-manager, the same user as the manager itself, so a
+# manager-written command line grants no privilege the manager did not already
+# have. llama-server needs no root: only /dev/nvidia* and the model files.
+
+[Unit]
+Description=AI-Lab inference instance %i
+After=network-online.target
+Wants=network-online.target
+StopWhenUnneeded=no
+
+[Service]
+Type=simple
+User=ai-lab-manager
+Group=ai-lab-manager
+# Say where the home directory is, instead of trusting the account's entry in
+# /etc/passwd. vLLM needs one: FlashInfer creates a working directory under
+# $HOME before it will start, and llama.cpp never noticed because it writes
+# nothing there. Stating it here means a rebuilt container works straight away,
+# with no hand-edited passwd entry to remember.
+Environment=HOME=/var/lib/ai-lab
+ExecStart=/opt/ai-lab/.venv/bin/ai-lab-run %i
+Restart=no
+TimeoutStopSec=60
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

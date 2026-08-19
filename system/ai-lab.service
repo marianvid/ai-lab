@@ -1,0 +1,21 @@
+[Unit]
+Description=AI-Lab web manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-lab-manager
+Group=ai-lab-manager
+ExecStart=/opt/ai-lab/.venv/bin/ai-lab --config /etc/ai-lab/config.json
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/etc/ai-lab /var/lib/ai-lab /models
+
+[Install]
+WantedBy=multi-user.target

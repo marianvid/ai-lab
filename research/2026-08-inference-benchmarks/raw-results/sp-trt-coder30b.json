@@ -1,0 +1,28 @@
+{
+  "label": "trt-coder30b",
+  "model": "qwen3-coder-30b-modelopt",
+  "runs": [
+    {
+      "test": "short prompt (~500 tok)",
+      "prompt_tokens": 309,
+      "output_tokens": 168,
+      "ttft_s": 0.051,
+      "total_s": 1.1,
+      "prefill_tok_s": 6019.2,
+      "decode_tok_s": 158.8
+    },
+    {
+      "test": "medium prompt (~9k tok)",
+      "prompt_tokens": 7841,
+      "output_tokens": 171,
+      "ttft_s": 0.455,
+      "total_s": 1.67,
+      "prefill_tok_s": 17217.2,
+      "decode_tok_s": 139.5
+    },
+    {
+      "test": "long prompt (~32k tok)",
+      "error": "<HTTPError 400: 'Bad Request'>"
+    }
+  ]
+}

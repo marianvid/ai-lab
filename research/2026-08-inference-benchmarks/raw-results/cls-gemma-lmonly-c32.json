@@ -1,0 +1,74 @@
+{
+  "label": "gemma-lmonly",
+  "model": "gemma-4-26b-a4b",
+  "concurrency": 32,
+  "batch": 5,
+  "wall_s": 6.39,
+  "answered": 600,
+  "of": 600,
+  "requests": 120,
+  "failed_requests": 0,
+  "prompt_tokens": 90805,
+  "completion_tokens": 6840,
+  "prefill_tok_s": 14202.1,
+  "decode_tok_s": 1069.8,
+  "items_per_s": 93.84,
+  "quality": {
+    "n": 600,
+    "accuracy": 0.9633,
+    "precision": 0.9708,
+    "recall": 0.9583,
+    "f1": 0.9645
+  },
+  "per_language": {
+    "ru": {
+      "n": 154,
+      "accuracy": 0.9481,
+      "precision": 0.9619,
+      "recall": 0.9619,
+      "f1": 0.9619
+    },
+    "ua": {
+      "n": 117,
+      "accuracy": 0.9829,
+      "precision": 1.0,
+      "recall": 0.9692,
+      "f1": 0.9844
+    },
+    "lt": {
+      "n": 114,
+      "accuracy": 0.9825,
+      "precision": 0.9444,
+      "recall": 0.9444,
+      "f1": 0.9444
+    },
+    "news": {
+      "n": 99,
+      "accuracy": 0.9394,
+      "precision": 0.9608,
+      "recall": 0.9245,
+      "f1": 0.9423
+    },
+    "com": {
+      "n": 95,
+      "accuracy": 0.9789,
+      "precision": 0.9846,
+      "recall": 0.9846,
+      "f1": 0.9846
+    },
+    "pl": {
+      "n": 11,
+      "accuracy": 0.9091,
+      "precision": 1.0,
+      "recall": 0.8333,
+      "f1": 0.9091
+    },
+    "md": {
+      "n": 10,
+      "accuracy": 0.9,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  }
+}

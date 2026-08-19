@@ -1,0 +1,33 @@
+{
+  "label": "reap40b-q4",
+  "model": "/models/gguf/qwen3-coder-next-reap40b/Qwen3-Coder-Next-REAP-40B-A3B-Q4_K_XL.gguf",
+  "runs": [
+    {
+      "test": "short prompt (~500 tok)",
+      "prompt_tokens": 309,
+      "output_tokens": 193,
+      "ttft_s": 0.073,
+      "total_s": 1.79,
+      "prefill_tok_s": 4226.7,
+      "decode_tok_s": 111.6
+    },
+    {
+      "test": "medium prompt (~9k tok)",
+      "prompt_tokens": 7841,
+      "output_tokens": 178,
+      "ttft_s": 2.508,
+      "total_s": 4.16,
+      "prefill_tok_s": 3126.0,
+      "decode_tok_s": 106.9
+    },
+    {
+      "test": "long prompt (~32k tok)",
+      "prompt_tokens": 28761,
+      "output_tokens": 237,
+      "ttft_s": 6.583,
+      "total_s": 8.93,
+      "prefill_tok_s": 4369.2,
+      "decode_tok_s": 100.6
+    }
+  ]
+}

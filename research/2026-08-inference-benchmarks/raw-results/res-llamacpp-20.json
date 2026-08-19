@@ -1,0 +1,33 @@
+{
+  "label": "llama.cpp | Coder-Next Q4_K_XL | ncmoe=20",
+  "model": "/models/gguf/qwen3-coder-next/Qwen3-Coder-Next-UD-Q4_K_XL.gguf",
+  "runs": [
+    {
+      "test": "short prompt (~500 tok)",
+      "prompt_tokens": 309,
+      "output_tokens": 195,
+      "ttft_s": 0.098,
+      "total_s": 3.53,
+      "prefill_tok_s": 3153.3,
+      "decode_tok_s": 56.5
+    },
+    {
+      "test": "medium prompt (~9k tok)",
+      "prompt_tokens": 7841,
+      "output_tokens": 178,
+      "ttft_s": 23.944,
+      "total_s": 27.2,
+      "prefill_tok_s": 327.5,
+      "decode_tok_s": 54.3
+    },
+    {
+      "test": "long prompt (~32k tok)",
+      "prompt_tokens": 28761,
+      "output_tokens": 196,
+      "ttft_s": 61.346,
+      "total_s": 65.05,
+      "prefill_tok_s": 468.8,
+      "decode_tok_s": 52.6
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "label": "glm47flash",
+  "model": "glm-4.7-flash",
+  "concurrency": 32,
+  "batch": 5,
+  "wall_s": 7.35,
+  "answered": 600,
+  "of": 600,
+  "requests": 120,
+  "failed_requests": 0,
+  "prompt_tokens": 90693,
+  "completion_tokens": 6870,
+  "prefill_tok_s": 12336.7,
+  "decode_tok_s": 934.5,
+  "items_per_s": 81.62,
+  "quality": {
+    "n": 600,
+    "accuracy": 0.9417,
+    "precision": 0.9482,
+    "recall": 0.9391,
+    "f1": 0.9436
+  },
+  "per_language": {
+    "ru": {
+      "n": 154,
+      "accuracy": 0.9221,
+      "precision": 0.9346,
+      "recall": 0.9524,
+      "f1": 0.9434
+    },
+    "ua": {
+      "n": 117,
+      "accuracy": 0.9658,
+      "precision": 0.9692,
+      "recall": 0.9692,
+      "f1": 0.9692
+    },
+    "lt": {
+      "n": 114,
+      "accuracy": 0.9474,
+      "precision": 0.875,
+      "recall": 0.7778,
+      "f1": 0.8235
+    },
+    "news": {
+      "n": 99,
+      "accuracy": 0.9596,
+      "precision": 0.9455,
+      "recall": 0.9811,
+      "f1": 0.963
+    },
+    "com": {
+      "n": 95,
+      "accuracy": 0.9263,
+      "precision": 0.9833,
+      "recall": 0.9077,
+      "f1": 0.944
+    },
+    "pl": {
+      "n": 11,
+      "accuracy": 0.9091,
+      "precision": 1.0,
+      "recall": 0.8333,
+      "f1": 0.9091
+    },
+    "md": {
+      "n": 10,
+      "accuracy": 0.9,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  }
+}

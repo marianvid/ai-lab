@@ -1,0 +1,354 @@
+// The library: every model on disk, and how to get more.
+//
+// Downloading and deleting live on the same page as the list because they are
+// the same subject seen from three angles — what you have, what you want, what
+// you no longer want. Splitting them meant knowing which page a model was on
+// before you could do anything with it.
+
+import { api } from '../api.js';
+import { confirmDestructive } from '../confirm.js';
+import { bytes, element } from '../format.js';
+import { setStatus } from '../status.js';
+
+let results = [];        // Hugging Face search results
+let sets = [];           // downloadable models in the opened repository
+let openRepo = null;
+let onlySupported = true;   // hide formats nothing here can run
+let lastQuery = '';
+let currentTransfers = [];
+let redraw = () => {};
+
+// Built once and reused on every render. The page refreshes itself every few
+// seconds, and rebuilding these would wipe whatever is being typed and steal
+// the focus mid-word.
+let searchRow = null;
+let filterRow = null;
+
+// -- what is on disk --------------------------------------------------------
+
+async function remove(model) {
+  const confirmed = await confirmDestructive({
+    title: `Delete ${model.name}?`,
+    body: `${model.file_count} file${model.file_count === 1 ? '' : 's'}, `
+          + `${bytes(model.size_bytes)}, will be removed from disk. `
+          + 'This cannot be undone.',
+  });
+  if (!confirmed) return;
+  setStatus(`Deleting ${model.name}…`);
+  try {
+    const result = await api.deleteModel(model.id);
+    setStatus(`Deleted ${result.deleted}, freed ${bytes(result.freed_bytes)}`, 'ok');
+  } catch (error) {
+    setStatus(error.message, 'error');
+  }
+  redraw();
+}
+
+function modelRow(model) {
+  const state = model.complete
+    ? element('span', { class: 'pill on', text: 'complete' })
+    : element('span', {
+        class: 'pill', style: 'color:var(--warn);border-color:var(--warn)',
+        text: `missing ${model.missing.length}`, title: model.missing.join(', '),
+      });
+  return element('tr', {}, [
+    element('td', {}, element('strong', { text: model.name })),
+    element('td', { class: 'muted', text: model.format }),
+    element('td', { class: 'number', text: bytes(model.size_bytes) }),
+    element('td', { class: 'number muted', text: String(model.file_count) }),
+    element('td', {}, state),
+    element('td', { class: 'number' },
+      element('button', { class: 'action danger', text: 'Delete',
+                          onclick: () => remove(model) })),
+  ]);
+}
+
+function repositorySection(repository, models) {
+  const heading = `${repository.name} · ${repository.format} · `
+                  + `${bytes(repository.free_bytes)} free`;
+  return element('section', {}, [
+    element('h3', { text: heading }),
+    models.length
+      ? element('table', {}, [
+          element('thead', {}, element('tr', {}, [
+            element('th', { text: 'Model' }),
+            element('th', { text: 'Format' }),
+            element('th', { class: 'number', text: 'Size' }),
+            element('th', { class: 'number', text: 'Files' }),
+            element('th', { text: '' }),
+            element('th', { text: '' }),
+          ])),
+          element('tbody', {}, models.map(modelRow)),
+        ])
+      : element('p', { class: 'muted', text: 'Empty.' }),
+  ]);
+}
+
+// -- getting more -----------------------------------------------------------
+
+async function search(query) {
+  setStatus(`Searching for “${query}”…`);
+  lastQuery = query;
+  try {
+    results = await api.search(query, !onlySupported);
+    sets = [];
+    openRepo = null;
+    setStatus(`${results.length} repositories found`);
+  } catch (error) {
+    setStatus(error.message, 'error');
+  }
+}
+
+async function openRepository(repo) {
+  setStatus(`Reading ${repo}…`);
+  openRepo = repo;
+  sets = [];
+  try {
+    sets = await api.remoteSets(repo, !onlySupported);
+    setStatus(sets.length
+      ? `${sets.length} model${sets.length === 1 ? '' : 's'} in ${repo}`
+      : `Nothing in ${repo} that this machine can run`);
+  } catch (error) {
+    openRepo = null;
+    setStatus(error.message, 'error');
+  }
+}
+
+function searchBox() {
+  if (searchRow) return searchRow;
+  const input = element('input', {
+    class: 'grow', placeholder: 'Search Hugging Face, e.g. qwen3 gguf',
+  });
+  const go = async () => {
+    if (!input.value.trim()) return;
+    await search(input.value.trim());
+    redraw();
+  };
+  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') go(); });
+  searchRow = element('div', { class: 'row' }, [
+    input,
+    element('button', { class: 'action', text: 'Search', onclick: go }),
+  ]);
+  return searchRow;
+}
+
+// The label says what ticking the box does and never changes. A caption that
+// rewrites itself when you tick it leaves you unsure what you just agreed to.
+function formatFilter() {
+  if (filterRow) return filterRow;
+  filterRow = element('label', { class: 'inline' }, [
+    element('input', {
+      type: 'checkbox', ...(onlySupported ? { checked: 'checked' } : {}),
+      onchange: async (event) => {
+        onlySupported = event.target.checked;
+        if (lastQuery) await search(lastQuery);
+        redraw();
+      },
+    }),
+    element('span', { text: 'Show only supported formats' }),
+  ]);
+  return filterRow;
+}
+
+async function startDownload(set, button) {
+  button.disabled = true;
+  button.textContent = 'Preparing…';
+  setStatus(`Preparing ${set.name}…`);
+  try {
+    // No destination: the server puts it where that format lives.
+    const transfer = await api.download(set.repo, set.name);
+    currentTransfers = [
+      ...currentTransfers.filter((item) => item.id !== transfer.id), transfer,
+    ];
+    setStatus(`Downloading ${set.name}`, 'ok');
+  } catch (error) {
+    setStatus(error.message, 'error');
+  }
+  await redraw();
+}
+
+async function cancelDownload(transfer) {
+  setStatus(`Cancelling ${transfer.name}…`);
+  try {
+    await api.cancelDownload(transfer.id);
+    setStatus(`Cancelled ${transfer.name}`);
+  } catch (error) {
+    setStatus(error.message, 'error');
+  }
+  await redraw();
+}
+
+function matchingTransfer(set) {
+  return currentTransfers.find((item) =>
+    item.repo === set.repo && item.name === set.name);
+}
+
+function transferProgress(transfer) {
+  if (!transfer) return null;
+  const active = ['queued', 'running'].includes(transfer.state);
+  let label = transfer.state;
+  if (transfer.state === 'running') {
+    const file = Math.min(transfer.files_done + 1, transfer.files_total);
+    label = `${transfer.percent.toFixed(1)}% · ${bytes(transfer.received_bytes)} of `
+      + `${bytes(transfer.total_bytes)} · file ${file} of ${transfer.files_total}`;
+  }
+  return element('div', { class: 'variant-progress' }, [
+    element('div', { class: 'row progress-label' }, [
+      element('span', {
+        class: transfer.state === 'failed' ? 'error' : 'muted',
+        text: label + (transfer.error ? ` · ${transfer.error}` : ''),
+      }),
+      active ? element('button', {
+        class: 'action quiet', text: 'Cancel',
+        onclick: () => cancelDownload(transfer),
+      }) : null,
+    ]),
+    element('div', {
+      class: 'bar' + (transfer.state === 'done' ? ' done' : '')
+             + (transfer.state === 'failed' ? ' failed' : ''),
+    }, element('span', { style: `width:${transfer.percent}%` })),
+  ]);
+}
+
+// One row per variant inside a repository. A repository usually holds the same
+// model at a dozen quantisations, and the format is the thing that decides
+// whether this machine can run it, so it is shown on every row.
+function variantRow(set) {
+  const transfer = matchingTransfer(set);
+  const alreadyFinished = transfer?.state === 'done';
+  return element('div', { class: 'variant' }, [
+    element('div', { class: 'variant-main' }, [
+      element('div', { class: 'variant-name' }, [
+        element('strong', { text: set.name }),
+        element('span', {
+          class: 'muted',
+          text: ` · ${bytes(set.size_bytes)} · ${set.files.length} file`
+                + `${set.files.length === 1 ? '' : 's'}`,
+        }),
+      ]),
+      element('div', { class: 'inline variant-actions' }, [
+        element('span', { class: 'pill', text: set.format }),
+        !set.complete
+          ? element('span', { class: 'warn',
+                              text: `incomplete upstream (${set.missing.length})` })
+          : alreadyFinished
+            ? element('span', { class: 'pill on', text: 'Downloaded' })
+            : ['queued', 'running'].includes(transfer?.state)
+              ? element('span', { class: 'pill on', text: transfer.state })
+              : element('button', {
+                class: 'action',
+                text: transfer?.state === 'failed' ? 'Retry'
+                  : transfer?.state === 'cancelled' ? 'Resume' : 'Download',
+                onclick: (event) => startDownload(set, event.currentTarget),
+              }),
+      ]),
+    ]),
+    transferProgress(transfer),
+  ]);
+}
+
+// The variants appear directly beneath the repository they came from. They used
+// to be rendered below the whole result list, which meant clicking a button
+// changed something far off the bottom of the screen and looked like nothing
+// had happened at all.
+function repositoryRow(item) {
+  const isOpen = openRepo === item.repo;
+  const rows = [
+    element('div', { class: 'row' }, [
+      element('div', {}, [
+        element('strong', { text: item.repo }),
+        element('span', { class: 'muted',
+                          text: ` · ${item.downloads.toLocaleString()} downloads` }),
+      ]),
+      element('button', {
+        class: 'action',
+        text: isOpen ? 'Hide' : 'Show models',
+        onclick: async () => {
+          if (isOpen) { openRepo = null; sets = []; redraw(); return; }
+          await openRepository(item.repo);
+          redraw();
+        },
+      }),
+    ]),
+  ];
+
+  if (isOpen) {
+    rows.push(element('div', { class: 'variants' },
+      sets.length
+        ? sets.map(variantRow)
+        : [element('p', { class: 'muted',
+                          text: 'Nothing here this machine can run. '
+                                + 'Untick the filter to see every format.' })]));
+  }
+  return element('div', {}, rows);
+}
+
+function transferList(transfers) {
+  if (!transfers.length) return null;
+  return element('div', {}, [
+    element('h4', { text: 'Transfers' }),
+    ...transfers.map((transfer) => element('div', {}, [
+      element('div', { class: 'row' }, [
+        element('div', {}, [
+          element('strong', { text: transfer.name }),
+          element('span', {
+            class: transfer.state === 'failed' ? 'error' : 'muted',
+            text: ` · ${transfer.state} · ${bytes(transfer.received_bytes)}`
+                  + ` of ${bytes(transfer.total_bytes)}`
+                  + (transfer.error ? ` · ${transfer.error}` : ''),
+          }),
+        ]),
+        ['running', 'queued'].includes(transfer.state)
+          ? element('button', {
+              class: 'action', text: 'Cancel',
+              onclick: () => cancelDownload(transfer),
+            })
+          : null,
+      ]),
+      element('div', { class: 'bar' + (transfer.state === 'done' ? ' done' : '') },
+              element('span', { style: `width:${transfer.percent}%` })),
+    ])),
+  ]);
+}
+
+// -- the view ---------------------------------------------------------------
+
+export async function render(container) {
+  redraw = () => render(container);
+  const [models, settings, transfers] = await Promise.all([
+    api.models(), api.settings(), api.transfers(),
+  ]);
+  currentTransfers = transfers;
+
+  const byRepository = new Map(settings.repositories.map((item) => [item.id, []]));
+  models.forEach((model) => {
+    const key = model.id.split('/')[0];
+    if (!byRepository.has(key)) byRepository.set(key, []);
+    byRepository.get(key).push(model);
+  });
+
+  const sections = [...byRepository.entries()]
+    .filter(([, entries]) => entries.length > 0)
+    .map(([id, entries]) => {
+      const repository = settings.repositories.find((item) => item.id === id);
+      return repository ? repositorySection(repository, entries) : null;
+    })
+    .filter(Boolean);
+
+  // Getting models comes first, then what you already have.
+  //
+  // replaceChildren turns a null into the text "null", so the list is filtered
+  // rather than handed straight over — two empty slots showed up on the page
+  // as "nullnull".
+  const children = [
+    searchBox(),
+    formatFilter(),
+    ...results.map(repositoryRow),
+    transferList(transfers.filter((transfer) =>
+      ['queued', 'running', 'failed'].includes(transfer.state)
+      && transfer.repo !== openRepo)),
+    element('hr', {}),
+    ...sections,
+  ].filter(Boolean);
+  container.replaceChildren(...children);
+}

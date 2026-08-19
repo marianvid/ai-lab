@@ -1,0 +1,74 @@
+{
+  "label": "coder30b-nvfp4",
+  "model": "qwen3-coder-30b-a3b",
+  "concurrency": 1,
+  "batch": 5,
+  "wall_s": 48.98,
+  "answered": 600,
+  "of": 600,
+  "requests": 120,
+  "failed_requests": 0,
+  "prompt_tokens": 100951,
+  "completion_tokens": 8114,
+  "prefill_tok_s": 2061.0,
+  "decode_tok_s": 165.7,
+  "items_per_s": 12.25,
+  "quality": {
+    "n": 600,
+    "accuracy": 0.9333,
+    "precision": 0.9387,
+    "recall": 0.9327,
+    "f1": 0.9357
+  },
+  "per_language": {
+    "ru": {
+      "n": 154,
+      "accuracy": 0.9286,
+      "precision": 0.9519,
+      "recall": 0.9429,
+      "f1": 0.9474
+    },
+    "ua": {
+      "n": 117,
+      "accuracy": 0.9487,
+      "precision": 1.0,
+      "recall": 0.9077,
+      "f1": 0.9516
+    },
+    "lt": {
+      "n": 114,
+      "accuracy": 0.9123,
+      "precision": 0.6538,
+      "recall": 0.9444,
+      "f1": 0.7727
+    },
+    "news": {
+      "n": 99,
+      "accuracy": 0.9596,
+      "precision": 0.9455,
+      "recall": 0.9811,
+      "f1": 0.963
+    },
+    "com": {
+      "n": 95,
+      "accuracy": 0.9263,
+      "precision": 0.9833,
+      "recall": 0.9077,
+      "f1": 0.944
+    },
+    "pl": {
+      "n": 11,
+      "accuracy": 0.9091,
+      "precision": 1.0,
+      "recall": 0.8333,
+      "f1": 0.9091
+    },
+    "md": {
+      "n": 10,
+      "accuracy": 0.9,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  }
+}

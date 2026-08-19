@@ -1,0 +1,20 @@
+[project]
+name = "ai-lab"
+version = "0.2.0"
+description = "A manager for local inference engines: model catalog, measured load and unload, Hugging Face downloads"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[project.scripts]
+ai-lab = "ai_lab.main:main"
+ai-lab-run = "ai_lab.hosts.launch:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["ai_lab", "ai_lab.hosts", "ai_lab.engines", "ai_lab.downloads", "ai_lab.api", "ai_lab.api.routes"]
+
+[tool.setuptools.package-data]
+ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*"]

@@ -1,0 +1,74 @@
+{
+  "label": "reap40b-q4",
+  "model": "/models/gguf/qwen3-coder-next-reap40b/Qwen3-Coder-Next-REAP-40B-A3B-Q4_K_XL.gguf",
+  "concurrency": 16,
+  "batch": 5,
+  "wall_s": 77.0,
+  "answered": 600,
+  "of": 600,
+  "requests": 120,
+  "failed_requests": 0,
+  "prompt_tokens": 100951,
+  "completion_tokens": 6840,
+  "prefill_tok_s": 1311.1,
+  "decode_tok_s": 88.8,
+  "items_per_s": 7.79,
+  "quality": {
+    "n": 600,
+    "accuracy": 0.8633,
+    "precision": 0.9078,
+    "recall": 0.8205,
+    "f1": 0.862
+  },
+  "per_language": {
+    "ru": {
+      "n": 154,
+      "accuracy": 0.8636,
+      "precision": 0.9375,
+      "recall": 0.8571,
+      "f1": 0.8955
+    },
+    "ua": {
+      "n": 117,
+      "accuracy": 0.8632,
+      "precision": 0.9016,
+      "recall": 0.8462,
+      "f1": 0.873
+    },
+    "lt": {
+      "n": 114,
+      "accuracy": 0.9035,
+      "precision": 0.7059,
+      "recall": 0.6667,
+      "f1": 0.6857
+    },
+    "news": {
+      "n": 99,
+      "accuracy": 0.8687,
+      "precision": 0.9348,
+      "recall": 0.8113,
+      "f1": 0.8687
+    },
+    "com": {
+      "n": 95,
+      "accuracy": 0.8316,
+      "precision": 0.9623,
+      "recall": 0.7846,
+      "f1": 0.8644
+    },
+    "pl": {
+      "n": 11,
+      "accuracy": 0.9091,
+      "precision": 1.0,
+      "recall": 0.8333,
+      "f1": 0.9091
+    },
+    "md": {
+      "n": 10,
+      "accuracy": 0.6,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  }
+}

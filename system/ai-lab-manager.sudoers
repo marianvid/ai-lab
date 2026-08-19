@@ -1,0 +1,7 @@
+# The manager may run one helper, and nothing else, without a password.
+#
+# The helper takes a verb and an instance id and validates both before
+# reaching systemd. Instances are created at runtime, so the id cannot be
+# enumerated here the way it was when there were two fixed slots; the
+# validation moved into the helper instead.
+ai-lab-manager ALL=(root) NOPASSWD: /usr/local/sbin/ai-lab-control

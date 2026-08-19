@@ -1,0 +1,80 @@
+{
+  "label": "gemma4-31b",
+  "model": "/models/gguf/gemma-4-31b/gemma-4-31B-it-UD-Q4_K_XL.gguf",
+  "passed": 10,
+  "of": 10,
+  "score": 1.0,
+  "wall_s": 64.6,
+  "tasks": [
+    {
+      "id": "t01_parse_duration",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 297,
+      "seconds": 8.1
+    },
+    {
+      "id": "t02_merge_intervals",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 234,
+      "seconds": 6.6
+    },
+    {
+      "id": "t03_fix_bug",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 51,
+      "seconds": 1.7
+    },
+    {
+      "id": "t04_group_by_key",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 148,
+      "seconds": 4.2
+    },
+    {
+      "id": "t05_retry_decorator",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 106,
+      "seconds": 3.1
+    },
+    {
+      "id": "t06_flatten",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 161,
+      "seconds": 4.6
+    },
+    {
+      "id": "t07_lru",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 196,
+      "seconds": 5.6
+    },
+    {
+      "id": "t08_csv_quotes",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 253,
+      "seconds": 7.1
+    },
+    {
+      "id": "t09_topo",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 316,
+      "seconds": 8.8
+    },
+    {
+      "id": "t10_semver",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 537,
+      "seconds": 14.8
+    }
+  ]
+}

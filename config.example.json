@@ -1,0 +1,69 @@
+{
+  "title": "AI-Lab",
+  "host": "0.0.0.0",
+  "port": 8090,
+  "engines": {
+    "llamacpp": {
+      "binary": "/opt/ai/llama.cpp/build/bin/llama-server",
+      "source": {
+        "path": "/opt/ai/llama.cpp"
+      }
+    }
+  },
+  "repositories": [
+    {
+      "id": "gguf",
+      "name": "GGUF models",
+      "path": "/models/gguf",
+      "format": "gguf"
+    },
+    {
+      "id": "safetensors",
+      "name": "Safetensors sources",
+      "path": "/models/safetensors",
+      "format": "safetensors"
+    },
+    {
+      "id": "fp8",
+      "name": "FP8",
+      "path": "/models/fp8",
+      "format": "fp8"
+    },
+    {
+      "id": "nvfp4",
+      "name": "NVFP4",
+      "path": "/models/nvfp4",
+      "format": "nvfp4"
+    }
+  ],
+  "instances": [
+    {
+      "id": "qwen-coder",
+      "name": "Coding",
+      "engine": "llamacpp",
+      "model_id": "gguf/qwen-coder/Qwen3.6-35B-A3B-UD-Q4_K_M",
+      "port": 8080,
+      "params": {
+        "context_size": 32768,
+        "parallel": 1,
+        "cache_type_k": "q4_0",
+        "cache_type_v": "q4_0",
+        "flash_attention": true
+      }
+    },
+    {
+      "id": "gemma-general",
+      "name": "General & documentation",
+      "engine": "llamacpp",
+      "model_id": "gguf/gemma-general/gemma-4-E4B-it-Q4_0",
+      "port": 8081,
+      "params": {
+        "context_size": 32768,
+        "parallel": 1,
+        "cache_type_k": "q4_0",
+        "cache_type_v": "q4_0",
+        "flash_attention": true
+      }
+    }
+  ]
+}

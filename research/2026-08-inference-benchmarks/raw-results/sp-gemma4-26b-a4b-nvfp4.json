@@ -1,0 +1,28 @@
+{
+  "label": "gemma4-26b-a4b-nvfp4",
+  "model": "gemma-4-26b-a4b",
+  "runs": [
+    {
+      "test": "short prompt (~500 tok)",
+      "prompt_tokens": 358,
+      "output_tokens": 256,
+      "ttft_s": 0.024,
+      "total_s": 2.28,
+      "prefill_tok_s": 14964.2,
+      "decode_tok_s": 113.1
+    },
+    {
+      "test": "medium prompt (~9k tok)",
+      "prompt_tokens": 9166,
+      "output_tokens": 256,
+      "ttft_s": 0.587,
+      "total_s": 3.02,
+      "prefill_tok_s": 15611.3,
+      "decode_tok_s": 105.0
+    },
+    {
+      "test": "long prompt (~32k tok)",
+      "error": "<HTTPError 400: 'Bad Request'>"
+    }
+  ]
+}

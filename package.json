@@ -1,0 +1,12 @@
+{
+  "name": "ai-lab-web",
+  "private": true,
+  "type": "module",
+  "description": "Tests for the browser interface. Nothing here is deployed: the interface itself has no dependencies and no build step, and jsdom exists only so the tests can run a real DOM.",
+  "scripts": {
+    "test": "node --test tests/ui/test_*.js"
+  },
+  "devDependencies": {
+    "jsdom": "^28.0.0"
+  }
+}

@@ -1,0 +1,26 @@
+#!/bin/bash
+# The only privileged surface in the project.
+#
+# Called through sudo by the manager, which runs unprivileged and therefore
+# cannot talk to systemd directly. It accepts one of four verbs and an
+# instance id, and refuses anything else — so a bug in the manager cannot turn
+# into an arbitrary systemctl call.
+#
+# The instance id is checked against a strict pattern before it is used, which
+# is what stops "qwen; rm -rf /" or "../../something" from reaching systemd.
+set -euo pipefail
+
+action=${1:-}
+instance=${2:-}
+
+case "$action" in
+  start|stop|restart|status) ;;
+  *) echo "usage: ai-lab-control {start|stop|restart|status} <instance-id>" >&2; exit 2 ;;
+esac
+
+if ! [[ "$instance" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]; then
+  echo "invalid instance id" >&2
+  exit 2
+fi
+
+exec /usr/bin/systemctl "$action" "ai-lab-engine@${instance}.service"

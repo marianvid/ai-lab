@@ -1,0 +1,80 @@
+{
+  "label": "trt-coder30b",
+  "model": "qwen3-coder-30b-modelopt",
+  "passed": 10,
+  "of": 10,
+  "score": 1.0,
+  "wall_s": 13.0,
+  "tasks": [
+    {
+      "id": "t01_parse_duration",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 217,
+      "seconds": 1.4
+    },
+    {
+      "id": "t02_merge_intervals",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 167,
+      "seconds": 1.1
+    },
+    {
+      "id": "t03_fix_bug",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 45,
+      "seconds": 0.3
+    },
+    {
+      "id": "t04_group_by_key",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 116,
+      "seconds": 0.8
+    },
+    {
+      "id": "t05_retry_decorator",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 95,
+      "seconds": 0.6
+    },
+    {
+      "id": "t06_flatten",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 172,
+      "seconds": 1.2
+    },
+    {
+      "id": "t07_lru",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 161,
+      "seconds": 1.1
+    },
+    {
+      "id": "t08_csv_quotes",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 185,
+      "seconds": 1.2
+    },
+    {
+      "id": "t09_topo",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 270,
+      "seconds": 1.8
+    },
+    {
+      "id": "t10_semver",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 518,
+      "seconds": 3.3
+    }
+  ]
+}

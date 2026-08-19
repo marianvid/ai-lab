@@ -1,0 +1,27 @@
+.DS_Store
+._*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Mutable runtime state does not belong in source control.
+downloads.json
+*.log
+*.pid
+
+# Personal Claude Code permission overrides.
+.claude/settings.local.json
+
+# Scratch scripts for remote execution.
+tmp/
+
+# Test-only dependency for the browser interface. Nothing here is deployed.
+node_modules/
+package-lock.json
+
+# The private half. Its own repository, cloned here. See README.
+opts/

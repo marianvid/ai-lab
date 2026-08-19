@@ -1,0 +1,80 @@
+{
+  "label": "glm47flash",
+  "model": "glm-4.7-flash",
+  "passed": 5,
+  "of": 10,
+  "score": 0.5,
+  "wall_s": 19.4,
+  "tasks": [
+    {
+      "id": "t01_parse_duration",
+      "pass": false,
+      "why": "ValueError: Unknown unit ' '",
+      "gen_tokens": 275,
+      "seconds": 2.0
+    },
+    {
+      "id": "t02_merge_intervals",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 196,
+      "seconds": 2.2
+    },
+    {
+      "id": "t03_fix_bug",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 54,
+      "seconds": 0.5
+    },
+    {
+      "id": "t04_group_by_key",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 113,
+      "seconds": 0.9
+    },
+    {
+      "id": "t05_retry_decorator",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 100,
+      "seconds": 0.8
+    },
+    {
+      "id": "t06_flatten",
+      "pass": false,
+      "why": "AssertionError",
+      "gen_tokens": 127,
+      "seconds": 1.0
+    },
+    {
+      "id": "t07_lru",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 165,
+      "seconds": 1.9
+    },
+    {
+      "id": "t08_csv_quotes",
+      "pass": false,
+      "why": "AssertionError: should raise",
+      "gen_tokens": 206,
+      "seconds": 1.5
+    },
+    {
+      "id": "t09_topo",
+      "pass": false,
+      "why": "ValueError: cycle",
+      "gen_tokens": 468,
+      "seconds": 3.3
+    },
+    {
+      "id": "t10_semver",
+      "pass": false,
+      "why": "ValueError: Malformed version: 1.2.3-alpha",
+      "gen_tokens": 783,
+      "seconds": 5.5
+    }
+  ]
+}

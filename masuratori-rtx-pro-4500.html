@@ -1,0 +1,739 @@
+<title>Măsurători RTX PRO 4500</title>
+<style>
+  :root {
+    --ground:      #f6f7f4;
+    --surface:     #ffffff;
+    --surface-alt: #eef1ec;
+    --ink:         #131a17;
+    --ink-soft:    #4c554f;
+    --ink-faint:   #77807a;
+    --rule:        #d7ddd6;
+    --fit:         #1d6f52;
+    --fit-wash:    #dfeee7;
+    --spill:       #9a5a1e;
+    --spill-wash:  #f4e6d6;
+    --flag:        #8d2f36;
+    --flag-wash:   #f7e3e4;
+    --shadow:      0 1px 2px rgba(19, 26, 23, .06), 0 8px 24px -16px rgba(19, 26, 23, .3);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0f1411;
+      --surface:     #171d19;
+      --surface-alt: #1e2622;
+      --ink:         #e7ebe6;
+      --ink-soft:    #a8b1ab;
+      --ink-faint:   #79837c;
+      --rule:        #2b342e;
+      --fit:         #57c396;
+      --fit-wash:    #16301f;
+      --spill:       #d99a4e;
+      --spill-wash:  #33240f;
+      --flag:        #e08b91;
+      --flag-wash:   #38191c;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0f1411;
+    --surface:     #171d19;
+    --surface-alt: #1e2622;
+    --ink:         #e7ebe6;
+    --ink-soft:    #a8b1ab;
+    --ink-faint:   #79837c;
+    --rule:        #2b342e;
+    --fit:         #57c396;
+    --fit-wash:    #16301f;
+    --spill:       #d99a4e;
+    --spill-wash:  #33240f;
+    --flag:        #e08b91;
+    --flag-wash:   #38191c;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground); color: var(--ink);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px; line-height: 1.62; margin: 0; padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1140px; margin: 0 auto; }
+  .col  { max-width: 64ch; }
+
+  h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.15; }
+  h1 { font-size: clamp(2.1rem, 5.2vw, 3.1rem); letter-spacing: -.028em; font-weight: 660; }
+  h2 { font-size: clamp(1.35rem, 2.6vw, 1.7rem); letter-spacing: -.02em; font-weight: 640; }
+  h3 { font-size: 1.06rem; letter-spacing: -.008em; font-weight: 640; }
+  p  { margin: 0; }
+
+  .eyebrow { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+             font-size: .705rem; letter-spacing: .14em; text-transform: uppercase;
+             color: var(--ink-faint); font-weight: 600; }
+  .lede { font-size: 1.16rem; color: var(--ink-soft); }
+
+  header.masthead { padding: 72px 0 40px; border-bottom: 2px solid var(--ink);
+                    display: flex; flex-direction: column; gap: 20px; }
+  section { padding-top: 56px; display: flex; flex-direction: column; gap: 20px; }
+  .stack  { display: flex; flex-direction: column; gap: 14px; }
+
+  .verdict { background: var(--surface); border: 1px solid var(--rule);
+             border-left: 4px solid var(--fit); border-radius: 3px;
+             padding: 22px 26px; box-shadow: var(--shadow);
+             display: flex; flex-direction: column; gap: 10px; }
+  .verdict.alt { border-left-color: var(--spill); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+          padding: 22px; box-shadow: var(--shadow);
+          display: flex; flex-direction: column; gap: 12px; }
+  .tag { align-self: flex-start; font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+         font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+         padding: 3px 9px; border-radius: 2px; font-weight: 650; }
+  .tag.fit   { background: var(--fit-wash);   color: var(--fit); }
+  .tag.spill { background: var(--spill-wash); color: var(--spill); }
+  .kv { display: flex; flex-direction: column; gap: 7px; font-size: .9rem; }
+  .kv div { display: flex; justify-content: space-between; gap: 16px;
+            border-bottom: 1px dotted var(--rule); padding-bottom: 6px; }
+  .kv .k { color: var(--ink-faint); }
+  .kv .v { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+           font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  .scroller { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .875rem; min-width: 700px; }
+  caption { text-align: left; padding: 16px 18px 12px; color: var(--ink-faint);
+            font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: .705rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; }
+  th, td { padding: 10px 16px; text-align: right; border-top: 1px solid var(--rule); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { color: var(--ink-faint); font-weight: 600; font-size: .78rem;
+             background: var(--surface-alt); border-top: none; }
+  tbody td.n { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+               font-variant-numeric: tabular-nums; }
+  tbody tr.group-head td { background: var(--surface-alt); font-weight: 640; text-align: left; }
+  tbody tr.hi td { background: var(--fit-wash); }
+  .best  { color: var(--fit);   font-weight: 700; }
+  .worst { color: var(--spill); }
+  .weak  { color: var(--flag);  font-weight: 650; }
+
+  .chart { display: flex; flex-direction: column; gap: 16px; }
+  .bar-row { display: grid; grid-template-columns: minmax(170px, 230px) 1fr; gap: 16px; align-items: center; }
+  .bar-label { font-size: .87rem; color: var(--ink-soft); }
+  .bar-lane { display: flex; align-items: center; gap: 10px; }
+  .bar { height: 20px; border-radius: 2px; min-width: 2px; display: block; }
+  .bar.fit { background: var(--fit); } .bar.spill { background: var(--spill); }
+  .bar-val { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+             font-variant-numeric: tabular-nums; font-size: .84rem; font-weight: 650; white-space: nowrap; }
+
+  code { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+         font-size: .87em; background: var(--surface-alt); padding: 1px 6px;
+         border-radius: 2px; border: 1px solid var(--rule); }
+  ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 9px; }
+  li::marker { color: var(--ink-faint); }
+  hr { border: none; border-top: 1px solid var(--rule); margin: 0; }
+  .caveat { background: var(--spill-wash); border: 1px solid var(--spill); border-radius: 3px;
+            padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .errbox { background: var(--flag-wash); border: 1px solid var(--flag); border-radius: 3px;
+            padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+  footer { padding-top: 56px; color: var(--ink-faint); font-size: .84rem; }
+  a { color: var(--fit); }
+  :focus-visible { outline: 2px solid var(--fit); outline-offset: 3px; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">AI-Lab &middot; LXC 102 &middot; 17–18 august 2026</p>
+    <h1>Ce rulează cel mai bine pe RTX PRO 4500</h1>
+    <p class="lede col">
+      Unsprezece modele, două motoare de inferență: viteză, cod care chiar se execută,
+      clasificare de știri reale în șase limbi, traduceri în șapte, și curbele de
+      concurență. Tot ce urmează e măsurat pe placa ta, nu estimat.
+    </p>
+  </header>
+
+  <section>
+    <div class="cards">
+      <div class="verdict">
+        <p class="eyebrow">Pentru agenți de coding</p>
+        <p><strong>Qwen3-Coder-30B-A3B, NVFP4, pe vLLM.</strong> Cel mai rapid din tot lotul,
+           cu mult: 3 secunde până la primul token pe un context de 32 000, față de 61 la
+           modelul de 80B. 9 din 10 la cod. Ocupă 17 GB și lasă loc berechet.</p>
+      </div>
+      <div class="verdict">
+        <p class="eyebrow">Pentru procesare de text în volum</p>
+        <p><strong>Qwopus3.6-27B-Coder, NVFP4, pe vLLM.</strong> Cel mai bun clasificator
+           măsurat: F1 <strong>0.974</strong>, mai bun decât orice altceva încercat, inclusiv
+           modelul de 80B. Încape întreg în 20.6 GB.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tabelul complet</h2>
+    <div class="scroller">
+      <table>
+        <caption>RTX PRO 4500 Blackwell, 32 623 MiB &middot; toate la Q4 sau NVFP4, temperatură 0</caption>
+        <thead>
+          <tr>
+            <th>Model</th><th>Mărime</th><th>Unde stă</th>
+            <th>Cod</th><th>F1</th>
+            <th>Citire prompt</th><th>Generare</th><th>Primul token 32K</th>
+            <th>Vârf articole/s</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="hi">
+            <td>Qwopus3.6-27B-Coder <span class="eyebrow">NVFP4</span></td>
+            <td class="n">20.6 GB</td><td>tot pe placă</td>
+            <td class="n">9/10</td><td class="n best">0.974</td>
+            <td class="n">7 369</td><td class="n">42</td><td class="n">5.4 s</td><td class="n">30.4</td>
+          </tr>
+          <tr class="hi">
+            <td>Qwen3-Coder-30B-A3B <span class="eyebrow">NVFP4</span></td>
+            <td class="n">17 GB</td><td>tot pe placă</td>
+            <td class="n">9/10</td><td class="n">0.936</td>
+            <td class="n best">18 602</td><td class="n">161</td><td class="n best">3.0 s</td><td class="n best">129.0</td>
+          </tr>
+          <tr>
+            <td>Qwen3.6-35B-A3B <span class="eyebrow">producție azi</span></td>
+            <td class="n">22 GB</td><td>tot pe placă</td>
+            <td class="n">9/10</td><td class="n">0.959</td>
+            <td class="n">4 068</td><td class="n best">167</td><td class="n">6.1 s</td><td class="n">10.0</td>
+          </tr>
+          <tr>
+            <td>Coder-Next REAP-40B</td>
+            <td class="n">28.5 GB</td><td>tot pe placă</td>
+            <td class="n">10/10</td><td class="n worst">0.864</td>
+            <td class="n">3 126</td><td class="n">107</td><td class="n">6.6 s</td><td class="n">7.8</td>
+          </tr>
+          <tr>
+            <td>Coder-Next REAP-48B</td>
+            <td class="n">33.4 GB</td><td>4 straturi în RAM</td>
+            <td class="n">10/10</td><td class="n">0.900</td>
+            <td class="n">1 253</td><td class="n">80</td><td class="n">16.1 s</td><td class="n">4.4</td>
+          </tr>
+          <tr>
+            <td>Coder-Next REAP-60B</td>
+            <td class="n">40.9 GB</td><td>14 straturi în RAM</td>
+            <td class="n">10/10</td><td class="n">0.931</td>
+            <td class="n">541</td><td class="n">56</td><td class="n">35.4 s</td><td class="n">2.3</td>
+          </tr>
+          <tr>
+            <td>Coder-Next 80B <span class="eyebrow">întreg</span></td>
+            <td class="n">47 GB</td><td>20 straturi în RAM</td>
+            <td class="n">10/10</td><td class="n">0.957</td>
+            <td class="n worst">328</td><td class="n">54</td><td class="n worst">61.3 s</td><td class="n worst">1.7</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col" style="font-size:.88rem;color:var(--ink-soft)">
+      Citirea promptului măsurată pe ~8 000 de tokeni. „Vârf articole/s" e cel mai bun debit
+      atins la orice nivel de concurență testat.
+    </p>
+  </section>
+
+  <section>
+    <h2>Tăierea unui model îl costă exact cât te-ai teme</h2>
+    <div class="col stack">
+      <p>
+        REAP scoate din model experții cel mai puțin folosiți și îi șterge definitiv. Din
+        același Coder-Next de 80B ies variante de 60B, 48B și 40B. Întrebarea era cât pierzi.
+        Răspunsul e curat și fără excepții: <strong>fiecare tăietură ia din judecată.</strong>
+      </p>
+    </div>
+    <div class="chart">
+      <div class="bar-row"><span class="bar-label">80B — întreg</span>
+        <span class="bar-lane"><i class="bar fit" style="width:95.7%"></i><span class="bar-val">F1 0.957</span></span></div>
+      <div class="bar-row"><span class="bar-label">REAP-60B</span>
+        <span class="bar-lane"><i class="bar fit" style="width:93.1%"></i><span class="bar-val">F1 0.931</span></span></div>
+      <div class="bar-row"><span class="bar-label">REAP-48B</span>
+        <span class="bar-lane"><i class="bar spill" style="width:90.0%"></i><span class="bar-val">F1 0.900</span></span></div>
+      <div class="bar-row"><span class="bar-label">REAP-40B</span>
+        <span class="bar-lane"><i class="bar spill" style="width:86.4%"></i><span class="bar-val">F1 0.864</span></span></div>
+    </div>
+    <div class="col stack">
+      <p>
+        În schimb câștigi enorm în viteză: REAP-40B citește promptul de <strong>zece ori mai
+        repede</strong> decât originalul de 80B (3 126 față de 328 tokeni/s), fiindcă încape
+        întreg pe placă în loc să calculeze pe procesor.
+      </p>
+      <p>
+        Dar dacă vrei viteză, modelele native o dau fără să tai nimic. <strong>REAP e o cale
+        de mijloc pe care datele nu o recomandă:</strong> mai lentă decât NVFP4 și mai proastă
+        decât originalul.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Multilingv: da, dar inegal</h2>
+    <p class="col">
+      600 de articole reale din pipeline-ul ParallaxVox, cu adevărul de referință stabilit
+      manual. Rusa și ucraineana le merg tuturor. <strong>Lituaniana e sita care separă
+      modelele</strong> — acolo diferența e de la 0.686 la 0.971.
+    </p>
+    <div class="scroller">
+      <table>
+        <caption>F1 pe limbă &middot; roșu = sub 0.85</caption>
+        <thead>
+          <tr><th>Model</th><th>Total</th><th>Rusă<br><span class="eyebrow">154</span></th>
+              <th>Ucraineană<br><span class="eyebrow">117</span></th>
+              <th>Lituaniană<br><span class="eyebrow">114</span></th>
+              <th>Poloneză<br><span class="eyebrow">11</span></th>
+              <th>Mixt .news<br><span class="eyebrow">99</span></th>
+              <th>Mixt .com<br><span class="eyebrow">95</span></th></tr>
+        </thead>
+        <tbody>
+          <tr class="hi"><td>Qwopus-27B</td><td class="n best">0.974</td><td class="n">0.972</td><td class="n">0.992</td><td class="n">0.944</td><td class="n">1.000</td><td class="n">0.982</td><td class="n">0.969</td></tr>
+          <tr><td>Qwen3.6-35B <span class="eyebrow">producție</span></td><td class="n">0.959</td><td class="n">0.957</td><td class="n">0.968</td><td class="n best">0.971</td><td class="n">1.000</td><td class="n">0.982</td><td class="n">0.935</td></tr>
+          <tr><td>Coder-Next 80B</td><td class="n">0.957</td><td class="n">0.967</td><td class="n">0.984</td><td class="n">0.900</td><td class="n">0.909</td><td class="n">0.972</td><td class="n">0.935</td></tr>
+          <tr><td>Coder-30B</td><td class="n">0.936</td><td class="n">0.947</td><td class="n">0.952</td><td class="n weak">0.773</td><td class="n">0.909</td><td class="n">0.963</td><td class="n">0.944</td></tr>
+          <tr><td>REAP-60B</td><td class="n">0.931</td><td class="n">0.960</td><td class="n">0.934</td><td class="n weak">0.833</td><td class="n">0.909</td><td class="n">0.962</td><td class="n">0.891</td></tr>
+          <tr><td>REAP-48B</td><td class="n">0.900</td><td class="n">0.918</td><td class="n">0.936</td><td class="n weak">0.788</td><td class="n">0.909</td><td class="n">0.918</td><td class="n">0.852</td></tr>
+          <tr><td>REAP-40B</td><td class="n">0.864</td><td class="n">0.895</td><td class="n">0.871</td><td class="n weak">0.686</td><td class="n">0.909</td><td class="n">0.857</td><td class="n">0.874</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col" style="font-size:.88rem;color:var(--ink-soft)">
+      Cele 10 articole din presa moldovenească nu apar în tabel: niciunul nu e relevant în
+      setul de referință, deci F1 nu se poate calcula acolo. Sunt oricum scrise în rusă.
+      Lituaniana are doar 18 articole relevante din 114 — dezechilibrul o face și mai grea.
+    </p>
+  </section>
+
+  <section>
+    <h2>Continuous batching: diferența dintre motoare e brutală</h2>
+    <p class="col">
+      Aceleași 600 de articole, trimise cu tot mai multe cereri simultane. vLLM le
+      întrepătrunde continuu; llama.cpp are un număr fix de sloturi și împarte contextul
+      între ele.
+    </p>
+    <div class="scroller">
+      <table>
+        <caption>Articole clasificate pe secundă</caption>
+        <thead><tr><th>Model / motor</th><th>1 cerere</th><th>8</th><th>16</th><th>32</th><th>64</th><th>Câștig</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>Coder-30B &middot; <strong>vLLM</strong></td>
+            <td class="n">12.3</td><td class="n">56.3</td><td class="n">—</td><td class="n">119.1</td><td class="n best">129.0</td><td class="n best">×10.5</td></tr>
+          <tr><td>Qwopus-27B &middot; <strong>vLLM</strong></td>
+            <td class="n">3.5</td><td class="n">17.6</td><td class="n">—</td><td class="n">30.3</td><td class="n">30.4</td><td class="n">×8.8</td></tr>
+          <tr><td>Qwen3.6-35B &middot; llama.cpp</td>
+            <td class="n">7.1</td><td class="n">8.7</td><td class="n">10.0</td><td class="n">—</td><td class="n">—</td><td class="n worst">×1.4</td></tr>
+          <tr><td>REAP-40B &middot; llama.cpp</td>
+            <td class="n">4.8</td><td class="n">6.3</td><td class="n">7.6</td><td class="n">—</td><td class="n">—</td><td class="n worst">×1.6</td></tr>
+          <tr><td>Coder-Next 80B &middot; llama.cpp</td>
+            <td class="n">1.4</td><td class="n">1.6</td><td class="n">1.7</td><td class="n">—</td><td class="n">—</td><td class="n worst">×1.2</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col stack">
+      <p>
+        <strong>vLLM scoate de zece ori mai mult debit; llama.cpp abia 40–60% în plus.</strong>
+        Calitatea nu scade deloc la concurență mare — F1 rămâne în același interval de zgomot.
+      </p>
+      <p>
+        Concret pentru pipeline-ul tău: cele ~4 000 de articole ale unei rulări ParallaxVox
+        trec prin Coder-30B în <strong>circa 31 de secunde</strong>. Prin Coder-Next 80B pe
+        llama.cpp ar dura <strong>aproape 40 de minute</strong>.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Încărcare și descărcare</h2>
+    <div class="scroller">
+      <table>
+        <caption>De la comandă până la primul răspuns posibil</caption>
+        <thead><tr><th>Model</th><th>La rece <span class="eyebrow">de pe disc</span></th><th>La cald <span class="eyebrow">din cache</span></th><th>Eliberarea plăcii</th></tr></thead>
+        <tbody>
+          <tr><td>REAP-40B Q4 (28.5 GB)</td><td class="n">24.6 s</td><td class="n">6.0 s</td><td class="n">0.04 s</td></tr>
+          <tr><td>Qwen3.6-35B Q4 (22 GB)</td><td class="n">—</td><td class="n">5.6 s</td><td class="n">0.04 s</td></tr>
+          <tr><td>Coder-30B NVFP4 (17 GB)</td><td class="n">93.5 s</td><td class="n">—</td><td class="n">0.35 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col">
+      Diferența dintre rece și cald e pur și simplu citirea de pe disc. Eliberarea plăcii e
+      instantanee la llama.cpp. vLLM se încarcă mult mai lent prima dată pentru că trebuie să
+      compileze kernel-urile FP4 pentru <code>sm_120</code> — o operație de vreo 11 minute care
+      se face o singură dată și rămâne în cache.
+    </p>
+  </section>
+
+  <section>
+    <h2>Ce ar merita urmărit</h2>
+    <div class="verdict col alt">
+      <p class="eyebrow">O posibilă mutare pentru ParallaxVox</p>
+      <p>
+        Raportul vostru de benchmark spune că pass1 a trecut de la modele locale pe
+        <code>luna</code> (GPT-5.6 în cloud) tocmai pentru calitate. <strong>Qwopus-27B,
+        rulând local, a dat F1 0.974 pe setul vostru de referință</strong> — peste cifra
+        notată acolo pentru varianta din cloud.
+      </p>
+      <p>
+        Nu e o concluzie, e un indiciu care merită verificat corect: eu am dat modelului
+        titlu <em>și</em> descriere, iar pass1 din producție vede doar titlul. Protocoalele
+        nu sunt identice. Dar dacă se confirmă, ai putea aduce pass1 înapoi în casă.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Trei erori de măsurare, și ce le-a cauzat</h2>
+    <div class="errbox col">
+      <p class="eyebrow">Toate trei ar fi produs cifre false convingătoare</p>
+      <ul>
+        <li><strong>Qwopus părea complet inutil</strong> — F1 zero, niciun articol clasificat.
+            Cauza: e un model care gândește înainte să răspundă, iar limita mea de tokeni îl
+            tăia înainte să ajungă la răspuns. După corecție a ieșit primul din clasament.
+            Diferența dintre „model inutil" și „cel mai bun model" era un parametru al meu.</li>
+        <li><strong>Latența modelelor GGUF ieșea goală.</strong> Le pornisem cu 16 sloturi
+            paralele, iar llama.cpp împarte contextul între sloturi — prompturile de 8K și 32K
+            nu mai încăpeau și serverul le respingea. Remăsurate cu un singur slot.</li>
+        <li><strong>Modelul din producție părea de trei ori mai lent decât e.</strong> Își
+            trimite raționamentul pe un câmp separat pe care cronometrul meu nu-l urmărea, deci
+            „primul token" nu era detectat niciodată.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Text și traduceri: diferențele sunt mici</h2>
+    <p class="col">
+      Șase articole reale traduse în șapte limbi, comparate cu referințe umane prin
+      <strong>chrF++</strong> — o măsură pur mecanică, care nu implică niciun model
+      judecător și nu poate avea preferințe. Rezultatul cel mai util e cât de
+      <em>apropiate</em> ies modelele.
+    </p>
+    <div class="scroller">
+      <table>
+        <caption>chrF++ față de referință &middot; 42 de traduceri per model &middot; mai mare = mai aproape</caption>
+        <thead>
+          <tr><th>Model</th><th>Medie</th><th>RO</th><th>DE</th><th>FR</th><th>ES</th><th>PL</th><th>UK</th><th>RU</th><th>Durată</th></tr>
+        </thead>
+        <tbody>
+          <tr class="hi"><td>Qwopus-27B <span class="eyebrow">NVFP4</span></td><td class="n best">70.1</td><td class="n">67.4</td><td class="n">70.6</td><td class="n">77.1</td><td class="n">77.7</td><td class="n">65.5</td><td class="n">65.0</td><td class="n">67.4</td><td class="n">157 s</td></tr>
+          <tr><td>Gemma-4-31B <span class="eyebrow">GGUF Q4</span></td><td class="n best">70.1</td><td class="n best">69.7</td><td class="n">71.6</td><td class="n">77.2</td><td class="n best">78.4</td><td class="n">65.8</td><td class="n">64.1</td><td class="n">63.9</td><td class="n worst">527 s</td></tr>
+          <tr class="hi"><td>Gemma-4-26B-A4B <span class="eyebrow">GGUF Q4</span></td><td class="n">69.5</td><td class="n">67.9</td><td class="n">70.8</td><td class="n">77.1</td><td class="n">76.6</td><td class="n">64.7</td><td class="n">64.6</td><td class="n">64.8</td><td class="n">121 s</td></tr>
+          <tr><td>Qwen3.6-35B <span class="eyebrow">producție</span></td><td class="n">69.3</td><td class="n">69.2</td><td class="n best">71.7</td><td class="n">74.6</td><td class="n">76.8</td><td class="n">64.0</td><td class="n">63.7</td><td class="n">65.5</td><td class="n">113 s</td></tr>
+          <tr><td>GLM-4.7-Flash <span class="eyebrow">NVFP4</span></td><td class="n">67.0</td><td class="n">66.2</td><td class="n">67.7</td><td class="n">75.2</td><td class="n">74.8</td><td class="n">61.4</td><td class="n">59.9</td><td class="n">63.7</td><td class="n">97 s</td></tr>
+          <tr><td>Gemma-4-E4B <span class="eyebrow">4.6 GB!</span></td><td class="n">66.7</td><td class="n">66.3</td><td class="n">68.8</td><td class="n">74.3</td><td class="n">76.8</td><td class="n">62.1</td><td class="n worst">55.5</td><td class="n">62.9</td><td class="n best">76 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="verdict col alt">
+      <p class="eyebrow">Constatarea principală</p>
+      <p>
+        Între primul și ultimul sunt <strong>3.4 puncte chrF++</strong>. Ultimul e un model
+        de <strong>4.6 GB</strong>; primul are de zece ori mai mult. Pentru traducere,
+        mărimea cumpără foarte puțin aici. Limbile romanice ies bine peste tot (74–78),
+        slavele sunt uniform mai grele (56–67) — <strong>limba contează mai mult decât
+        modelul</strong>.
+      </p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <caption>Clasificare multilingvă și viteză, aceleași modele</caption>
+        <thead><tr><th>Model</th><th>F1</th><th>Acuratețe</th><th>Citire prompt</th><th>Generare</th></tr></thead>
+        <tbody>
+          <tr><td>Gemma-4-31B</td><td class="n best">0.976</td><td class="n">0.975</td><td class="n worst">1 232</td><td class="n worst">31</td></tr>
+          <tr class="hi"><td>Qwopus-27B</td><td class="n">0.974</td><td class="n">0.973</td><td class="n">7 152</td><td class="n">42</td></tr>
+          <tr class="hi"><td>Gemma-4-26B-A4B</td><td class="n">0.968</td><td class="n">0.967</td><td class="n">5 087</td><td class="n">119</td></tr>
+          <tr><td>Qwen3.6-35B <span class="eyebrow">producție</span></td><td class="n">0.966</td><td class="n">0.965</td><td class="n">4 018</td><td class="n best">167</td></tr>
+          <tr><td>Gemma-4-E4B</td><td class="n">0.958</td><td class="n">0.957</td><td class="n">8 961</td><td class="n">152</td></tr>
+          <tr><td>GLM-4.7-Flash</td><td class="n">0.951</td><td class="n">0.948</td><td class="n best">12 778</td><td class="n">126</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cards">
+      <div class="verdict">
+        <p class="eyebrow">Recomandarea pentru text și traduceri</p>
+        <p>
+          <strong>Gemma-4-26B-A4B în GGUF Q4.</strong> La 0.6 puncte de vârf la traducere,
+          F1 0.968 la clasificare, 119 tokeni pe secundă, 17 GB. Cel mai bun raport din lot.
+        </p>
+      </div>
+      <div class="verdict alt">
+        <p class="eyebrow">Sau nu schimba nimic</p>
+        <p>
+          <strong>Qwen3.6-35B, ce rulezi deja</strong>, iese 69.3 la traducere și 0.966 la
+          clasificare, cu cea mai bună viteză de generare din tot lotul. Diferența față de
+          orice alternativă e sub pragul la care merită efortul.
+        </p>
+      </div>
+    </div>
+
+    <div class="errbox col">
+      <p class="eyebrow">Trei lucruri pe care le-am verificat, nu presupus</p>
+      <ul>
+        <li><strong>Gemma în NVFP4 nu pornea pe vLLM</strong> — până am reparat-o.
+            Măsurătorile din tabelele de mai sus sunt prin llama.cpp; secțiunea următoare
+            explică ce era stricat și cât se câștigă după reparație.</li>
+        <li><strong>„Cuvinte englezești rămase" e un semnal slab.</strong> Aproape toate
+            potrivirile sunt <em>Institute for the Study of War</em> — nume propriu, corect
+            păstrat. Numărul brut nu e o măsură de calitate.</li>
+        <li><strong>Dar o omisiune reală există.</strong> Gemma-4-31B a lăsat netradusă o
+            linie întreagă de subsol în varianta franceză. Am verificat aceeași linie la
+            toate celelalte cinci modele: toate au tradus-o. Cel mai mare și mai lent model
+            a făcut singura greșeală adevărată.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Gemma pe vLLM: două defecte, găsite și reparate</h2>
+    <p class="col">
+      Gemma-4 în format nativ refuza să pornească. Nu era model nesuportat — vLLM 0.27.1
+      declară arhitectura ca funcțională. Săpând, au ieșit <strong>două defecte
+      distincte</strong>, ambele în vLLM, niciunul în model.
+    </p>
+
+    <div class="errbox col">
+      <p class="eyebrow">Defectul întâi — o excepție prinsă greșit</p>
+      <p>
+        În <code>model_arch_config_convertor.py:608</code>, vLLM citește
+        <code>getattr(config, "head_dim", 0)</code> — cu o valoare de rezervă, deci autorul
+        se aștepta ca atributul să poată lipsi. Dar transformers 5.15 nu îl declară lipsă:
+        aruncă <code>AmbiguousGlobalPerLayerAttributeError</code>, care moștenește din
+        <strong><code>RuntimeError</code>, nu din <code>AttributeError</code></strong>.
+        Valoarea de rezervă a lui <code>getattr</code> nu prinde așa ceva, iar pornirea moare.
+      </p>
+    </div>
+
+    <div class="errbox col">
+      <p class="eyebrow">Defectul al doilea — straturi construite pe dimensiuni greșite</p>
+      <p>
+        Gemma-4 amestecă două forme de atenție: <strong>25 de straturi glisante</strong> cu
+        <code>head_dim 256</code> și 8 capete key-value, și <strong>5 straturi complete</strong>
+        cu <code>head_dim 512</code> și doar 2 capete. Transformers vechi publica al doilea
+        set sub numele <code>global_head_dim</code> și
+        <code>num_global_key_value_heads</code> — exact numele pe care le caută vLLM.
+      </p>
+      <p>
+        <strong>Transformers 5.15 a șters ambele nume</strong> și pune valorile adevărate în
+        <code>per_layer_config[i]</code>. vLLM caută nume care nu mai există, cade tăcut pe
+        valorile straturilor glisante, și construiește toate cele 30 de straturi cu 256 și 8.
+        Apoi se împiedică de primul strat complet:
+        <em>Attempted to load weight (512) into parameter (256)</em>.
+      </p>
+    </div>
+
+    <div class="col stack">
+      <p class="eyebrow">Cum am confirmat că nu e vina modelului</p>
+      <p>
+        Am citit direct anteturile fișierelor de greutăți și le-am comparat cu ce declară
+        config-ul, strat cu strat: <strong>25 de straturi la 256, 5 la 512, zero
+        nepotriviri.</strong> Checkpoint-ul e impecabil. Apoi am pus un afișaj temporar în
+        codul vLLM, care a arătat negru pe alb <code>global_head_dim=None</code> pentru toate
+        cele 30 de straturi.
+      </p>
+      <p>
+        <strong>Reparația</strong> citește valoarea per strat atunci când există, și păstrează
+        vechea logică drept rezervă. Două blocuri modificate, în
+        <code>vllm/model_executor/models/gemma4.py</code>.
+      </p>
+    </div>
+
+    <div class="verdict col">
+      <p class="eyebrow">Validare — pornește nu înseamnă corect</p>
+      <p>
+        Un model cu straturi dimensionate greșit ar porni și ar produce text fără sens, deci
+        am comparat cu aceleași teste rulate pe varianta GGUF a aceluiași model:
+      </p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <caption>Același model, două formate &middot; dacă reparația ar fi greșită, coloanele ar diverge</caption>
+        <thead><tr><th>Măsurătoare</th><th>NVFP4 / vLLM <span class="eyebrow">reparat</span></th><th>GGUF / llama.cpp</th><th>Diferență</th></tr></thead>
+        <tbody>
+          <tr><td>chrF++ mediu</td><td class="n">69.68</td><td class="n">69.50</td><td class="n">+0.18</td></tr>
+          <tr><td>chrF++ română</td><td class="n">68.68</td><td class="n">67.90</td><td class="n">+0.78</td></tr>
+          <tr><td>chrF++ franceză</td><td class="n">77.55</td><td class="n">77.10</td><td class="n">+0.45</td></tr>
+          <tr><td>chrF++ ucraineană</td><td class="n">63.80</td><td class="n">64.60</td><td class="n">−0.80</td></tr>
+          <tr><td>Clasificare F1</td><td class="n">0.969</td><td class="n">0.968</td><td class="n">+0.001</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col">
+      Toate diferențele sunt în zgomotul de măsurare, pe toate cele șapte limbi. Modelul
+      <strong>calculează corect</strong>, nu doar pornește.
+    </p>
+
+    <div class="scroller">
+      <table>
+        <caption>Ce se câștigă &middot; același model, aceleași 600 de articole</caption>
+        <thead><tr><th>Cereri simultane</th><th>1</th><th>8</th><th>32</th><th>64</th><th>Câștig</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>NVFP4 / vLLM <span class="eyebrow">articole/s</span></td>
+            <td class="n">9.1</td><td class="n">57.3</td><td class="n">156.7</td><td class="n best">159.6</td><td class="n best">×17.6</td></tr>
+          <tr><td>GGUF / llama.cpp <span class="eyebrow">articole/s</span></td>
+            <td class="n">~7</td><td class="n">~8</td><td class="n">—</td><td class="n">—</td><td class="n worst">×1.4</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col">
+      <strong>Cele 600 de articole în 3.8 secunde</strong>, față de aproape un minut și
+      jumătate prin llama.cpp. Cea mai bună scalare la concurență măsurată în tot proiectul.
+      Citirea promptului: 15 611 tokeni pe secundă.
+    </p>
+
+    <div class="caveat col">
+      <p class="eyebrow">De reținut despre reparație</p>
+      <ul>
+        <li>Modificarea stă în <code>site-packages</code> și <strong>se pierde la orice
+            actualizare a vLLM</strong>. Fișierul original e păstrat alături, cu sufixul
+            <code>.orig</code>.</li>
+        <li>Defectul e în versiunea curentă publicată, 0.27.1 — nu există o versiune mai nouă
+            spre care să urci. <strong>Merită raportat în amonte.</strong></li>
+        <li>Am adăugat și <code>allow_global_per_layer_attribute_access</code> în
+            <code>config.json</code>-ul celor două modele Gemma, necesar pentru primul defect.
+            Și acolo există copie <code>.orig</code>.</li>
+        <li>Tokenizatorul Gemma produce mai mulți tokeni decât al celorlalte modele, așa că
+            promptul de 32K depășește fereastra la aceeași setare — nu e un defect, doar o
+            limită de reglat.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Programat separat: modelul Cohere, pe Mac</h2>
+    <div class="col stack">
+      <p>
+        <strong>Command-A-Translate-08-2025</strong> e singurul model din tot ce am
+        cercetat antrenat explicit pentru traducere, nu un generalist care se descurcă.
+        Nu poate rula pe placă, dar poate rula pe Mac — și acolo își are locul, fiindcă
+        traducerea e pentru produs final, în volum mic, care poate rula peste noapte.
+      </p>
+    </div>
+
+    <div class="cards">
+      <article class="card">
+        <div class="card-head">
+          <span class="tag spill">Nu încape pe placă</span>
+          <h3>De ce nu pe RTX PRO 4500</h3>
+        </div>
+        <div class="kv">
+          <div><span class="k">BF16</span><span class="v">222 GB</span></div>
+          <div><span class="k">FP8</span><span class="v">111 GB</span></div>
+          <div><span class="k">GGUF Q4_K_M</span><span class="v">67 GB</span></div>
+          <div><span class="k">VRAM disponibil</span><span class="v">32.6 GB</span></div>
+        </div>
+        <p style="font-size:.9rem;color:var(--ink-soft)">
+          E un model <strong>dens</strong> de 111B, nu un MoE. Cu experții revărsați în RAM
+          ar citi toate greutățile la fiecare token — mult mai rău decât la modelele MoE
+          măsurate mai sus.
+        </p>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="tag fit">Încape pe Mac</span>
+          <h3>M3 Max, 128 GB</h3>
+        </div>
+        <div class="kv">
+          <div><span class="k">Quant ales</span><span class="v">Q4_K_M</span></div>
+          <div><span class="k">Mărime</span><span class="v">67.1 GB</span></div>
+          <div><span class="k">Reper cunoscut</span><span class="v">GLM Air 69 GB</span></div>
+          <div><span class="k">Motor</span><span class="v">llama.cpp Metal</span></div>
+        </div>
+        <p style="font-size:.9rem;color:var(--ink-soft)">
+          Același build 10449 ca pe Linux, deci comparabil. FP8 și NVFP4 nu sunt o opțiune
+          pe Apple: Metal nu are cale de execuție pentru ele, indiferent de mărime. Nu
+          există nici variantă MLX a acestui model.
+        </p>
+      </article>
+    </div>
+
+    <div class="caveat col">
+      <p class="eyebrow">De ce nu l-am rulat încă</p>
+      <p>
+        Estimare: <strong>2–5 tokeni pe secundă</strong>. GLM-4.5-Air face 17–18 pe aceeași
+        mașină pentru că e MoE și folosește doar ~12B din 106B la fiecare token; acesta
+        folosește toți cei 111B. Un articol ar dura 5–10 minute, cele 42 de traduceri din
+        setul de referință o noapte întreagă. Cifra e calculată din banda de memorie, nu
+        măsurată — blochează mașina prea mult ca să o probez în timpul zilei.
+      </p>
+    </div>
+
+    <div class="col stack">
+      <p class="eyebrow">Ce se testează, când se testează</p>
+      <ul>
+        <li><strong>Traducere EN → 7 limbi</strong> pe cele 6 articole din setul golden
+            ParallaxVox, aceleași folosite pentru modelele de mai sus, deci direct comparabil.</li>
+        <li><strong>chrF++</strong> față de referințe — o măsură pur mecanică, fără judecător.</li>
+        <li><strong>Verificări mecanice</strong>: fragmente rămase în engleză, numere pierdute.</li>
+        <li><strong>Citire în orb</strong>: aceleași 2–3 articole traduse de specialist și de
+            cel mai bun generalist, puse una lângă alta fără etichete. Pentru produs final,
+            judecata ta contează mai mult decât orice scor automat.</li>
+        <li><strong>Viteza reală</strong>, ca să știm dacă estimarea de mai sus ține.</li>
+      </ul>
+      <p>
+        Reperul mic din aceeași familie, <code>command-r7b</code> (16.1 GB), încape oriunde
+        dar e din 2024 — merită inclus doar ca linie de bază istorică.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ce nu am măsurat</h2>
+    <div class="caveat col">
+      <ul>
+        <li><strong>Testul de cod nu discriminează.</strong> Patru modele au luat 10/10 și
+            restul 9/10. Sarcinile mele sunt prea ușoare ca să separe modelele bune de cele
+            foarte bune. Ca reper, soluțiile mele de referință trec toate zece.</li>
+        <li><strong>Calitatea la sarcini lungi de agent</strong> — refactorizări pe mai multe
+            fișiere, folosirea uneltelor, urmărirea unui plan. Nimic din ce e mai sus nu spune
+            ceva despre asta.</li>
+        <li><strong>O singură rulare per configurație.</strong> Fără repetări, deci fără
+            margini de eroare. Diferențele mici, sub vreo 0.02 la F1, nu înseamnă nimic.</li>
+        <li><strong>Offload-ul NVFP4 prin vLLM a fost abandonat.</strong> Pornește
+            (<code>--offload-backend uva --cpu-offload-gb 24</code>, 20 GB pe placă, 131 s de
+            încărcare), dar trimite greutățile prin OCuLink la fiecare pas. Nu l-am cronometrat.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ce e instalat acum</h2>
+    <div class="col stack">
+      <ul>
+        <li><strong>CUDA toolkit 13.3</strong> — se potrivește cu driverul gazdei, 610.57.04.
+            Doar toolkit-ul; driverul rămâne al gazdei.</li>
+        <li><strong>vLLM 0.27.1</strong> la <code>/opt/ai/vllm</code>, Python 3.12, torch 2.13,
+            separat de llama.cpp.</li>
+        <li><strong>Șase modele noi</strong> pe <code>/models</code>, aranjate după format.</li>
+        <li><strong>Uneltele de test</strong> în <code>/opt/ai/tools</code>: <code>bench.py</code>
+            (latență), <code>bench_coding.py</code> (cod executat ca utilizator neprivilegiat),
+            <code>bench_classify.py</code> (calitate multilingvă și debit). Se pot rerula oricând.</li>
+      </ul>
+      <hr>
+      <p class="eyebrow">Capcane, pentru data viitoare</p>
+      <ul>
+        <li>vLLM 0.27 a eliminat <code>--disable-log-requests</code>.</li>
+        <li>Modelele hibride cer <code>--max-num-seqs 8</code>; fără el rămân fără memorie
+            oricât ai reduce contextul.</li>
+        <li>La modelele care gândesc, cere explicit oprirea gândirii, altfel măsori altceva.</li>
+        <li>Q3 nu merită: la REAP-40B a ieșit identic ca viteză cu Q4 și doar mai imprecis.</li>
+      </ul>
+      <hr>
+      <p>
+        Instanțele oprite pentru teste au fost repornite. Placa arată 25.3 GB folosiți, ca
+        înainte, și toate cele trei adrese web răspund.
+      </p>
+    </div>
+  </section>
+
+  <footer class="col">
+    Măsurat în noaptea de 17 spre 18 august 2026, LXC 102, gazda Proxmox <code>mv</code>.
+    Aceleași prompturi, aceeași ordine, temperatură 0, o rulare de încălzire necontorizată
+    înainte de fiecare măsurătoare. Setul de clasificare: 600 de articole din
+    <code>benchmark-data/gold/relevance</code> al proiectului ParallaxVox.
+  </footer>
+
+</div>

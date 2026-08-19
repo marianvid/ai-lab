@@ -1,0 +1,80 @@
+{
+  "label": "gemma4-26b-a4b-nvfp4",
+  "model": "gemma-4-26b-a4b",
+  "passed": 10,
+  "of": 10,
+  "score": 1.0,
+  "wall_s": 37.9,
+  "tasks": [
+    {
+      "id": "t01_parse_duration",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 387,
+      "seconds": 3.5
+    },
+    {
+      "id": "t02_merge_intervals",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 211,
+      "seconds": 1.9
+    },
+    {
+      "id": "t03_fix_bug",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 53,
+      "seconds": 0.5
+    },
+    {
+      "id": "t04_group_by_key",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 154,
+      "seconds": 1.4
+    },
+    {
+      "id": "t05_retry_decorator",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 114,
+      "seconds": 1.0
+    },
+    {
+      "id": "t06_flatten",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 309,
+      "seconds": 2.7
+    },
+    {
+      "id": "t07_lru",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 198,
+      "seconds": 1.8
+    },
+    {
+      "id": "t08_csv_quotes",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 1825,
+      "seconds": 16.3
+    },
+    {
+      "id": "t09_topo",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 368,
+      "seconds": 3.3
+    },
+    {
+      "id": "t10_semver",
+      "pass": true,
+      "why": "",
+      "gen_tokens": 634,
+      "seconds": 5.6
+    }
+  ]
+}
