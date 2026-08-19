@@ -6,9 +6,19 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# No default: the address of the machine is not this repository's business.
-#   AI_LAB_HOST=root@<proxmox-host> ./scripts/deploy.sh
-target_host="${AI_LAB_HOST:?set AI_LAB_HOST, for example root@proxmox.lan}"
+# Which machine to deploy to is not this repository's business, so there is no
+# default. The private half keeps the real values; if it is checked out, they
+# are read from there and this script takes no arguments.
+#
+#   opts/deploy.env      AI_LAB_HOST=root@... , AI_LAB_SSH_KEY=..., AI_LAB_CTID=...
+#
+# Without it, set them in the environment:
+#   AI_LAB_HOST=root@proxmox.lan AI_LAB_SSH_KEY=~/.ssh/key ./scripts/deploy.sh
+if [ -f "${project_dir}/opts/deploy.env" ]; then
+  # shellcheck disable=SC1091
+  . "${project_dir}/opts/deploy.env"
+fi
+target_host="${AI_LAB_HOST:?set AI_LAB_HOST, or check out the private half into opts/}"
 container_id="${AI_LAB_CTID:-102}"
 ssh_key="${AI_LAB_SSH_KEY:?set AI_LAB_SSH_KEY to the private key for that host}"
 runtime_dir="/opt/ai-lab"
