@@ -15,8 +15,13 @@ on macOS with Apple silicon, where it supervises them itself. llama.cpp works
 on both. vLLM works on the Linux machine and is shown greyed out on the Mac,
 with the reason — it needs CUDA, and Apple silicon offers Metal.
 
-Read `ARCHITECTURE.md` before changing anything, and
-`research/2026-08-inference-benchmarks/` for how the models were measured.
+Read `ARCHITECTURE.md` before changing anything.
+
+**How the models were measured lives in its own repository**,
+[`ai-lab-benchmarks`](https://github.com/marianvid/ai-lab-benchmarks): four
+tests across twenty languages on this machine, with the harness and the raw
+results. It used to be a directory here; it is separate now so the application
+stays an application.
 
 ## What it looks like
 
@@ -70,7 +75,6 @@ ai_lab/wiring.py        Object construction only
 tests/                  Unit tests, mirroring the package layout
 system/                 systemd units and the one privileged helper
 scripts/deploy.sh       Test and deploy to the AI-Lab container
-research/               Benchmark studies: harness, prompts, gold sets, results
 docs/screenshots/       The interface, for the README
 ARCHITECTURE.md         What each module is for, and what it must not contain
 MODEL_STORAGE.md        Model store layout and NVIDIA weight formats
