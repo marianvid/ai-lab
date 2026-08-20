@@ -28,12 +28,6 @@ with the reason — it needs CUDA, and Apple silicon offers Metal.
 
 Read `ARCHITECTURE.md` before changing anything.
 
-**How the models were measured lives in its own repository**,
-[`ai-lab-benchmarks`](https://github.com/marianvid/ai-lab-benchmarks): four
-tests across twenty languages on this machine, with the harness and the raw
-results. It used to be a directory here; it is separate now so the application
-stays an application.
-
 ## What it looks like
 
 One line per configured model: what you called it, which model it runs, and —
