@@ -40,20 +40,6 @@ why it has no version beside it and no update button.
 
 ![Settings](docs/screenshots/settings.png)
 
-## Two repositories
-
-The application is here and public. Everything that names the machines it runs
-on — addresses, credentials, disk serials, the real configuration — lives in a
-separate private repository, cloned into `opts/` and ignored here.
-
-```text
-ai-lab/          this repository, public
-└── opts/        private: addresses, credentials, the home-lab document
-```
-
-This repository was started fresh, so nothing sensitive can be recovered from
-its history either.
-
 ## Structure
 
 ```text
