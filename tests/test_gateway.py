@@ -327,6 +327,26 @@ class ReportingTests(unittest.TestCase):
         second.__exit__()
         self.assertFalse(gateway.stats()["busy"])
 
+    def test_the_card_reads_busy_while_a_model_is_still_loading(self):
+        # Loading is when someone is most likely to look at this, and reporting
+        # "not busy" then is the one answer that is certainly wrong.
+        operations = two_models()
+        operations.load_delay_s = 0.2
+        gateway = quick(operations)
+        seen = []
+
+        def ask():
+            with gateway.acquire("coder"):
+                pass
+
+        thread = threading.Thread(target=ask)
+        thread.start()
+        time.sleep(0.05)
+        seen.append(gateway.stats()["busy"])
+        thread.join(timeout=5)
+        self.assertEqual(seen, [True])
+        self.assertFalse(gateway.stats()["busy"])
+
     def test_the_card_is_reported_free_between_requests(self):
         gateway = quick(two_models(coder=True))
         with gateway.acquire("coder"):

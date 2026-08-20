@@ -288,7 +288,10 @@ class Gateway:
         counters = self.counters
         return {
             "current": self._current,
-            "busy": self._held,
+            # True from the moment a request takes the card, which includes
+            # the switch it may have to do first. `_held` is only about who
+            # owes the card back, and is still false while a model loads.
+            "busy": self._card.locked(),
             "requests": counters.requests,
             "switches": counters.switches,
             "average_wait_s": round(counters.waited_s / counters.requests, 2)
