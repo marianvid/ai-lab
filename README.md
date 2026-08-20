@@ -17,7 +17,7 @@ faster than reading it all yourself, and it is how the code got here.
 an agent naming a model that is not loaded, and getting it loaded rather than a
 refused connection. It works; it is not written up here yet.
 
-A manager for local inference engines. It shows what models are on disk, what
+Provides a manager for local inference engines. It shows what models are on disk, what
 is loaded on the accelerator right now, and how long a model took to load —
 and it moves models on and off, measuring every step.
 
