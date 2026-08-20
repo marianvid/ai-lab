@@ -21,6 +21,10 @@ from pathlib import Path
 # convention, so the numbers read in the order things were added.
 FIRST_PORT = 8080
 
+# What an edit to an existing model is allowed to touch. Anything else is
+# refused rather than ignored.
+CHANGEABLE = frozenset({"params", "name", "model_id", "port"})
+
 from .builds import Builds
 from .catalog import Catalog
 from .config import ConfigStore, Instance
@@ -141,7 +145,12 @@ class Operations:
         and still editable, because a port sometimes has to match what a client
         already expects.
         """
-        taken = {item.port for item in self.store.load().instances}
+        config = self.store.load()
+        # The manager's own port counts as taken. An engine started on it would
+        # find the port already held and refuse, which is a confusing way to
+        # learn that the number was never free — and it is the number this
+        # method hands out as soon as the instances reach it.
+        taken = {item.port for item in config.instances} | {config.port}
         port = FIRST_PORT
         while port in taken:
             port += 1
@@ -183,6 +192,14 @@ class Operations:
         Saving and applying are separate acts, because applying means
         restarting, and restarting unloads a model somebody may be using.
         """
+        unknown = set(changes) - CHANGEABLE
+        if unknown:
+            # Silence here is worse than a refusal. Ignoring a field and still
+            # answering "applied" tells the caller the change was made when
+            # nothing happened.
+            raise ValueError(
+                f"Cannot change {', '.join(sorted(unknown))}. "
+                f"Changeable: {', '.join(sorted(CHANGEABLE))}")
         with self.store.mutate() as config:
             instance = config.instance(instance_id)
             engine = self.engines.get(instance.engine)
@@ -192,6 +209,14 @@ class Operations:
                 instance.name = str(changes["name"])
             if "model_id" in changes:
                 instance.model_id = str(changes["model_id"])
+            if "port" in changes:
+                port = int(changes["port"])
+                if any(item.id != instance_id and item.port == port
+                       for item in config.instances):
+                    raise ValueError(f"Port {port} is already taken by another model")
+                if port == config.port:
+                    raise ValueError(f"Port {port} is the manager's own port")
+                instance.port = port
         self._changed("instances")
         running = self.host.status(instance_id).running
         return {"id": instance_id, "applied": not running,

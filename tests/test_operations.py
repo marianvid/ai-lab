@@ -151,6 +151,38 @@ class OperationsTests(unittest.TestCase):
                                          "model_id": "gguf/gemma/gemma", "port": 8081})
         self.assertEqual(self.operations.suggest_port(), 8082)
 
+    def test_the_managers_own_port_is_never_suggested(self):
+        # It is 8090, and the suggestion walks up from 8080 — so it reaches it
+        # as soon as ten models are configured. An engine started there finds
+        # the port already held and refuses, which is a puzzling way to be told
+        # the number was never free.
+        for number in range(8081, 8095):
+            self.operations.create_instance({
+                "id": f"m{number}", "engine": "llamacpp",
+                "model_id": "gguf/gemma/gemma", "port": number})
+            if number == 8089:
+                self.assertEqual(self.operations.suggest_port(), 8091)
+
+    def test_the_port_of_an_existing_model_can_be_changed(self):
+        self.operations.update_instance("qwen", {"port": 8095})
+        self.assertEqual(self.store.load().instance("qwen").port, 8095)
+
+    def test_a_port_another_model_holds_is_refused(self):
+        self.operations.create_instance({"id": "second", "engine": "llamacpp",
+                                         "model_id": "gguf/gemma/gemma", "port": 8081})
+        with self.assertRaises(ValueError):
+            self.operations.update_instance("qwen", {"port": 8081})
+
+    def test_the_managers_own_port_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.operations.update_instance("qwen", {"port": 8090})
+
+    def test_a_change_that_cannot_be_made_is_refused_not_ignored(self):
+        # It used to accept anything and answer "applied", so a change that
+        # never happened read as a change that did.
+        with self.assertRaises(ValueError):
+            self.operations.update_instance("qwen", {"engine": "vllm"})
+
     def test_the_add_form_arrives_in_one_call(self):
         form = self.operations.new_instance_form()
         self.assertEqual(form["port"], 8081)
