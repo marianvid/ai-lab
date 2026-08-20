@@ -50,6 +50,45 @@ class FakeOperations:
         return Operation(instance_id=instance_id, kind="unload", ok=True)
 
 
+class FakeCard:
+    """Operations backed by VRAM arithmetic rather than a count of models.
+
+    The count-based fake above cannot show the thing that matters most: that
+    only as many models are evicted as are needed to make room, and no more.
+    """
+
+    def __init__(self, entries, total_gb=32.0):
+        self._entries = {e["id"]: dict(e) for e in entries}
+        self.sizes = {}
+        self.total_gb = total_gb
+        self.loads = []
+        self.unloads = []
+
+    def instances(self):
+        return [dict(entry) for entry in self._entries.values()]
+
+    def _free_gb(self, exclude):
+        used = sum(self.sizes[i] for i, e in self._entries.items()
+                   if e["running"] and i != exclude)
+        return self.total_gb - used
+
+    def load(self, instance_id):
+        self.loads.append(instance_id)
+        needed = self.sizes[instance_id]
+        free = self._free_gb(exclude=instance_id)
+        if needed > free:
+            return Operation(instance_id=instance_id, kind="load", ok=False,
+                             error=f"x needs about {needed:.1f} GB but only "
+                                   f"{free:.1f} GB is free on the card.")
+        self._entries[instance_id].update(running=True, ready=True)
+        return Operation(instance_id=instance_id, kind="load", ok=True, total_ms=900)
+
+    def unload(self, instance_id):
+        self.unloads.append(instance_id)
+        self._entries[instance_id].update(running=False, ready=False)
+        return Operation(instance_id=instance_id, kind="unload", ok=True)
+
+
 def entry(identifier, name, model_id, port, running=False):
     return {"id": identifier, "name": name, "model_id": model_id, "port": port,
             "engine": "llamacpp", "running": running, "ready": running,
@@ -147,6 +186,57 @@ class LoadingTests(unittest.TestCase):
         # Both had to go to make room for one, and the order is what is being
         # tested: coder was used first, so coder goes first.
         self.assertEqual(operations.unloads[0], "coder")
+
+    def test_only_as_many_models_are_evicted_as_are_needed(self):
+        # 5 + 21 resident on a 32 GB card, and a third wanting 10. All three
+        # together do not fit; dropping the small one leaves 21 + 10 = 31, which
+        # does. The large one must survive: evicting everything to make room for
+        # one model would throw away a load that is still useful.
+        operations = FakeCard([
+            entry("small", "Small", "gguf/a/small", 8080, running=True),
+            entry("large", "Large", "gguf/b/large", 8081, running=True),
+            entry("third", "Third", "gguf/c/third", 8082),
+        ], total_gb=32.0)
+        operations.sizes = {"small": 5.0, "large": 21.0, "third": 10.0}
+        gateway = Gateway(operations)
+        gateway._used_at = {"small": 1.0, "large": 2.0}   # small used longer ago
+
+        with gateway.acquire("third"):
+            pass
+
+        self.assertEqual(operations.unloads, ["small"])
+        still_running = {i["id"] for i in operations.instances() if i["running"]}
+        self.assertEqual(still_running, {"large", "third"})
+
+    def test_everything_is_evicted_when_one_model_needs_the_whole_card(self):
+        operations = FakeCard([
+            entry("small", "Small", "gguf/a/small", 8080, running=True),
+            entry("large", "Large", "gguf/b/large", 8081, running=True),
+            entry("huge", "Huge", "gguf/c/huge", 8082),
+        ], total_gb=32.0)
+        operations.sizes = {"small": 5.0, "large": 21.0, "huge": 30.0}
+        gateway = Gateway(operations)
+        gateway._used_at = {"small": 1.0, "large": 2.0}
+
+        with gateway.acquire("huge"):
+            pass
+
+        # Least recently used first, and only because the second was also
+        # necessary.
+        self.assertEqual(operations.unloads, ["small", "large"])
+
+    def test_a_model_larger_than_the_card_fails_after_emptying_it(self):
+        operations = FakeCard([
+            entry("small", "Small", "gguf/a/small", 8080, running=True),
+            entry("toobig", "Too big", "gguf/c/toobig", 8082),
+        ], total_gb=32.0)
+        operations.sizes = {"small": 5.0, "toobig": 46.0}
+        gateway = Gateway(operations)
+        with self.assertRaises(CouldNotLoad):
+            gateway.acquire("toobig")
+        # It cleared the card trying, which is the right order: there was no way
+        # to know it would not fit without freeing everything first.
+        self.assertEqual(operations.unloads, ["small"])
 
     def test_a_model_that_will_not_start_raises_rather_than_hanging(self):
         operations = two_models()
