@@ -246,20 +246,33 @@ class ModelThatDoesNotFitTests(unittest.TestCase):
         self.assertIn("free on the card", operation.error)
         self.assertEqual(host.started, [], "nothing should have been started")
 
-    def test_there_is_no_partial_offload_escape(self):
-        """The whole model goes on the accelerator or it does not load.
-
-        Splitting layers across GPU and CPU sends every token over the link,
-        and here that link is OCuLink.
-        """
+    def test_the_refusal_offers_the_split_as_a_way_out(self):
         host = FakeHost(total_mb=32000, other_models_mb=28000)
-        big = ModelSet(id="r/big", name="big", format=Format.GGUF,
-                       entrypoint="/models/big.gguf",
-                       files=(ModelFile("/models/big.gguf", 20 * 1024**3),))
         operation = Runtime(host, self.bus, sample_interval_s=0).load(
-            instance(), big, FakeEngine(host=host))
+            instance(), self.big(), FakeEngine(host=host))
         self.assertFalse(operation.ok)
         self.assertIn("choose a smaller one", operation.error)
+        self.assertIn("system memory", operation.error)
+
+    def test_a_deliberate_split_is_not_refused(self):
+        """A model larger than the card runs when you asked for it to be split.
+
+        It is slow — most of the weights sit in system memory and are reached
+        over the link — but it is a choice, and refusing it would be answering
+        a question nobody asked.
+        """
+        host = FakeHost(total_mb=32000, other_models_mb=28000)
+        operation = Runtime(host, self.bus, sample_interval_s=0).load(
+            instance(), self.big(),
+            FakeEngine(host=host, splits_across_cpu=True))
+        self.assertTrue(operation.ok, operation.error)
+        self.assertEqual(len(host.started), 1)
+
+    @staticmethod
+    def big():
+        return ModelSet(id="r/big", name="big", format=Format.GGUF,
+                        entrypoint="/models/big.gguf",
+                        files=(ModelFile("/models/big.gguf", 20 * 1024**3),))
 
     def test_an_engine_that_dies_mid_load_fails_at_once(self):
         class DiesOnStart(FakeHost):

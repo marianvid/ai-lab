@@ -247,8 +247,10 @@ class EffectiveSettingsTests(unittest.TestCase):
         self.assertEqual(params["temperature"], 0.8)
         self.assertEqual(params["context_size"], 4096)   # the stored one wins
 
-    def test_a_removed_setting_does_not_break_the_listing(self):
-        self.assertNotIn("gpu_layers", self.operations.instances()[0]["params"])
+    def test_a_setting_stored_by_an_older_version_is_still_read(self):
+        # 999 is what this project wrote when every layer went on the card.
+        self.assertEqual(self.operations.instances()[0]["params"]["gpu_layers"],
+                         999)
 
 
 class DeleteModelTests(unittest.TestCase):

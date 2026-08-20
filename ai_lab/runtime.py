@@ -284,11 +284,14 @@ class Runtime:
         alone exceed what is free, there is no need to start anything to find
         out — and the alternative is a confusing crash a few seconds later.
 
-        There is no partial-offload case to exempt: a model either fits on the
-        accelerator or it is not loaded. Splitting layers across GPU and CPU
-        would send every token over the link, and on this machine that link is
-        OCuLink.
+        A plan that deliberately leaves part of the model in system memory is
+        exempt. There the weights are not all meant to be on the card, so
+        comparing the whole file against free memory answers a question nobody
+        asked. It is slow, and it is a choice — the setting that turns it on
+        says how slow.
         """
+        if getattr(plan, "splits_across_cpu", False):
+            return
         snapshot = self.host.accelerator()
         if snapshot.memory_kind != "dedicated" or not snapshot.memory_total_mb:
             return
@@ -298,7 +301,8 @@ class Runtime:
             raise RuntimeError(
                 f"{model.name} needs about {needed_mb / 1024:.1f} GB but only "
                 f"{free_mb / 1024:.1f} GB is free on the card. Unload another "
-                f"model, or choose a smaller one.")
+                f"model, choose a smaller one, or set how many layers go on the "
+                f"card and leave the rest in system memory.")
 
     def _refuse_stranger(self, instance: Instance, engine: Engine) -> None:
         """Refuse to start when something else already holds the port.

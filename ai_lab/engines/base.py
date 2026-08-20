@@ -92,6 +92,12 @@ class LaunchPlan:
     # Whether this engine also serves a page a person can talk to, as opposed
     # to an API only. The interface offers a link only when there is one.
     web_ui: bool = False
+    # True when this plan deliberately leaves part of the model in system
+    # memory. The manager refuses a model bigger than the free memory on the
+    # card, because normally that is a crash a few seconds later dressed up as
+    # a mystery. When the split is what you asked for, that refusal is wrong,
+    # and this is how the engine says so.
+    splits_across_cpu: bool = False
 
 
 class Engine(Protocol):

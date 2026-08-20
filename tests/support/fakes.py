@@ -77,9 +77,11 @@ class FakeEngine:
     id = "fake"
     display_name = "Fake"
 
-    def __init__(self, ready_after: int = 1, host=None) -> None:
+    def __init__(self, ready_after: int = 1, host=None,
+                 splits_across_cpu: bool = False) -> None:
         self.ready_after = ready_after
         self.host = host
+        self.splits_across_cpu = splits_across_cpu
         self.probes = 0
 
     def formats(self):
@@ -91,7 +93,9 @@ class FakeEngine:
 
     def plan(self, model, port, params):
         from ai_lab.engines.base import LaunchPlan
-        return LaunchPlan(argv=["fake-server", model.entrypoint], env={}, health_path="/health")
+        return LaunchPlan(argv=["fake-server", model.entrypoint], env={},
+                          health_path="/health",
+                          splits_across_cpu=self.splits_across_cpu)
 
     def ready(self, port: int) -> bool:
         if self.host is not None and not self.host.running:

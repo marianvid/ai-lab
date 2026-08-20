@@ -53,6 +53,16 @@ PARAMS = (
               group="memory",
               help="Threads for the parts that stay on the CPU. -1 lets "
                    "llama.cpp choose."),
+    ParamSpec("gpu_layers", "Layers on the card", "int", -1,
+              minimum=-2, maximum=999, group="memory",
+              help="-1 puts the whole model on the card and refuses to load if "
+                   "it does not fit. That is what you want whenever it fits. "
+                   "-2 lets llama.cpp put on as many layers as fit and leaves "
+                   "the rest in system memory, so a model larger than the card "
+                   "still runs. A number from 0 up sets the count yourself. "
+                   "Splitting costs a lot: moving 20 of 80 layers off the card "
+                   "cut prompt reading to a ninth on this machine. Generation "
+                   "suffers far less."),
 
     # -- generation: defaults a client can override ------------------------
     ParamSpec("temperature", "Temperature", "float", 0.8, minimum=0.0, maximum=2.0,
@@ -99,12 +109,15 @@ PARAMS = (
 # Settings that used to exist and are now decided rather than configured. They
 # are dropped from a configuration file instead of being rejected, so an
 # installation written by an older version keeps working.
-OBSOLETE = frozenset({"gpu_layers"})
+OBSOLETE: frozenset[str] = frozenset()
 
-# The whole model goes on the accelerator or it does not load at all. Splitting
-# layers between GPU and CPU means every token crosses the link, and this
-# machine's accelerator hangs off OCuLink — the split would be slow enough that
-# nobody would want the result. Better to say the model does not fit.
+# The three things "Layers on the card" can mean. Two of them are not layer
+# counts, which is why they are negative — a real count is never below zero.
+ALL_ON_CARD = -1          # every layer on the card, or refuse to load
+FIT_AUTOMATICALLY = -2    # let llama.cpp work out how many fit
+
+# What to pass for ALL_ON_CARD. llama.cpp counts layers, so any number past the
+# largest model means "all of them".
 ALL_LAYERS = "999"
 
 # Where the built chat page ends up, relative to the binary. It is a directory
@@ -112,6 +125,29 @@ ALL_LAYERS = "999"
 # serves it only when told where it is — so without --path there is an API and
 # no page, which is what a bare GET / answering 415 was telling us.
 UI_DIST = ("../tools/ui/dist", "../../tools/server/public")
+
+
+def _splits(setting: int) -> bool:
+    """Whether this setting may leave part of the model in system memory.
+
+    True disables the manager's refusal to load a model larger than the card.
+    ALL_ON_CARD keeps that refusal, and so does any number past the largest
+    model — 999 is what older configurations of this project stored to mean
+    every layer, and reading it as a split would quietly drop the check.
+    """
+    return setting == FIT_AUTOMATICALLY or 0 <= setting < int(ALL_LAYERS)
+
+
+def _layers(setting: int) -> str | None:
+    """The value for --n-gpu-layers, or None to leave the flag off.
+
+    Leaving it off is not the same as any value: llama.cpp measures the free
+    memory on the card and chooses a count itself, and it refuses to do that
+    once the flag is present — "n_gpu_layers already set by user, abort".
+    """
+    if setting == FIT_AUTOMATICALLY:
+        return None
+    return ALL_LAYERS if setting < 0 else str(setting)
 
 
 class LlamaCppEngine:
@@ -157,7 +193,6 @@ class LlamaCppEngine:
             "--alias", model.name,
             "--host", "0.0.0.0",
             "--port", str(port),
-            "--n-gpu-layers", ALL_LAYERS,
             "--jinja",
             "--ctx-size", str(settings["context_size"]),
             "--parallel", str(settings["parallel"]),
@@ -173,6 +208,9 @@ class LlamaCppEngine:
             "--repeat-penalty", str(settings["repeat_penalty"]),
             "--reasoning-budget", str(settings["reasoning_budget"]),
         ]
+        layers = _layers(settings["gpu_layers"])
+        if layers is not None:
+            argv += ["--n-gpu-layers", layers]
         if settings["reasoning"] != "auto":
             argv += ["--reasoning", settings["reasoning"]]
         if settings["reasoning_effort"] != "default":
@@ -184,7 +222,9 @@ class LlamaCppEngine:
         ui = self.web_ui()
         if ui:
             argv += ["--path", ui]
-        return LaunchPlan(argv=argv, env={}, health_path="/health", web_ui=bool(ui))
+        return LaunchPlan(argv=argv, env={}, health_path="/health",
+                          web_ui=bool(ui),
+                          splits_across_cpu=_splits(settings["gpu_layers"]))
 
     def ready(self, port: int) -> bool:
         return http_ok(port, "/health")

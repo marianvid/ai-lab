@@ -57,6 +57,52 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class SplitAcrossCpuTests(unittest.TestCase):
+    """Running a model larger than the card, with part of it in system memory."""
+
+    def setUp(self):
+        self.engine = LlamaCppEngine(binary="/bin/llama-server")
+
+    def plan(self, params=None):
+        return self.engine.plan(model(), 8080, params or {})
+
+    def flag(self, name, params=None):
+        argv = self.plan(params).argv
+        return argv[argv.index(name) + 1]
+
+    def test_the_whole_model_goes_on_the_card_by_default(self):
+        self.assertEqual(self.flag("--n-gpu-layers"), "999")
+        self.assertFalse(self.plan().splits_across_cpu)
+
+    def test_a_layer_count_reaches_the_command_line(self):
+        self.assertEqual(self.flag("--n-gpu-layers", {"gpu_layers": 60}), "60")
+
+    def test_a_layer_count_is_declared_as_a_split(self):
+        # This is what tells the manager to stop refusing a model bigger than
+        # the free memory on the card.
+        self.assertTrue(self.plan({"gpu_layers": 60}).splits_across_cpu)
+
+    def test_llama_cpp_can_be_left_to_work_out_the_count(self):
+        # The flag must be absent, not set to something. llama.cpp refuses to
+        # measure free memory once the flag is present: "n_gpu_layers already
+        # set by user, abort".
+        plan = self.plan({"gpu_layers": -2})
+        self.assertNotIn("--n-gpu-layers", plan.argv)
+        self.assertTrue(plan.splits_across_cpu)
+
+    def test_no_layers_on_the_card_is_still_a_split(self):
+        # Everything in system memory is legitimate, and very slow.
+        self.assertEqual(self.flag("--n-gpu-layers", {"gpu_layers": 0}), "0")
+        self.assertTrue(self.plan({"gpu_layers": 0}).splits_across_cpu)
+
+    def test_the_all_layers_sentinel_is_not_a_split(self):
+        # 999 is what an older version of this project stored to mean "all of
+        # them". Reading it as a split would drop the check that catches a model
+        # too large to load.
+        self.assertEqual(self.flag("--n-gpu-layers", {"gpu_layers": 999}), "999")
+        self.assertFalse(self.plan({"gpu_layers": 999}).splits_across_cpu)
+
+
 class WebUiTests(unittest.TestCase):
     """llama.cpp ships a chat page as static files, not inside the binary.
 
