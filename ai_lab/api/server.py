@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 from ..events import EventBus
 from ..operations import Operations
 from . import sse
+from .passthrough import Passthrough
 from .router import Router
 from .routes import register_all
 
@@ -67,7 +68,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
             result = handler(query=query, body=self._body(), **captured)
-            self._json(result if result is not None else {"ok": True})
+            if isinstance(result, Passthrough):
+                self._passthrough(result)
+            else:
+                self._json(result if result is not None else {"ok": True})
         except Exception as error:
             self._error(error)
         return True
@@ -113,6 +117,31 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         sse.stream(self.bus, self._write_chunk, lambda: not self.wfile.closed)
 
+    def _passthrough(self, response: Passthrough):
+        """Write an engine's answer straight through, as it arrives.
+
+        Chunked rather than buffered: a streamed answer has to reach the client
+        while it is being produced, which is the whole reason a client asks for
+        one.
+        """
+        self.send_response(response.status)
+        self.send_header("Content-Type", response.content_type)
+        for name, value in response.headers.items():
+            if name.lower() != "content-type":
+                self.send_header(name, value)
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        try:
+            for chunk in response.chunks:
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            # The client hung up mid-answer. The generator's cleanup still runs
+            # and still releases the lease, which is what matters.
+            pass
+
     def _write_chunk(self, data: bytes):
         self.wfile.write(data)
         self.wfile.flush()
@@ -133,13 +162,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def build_router(operations: Operations) -> Router:
+def build_router(operations: Operations, model_gateway=None) -> Router:
     router = Router()
-    register_all(router, operations)
+    register_all(router, operations, model_gateway)
     return router
 
 
-def serve(operations: Operations, bus: EventBus, host: str, port: int) -> None:
+def serve(operations: Operations, bus: EventBus, host: str, port: int,
+          model_gateway=None) -> None:
     handler = type("ConfiguredHandler", (Handler,),
-                   {"router": build_router(operations), "bus": bus})
+                   {"router": build_router(operations, model_gateway), "bus": bus})
     ThreadingHTTPServer((host, port), handler).serve_forever()

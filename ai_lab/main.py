@@ -24,7 +24,7 @@ def main() -> None:
     if not arguments.config.is_file():
         sys.exit(f"No configuration at {arguments.config}")
 
-    operations, bus, store = build(arguments.config)
+    operations, bus, store, model_gateway = build(arguments.config)
     config = store.load()
     host = arguments.host or config.host
     port = arguments.port or config.port
@@ -33,7 +33,7 @@ def main() -> None:
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
-        serve(operations, bus, host, port)
+        serve(operations, bus, host, port, model_gateway)
     finally:
         operations.host.stop_all()
 

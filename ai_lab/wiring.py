@@ -17,13 +17,14 @@ from .config import ConfigStore
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
+from .gateway import Gateway
 from .hosts import current_host
 from .operations import Operations
 from .runtime import Runtime
 from .settings import Settings
 
 
-def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore]:
+def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway]:
     store = ConfigStore(config_path)
     bus = EventBus()
     # Engines are built from configuration, so a machine holding two llama.cpp
@@ -48,4 +49,6 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore]:
         builds=builds,
         bus=bus,
     )
-    return operations, bus, store
+    # Routes a request by model name and loads that model if it is not running,
+    # so an agent workflow can name several models and reach one card.
+    return operations, bus, store, Gateway(operations)
