@@ -13,6 +13,7 @@ import { installTheme } from './theme.js';
 import { render as renderSettings } from './views/settings.js';
 import { render as renderLibrary } from './views/library.js';
 import { render as renderRuntime } from './views/runtime.js';
+import { render as renderGateway } from './views/gateway.js';
 
 // "Models" is the list you run; "Library" is what is on disk. They were both
 // called models before, which was the same confusion as calling a row a slot.
@@ -28,6 +29,10 @@ const VIEWS = [
     topics: ['instances', 'models'] },
   { id: 'library', label: 'Library', render: renderLibrary,
     topics: ['models', 'downloads'] },
+  // The one address an agent talks to. Its numbers come from traffic the
+  // manager only forwards, which produces no events, so this view keeps
+  // itself fresh on a timer of its own rather than waiting to be told.
+  { id: 'gateway', label: 'Gateway', render: renderGateway, topics: ['instances'] },
   { id: 'settings', label: 'Settings', render: renderSettings,
     topics: ['engines', 'models'] },
 ];
