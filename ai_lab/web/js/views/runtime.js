@@ -5,7 +5,7 @@
 // the first time.
 
 import { api } from '../api.js';
-import { confirmDestructive } from '../confirm.js';
+import { confirmDestructive, showNotice } from '../confirm.js';
 import { onProgress } from '../events.js';
 import { settingsForm } from '../form.js';
 import { bytes, element, seconds } from '../format.js';
@@ -71,12 +71,26 @@ function subscribe() {
 
 // -- actions ----------------------------------------------------------------
 
+// A failure interrupts; a success does not.
+//
+// A load takes between four seconds and a minute, so you look away. The status
+// line is right for "finished in 12.7 s" and wrong for "it would not start":
+// the page is long, that line sits below it with no border and no background,
+// and the next action wipes it. The explanation is also the useful part — an
+// engine that refuses a context says which one would have fitted — and it is
+// worth taking the page away for.
+function failed(label, detail) {
+  setStatus(detail, 'error');
+  return showNotice({ title: `${label} failed`, body: detail });
+}
+
 function report(label, result) {
   const operation = result.operation || result;
-  if (operation.ok === false) setStatus(operation.error, 'error');
-  else if (operation.total_ms !== undefined) {
+  if (operation.ok === false) return failed(label, operation.error);
+  if (operation.total_ms !== undefined) {
     setStatus(`${label} finished in ${seconds(operation.total_ms)}`, 'ok');
   } else setStatus(`${label} done`, 'ok');
+  return undefined;
 }
 
 // An agent may be streaming an answer off the card right now. The server
@@ -100,22 +114,22 @@ async function askThenForce(label, work, busy) {
     return;
   }
   setStatus(`${label}, forced…`);
-  report(label, await work(true));
+  await report(label, await work(true));
 }
 
 // `work` takes one argument: whether to go ahead despite a busy card.
 async function run(label, work) {
   setStatus(`${label}…`);
   try {
-    report(label, await work(false));
+    await report(label, await work(false));
   } catch (error) {
     if (error.busy) {
       try {
         await askThenForce(label, work, error.busy);
       } catch (again) {
-        setStatus(again.message, 'error');
+        await failed(label, again.message);
       }
-    } else setStatus(error.message, 'error');
+    } else await failed(label, error.message);
   }
   redraw();
 }

@@ -366,9 +366,9 @@ describe('stopping a model that is busy', () => {
     assert.match(dialog().textContent, /still loading/);
   });
 
-  it('does not ask about failures that have nothing to do with a busy card', async () => {
-    // Every other refusal is still a plain message. Offering to force past a
-    // model that will not fit would be nonsense.
+  it('does not offer to force past a failure that is not about a busy card', async () => {
+    // The failure is still shown — every failure is, now — but offering to
+    // force past a model that will not fit would be nonsense.
     const { view } = await renderPage({
       '/api/instances/qwen-coder/unload': {
         __status: 400, error: 'Could not stop it: no such unit',
@@ -376,7 +376,10 @@ describe('stopping a model that is busy', () => {
     });
     button(view, 'Unload').click();
     await settle();
-    assert.equal(dialog(), null, 'a dialog appeared for an unrelated failure');
+    assert.ok(dialog(), 'the failure was not shown at all');
+    assert.match(dialog().textContent, /no such unit/);
+    assert.equal(dialog().textContent.includes('Stop it anyway'), false,
+                 'it offered to force past something forcing cannot fix');
   });
 });
 
@@ -476,5 +479,80 @@ describe('a model started differently from how it is configured', () => {
   it('copes with an entry that has no such field at all', async () => {
     const { view } = await renderPage();
     assert.doesNotThrow(() => view.querySelector('.row.instance').getAttribute('title'));
+  });
+});
+
+describe('a load that fails', () => {
+  // A load takes between four seconds and a minute, so you look away. The
+  // status line is right for "finished in 12.7 s" and wrong for "it would not
+  // start": the page is long, that line sits below it with no border, and the
+  // next action wipes it. Twice in one afternoon the answer was on the machine
+  // and not on the screen.
+
+  const REFUSED = {
+    ok: false, total_ms: 73189, instance_id: 'qwen-coder', kind: 'load',
+    steps: [],
+    error: 'The engine stopped while loading: ValueError: To serve at least '
+         + "one request with the model's max seq len (131072), 12.0 GiB KV "
+         + 'cache is needed, which is larger than the available KV cache '
+         + 'memory (11.01 GiB). Based on the available memory, the estimated '
+         + 'maximum model length is 120256.',
+  };
+
+  // The status line is attached by the entry point, not by a view, so a test
+  // that renders a view on its own has to do it.
+  async function attachFooter() {
+    const { attachStatus } = await import('../../ai_lab/web/js/status.js');
+    attachStatus(document.getElementById('status'));
+  }
+
+  async function failLoad() {
+    const { view } = await renderPage({
+      '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
+      '/api/instances/qwen-coder/load': REFUSED,
+    });
+    await attachFooter();
+    button(view, 'Load').click();
+    await settle();
+    return document.querySelector('dialog');
+  }
+
+  it('takes the page rather than whispering at the bottom of it', async () => {
+    assert.ok(await failLoad(), 'nothing was shown');
+  });
+
+  it('keeps the number that would have worked', async () => {
+    // The whole reason for showing the engine's own words: it worked out the
+    // largest context that fits and said so.
+    assert.match((await failLoad()).textContent, /120256/);
+  });
+
+  it('shows the explanation whole, not trimmed to a line', async () => {
+    const text = (await failLoad()).textContent;
+    assert.match(text, /12.0 GiB KV cache is needed/);
+    assert.match(text, /11.01 GiB/);
+  });
+
+  it('says which action failed', async () => {
+    assert.match((await failLoad()).textContent, /failed/);
+  });
+
+  it('leaves the message in the status line as well', async () => {
+    // For anyone who dismisses it and then wonders what it said.
+    await failLoad();
+    assert.match(document.getElementById('status').textContent, /120256/);
+  });
+
+  it('says nothing extra when a load succeeds', async () => {
+    const { view } = await renderPage({
+      '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
+      '/api/instances/qwen-coder/load': { ok: true, total_ms: 12700, steps: [] },
+    });
+    await attachFooter();
+    button(view, 'Load').click();
+    await settle();
+    assert.equal(document.querySelector('dialog'), null,
+                 'a success should not interrupt');
+    assert.match(document.getElementById('status').textContent, /12.7 s/);
   });
 });

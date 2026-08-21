@@ -192,6 +192,15 @@ dialog.confirm {
 }
 dialog.confirm::backdrop { background: rgba(0, 0, 0, 0.5); }
 dialog.confirm h3 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--text); }
+/* An engine's own explanation, which can run to several sentences and carries
+   the number that would have worked. Shown whole: truncating it would throw
+   away the reason it is on screen. */
+dialog.notice { max-width: 44rem; }
+dialog.notice .detail {
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 50vh; overflow-y: auto;
+  font-size: 0.85rem; line-height: 1.45;
+}
 dialog.confirm p { margin: 0 0 1rem; }
 dialog.confirm .buttons { justify-content: flex-end; gap: 0.5rem; }
 button.action.danger { border-color: var(--error); color: var(--error); }

@@ -1,4 +1,9 @@
-// Asking before something irreversible.
+// Modal interruptions: the two things that must not be missed.
+//
+// Asking before something irreversible, and telling you something you would
+// otherwise scroll past. They share this file because they are one job — a
+// dialog that takes the page away until it is answered — and splitting them
+// would mean two copies of the mechanics below.
 //
 // The browser's own confirm() defaults to OK, which is the wrong way round for
 // deleting files: the safe answer should be the one you get by pressing Enter
@@ -38,5 +43,37 @@ export function confirmDestructive({ title, body, confirmLabel = 'Delete' }) {
     document.body.append(dialog);
     dialog.showModal();
     cancel.focus();
+  });
+}
+
+
+// Telling you something you must not miss.
+//
+// The status line at the foot of the page is the right place for progress and
+// for a success. It is the wrong place for a load that failed: the page is
+// long, the line is below it, it has no border and no background, and the next
+// action wipes it. A model that would not start took forty seconds to say so
+// and then said it where nobody was looking.
+//
+// The message is worth reading in full. An engine that refuses a context says
+// which one would have fitted, and that sentence is the whole point of showing
+// it at all — so this does not truncate.
+export function showNotice({ title, body, dismissLabel = 'Close' }) {
+  return new Promise((resolve) => {
+    const dismiss = element('button', {
+      class: 'action', autofocus: 'autofocus', text: dismissLabel,
+      onclick: () => dialog.close(),
+    });
+
+    const dialog = element('dialog', { class: 'confirm notice' }, [
+      element('h3', { text: title }),
+      element('p', { class: 'detail' }, body),
+      element('div', { class: 'row buttons' }, [dismiss]),
+    ]);
+
+    dialog.addEventListener('close', () => { dialog.remove(); resolve(); });
+    document.body.append(dialog);
+    dialog.showModal();
+    dismiss.focus();
   });
 }
