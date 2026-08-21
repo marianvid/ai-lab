@@ -44,11 +44,17 @@ echo "[2/6] Uploading to LXC ${container_id}"
 # module still importable, a stale script still served. The running manager
 # holds its code in memory and is restarted at the end, so this is safe.
 remote "rm -rf ${runtime_dir}/ai_lab ${runtime_dir}/tests"
+# opts/ is the private half: machine addresses, an ssh key path, passwords.
+# This script reads opts/deploy.env here, before anything is sent, so the far
+# side never needs it — and the far side runs a web page with no authentication
+# on it. node_modules is the test runner for the interface, which runs here
+# too: the container has no node, so 25 MB crosses the wire for nothing.
 COPYFILE_DISABLE=1 tar \
   --no-xattrs \
   --exclude=.git --exclude=.venv --exclude=.pytest_cache \
   --exclude='*.egg-info' --exclude='__pycache__' \
   --exclude='.DS_Store' --exclude='._*' --exclude=tmp \
+  --exclude=opts --exclude=node_modules --exclude=research \
   -C "${project_dir}" -cf - . \
   | ssh -i "${ssh_key}" "${target_host}" \
       "pct exec '${container_id}' -- tar -C '${runtime_dir}' -xf -"
