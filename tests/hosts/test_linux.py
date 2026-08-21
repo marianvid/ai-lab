@@ -1,8 +1,9 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from ai_lab.hosts.command import Result
-from ai_lab.hosts.linux import LinuxHost
+from ai_lab.hosts.linux import CONTROL_TIMEOUT_S, LinuxHost
 
 
 def result(stdout="", returncode=0, stderr=""):
@@ -114,3 +115,45 @@ class EngineDetectionTests(unittest.TestCase):
         host = LinuxHost(vllm_binary="/opt/ai/vllm/.venv/bin/vllm")
         engines = self.capabilities(host, on_path=("llama-server",)).engines
         self.assertIn("llamacpp", engines)
+
+
+class StopTimeoutTests(unittest.TestCase):
+    """The wait has to outlast the thing being waited for.
+
+    `systemctl stop` blocks until the unit is stopped, and the unit gives an
+    engine `TimeoutStopSec` seconds to go quietly before systemd kills it. If
+    this side's patience equals systemd's, the stop times out at the very
+    moment it succeeds — which is what happened on the real machine: a vLLM
+    instance stopped in the middle of generating really did stop, the card
+    really was released, and the interface said "sudo: timed out after 60s".
+
+    Two numbers in two files that must stay in a particular order is exactly
+    the kind of pair that drifts apart silently, so it is asserted rather than
+    left to a comment.
+    """
+
+    UNIT = (Path(__file__).resolve().parents[2]
+            / "system" / "ai-lab-engine@.service")
+
+    def unit_stop_seconds(self) -> float:
+        for line in self.UNIT.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("TimeoutStopSec="):
+                return float(stripped.split("=", 1)[1].rstrip("s"))
+        self.fail("the unit no longer sets TimeoutStopSec")
+
+    def test_the_unit_still_bounds_how_long_a_stop_takes(self):
+        # Without it, systemd waits 90 seconds by default and an engine that
+        # ignores SIGTERM holds the card for all of them.
+        self.assertLessEqual(self.unit_stop_seconds(), 60.0)
+
+    def test_we_wait_longer_than_systemd_does(self):
+        self.assertGreater(
+            CONTROL_TIMEOUT_S, self.unit_stop_seconds(),
+            "this side must outlast the unit, or a successful stop is "
+            "reported as a timeout")
+
+    def test_with_a_margin_rather_than_by_a_second(self):
+        # Equal was the bug; one second more would be the same bug with better
+        # luck. systemd still has to reap the processes after it kills them.
+        self.assertGreaterEqual(CONTROL_TIMEOUT_S - self.unit_stop_seconds(), 30.0)

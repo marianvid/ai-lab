@@ -26,7 +26,16 @@ Group=ai-lab-manager
 Environment=HOME=/var/lib/ai-lab
 ExecStart=/opt/ai-lab/.venv/bin/ai-lab-run %i
 Restart=no
-TimeoutStopSec=60
+# SIGTERM first, then systemd insists. An engine has nothing to save: the
+# weights are on disk and the driver reclaims the card either way, so a long
+# wait buys nothing and makes an unload feel broken. Measured on this machine:
+# llama.cpp exits in about half a second; vLLM in the middle of generating did
+# not answer SIGTERM within a minute and had to be killed. So the limit is set
+# by how long somebody should wait for a stop, not by hope of a clean exit.
+#
+# ai_lab/hosts/linux.py waits longer than this on purpose, and a test asserts
+# it: a caller whose patience equals systemd's times out on its own success.
+TimeoutStopSec=30
 KillSignal=SIGTERM
 
 [Install]

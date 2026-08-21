@@ -21,6 +21,17 @@ from .command import run, which
 CONTROL_HELPER = "/usr/local/sbin/ai-lab-control"
 UNIT = "ai-lab-engine@{instance_id}.service"
 
+# `systemctl stop` blocks until the unit is actually stopped, and the unit
+# gives an engine TimeoutStopSec=30 to go quietly before killing it. So this
+# has to be comfortably longer than that.
+#
+# It used to be exactly 60, against a TimeoutStopSec of 60. Stopping a vLLM
+# instance in the middle of generating then timed out here at the very moment
+# systemd was finishing the job: the model really did stop and the card really
+# was released, and the interface reported "sudo: timed out after 60s". A wait
+# that equals what it is waiting for reports failure on success.
+CONTROL_TIMEOUT_S = 90.0
+
 GPU_QUERY = "name,memory.used,memory.total,temperature.gpu,utilization.gpu"
 APPS_QUERY = "pid,used_gpu_memory"
 
@@ -92,7 +103,8 @@ class LinuxHost:
         return ProcessStatus(running=active, pid=pid, enabled=enabled)
 
     def _control(self, action: str, instance_id: str) -> None:
-        result = run(["sudo", "-n", self.control_helper, action, instance_id], timeout=60)
+        result = run(["sudo", "-n", self.control_helper, action, instance_id],
+                     timeout=CONTROL_TIMEOUT_S)
         if not result.ok:
             message = result.stderr.strip() or result.stdout.strip()
             raise RuntimeError(f"Could not {action} {instance_id}: {message}")
