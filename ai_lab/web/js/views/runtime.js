@@ -71,17 +71,51 @@ function subscribe() {
 
 // -- actions ----------------------------------------------------------------
 
+function report(label, result) {
+  const operation = result.operation || result;
+  if (operation.ok === false) setStatus(operation.error, 'error');
+  else if (operation.total_ms !== undefined) {
+    setStatus(`${label} finished in ${seconds(operation.total_ms)}`, 'ok');
+  } else setStatus(`${label} done`, 'ok');
+}
+
+// An agent may be streaming an answer off the card right now. The server
+// refuses to stop a model in that state, and says which one is working. Rather
+// than printing that refusal and leaving the reader stuck, ask: cutting the
+// answer short is sometimes exactly what is wanted — a model wedged in a bad
+// state has to be stoppable — but it should be a decision, not an accident.
+async function askThenForce(label, work, busy) {
+  const who = busy.instance_id || 'A model';
+  const forced = await confirmDestructive({
+    title: `${who} is busy`,
+    body: busy.answering
+      ? `${who} is answering a request right now. Going ahead cuts that answer `
+        + 'off in the middle, and whatever asked for it sees the connection drop.'
+      : `${who} is still loading, for a request that is already waiting. `
+        + 'Going ahead abandons that load.',
+    confirmLabel: 'Stop it anyway',
+  });
+  if (!forced) {
+    setStatus(`Left ${who} alone.`, 'ok');
+    return;
+  }
+  setStatus(`${label}, forced…`);
+  report(label, await work(true));
+}
+
+// `work` takes one argument: whether to go ahead despite a busy card.
 async function run(label, work) {
   setStatus(`${label}…`);
   try {
-    const result = await work();
-    const operation = result.operation || result;
-    if (operation.ok === false) setStatus(operation.error, 'error');
-    else if (operation.total_ms !== undefined) {
-      setStatus(`${label} finished in ${seconds(operation.total_ms)}`, 'ok');
-    } else setStatus(`${label} done`, 'ok');
+    report(label, await work(false));
   } catch (error) {
-    setStatus(error.message, 'error');
+    if (error.busy) {
+      try {
+        await askThenForce(label, work, error.busy);
+      } catch (again) {
+        setStatus(again.message, 'error');
+      }
+    } else setStatus(error.message, 'error');
   }
   redraw();
 }
@@ -193,20 +227,21 @@ function card(instance, models, engines) {
                   : 'Open Settings to change something first')
       : 'Nothing is running — use Load',
     ...(instance.running && expanded ? {} : { disabled: 'disabled' }),
-    onclick: () => run(`Reloading ${instance.name || instance.id}`, () =>
-      api.apply(instance.id, edits())),
+    onclick: () => run(`Reloading ${instance.name || instance.id}`, (force) =>
+      api.apply(instance.id, edits(), force)),
   });
 
   const primary = instance.running
     ? element('button', {
         class: 'action', text: 'Unload',
-        onclick: () => run(`Unloading ${instance.name || instance.id}`, () => api.unload(instance.id)),
+        onclick: () => run(`Unloading ${instance.name || instance.id}`,
+                           (force) => api.unload(instance.id, force)),
       })
     : element('button', {
         class: 'action', text: 'Load',
-        onclick: () => run(`Loading ${instance.name || instance.id}`, async () => {
+        onclick: () => run(`Loading ${instance.name || instance.id}`, async (force) => {
           if (expanded) await api.update(instance.id, edits());
-          return api.load(instance.id);
+          return api.load(instance.id, force);
         }),
       });
 

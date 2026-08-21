@@ -9,9 +9,12 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 
 from ai_lab.api.server import Handler, build_router
+from ai_lab.api.server import status_for
+from ai_lab.gateway import CardBusy, NotConfigured
 from ai_lab.events import EventBus
 
 
@@ -131,6 +134,14 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"], "Port 8080 is already in use")
 
+    def test_a_subclass_lands_on_its_parent_rule(self):
+        # Looked up by exact type, a KeyError subclass misses the 404 rule and
+        # leaves as a bad request. The gateway raises one for a model name
+        # nobody serves, and 400 tells an agent the wrong thing about its own
+        # request: it would retry differently instead of fixing the name.
+        self.assertEqual(status_for(NotConfigured("no such model")),
+                         HTTPStatus.NOT_FOUND)
+
     def test_an_unknown_route_is_a_404(self):
         status, _ = self.call("POST", "/api/nothing-here")
         self.assertEqual(status, 404)
@@ -190,3 +201,103 @@ class CachingTests(unittest.TestCase):
 
     def test_api_responses_are_never_cached(self):
         self.assertIn("no-store", self.headers_for("/api/instances").get("Cache-Control", ""))
+
+
+class BusyCardTests(unittest.TestCase):
+    """The whole round trip of the refusal, because the page acts on it.
+
+    A message alone is not enough. The page has to be able to tell this
+    refusal from every other one, and to name the model that is working — so
+    the status code and the detail have to survive the trip out.
+    """
+
+    class Gateway:
+        """Busy until told otherwise, which is all the routes need of it."""
+
+        def __init__(self):
+            self.holder = {"instance_id": "coder", "answering": True}
+            self.guarded = []
+
+        def guard(self, action, instance_id):
+            self.guarded.append((action, instance_id))
+            if self.holder is None:
+                return
+            raise CardBusy(f"coder is answering a request; {action} on "
+                           f"{instance_id} would cut it off", self.holder)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.operations = FakeOperations()
+        cls.gateway = cls.Gateway()
+        handler = type("BusyHandler", (Handler,), {
+            "router": build_router(cls.operations, cls.gateway),
+            "bus": EventBus()})
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        self.gateway.holder = {"instance_id": "coder", "answering": True}
+        self.operations.calls.clear()
+        self.gateway.guarded.clear()
+
+    call = ServerTests.call
+
+    def test_loading_while_the_card_is_busy_is_refused(self):
+        status, payload = self.call("POST", "/api/instances/qwen/load")
+        self.assertEqual(status, 409, "409 rather than 400: the same request "
+                                      "will work once the card is free")
+        self.assertEqual(payload["busy"]["instance_id"], "coder")
+        self.assertNotIn(("load", "qwen"), self.operations.calls)
+
+    def test_the_refusal_says_which_model_is_working(self):
+        _, payload = self.call("POST", "/api/instances/qwen/load")
+        self.assertTrue(payload["busy"]["answering"])
+        self.assertIn("coder", payload["error"])
+
+    def test_force_goes_ahead_anyway(self):
+        status, _ = self.call("POST", "/api/instances/qwen/load", {"force": True})
+        self.assertEqual(status, 200)
+        self.assertIn(("load", "qwen"), self.operations.calls)
+
+    def test_force_is_not_saved_as_a_setting(self):
+        # `apply` writes the body into the instance's configuration. The
+        # override is an instruction to the web layer and has no business
+        # being stored beside the engine's own settings.
+        self.call("POST", "/api/instances/qwen/apply",
+                  {"force": True, "params": {"context_size": 8192}})
+        self.assertIn(("apply", "qwen", {"params": {"context_size": 8192}}),
+                      self.operations.calls)
+
+    def test_a_free_card_is_not_asked_about_twice(self):
+        self.gateway.holder = None
+        status, _ = self.call("POST", "/api/instances/qwen/load")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.gateway.guarded, [("load", "qwen")])
+
+    def test_reading_the_list_is_never_refused(self):
+        status, _ = self.call("GET", "/api/instances")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.gateway.guarded, [],
+                         "looking at the page must not be guarded")
+
+
+class NoGatewayTests(unittest.TestCase):
+    """A router built without a gateway still starts and stops models.
+
+    The tests build one that way, and so does anything embedding this without
+    the agent front door. Nothing is being served, so there is nothing to
+    interrupt and nothing to guard.
+    """
+
+    def test_loading_works_with_no_gateway_wired(self):
+        operations = FakeOperations()
+        router = build_router(operations)
+        handler, captured = router.match("POST", "/api/instances/qwen/load")
+        self.assertEqual(handler(query={}, body={}, **captured)["total_ms"], 42)

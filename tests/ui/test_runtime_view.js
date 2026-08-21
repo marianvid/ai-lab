@@ -281,3 +281,101 @@ describe('removing an entry', () => {
     assert.equal(button(view, 'Remove').disabled, true);
   });
 });
+
+describe('stopping a model that is busy', () => {
+  // The buttons on this page reach the engines directly, past the queue that
+  // keeps agent requests from interrupting each other. Pressing Unload during
+  // a streamed answer used to kill it mid sentence, and the agent on the other
+  // end saw a connection that simply stopped.
+
+  const BUSY = {
+    __status: 409,
+    error: 'coder is answering a request right now.',
+    busy: { instance_id: 'coder', answering: true },
+  };
+
+  // Refuses the first attempt, accepts one that says force.
+  function refuseUntilForced(record) {
+    return (path, options) => {
+      const body = options.body ? JSON.parse(options.body) : {};
+      record.push(body);
+      return body.force ? { ok: true, total_ms: 900 } : BUSY;
+    };
+  }
+
+  function dialog() {
+    return document.querySelector('dialog');
+  }
+
+  it('asks instead of printing a refusal and leaving you stuck', async () => {
+    const { view } = await renderPage({
+      '/api/instances/qwen-coder/unload': refuseUntilForced([]),
+    });
+    button(view, 'Unload').click();
+    await settle();
+    assert.ok(dialog(), 'no dialog appeared');
+    assert.match(dialog().textContent, /coder is busy/);
+  });
+
+  it('says what going ahead costs, in words rather than a status code', async () => {
+    const { view } = await renderPage({
+      '/api/instances/qwen-coder/unload': refuseUntilForced([]),
+    });
+    button(view, 'Unload').click();
+    await settle();
+    assert.match(dialog().textContent, /cuts that answer off/);
+  });
+
+  it('leaves the model alone when the answer is no', async () => {
+    const sent = [];
+    const { view } = await renderPage({
+      '/api/instances/qwen-coder/unload': refuseUntilForced(sent),
+    });
+    button(view, 'Unload').click();
+    await settle();
+    button(dialog(), 'Cancel').click();
+    await settle();
+    assert.equal(sent.length, 1, 'it was stopped despite the answer being no');
+    assert.equal(sent[0].force, undefined);
+  });
+
+  it('goes ahead when the answer is yes', async () => {
+    // A model wedged in a bad state has to be stoppable. The point of the
+    // dialog is that it becomes a decision, not that it becomes impossible.
+    const sent = [];
+    const { view } = await renderPage({
+      '/api/instances/qwen-coder/unload': refuseUntilForced(sent),
+    });
+    button(view, 'Unload').click();
+    await settle();
+    button(dialog(), 'Stop it anyway').click();
+    await settle();
+    assert.equal(sent.length, 2, 'the forced attempt was never sent');
+    assert.equal(sent[1].force, true);
+  });
+
+  it('says a model is loading rather than answering, when that is the case', async () => {
+    const { view } = await renderPage({
+      '/api/instances/qwen-coder/unload': {
+        __status: 409, error: 'busy',
+        busy: { instance_id: 'coder', answering: false },
+      },
+    });
+    button(view, 'Unload').click();
+    await settle();
+    assert.match(dialog().textContent, /still loading/);
+  });
+
+  it('does not ask about failures that have nothing to do with a busy card', async () => {
+    // Every other refusal is still a plain message. Offering to force past a
+    // model that will not fit would be nonsense.
+    const { view } = await renderPage({
+      '/api/instances/qwen-coder/unload': {
+        __status: 400, error: 'Could not stop it: no such unit',
+      },
+    });
+    button(view, 'Unload').click();
+    await settle();
+    assert.equal(dialog(), null, 'a dialog appeared for an unrelated failure');
+  });
+});

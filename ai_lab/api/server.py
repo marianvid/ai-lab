@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
+from ..gateway import CardBusy
 from ..operations import Operations
 from . import sse
 from .passthrough import Passthrough
@@ -32,7 +33,24 @@ STATUS = {
     KeyError: HTTPStatus.NOT_FOUND,
     FileNotFoundError: HTTPStatus.NOT_FOUND,
     NotImplementedError: HTTPStatus.NOT_IMPLEMENTED,
+    # Not a bad request: the same request will succeed once the card is free.
+    CardBusy: HTTPStatus.CONFLICT,
 }
+
+
+def status_for(error: Exception) -> HTTPStatus:
+    """The first rule that matches, following inheritance.
+
+    Looking the exact type up in the table misses a subclass, and the subclasses
+    are the point: the gateway raises `NotConfigured` for a model name nobody
+    serves, and it is a KeyError precisely so that it lands on 404. Matched by
+    exact type it would leave as a bad request, which tells an agent the wrong
+    thing about its own request.
+    """
+    for kind, status in STATUS.items():
+        if isinstance(error, kind):
+            return status
+    return HTTPStatus.BAD_REQUEST
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -93,9 +111,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _error(self, error: Exception):
-        status = STATUS.get(type(error), HTTPStatus.BAD_REQUEST)
-        message = str(error) or error.__class__.__name__
-        self._json({"error": message}, status)
+        """The message, plus whatever the error carried with it.
+
+        Some refusals are worth acting on rather than only reading — being told
+        the card is busy is useful only if the page can also say which model
+        holds it and offer to stop it anyway. An exception carrying a `detail`
+        dictionary has it merged into the answer. Still no decision here: this
+        copies what it is given and knows nothing about what is in it.
+        """
+        status = status_for(error)
+        payload = {"error": str(error) or error.__class__.__name__}
+        detail = getattr(error, "detail", None)
+        if isinstance(detail, dict):
+            payload.update(detail)
+        self._json(payload, status)
 
     def _head(self, status, content_type: str, length: int, cache: bool = False):
         self.send_response(status)

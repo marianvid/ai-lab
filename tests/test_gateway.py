@@ -12,7 +12,7 @@ import threading
 import time
 import unittest
 
-from ai_lab.gateway import CouldNotLoad, Gateway, NotConfigured
+from ai_lab.gateway import CardBusy, CouldNotLoad, Gateway, NotConfigured
 from ai_lab.runtime import Operation
 from ai_lab.types import AcceleratorSnapshot
 
@@ -106,6 +106,15 @@ class NamingTests(unittest.TestCase):
 
     def test_names_are_matched_regardless_of_case(self):
         self.assertEqual(self.gateway.resolve("cODiNg")["id"], "coder")
+
+    def test_an_unknown_name_reads_as_a_sentence(self):
+        # It is a KeyError so the web layer answers 404 on its own, and a
+        # KeyError renders its argument with repr() — which would deliver this
+        # whole sentence wrapped in quotes to somebody debugging an agent.
+        with self.assertRaises(NotConfigured) as caught:
+            self.gateway.resolve("nope")
+        self.assertFalse(str(caught.exception).startswith(("'", '"')),
+                         f"quoted: {str(caught.exception)!r}")
 
     def test_an_unknown_name_says_what_is_known(self):
         with self.assertRaises(NotConfigured) as caught:
@@ -301,6 +310,24 @@ class ReportingTests(unittest.TestCase):
                 pass
         self.assertEqual(gateway.stats()["switches"], 0)
 
+    def test_what_is_on_the_card_survives_an_unload_it_was_not_told_about(self):
+        """Found on the real machine, not here.
+
+        A person forced past a busy card from the page, which stops a model
+        without going through the gateway — by design. The gateway went on
+        naming that model as the one on the card, so the page showed a model
+        that was no longer loaded, next to an accelerator reading empty.
+        """
+        operations = two_models()
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(gateway.stats()["current"], "coder")
+
+        operations.unload("coder")              # straight past the gateway
+        self.assertIsNone(gateway.stats()["current"],
+                          "it reported a model that had been stopped behind its back")
+
     def test_the_current_model_is_reported(self):
         gateway = quick(two_models(coder=True))
         with gateway.acquire("reviewer"):
@@ -356,3 +383,129 @@ class ReportingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OneModelOnlyTests(unittest.TestCase):
+    """One model on the card, with no exceptions.
+
+    The rule is easy to state and easy to break in one particular way: a
+    request that needs no switch used to leave the card exactly as it found it,
+    strays and all.
+    """
+
+    def test_a_stray_is_unloaded_even_when_no_switch_is_needed(self):
+        # Both are up — a manager restart found two units enabled, or somebody
+        # pressed Load twice. The request asks for one of them, so nothing has
+        # to be loaded; the other still has to go.
+        operations = two_models(coder=True, reviewer=True)
+        gateway = quick(operations)
+
+        with gateway.acquire("coder") as lease:
+            self.assertEqual(lease.port, 8080)
+
+        self.assertEqual(operations.unloads, ["reviewer"])
+        self.assertEqual(operations.loads, [],
+                         "the model asked for was already up; nothing to load")
+        running = [e["id"] for e in operations.instances() if e["running"]]
+        self.assertEqual(running, ["coder"])
+
+    def test_tidying_up_does_not_reload_the_model_that_was_already_there(self):
+        # The cheap mistake is to treat "something else is running" as a switch
+        # and put the wanted model through an unload and a load for nothing.
+        operations = two_models(coder=True, reviewer=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        self.assertNotIn("coder", operations.unloads)
+
+    def test_a_tidy_up_is_recorded_as_what_it_was(self):
+        operations = two_models(coder=True, reviewer=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        entry = gateway.stats()["recent"][0]
+        self.assertTrue(entry["tidied"])
+        self.assertEqual(entry["unloaded"], ["reviewer"])
+        self.assertEqual(gateway.stats()["switches"], 0,
+                         "nothing was switched, so nothing should be counted")
+
+    def test_a_clean_card_is_left_alone(self):
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(operations.unloads, [])
+        self.assertEqual(gateway.stats()["recent"], [])
+
+
+class BusyGuardTests(unittest.TestCase):
+    """What the buttons on the page are told while a request is in progress."""
+
+    def test_nothing_is_refused_while_the_card_is_free(self):
+        gateway = quick(two_models(coder=True))
+        self.assertIsNone(gateway.busy())
+        gateway.guard("unload", "coder")        # does not raise
+
+    def test_stopping_a_model_that_is_answering_is_refused(self):
+        gateway = quick(two_models(coder=True))
+        with gateway.acquire("coder"):
+            with self.assertRaises(CardBusy) as caught:
+                gateway.guard("unload", "coder")
+        self.assertIn("coder", str(caught.exception))
+        self.assertTrue(caught.exception.detail["busy"]["answering"])
+
+    def test_the_refusal_names_who_holds_the_card(self):
+        # The page cannot offer a useful choice without knowing which model is
+        # working — the one being stopped may not be the one that is busy.
+        gateway = quick(two_models(coder=True))
+        with gateway.acquire("coder"):
+            with self.assertRaises(CardBusy) as caught:
+                gateway.guard("load", "reviewer")
+        self.assertEqual(caught.exception.detail["busy"]["instance_id"], "coder")
+
+    def test_the_card_is_free_again_once_the_answer_is_finished(self):
+        gateway = quick(two_models(coder=True))
+        with gateway.acquire("coder"):
+            pass
+        self.assertIsNone(gateway.busy())
+        gateway.guard("unload", "coder")        # does not raise
+
+    def test_a_model_still_loading_counts_as_busy(self):
+        # The card is taken and no answer is being written yet, but a request
+        # is already waiting on that load. Interrupting it is still an
+        # interruption.
+        operations = two_models()
+        operations.load_delay_s = 0.2
+        gateway = quick(operations)
+        seen = []
+
+        def request():
+            with gateway.acquire("coder"):
+                pass
+
+        thread = threading.Thread(target=request)
+        thread.start()
+        time.sleep(0.05)
+        try:
+            gateway.guard("unload", "coder")
+        except CardBusy as error:
+            seen.append(error.detail["busy"])
+        thread.join(timeout=5)
+
+        self.assertEqual(len(seen), 1, "a load in progress should be refused")
+        self.assertFalse(seen[0]["answering"],
+                         "it is loading, not answering, and should say so")
+
+    def test_a_failed_request_does_not_leave_the_card_looking_busy(self):
+        operations = two_models()
+
+        def refuse(instance_id):
+            return Operation(instance_id=instance_id, kind="load", ok=False,
+                             error="no")
+        operations.load = refuse
+
+        gateway = quick(operations)
+        with self.assertRaises(CouldNotLoad):
+            gateway.acquire("coder")
+        self.assertIsNone(gateway.busy())
+        gateway.guard("unload", "coder")        # does not raise

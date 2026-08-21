@@ -12,7 +12,16 @@ async function request(method, path, body) {
   }
   const response = await fetch(path, options);
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `${method} ${path} failed`);
+  if (!response.ok) {
+    // Some refusals are worth acting on and not only reading. "The card is
+    // busy" is one: the caller can offer to go ahead anyway, but only if it
+    // knows that is why the request failed. The message alone cannot be
+    // tested for without matching on its words.
+    const error = new Error(payload.error || `${method} ${path} failed`);
+    error.status = response.status;
+    if (payload.busy) error.busy = payload.busy;
+    throw error;
+  }
   return payload;
 }
 
@@ -24,11 +33,20 @@ export const api = {
     request('PATCH', `/api/repositories/${encodeURIComponent(id)}`, changes),
   deleteModel: (id) => request('DELETE', `/api/models/${encodeURIComponent(id)}`),
   instances: () => request('GET', '/api/instances'),
-  load: (id) => request('POST', `/api/instances/${encodeURIComponent(id)}/load`),
-  unload: (id) => request('POST', `/api/instances/${encodeURIComponent(id)}/unload`),
+  // `force` goes ahead even though a request is being answered on the card.
+  // The server refuses without it; only the person looking at the screen can
+  // decide that cutting an answer short is the lesser evil.
+  load: (id, force) =>
+    request('POST', `/api/instances/${encodeURIComponent(id)}/load`,
+            force ? { force: true } : undefined),
+  unload: (id, force) =>
+    request('POST', `/api/instances/${encodeURIComponent(id)}/unload`,
+            force ? { force: true } : undefined),
   // Save the settings and restart the model with them, as one action.
-  apply: (id, changes) =>
-    request('POST', `/api/instances/${encodeURIComponent(id)}/apply`, changes),
+  apply: (id, changes, force) =>
+    request('POST', `/api/instances/${encodeURIComponent(id)}/apply`,
+            force ? { ...changes, force: true } : changes),
+  gateway: () => request('GET', '/api/gateway'),
   update: (id, changes) =>
     request('PATCH', `/api/instances/${encodeURIComponent(id)}`, changes),
   newInstanceForm: () => request('GET', '/api/instances/new'),

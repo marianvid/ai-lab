@@ -37,6 +37,9 @@ export function installDom(responses = {}) {
     const value = typeof payload === 'function' ? payload(path, options) : payload;
     return {
       ok: !(value && value.__status >= 400),
+      // The status is read by the client, so a fake that omits it cannot
+      // exercise the paths that branch on it.
+      status: (value && value.__status) || 200,
       json: async () => value,
     };
   };

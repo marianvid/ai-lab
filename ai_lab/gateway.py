@@ -23,6 +23,24 @@ The consequence is worth stating plainly: **two agents on this machine do not
 run in parallel.** The second waits for the first. Running them at the same time
 needs a second machine.
 
+One model means one, with no exceptions. A request that needs no switch still
+unloads anything else it finds running. A second engine can be up for reasons
+unrelated to this request — a manager restart, or somebody pressing Load on the
+page — and left alone it holds memory the loaded model wanted for context.
+
+## The buttons on the page are the other way in
+
+The gateway's traffic is safe from itself: every request takes the card in turn.
+The Load and Unload buttons are not part of that. They reach the engines
+directly and know nothing about who is mid-answer, so pressing Unload during a
+long answer would kill it in the middle of a sentence.
+
+`guard` is what the routes behind those buttons call first. It refuses while the
+card is held and says who holds it, so the page can offer to go ahead anyway.
+That choice stays with the person looking at the screen — a model wedged in a
+bad state has to be stoppable — but it is now a decision rather than an
+accident.
+
 ## Emptying the card properly
 
 Switching does not unload the outgoing model and start the next one straight
@@ -48,11 +66,36 @@ from .operations import Operations
 
 
 class NotConfigured(KeyError):
-    """No entry serves that model name."""
+    """No entry serves that model name.
+
+    A KeyError so the web layer answers 404 without being told, since that is
+    already the rule for "no such thing".
+    """
+
+    def __str__(self) -> str:
+        # KeyError renders its argument with repr(), which wraps the whole
+        # sentence in quotes and escapes what is inside it. This message lists
+        # the names that would have worked, and it is read by a person
+        # debugging an agent, so it should arrive as a sentence.
+        return self.args[0] if self.args else ""
 
 
 class CouldNotLoad(RuntimeError):
     """The entry exists but the card could not be made ready for it."""
+
+
+class CardBusy(RuntimeError):
+    """The card is serving a request, and the action asked for would cut it off.
+
+    Raised at the request of the interface, not by the gateway's own work: the
+    buttons on the page reach the engines directly, and this is how they find
+    out that somebody is mid-answer. It carries `detail` so the page can offer
+    to go ahead anyway rather than only printing a sentence.
+    """
+
+    def __init__(self, message: str, holder: dict) -> None:
+        super().__init__(message)
+        self.detail = {"busy": holder}
 
 
 # How quiet the card has to be before a new model is loaded, and how long to
@@ -115,7 +158,11 @@ class Gateway:
         # answer ends, and again if the connection broke on the way out.
         self._bookkeeping = threading.Lock()
         self._held = False
-        self._current: str | None = None
+        # Who has the card, from the moment it is taken. Not the same question
+        # as what is loaded: during a switch there is a holder and nothing on
+        # the card at all. What is loaded is read from the instances instead of
+        # remembered — see `_loaded`.
+        self._holder: str | None = None
         self.counters = _Counters()
 
     # -- what a client can ask for -----------------------------------------
@@ -181,16 +228,22 @@ class Gateway:
         instance_id, port = instance["id"], instance["port"]
 
         self._card.acquire()
+        self._holder = instance_id
         try:
             if not self._is_ready(instance_id):
                 self._switch_to(instance_id)
-            self._current = instance_id
+            else:
+                # It is already up, so there is nothing to load. There may
+                # still be something else up beside it, and one model on the
+                # card is the rule with no exceptions — so anything else goes.
+                self._evict_strays(instance_id)
             self._held = True
             self.counters.requests += 1
             self.counters.waited_s += time.perf_counter() - started
             return Lease(self, instance_id, port)
         except Exception as error:
             self.counters.last_error = str(error)
+            self._holder = None
             self._card.release()
             raise
 
@@ -206,7 +259,39 @@ class Gateway:
             if not self._held:
                 return
             self._held = False
+            self._holder = None
             self._card.release()
+
+    # -- what the buttons on the page have to respect -----------------------
+
+    def busy(self) -> dict | None:
+        """What is holding the card, or None if nothing is.
+
+        `answering` is false while a model is still being loaded: the card is
+        taken, but no answer is being written yet. Both count as busy — the
+        load is being done for a request that is already waiting.
+        """
+        if not self._card.locked():
+            return None
+        return {"instance_id": self._holder or "", "answering": self._held}
+
+    def guard(self, action: str, instance_id: str) -> None:
+        """Refuse an action that would interrupt a request in progress.
+
+        The gateway's own traffic is safe from itself — every request takes the
+        card in turn. This is for the other way in: the Load and Unload buttons
+        on the page reach the engines directly and know nothing about leases.
+        Without this, pressing Unload during a long answer kills it mid
+        sentence, and the agent sees a connection that simply stopped.
+        """
+        holder = self.busy()
+        if holder is None:
+            return
+        who = holder["instance_id"] or "a model"
+        doing = "is answering a request" if holder["answering"] else "is being loaded"
+        raise CardBusy(
+            f"{who} {doing} right now. Going ahead with '{action}' on "
+            f"{instance_id} would cut that off.", holder)
 
     # -- switching ----------------------------------------------------------
 
@@ -235,15 +320,41 @@ class Gateway:
         })
         del self.counters.history[:-self.HISTORY]
 
-    def _clear(self) -> list[str]:
-        """Unload every running engine. Returns what was stopped."""
+    def _clear(self, keep: str | None = None) -> list[str]:
+        """Unload every running engine. Returns what was stopped.
+
+        `keep` spares one entry, for the case where the model asked for is
+        already up and only its company has to go.
+        """
         stopped = []
         for instance in self.operations.instances():
-            if instance["running"]:
+            if instance["running"] and instance["id"] != keep:
                 self.operations.unload(instance["id"])
                 stopped.append(instance["id"])
-        self._current = None
         return stopped
+
+    def _evict_strays(self, instance_id: str) -> None:
+        """Unload anything running beside the model that was asked for.
+
+        One model on the card is the rule, and it holds even when the request
+        needs no switch. A second engine can be up for reasons that have
+        nothing to do with this request — a manager restart that found two
+        units enabled, or somebody pressing Load on the page — and left alone
+        it sits there holding memory the loaded model could have used for
+        context.
+
+        No wait for the card to go quiet afterwards: nothing is about to be
+        loaded, and the model that stays is holding memory on purpose, so
+        there is no quiet to wait for.
+        """
+        evicted = self._clear(keep=instance_id)
+        if not evicted:
+            return
+        self.counters.history.append({
+            "at": time.time(), "loaded": instance_id, "unloaded": evicted,
+            "took_s": 0.0, "load_ms": 0, "tidied": True,
+        })
+        del self.counters.history[:-self.HISTORY]
 
     def _wait_until_quiet(self) -> None:
         """Wait for the driver to hand the memory back.
@@ -269,6 +380,23 @@ class Gateway:
 
     # -- internals ----------------------------------------------------------
 
+    def _loaded(self) -> str | None:
+        """What is on the card, read rather than remembered.
+
+        A remembered value goes stale the moment something outside the gateway
+        unloads a model — and that happens on purpose: a person can force past
+        a busy card from the page, and the gateway is deliberately not told.
+        Reading it costs one call the caller is making anyway, and it cannot be
+        wrong.
+
+        One name, not a list, because one model on the card is the rule. If two
+        are somehow up, the next request through here unloads the stray.
+        """
+        for instance in self.operations.instances():
+            if instance["running"]:
+                return instance["id"]
+        return None
+
     def _is_ready(self, instance_id: str) -> bool:
         for instance in self.operations.instances():
             if instance["id"] == instance_id:
@@ -287,11 +415,14 @@ class Gateway:
         """
         counters = self.counters
         return {
-            "current": self._current,
+            "current": self._loaded(),
             # True from the moment a request takes the card, which includes
             # the switch it may have to do first. `_held` is only about who
             # owes the card back, and is still false while a model loads.
             "busy": self._card.locked(),
+            # Who has it, for the page: "busy" alone cannot say whether the
+            # thing you are about to stop is the thing that is working.
+            "holder": self.busy(),
             "requests": counters.requests,
             "switches": counters.switches,
             "average_wait_s": round(counters.waited_s / counters.requests, 2)
