@@ -162,6 +162,13 @@ class Runtime:
         self._last: dict[str, Operation] = {}
         self._pids: dict[str, int | None] = {}
         self._progress: dict[str, _Progress] = {}
+        # What each running instance was actually started with. Usually its
+        # stored settings, but not always: a request may ask for a model with
+        # a bigger context than the entry is configured for, and then the two
+        # differ until it is unloaded. Remembered here because this is where
+        # the launching happens, and reported so that the page does not show
+        # settings the running model is not using.
+        self._active: dict[str, dict] = {}
 
     # -- public operations -------------------------------------------------
 
@@ -232,6 +239,10 @@ class Runtime:
             "model_id": instance.model_id,
             "port": instance.port,
             "params": instance.params,
+            # What it is running with, when that is not what it is configured
+            # with. Empty otherwise, so the page only mentions a difference
+            # when there is one.
+            "active_params": self.active_params(instance),
             "running": process.running,
             "enabled": process.enabled,
             "pid": process.pid,
@@ -239,6 +250,21 @@ class Runtime:
             "web_ui": bool(getattr(engine, "web_ui", lambda: None)()),
             "last_operation": self.last(instance.id),
         }
+
+    def active_params(self, instance: Instance) -> dict:
+        """The settings the running process was started with, if they differ.
+
+        A request can ask for a model with settings the entry is not configured
+        for — a bigger context, usually — and the model is then reloaded with
+        them without the stored configuration being touched. Somebody looking
+        at the page would otherwise read the configured value and believe the
+        running model was using it.
+        """
+        active = self._active.get(instance.id)
+        if not active:
+            return {}
+        return {key: value for key, value in active.items()
+                if instance.params.get(key) != value}
 
     def last(self, instance_id: str) -> dict | None:
         operation = self._last.get(instance_id)
@@ -249,6 +275,7 @@ class Runtime:
     def _load(self, instance: Instance, model: ModelSet, engine: Engine,
               operation: Operation, clock: "_Clock") -> None:
         plan = engine.plan(model, instance.port, instance.params)
+        self._active[instance.id] = dict(instance.params)
         self._refuse_stranger(instance, engine)
         self._refuse_if_it_cannot_fit(instance, model, plan)
         self._mark(operation, clock, Phase.STARTING, f"Starting {model.name}")
@@ -282,6 +309,7 @@ class Runtime:
 
         self._await_settled(instance_id, clock, UNLOAD_TIMEOUT_S)
         self._pids.pop(instance_id, None)
+        self._active.pop(instance_id, None)
         self._mark(operation, clock, Phase.MEMORY_RELEASED, "Memory released")
 
     def _refuse_if_it_cannot_fit(self, instance: Instance, model: ModelSet,

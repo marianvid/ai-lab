@@ -107,6 +107,48 @@ Which shapes each entry answers is in `GET /v1/models`, so a client can look
 rather than guess. The engine declares it, so adding a shape — or an engine
 that speaks one — is a line in that engine's file and nothing else changes.
 
+### Asking for the model started a particular way
+
+Some settings go in a request — temperature, top-p, how many tokens to write.
+Others decide how the model *process* starts, and cannot: context size is the
+one that matters, because a model has to be told at startup how much it will
+be asked to hold.
+
+Sending one of those in the body does nothing. It reaches the engine, which
+does not recognise it and ignores it without a word, and you are left with the
+same truncations and no idea why. So they travel in a field of their own:
+
+```json
+{
+  "model": "coder-fast",
+  "messages": [{"role": "user", "content": "..."}],
+  "ai_lab": { "context_size": 65536 }
+}
+```
+
+What happens:
+
+- already running that way — the request goes straight through
+- running some other way — reloaded with these, then answered
+- not running — started with these
+- a setting the engine does not have, or a value out of range — refused at
+  once, before anything is loaded, naming what is wrong
+
+**The settings are not saved.** One request must not quietly rewrite what you
+chose in the page. The entry keeps its own settings, the running model differs
+from them until it is unloaded, and the Models page says so when you hover the
+row.
+
+A reload takes as long as a reload — 4 seconds for a small model, 13 for a 35B,
+about 40 for one on vLLM — so asking for different settings on every step of a
+workflow costs that every time. Asking for the same ones repeatedly costs
+nothing: the second identical request is answered without reloading.
+
+Nothing here interrupts an answer in progress. Every request takes the card in
+turn and holds it to the last byte, so a request wanting different settings
+waits like any other. That is why the Load and Unload buttons need a guard and
+this does not — the buttons do not queue.
+
 ### Running Claude Code against a model on your own card
 
 This works, and it needs one setting most models do not have on by default.

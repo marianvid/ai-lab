@@ -442,3 +442,39 @@ describe('what a setting explains about itself', () => {
     assert.match(view.textContent, /Context size/);
   });
 });
+
+describe('a model started differently from how it is configured', () => {
+  // A request can ask for a bigger context than the entry was set up for. The
+  // settings are not saved, so the row would otherwise show a number the
+  // running model is not using, with nothing to say so.
+
+  it('says what it was actually started with', async () => {
+    const { view } = await renderPage({
+      '/api/instances': [{ ...INSTANCE, active_params: { context_size: 65536 } }],
+    });
+    const row = view.querySelector('.row.instance');
+    assert.match(row.getAttribute('title'), /started by a request with context_size 65536/);
+  });
+
+  it('says the change will not survive a reload', async () => {
+    const { view } = await renderPage({
+      '/api/instances': [{ ...INSTANCE, active_params: { context_size: 65536 } }],
+    });
+    assert.match(view.querySelector('.row.instance').getAttribute('title'),
+                 /not saved/);
+  });
+
+  it('says nothing when the model runs as configured', async () => {
+    const { view } = await renderPage({
+      '/api/instances': [{ ...INSTANCE, active_params: {} }],
+    });
+    assert.equal(
+      view.querySelector('.row.instance').getAttribute('title').includes('started by a request'),
+      false);
+  });
+
+  it('copes with an entry that has no such field at all', async () => {
+    const { view } = await renderPage();
+    assert.doesNotThrow(() => view.querySelector('.row.instance').getAttribute('title'));
+  });
+});

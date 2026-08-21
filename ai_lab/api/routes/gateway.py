@@ -56,6 +56,12 @@ def _catalogue(gateway: Gateway) -> dict:
     return {"object": "list", "data": data}
 
 
+# Where a client puts settings the model has to be *started* with, rather than
+# ones that go in a request. Anything else in the body belongs to the engine and
+# is passed through untouched.
+SETTINGS_FIELD = "ai_lab"
+
+
 def _forwarder(gateway: Gateway, path: str):
     def handle(body=None, **_):
         payload = body or {}
@@ -63,17 +69,27 @@ def _forwarder(gateway: Gateway, path: str):
         if not wanted:
             raise ValueError("the request must name a model")
 
+        # Settings that decide how the model starts — context size and the
+        # rest — cannot be part of the request the engine sees: the engine does
+        # not know them, and would ignore them without a word. They travel in a
+        # field of ours, which is read here and removed before forwarding, so
+        # what reaches the engine is exactly what would have reached it before.
+        settings = payload.get(SETTINGS_FIELD) or None
+        if settings is not None and not isinstance(settings, dict):
+            raise ValueError(f"{SETTINGS_FIELD} must be an object of settings")
+
         # The lease is held until the last byte of the answer has been read, so
         # a swap cannot pull the model out from under a stream in progress.
         # `path` goes with it: an entry whose engine does not answer this shape
         # is refused before anything is loaded, not after.
-        lease = gateway.acquire(wanted, shape=path)
+        lease = gateway.acquire(wanted, shape=path, settings=settings)
 
         # The engine knows its own model by a different name than the entry
         # does, and rejects a name it does not recognise. Ask by the name it
         # reports rather than passing ours through. The lease carries it, so
         # this costs nothing.
         outgoing = dict(payload)
+        outgoing.pop(SETTINGS_FIELD, None)
         outgoing["model"] = lease.model_name or wanted
 
         url = f"http://127.0.0.1:{lease.port}{path}"

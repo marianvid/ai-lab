@@ -12,7 +12,8 @@ import threading
 import time
 import unittest
 
-from ai_lab.engines.base import ANTHROPIC_PATHS, OPENAI_PATHS
+from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
+                                 validate)
 from ai_lab.gateway import (CardBusy, CouldNotLoad, Gateway, NotConfigured,
                             ShapeNotServed)
 from ai_lab.runtime import Operation
@@ -44,6 +45,17 @@ class FakeHost:
                                    memory_used_mb=used, memory_total_mb=32000.0)
 
 
+# The settings a fake engine takes. Few, but real ParamSpecs checked by the
+# real `validate`, so a test about refusing a bad setting is testing the rule
+# the interface uses rather than a stand-in for it.
+FAKE_PARAMS = (
+    ParamSpec("context_size", "Context size", "int", 32768,
+              minimum=512, maximum=1048576, group="memory", help="How much."),
+    ParamSpec("parallel", "Slots", "int", 1, minimum=1, maximum=64,
+              group="memory", help="How many."),
+)
+
+
 class FakeEngine:
     """An engine that answers a stated set of request shapes, and nothing else."""
 
@@ -52,6 +64,9 @@ class FakeEngine:
 
     def api_paths(self):
         return self._shapes
+
+    def params(self):
+        return FAKE_PARAMS
 
 
 class FakeRegistry:
@@ -76,6 +91,7 @@ class FakeOperations:
         self.engines = FakeRegistry()
         self._entries = {e["id"]: dict(e) for e in entries}
         self.loads = []
+        self.load_settings = []
         self.unloads = []
         self.load_delay_s = 0.0
         self.host = FakeHost(self, lag=lag)
@@ -83,23 +99,38 @@ class FakeOperations:
     def instances(self):
         return [dict(entry) for entry in self._entries.values()]
 
-    def load(self, instance_id):
+    def load(self, instance_id, settings=None):
         self.loads.append(instance_id)
+        self.load_settings.append(settings)
         if self.load_delay_s:
             time.sleep(self.load_delay_s)
-        self._entries[instance_id].update(running=True, ready=True)
+        entry = self._entries[instance_id]
+        # What it is running with, when that is not what it is configured with
+        # — the same thing the real runtime reports.
+        active = {} if settings is None else {
+            key: value for key, value in settings.items()
+            if entry["params"].get(key) != value}
+        entry.update(running=True, ready=True, active_params=active)
         return Operation(instance_id=instance_id, kind="load", ok=True, total_ms=1200)
+
+    def effective_params(self, instance_id, settings):
+        entry = self._entries[instance_id]
+        engine = self.engines.get(entry["engine"])
+        return validate(engine.params(), {**entry["params"], **settings})
 
     def unload(self, instance_id):
         self.unloads.append(instance_id)
-        self._entries[instance_id].update(running=False, ready=False)
+        self._entries[instance_id].update(running=False, ready=False,
+                                          active_params={})
         return Operation(instance_id=instance_id, kind="unload", ok=True)
 
 
 def entry(identifier, name, model_id, port, running=False, engine="llamacpp"):
     return {"id": identifier, "name": name, "model_id": model_id, "port": port,
             "engine": engine, "running": running, "ready": running,
-            "params": {}, "enabled": True, "pid": None, "web_ui": False,
+            "params": {"context_size": 32768, "parallel": 1},
+            "active_params": {},
+            "enabled": True, "pid": None, "web_ui": False,
             "last_operation": None}
 
 
@@ -234,7 +265,7 @@ class LoadingTests(unittest.TestCase):
     def test_a_model_that_will_not_start_raises_rather_than_hanging(self):
         operations = two_models()
 
-        def refuse(instance_id):
+        def refuse(instance_id, settings=None):
             operations.loads.append(instance_id)
             return Operation(instance_id=instance_id, kind="load", ok=False,
                              error="engine died during startup")
@@ -249,7 +280,7 @@ class LoadingTests(unittest.TestCase):
         # waits forever on a switch that already gave up.
         operations = two_models()
         original = operations.load
-        operations.load = lambda i: Operation(instance_id=i, kind="load",
+        operations.load = lambda i, s=None: Operation(instance_id=i, kind="load",
                                               ok=False, error="boom")
         gateway = quick(operations)
         with self.assertRaises(CouldNotLoad):
@@ -527,7 +558,7 @@ class BusyGuardTests(unittest.TestCase):
     def test_a_failed_request_does_not_leave_the_card_looking_busy(self):
         operations = two_models()
 
-        def refuse(instance_id):
+        def refuse(instance_id, settings=None):
             return Operation(instance_id=instance_id, kind="load", ok=False,
                              error="no")
         operations.load = refuse
@@ -677,3 +708,103 @@ class RequestShapeTests(unittest.TestCase):
         self.assertIn("/v1/messages", rows["fast"]["shapes"])
         self.assertNotIn("/v1/messages", rows["coder"]["shapes"])
         self.assertIn("/v1/chat/completions", rows["coder"]["shapes"])
+
+
+class StartupSettingsTests(unittest.TestCase):
+    """A request asking for the model started a particular way.
+
+    Some settings go in a request; others decide how the process starts, and
+    those cannot. Context size is the one that matters in practice: an agent
+    needs room for its own instructions, and the entry may be configured for
+    less. Sending it in the body would reach the engine, which does not know
+    it and would ignore it without a word.
+
+    So it travels in a field of ours. If the model is already running that way,
+    nothing happens. If not, it is reloaded — which never interrupts anything,
+    because the card is taken first and only handed over after the request in
+    front has had its last byte.
+    """
+
+    def test_a_stopped_model_starts_with_what_was_asked_for(self):
+        operations = two_models()
+        gateway = quick(operations)
+        with gateway.acquire("coder", settings={"context_size": 65536}):
+            pass
+        self.assertEqual(operations.load_settings[-1]["context_size"], 65536)
+
+    def test_a_model_already_running_that_way_is_left_alone(self):
+        # Reloading for settings it already has would cost the wait for
+        # nothing, on every request.
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder", settings={"context_size": 65536}):
+            pass
+        self.assertEqual(len(operations.loads), 1)
+        with gateway.acquire("coder", settings={"context_size": 65536}):
+            pass
+        self.assertEqual(len(operations.loads), 1, "it was reloaded for nothing")
+
+    def test_asking_for_something_else_reloads_it(self):
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder", settings={"context_size": 65536}):
+            pass
+        with gateway.acquire("coder", settings={"context_size": 98304}):
+            pass
+        self.assertEqual(len(operations.loads), 2)
+        self.assertEqual(operations.load_settings[-1]["context_size"], 98304)
+
+    def test_asking_for_what_it_is_configured_with_changes_nothing(self):
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder", settings={"context_size": 32768}):
+            pass
+        self.assertEqual(operations.loads, [])
+
+    def test_settings_are_not_saved_to_the_entry(self):
+        # One request must not quietly rewrite what somebody chose in the page.
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder", settings={"context_size": 65536}):
+            pass
+        stored = next(item["params"] for item in operations.instances()
+                      if item["id"] == "coder")
+        self.assertEqual(stored["context_size"], 32768)
+
+    def test_the_difference_is_visible_afterwards(self):
+        # Otherwise the page shows a configured value the running model is not
+        # using, and there is no way to tell.
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder", settings={"context_size": 65536}):
+            pass
+        row = next(item for item in operations.instances() if item["id"] == "coder")
+        self.assertEqual(row["active_params"], {"context_size": 65536})
+
+    def test_a_setting_the_engine_does_not_have_is_refused(self):
+        gateway = quick(two_models(coder=True))
+        with self.assertRaises(ValueError) as caught:
+            gateway.acquire("coder", settings={"gpu_layers": 20})
+        self.assertIn("gpu_layers", str(caught.exception))
+
+    def test_a_value_out_of_range_is_refused(self):
+        gateway = quick(two_models(coder=True))
+        with self.assertRaises(ValueError):
+            gateway.acquire("coder", settings={"context_size": 10})
+
+    def test_a_bad_setting_is_refused_before_anything_is_loaded(self):
+        # And before queueing: a misspelling should come back at once, not
+        # after waiting behind somebody else's answer.
+        operations = two_models()
+        gateway = quick(operations)
+        with self.assertRaises(ValueError):
+            gateway.acquire("coder", settings={"nonsense": 1})
+        self.assertEqual(operations.loads, [])
+        self.assertIsNone(gateway.busy())
+
+    def test_no_settings_means_the_entry_is_used_as_configured(self):
+        operations = two_models()
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(operations.load_settings, [None])

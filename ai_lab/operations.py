@@ -14,7 +14,7 @@ belongs in this file.
 from __future__ import annotations
 
 import os
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 # Where port suggestions start. Engines sit above the manager's own 8090 by
@@ -125,18 +125,39 @@ class Operations:
 
     # -- moving models on and off the accelerator --------------------------
 
-    def load(self, instance_id: str) -> Operation:
+    def load(self, instance_id: str, settings: dict | None = None) -> Operation:
         """Start this model, replacing whatever this entry was running.
 
         One entry is one model, so there is no separate "swap": reloading with
         different settings and starting for the first time are the same act
         from the outside.
+
+        `settings` starts it with something other than what it is configured
+        with, **without saving them**. A request can ask for a bigger context
+        than the entry was set up for, and it would be wrong for that one
+        request to quietly rewrite what somebody chose in the page. The running
+        model differs from its configuration until it is unloaded, and says so.
         """
         instance, model = self._resolve(instance_id)
         engine = self.engines.get(instance.engine)
+        if settings:
+            instance = replace(instance,
+                               params=self.effective_params(instance_id, settings))
         if self.host.status(instance_id).running:
             return self.runtime.swap(instance, model, engine)
         return self.runtime.load(instance, model, engine)
+
+    def effective_params(self, instance_id: str, settings: dict) -> dict:
+        """The entry's settings with these laid over them, checked.
+
+        Raises ValueError naming what is wrong, so a caller can refuse a
+        request before anything is loaded rather than after. The engine's own
+        rules do the checking, so a setting it does not have is refused here
+        for the same reason it would be refused in the page.
+        """
+        instance, _ = self._resolve(instance_id)
+        engine = self.engines.get(instance.engine)
+        return validate(engine.params(), {**instance.params, **settings})
 
     def unload(self, instance_id: str) -> Operation:
         return self.runtime.unload(instance_id)

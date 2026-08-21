@@ -109,6 +109,30 @@ leaves it nowhere to go.
 Refusing early matters: the alternative is a forty-second load followed by a
 404 from the engine about a path the client never chose.
 
+**A request can ask for the model started a particular way.** Some settings go
+in a request; others decide how the process starts and cannot. Context size is
+the one that matters — a model is told at startup how much it will hold, and an
+agent needs room for its own instructions. Sent in the body it would reach the
+engine, which does not know it and ignores it silently, so it travels in a
+field of its own that the web layer reads and removes before forwarding. What
+reaches the engine is exactly what would have reached it before.
+
+**They are not saved.** `Operations.load` takes them and lays them over the
+entry's own without writing anything: one request must not rewrite what
+somebody chose in the page. The running model then differs from its
+configuration, so `Runtime` remembers what it actually launched with and
+reports the difference — otherwise the page shows a number the running model is
+not using and nothing says so.
+
+The comparison is against what is *running*, not what is configured. An earlier
+request may have already reloaded it with exactly these settings, and reloading
+again would cost the wait for the same answer.
+
+Nothing here interrupts an answer. The card is taken first and only handed over
+after the request in front has had its last byte, so a request wanting
+different settings queues like any other. That is the difference between this
+and the buttons below, which do not queue and therefore need `guard`.
+
 **The buttons on the page are the other way in.** Agent traffic is safe from
 itself because every request takes the card in turn. Load, Unload and Apply
 reach the engines directly and know nothing about who is mid-answer, so they

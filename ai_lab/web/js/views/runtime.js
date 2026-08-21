@@ -163,6 +163,11 @@ function details(instance, models, latest) {
      settings.temperature !== undefined ? `temp ${settings.temperature}` : null,
     ].filter(Boolean).join(' · '),
     instance.ready ? 'ready' : instance.running ? 'starting' : 'stopped',
+    // A request can ask for the model started differently from how the entry
+    // is configured — a bigger context, usually — and the settings are not
+    // saved. Without this the row shows a number the running model is not
+    // using, and nothing says so.
+    runningDifferently(instance),
   ];
   if (latest && instance.running && latest.memory_used_mb) {
     lines.push(`this model is holding ${Math.round(latest.memory_used_mb)} MB`);
@@ -175,6 +180,16 @@ function details(instance, models, latest) {
       .join(' · '));
   }
   return lines.filter(Boolean).join('\n');
+}
+
+// What it is actually running with, when that is not what it says above.
+function runningDifferently(instance) {
+  const active = instance.active_params || {};
+  const keys = Object.keys(active);
+  if (!keys.length) return null;
+  return 'started by a request with '
+    + keys.map((key) => `${key} ${active[key]}`).join(', ')
+    + ' — not saved, so it returns to the settings above when reloaded';
 }
 
 function formatOf(instance, models) {

@@ -288,6 +288,74 @@ class BusyCardTests(unittest.TestCase):
                          "looking at the page must not be guarded")
 
 
+class SettingsFieldTests(unittest.TestCase):
+    """The field carrying startup settings must not reach the engine.
+
+    The engine does not know it, and would ignore it without a word — which is
+    the fault this whole field exists to avoid.
+    """
+
+    class Gateway:
+        def __init__(self):
+            self.asked = []
+
+        def acquire(self, wanted, shape=None, settings=None):
+            self.asked.append((wanted, shape, settings))
+            return SettingsFieldTests.Lease(self)
+
+        def release(self):
+            pass
+
+        def stats(self):
+            return {}
+
+        def catalogue(self):
+            return []
+
+    class Lease:
+        def __init__(self, gateway):
+            self.gateway = gateway
+            self.instance_id = "qwen"
+            self.port = 9
+            self.model_name = "qwen-real"
+
+    def test_the_field_is_read_and_removed(self):
+        from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder
+        gateway = self.Gateway()
+        forwarded = {}
+
+        def fake_forward(url, payload, on_close=None):
+            forwarded.update(payload)
+            if on_close:
+                on_close()
+            return None
+
+        import ai_lab.api.routes.gateway as module
+        original, module.forward = module.forward, fake_forward
+        try:
+            handle = _forwarder(gateway, "/v1/chat/completions")
+            handle(body={"model": "qwen", "messages": [], "temperature": 0.5,
+                         SETTINGS_FIELD: {"context_size": 65536}})
+        finally:
+            module.forward = original
+
+        self.assertEqual(gateway.asked[0][2], {"context_size": 65536},
+                         "the settings never reached the gateway")
+        self.assertNotIn(SETTINGS_FIELD, forwarded,
+                         "the field was forwarded to the engine")
+        self.assertEqual(forwarded["temperature"], 0.5,
+                         "the rest of the body must go through untouched")
+        self.assertEqual(forwarded["model"], "qwen-real")
+
+    def test_a_field_that_is_not_an_object_is_refused(self):
+        from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder
+        handle = _forwarder(self.Gateway(), "/v1/chat/completions")
+        with self.assertRaises(ValueError) as caught:
+            handle(body={"model": "qwen", "messages": [],
+                         SETTINGS_FIELD: "context_size=65536"})
+        self.assertIn(SETTINGS_FIELD, str(caught.exception))
+
+
 class NoGatewayTests(unittest.TestCase):
     """A router built without a gateway still starts and stops models.
 

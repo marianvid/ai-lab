@@ -260,7 +260,8 @@ class Gateway:
 
     # -- taking the card ----------------------------------------------------
 
-    def acquire(self, wanted: str, shape: str | None = None) -> Lease:
+    def acquire(self, wanted: str, shape: str | None = None,
+                settings: dict | None = None) -> Lease:
         """Take the card with the named model on it.
 
         Waits for the request in front, then switches models if this one is not
@@ -269,6 +270,18 @@ class Gateway:
         `shape` is the kind of request about to be forwarded. Checked before
         anything is loaded: an entry whose engine does not answer that shape is
         refused straight away rather than after a forty-second load.
+
+        `settings` asks for the model with something other than what the entry
+        is configured with — a bigger context, usually. It is checked before
+        queueing, so a setting the engine does not have is refused at once. If
+        the model is already running with them, nothing happens. If it is
+        running with something else, it is reloaded.
+
+        That reload never interrupts anything, and not because it checks: the
+        card is taken first, and it is only handed over when the request in
+        front has had its last byte. A request asking for different settings
+        waits its turn like any other. The buttons on the page are the ones
+        that need `guard`, because they do not queue.
         """
         started = time.perf_counter()
         # Read once and pass it down. Asking what the instances are doing means
@@ -285,6 +298,10 @@ class Gateway:
         if shape is not None:
             self._refuse_wrong_shape(instance, shape, instances)
         instance_id, port = instance["id"], instance["port"]
+        # Checked before the queue: a misspelled setting should come back
+        # immediately, not after waiting behind somebody else's answer.
+        asked_for = (self.operations.effective_params(instance_id, settings)
+                     if settings else None)
 
         self._card.acquire()
         self._holder = instance_id
@@ -294,7 +311,13 @@ class Gateway:
             # model is loaded while this one waited.
             instances = self.operations.instances()
             if not self._is_ready(instance_id, instances):
-                self._switch_to(instance_id)
+                self._switch_to(instance_id, asked_for)
+            elif asked_for is not None and self._running_differs(instance_id,
+                                                                 asked_for,
+                                                                 instances):
+                # Up, but not the way this request wants it. Reloading is the
+                # only way: these are settings the process is started with.
+                self._switch_to(instance_id, asked_for)
             else:
                 # It is already up, so there is nothing to load. There may
                 # still be something else up beside it, and one model on the
@@ -386,7 +409,25 @@ class Gateway:
 
     # -- switching ----------------------------------------------------------
 
-    def _switch_to(self, instance_id: str) -> None:
+    def _running_differs(self, instance_id: str, asked_for: dict,
+                         instances: list[dict]) -> bool:
+        """Whether the running model was started with something else.
+
+        Compared against what it is *running* with, not what it is configured
+        with: an earlier request may have already reloaded it with exactly
+        these settings, and reloading again for the same answer would cost
+        forty seconds for nothing.
+        """
+        for instance in instances:
+            if instance["id"] != instance_id:
+                continue
+            running = {**instance.get("params", {}),
+                       **instance.get("active_params", {})}
+            return any(running.get(key) != value
+                       for key, value in asked_for.items())
+        return False
+
+    def _switch_to(self, instance_id: str, settings: dict | None = None) -> None:
         """Empty the card, wait for it to go quiet, then load.
 
         Everything running is unloaded, not only the entry that was last asked
@@ -398,7 +439,7 @@ class Gateway:
         unloaded = self._clear()
         self._wait_until_quiet()
 
-        operation = self.operations.load(instance_id)
+        operation = self.operations.load(instance_id, settings)
         if not operation.ok:
             raise CouldNotLoad(operation.error or f"{instance_id} would not start")
 
