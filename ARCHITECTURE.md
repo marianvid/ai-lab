@@ -23,6 +23,7 @@ there is exactly one place to look.
 | Module | Owns | Must not contain |
 |---|---|---|
 | `hosts/` | Starting and stopping processes, reading the accelerator, saying what this machine supports | Anything about models or engines |
+| `hosts/base.py` | The questions every platform must answer, including `statuses` — the same question as `status`, asked about several instances at once | — |
 | `engines/` | Per engine: formats read, settings offered, command line built, readiness probe | Process supervision, filesystem scanning |
 | `catalog.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
 | `runtime.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |
@@ -42,6 +43,7 @@ Four supporting files carry no policy of their own:
 | `naming.py` | Rules about model file names — what a shard is, what a companion is. Pure text. |
 | `events.py` | Publishing progress to subscribers. |
 | `wiring.py` | Constructing objects and connecting them. No logic. |
+| `main.py` | Reading the arguments, building the application, serving. Stops the engines on the way out, where this application is the one supervising them. |
 
 ### Why `operations.py` exists
 
@@ -122,6 +124,25 @@ templated unit runs `ai-lab-run <id>`, which reads the file and execs. That
 launcher understands nothing else. The unit runs as `ai-lab-manager`, the same
 user as the manager, so a manager-written command line grants no privilege the
 manager did not already have.
+
+**Asking what is running is the expensive question, and it is asked in bulk.**
+Drawing the model list needs the state of every configured instance, and the
+gateway needs it on every request. On systemd each answer is a command — three
+per instance, for whether it is active, whether it is enabled, and its pid — so
+with eleven instances configured that reading cost 152 ms, which was the entire
+cost of the call; the readiness probes beside it were free. A one-token request
+that the engine answered in 17 ms was taking 500 ms to reach it.
+
+`Host.statuses` asks about every instance at once. `systemctl show` accepts as
+many units as it is given and answers with one block each, so the same
+information costs one command rather than thirty-three: 152 ms became 15, and
+the request overhead 500 ms became 140.
+
+The method is on the interface with the one-at-a-time loop as its meaning, and
+only the Linux host overrides it. On macOS this application owns the processes
+and keeps them in a dictionary, so asking about one is a lookup and there is
+nothing to batch — measured there, the gateway costs 39 ms against 40 ms
+straight to the engine. A platform with nothing to gain says so and moves on.
 
 **Engines outlive the manager on Linux and not on macOS, on purpose.** systemd
 owns them there, so restarting or deploying the manager does not interrupt

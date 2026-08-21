@@ -107,6 +107,7 @@ ai_lab/naming.py        Rules about model file names
 ai_lab/types.py         Shared data structures
 ai_lab/events.py        Publishing progress to subscribers
 ai_lab/wiring.py        Object construction only
+ai_lab/main.py          Entry point: read the arguments, build, serve
 tests/                  Unit tests, mirroring the package layout
 system/                 systemd units and the one privileged helper
 scripts/deploy.sh       Test and deploy to the AI-Lab container
