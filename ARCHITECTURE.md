@@ -32,6 +32,7 @@ there is exactly one place to look.
 | `builds.py` | Reporting an engine's source version, checking upstream, pulling and recompiling | Running engines, or choosing compile flags |
 | `operations.py` | Joining the services into whole actions | Anything a single service could do alone |
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
+| `lastloaded.py` | One fact on disk: which model was on the card and how it was started | Deciding anything — it remembers and is read |
 | `api/` | HTTP routing, JSON, the event stream | Any decision about models, engines or formats |
 | `web/` | The browser interface | — |
 
@@ -184,6 +185,37 @@ only the Linux host overrides it. On macOS this application owns the processes
 and keeps them in a dictionary, so asking about one is a lookup and there is
 nothing to batch — measured there, the gateway costs 39 ms against 40 ms
 straight to the engine. A platform with nothing to gain says so and moves on.
+
+**What is on the card survives a restart, and nothing else decides it.**
+There used to be no answer to "what comes up after a reboot". The unit files
+allow an engine to be enabled, and two of them had been, by hand, months
+earlier — so a machine came back with two models on a card that holds one, and
+nothing in the application could say otherwise. That flag is gone from the
+interface, from the status a host reports, and from the units.
+
+In its place, the model on the card is written down as it changes and put back
+when the manager starts. Three cases, and the second and third are the ones
+worth stating:
+
+- **A machine rebooted.** Nothing is running, something was remembered, so it
+  is loaded again — with the settings it was actually started with, since a
+  request can ask for a bigger context than the entry is configured for and
+  bringing back the same model set up differently would be a poor restore.
+- **A manager restarted.** On Linux systemd owns the engines and they survive,
+  which is the reason for using it. The manager comes back, finds its model
+  still answering, and leaves it alone. Reloading would take the card away
+  from whoever is using it.
+- **The card was emptied on purpose.** That is remembered as firmly as a model
+  is. Somebody who unloads and then reboots does not want it back.
+
+The restore runs in the background: a large model takes the better part of a
+minute, and the page should open at once showing it loading rather than refuse
+to open until it has. A restore that cannot work is reported and dropped — this
+runs while the manager is starting, and a model whose files have gone must not
+stop the manager from serving.
+
+Unloading names what it is forgetting. The gateway unloads a stray from beside
+the model that stays, and that must not read as the card having been emptied.
 
 **Engines outlive the manager on Linux and not on macOS, on purpose.** systemd
 owns them there, so restarting or deploying the manager does not interrupt

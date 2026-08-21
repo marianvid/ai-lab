@@ -109,7 +109,6 @@ class ProcessSpec:
 class ProcessStatus:
     running: bool
     pid: int | None = None
-    enabled: bool = False         # starts at boot; always False under subprocess
 
 
 class Phase(str, Enum):

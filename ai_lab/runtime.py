@@ -294,7 +294,6 @@ class Runtime:
             # when there is one.
             "active_params": self.active_params(instance),
             "running": process.running,
-            "enabled": process.enabled,
             "pid": process.pid,
             "ready": engine.ready(instance.port) if process.running else False,
             "web_ui": bool(getattr(engine, "web_ui", lambda: None)()),

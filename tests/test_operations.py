@@ -15,6 +15,7 @@ from ai_lab.settings import Settings
 
 from ai_lab.engines.llamacpp import LlamaCppEngine
 
+from ai_lab.lastloaded import LastLoaded
 from tests.support import FakeHost, make_files
 
 
@@ -47,7 +48,7 @@ def offline_huggingface():
     ])
 
 
-def operations_with_instances(count):
+def operations_with_instances(count, last_loaded=None):
     """An Operations with `count` configured entries, and the host behind it.
 
     Built by hand rather than through the interface, because what is under test
@@ -83,7 +84,8 @@ def operations_with_instances(count):
         runtime=Runtime(host, EventBus(), sample_interval_s=0),
         settings=Settings(store, host, Registry()),
         downloads=DownloadManager(), huggingface=offline_huggingface(),
-        host=host, engines=FakeRegistry(host),
+        host=host, engines=FakeRegistry(host), bus=EventBus(),
+        last_loaded=last_loaded,
     )
     return operations, host
 
@@ -762,3 +764,87 @@ class EngineOutputTests(unittest.TestCase):
         self.host.logs = counted
         self.operations.logs("model-0", lines=500)
         self.assertEqual(seen["lines"], 500)
+
+
+class RestoringTests(unittest.TestCase):
+    """What comes back when the manager starts."""
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.addCleanup(self._temporary.cleanup)
+        self.memory = LastLoaded(Path(self._temporary.name))
+        self.operations, self.host = operations_with_instances(
+            2, last_loaded=self.memory)
+
+    def test_loading_a_model_is_remembered(self):
+        self.operations.load("model-0")
+        self.assertEqual(self.memory.read()["instance_id"], "model-0")
+
+    def test_the_settings_it_was_started_with_are_remembered_too(self):
+        self.operations.load("model-0", {"context_size": 4096})
+        self.assertEqual(self.memory.read()["settings"]["context_size"], 4096)
+
+    def test_unloading_it_is_remembered_as_an_empty_card(self):
+        self.operations.load("model-0")
+        self.operations.unload("model-0")
+        self.assertIsNone(self.memory.read())
+
+    def test_unloading_a_stray_does_not_empty_the_memory(self):
+        # The gateway unloads anything running beside the model that stays.
+        # That is not the card being emptied.
+        self.operations.load("model-0")
+        self.operations.unload("model-1")
+        self.assertEqual(self.memory.read()["instance_id"], "model-0")
+
+    def test_a_load_that_failed_is_not_remembered(self):
+        original = self.operations.runtime.load
+        self.operations.runtime.load = lambda *a, **k: _failed("model-0")
+        try:
+            self.operations.load("model-0")
+        finally:
+            self.operations.runtime.load = original
+        self.assertIsNone(self.memory.read())
+
+    def test_it_comes_back_on_startup(self):
+        self.operations.load("model-0")
+        self.host.running.clear()               # as after a reboot
+        self.operations.restore_last()
+        self.assertIn("model-0", self.host.running)
+
+    def test_it_comes_back_the_way_it_was_started(self):
+        self.operations.load("model-0", {"context_size": 4096})
+        self.host.running.clear()
+        self.operations.restore_last()
+        started = self.host.started[-1]
+        self.assertIn("4096", " ".join(started.argv))
+
+    def test_nothing_comes_back_when_the_card_was_left_empty(self):
+        self.operations.load("model-0")
+        self.operations.unload("model-0")
+        self.host.running.clear()
+        self.operations.restore_last()
+        self.assertEqual(self.host.running, set())
+
+    def test_a_model_still_running_is_left_alone(self):
+        # The ordinary case on Linux: systemd owns the engines, so a manager
+        # restart finds its model still answering. Reloading it would take the
+        # card away from whoever is using it.
+        self.operations.load("model-0")
+        before = len(self.host.started)
+        self.operations.restore_last()
+        self.assertEqual(len(self.host.started), before)
+
+    def test_a_restore_that_cannot_work_does_not_raise(self):
+        # This runs while the manager is starting. A model whose files have
+        # gone must not stop the manager from serving.
+        self.memory.remember("no-such-entry")
+        self.assertIsNone(self.operations.restore_last())
+
+    def test_nothing_remembered_means_nothing_done(self):
+        self.assertIsNone(self.operations.restore_last())
+        self.assertEqual(self.host.running, set())
+
+
+def _failed(instance_id):
+    from ai_lab.runtime import Operation
+    return Operation(instance_id=instance_id, kind="load", ok=False, error="no")

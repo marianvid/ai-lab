@@ -19,6 +19,7 @@ from .engines.registry import Registry
 from .events import EventBus
 from .gateway import Gateway
 from .hosts import current_host
+from .lastloaded import LastLoaded
 from .operations import Operations
 from .runtime import Runtime
 from .settings import Settings
@@ -48,6 +49,9 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
         host=host,
         builds=builds,
         bus=bus,
+        # What was on the card when the manager last stopped. The host says
+        # where a machine keeps such things.
+        last_loaded=LastLoaded(host.state_dir()),
     )
     # Routes a request by model name and loads that model if it is not running,
     # so an agent workflow can name several models and reach one card.

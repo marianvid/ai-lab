@@ -32,7 +32,7 @@ from .downloads import DownloadManager, HuggingFaceClient
 from .engines.base import validate
 from .hosts.base import Host
 from .runtime import Operation, Runtime
-from .types import ChangeEvent
+from .types import ChangeEvent, LogEvent
 from .settings import Settings
 
 
@@ -41,7 +41,7 @@ class Operations:
                  settings: Settings, downloads: DownloadManager,
                  huggingface: HuggingFaceClient, host: Host,
                  engines=None, builds: Builds | None = None,
-                 bus=None) -> None:
+                 bus=None, last_loaded=None) -> None:
         # `engines` is the engine registry. It is passed in rather than
         # imported for two reasons: the binary paths come from configuration,
         # and a test can supply engines that do not reach for the network when
@@ -57,6 +57,10 @@ class Operations:
         self.downloads = downloads
         self.huggingface = huggingface
         self.host = host
+        # What was on the card when the manager last stopped, so it can be put
+        # back. Optional: a test that does not care about it passes nothing,
+        # and nothing is remembered.
+        self.last_loaded = last_loaded
 
     def _changed(self, topic: str) -> None:
         """Tell whoever is watching that this kind of thing has moved.
@@ -144,8 +148,12 @@ class Operations:
             instance = replace(instance,
                                params=self.effective_params(instance_id, settings))
         if self.host.status(instance_id).running:
-            return self.runtime.swap(instance, model, engine)
-        return self.runtime.load(instance, model, engine)
+            operation = self.runtime.swap(instance, model, engine)
+        else:
+            operation = self.runtime.load(instance, model, engine)
+        if operation.ok and self.last_loaded:
+            self.last_loaded.remember(instance_id, settings)
+        return operation
 
     def effective_params(self, instance_id: str, settings: dict) -> dict:
         """The entry's settings with these laid over them, checked.
@@ -160,7 +168,42 @@ class Operations:
         return validate(engine.params(), {**instance.params, **settings})
 
     def unload(self, instance_id: str) -> Operation:
-        return self.runtime.unload(instance_id)
+        operation = self.runtime.unload(instance_id)
+        if operation.ok and self.last_loaded:
+            # Named, so unloading a stray from beside the model that stays is
+            # not read as the card having been emptied.
+            self.last_loaded.forget(instance_id)
+        return operation
+
+    def restore_last(self) -> Operation | None:
+        """Put back whatever was on the card before the manager stopped.
+
+        Does nothing while something is already running. On Linux systemd owns
+        the engines and they survive a manager restart — that is the reason for
+        using it — so a manager coming back finds its model still answering.
+        Only a machine that rebooted has anything to put back.
+
+        Returns the operation, or None when there was nothing to do. Never
+        raises: this runs while the manager is starting, and a model that
+        cannot be restored must not stop the manager from serving.
+        """
+        if not self.last_loaded:
+            return None
+        remembered = self.last_loaded.read()
+        if not remembered:
+            return None
+        config = self.store.load()
+        if any(self.host.status(item.id).running for item in config.instances):
+            return None
+        try:
+            return self.load(remembered["instance_id"],
+                             remembered["settings"] or None)
+        except Exception as error:                      # reported, not raised
+            self._log(f"Could not restore {remembered['instance_id']}: {error}")
+            return None
+
+    def _log(self, text: str) -> None:
+        self.bus.publish(LogEvent(source="restore", stream="err", text=text))
 
     def logs(self, instance_id: str, lines: int = 200) -> dict:
         """What the engine has printed about itself.

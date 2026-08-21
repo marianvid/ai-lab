@@ -13,12 +13,16 @@ launch file — see `launch.py`.
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from ..types import AcceleratorSnapshot, Capabilities, ProcessSpec, ProcessStatus
 from . import launch
 from .command import run, which
 
 CONTROL_HELPER = "/usr/local/sbin/ai-lab-control"
+# Where the deployment gives the manager somewhere to write. The launch
+# files live under it too — see `launch.py`.
+STATE_DIR = Path("/var/lib/ai-lab")
 UNIT = "ai-lab-engine@{instance_id}.service"
 
 # `systemctl stop` blocks until the unit is actually stopped, and the unit
@@ -65,6 +69,10 @@ class LinuxHost:
             can_configure_accelerator=False,
             operating_system="Linux",
         )
+
+    def state_dir(self) -> Path:
+        """The directory the unit files already give the manager to write in."""
+        return STATE_DIR
 
     # -- processes ---------------------------------------------------------
 
@@ -116,15 +124,13 @@ class LinuxHost:
         units = {UNIT.format(instance_id=identifier): identifier
                  for identifier in instance_ids}
         result = run(["systemctl", "show",
-                      "-p", "Id", "-p", "ActiveState",
-                      "-p", "UnitFileState", "-p", "MainPID", *units],
+                      "-p", "Id", "-p", "ActiveState", "-p", "MainPID", *units],
                      timeout=15)
         found = self._parse_show(result.stdout, units) if result.ok else {}
         # Anything systemd did not mention is reported as stopped rather than
         # left out: a caller asking about an instance is entitled to an answer.
         return {identifier: found.get(identifier,
-                                      ProcessStatus(running=False, pid=None,
-                                                    enabled=False))
+                                      ProcessStatus(running=False, pid=None))
                 for identifier in instance_ids}
 
     @staticmethod
@@ -144,10 +150,8 @@ class LinuxHost:
                 continue
             running = fields.get("ActiveState") == "active"
             pid = int(fields.get("MainPID") or 0) or None
-            statuses[identifier] = ProcessStatus(
-                running=running,
-                pid=pid if running else None,
-                enabled=fields.get("UnitFileState") == "enabled")
+            statuses[identifier] = ProcessStatus(running=running,
+                                                 pid=pid if running else None)
         return statuses
 
     def _control(self, action: str, instance_id: str) -> None:

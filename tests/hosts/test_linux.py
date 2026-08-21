@@ -64,12 +64,11 @@ class ControlTests(unittest.TestCase):
 
         def fake_run(argv, timeout=10.0):
             seen.append(argv)
-            return result(show(qwen="active enabled 4321"))
+            return result(show(qwen="active 4321"))
 
         with patch("ai_lab.hosts.linux.run", side_effect=fake_run):
             status = host.status("qwen")
         self.assertTrue(status.running)
-        self.assertTrue(status.enabled)
         self.assertEqual(status.pid, 4321)
         self.assertIn("ai-lab-engine@qwen.service", seen[0])
         self.assertEqual(len(seen), 1, "one instance should still be one command")
@@ -84,11 +83,10 @@ def show(**instances):
     """
     blocks = []
     for identifier, spec in instances.items():
-        state, enabled, pid = spec.split()
+        state, pid = spec.split()
         blocks.append(f"MainPID={pid}\n"
                       f"Id=ai-lab-engine@{identifier}.service\n"
-                      f"ActiveState={state}\n"
-                      f"UnitFileState={enabled}")
+                      f"ActiveState={state}")
     return "\n\n".join(blocks) + "\n"
 
 
@@ -111,17 +109,15 @@ class BatchStatusTests(unittest.TestCase):
 
     def test_every_instance_comes_back_from_one_command(self):
         found = self.statuses(
-            show(a="active enabled 11", b="inactive enabled 0",
-                 c="failed disabled 0"), ["a", "b", "c"])
+            show(a="active 11", b="inactive 0",
+                 c="failed 0"), ["a", "b", "c"])
         self.assertEqual([found[key].running for key in "abc"],
                          [True, False, False])
-        self.assertEqual([found[key].enabled for key in "abc"],
-                         [True, True, False])
         self.assertEqual(found["a"].pid, 11)
 
     def test_blocks_are_matched_by_name_not_by_position(self):
         # systemd is under no obligation to answer in the order it was asked.
-        found = self.statuses(show(b="active enabled 22", a="inactive enabled 0"),
+        found = self.statuses(show(b="active 22", a="inactive 0"),
                               ["a", "b"])
         self.assertTrue(found["b"].running)
         self.assertFalse(found["a"].running)
@@ -130,14 +126,13 @@ class BatchStatusTests(unittest.TestCase):
     def test_a_stale_pid_on_a_stopped_unit_is_not_reported(self):
         # A pid belonging to a process that has exited would be sampled for
         # accelerator memory and answer with somebody else's numbers.
-        found = self.statuses(show(a="inactive enabled 999"), ["a"])
+        found = self.statuses(show(a="inactive 999"), ["a"])
         self.assertIsNone(found["a"].pid)
 
     def test_an_instance_systemd_never_mentions_is_still_answered(self):
-        found = self.statuses(show(a="active enabled 11"), ["a", "ghost"])
+        found = self.statuses(show(a="active 11"), ["a", "ghost"])
         self.assertIn("ghost", found)
         self.assertFalse(found["ghost"].running)
-        self.assertFalse(found["ghost"].enabled)
 
     def test_a_failed_command_reports_stopped_rather_than_raising(self):
         # Every other reader here treats "could not ask" and "answered no" the

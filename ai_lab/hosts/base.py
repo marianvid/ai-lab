@@ -5,6 +5,7 @@ Implementations: `linux.py` and `darwin.py`.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from ..types import AcceleratorSnapshot, Capabilities, ProcessSpec, ProcessStatus
@@ -37,6 +38,18 @@ class Host(Protocol):
 
     def status(self, instance_id: str) -> ProcessStatus:
         """Whether the process is currently running."""
+        ...
+
+    def state_dir(self) -> "Path":
+        """Where this machine keeps things the manager must not lose.
+
+        Not configuration — that is a file somebody edits, and it lives
+        wherever this installation was told to put it. This is the other kind:
+        what was true a moment ago and has to survive a restart.
+
+        A platform difference, so it belongs behind this interface rather than
+        as a check on the operating system somewhere above.
+        """
         ...
 
     def statuses(self, instance_ids: list[str]) -> dict[str, ProcessStatus]:

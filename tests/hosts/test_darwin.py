@@ -29,7 +29,6 @@ class DarwinHostTests(unittest.TestCase):
         status = self.host.status("sleeper")
         self.assertTrue(status.running)
         self.assertIsNotNone(status.pid)
-        self.assertFalse(status.enabled)          # nothing supervises us here
         self.host.stop("sleeper")
         self.assertFalse(self.host.status("sleeper").running)
 

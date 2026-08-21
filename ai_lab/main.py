@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import signal
 import sys
+import threading
 from pathlib import Path
 
 from .api.server import serve
@@ -31,11 +32,28 @@ def main() -> None:
 
     _install_shutdown(operations)
 
+    _restore_last_model(operations)
+
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
         serve(operations, bus, host, port, model_gateway)
     finally:
         operations.host.stop_all()
+
+
+def _restore_last_model(operations) -> None:
+    """Put back what was on the card, without making anyone wait for it.
+
+    In the background, because a large model takes the better part of a minute
+    to load and the page should answer immediately — showing it loading, which
+    is the honest thing, rather than refusing to open until it has.
+
+    It does nothing when a model is already running, which is the ordinary case
+    on Linux: systemd owns the engines and they survive a manager restart.
+    """
+    thread = threading.Thread(target=operations.restore_last, daemon=True,
+                              name="restore-last-model")
+    thread.start()
 
 
 def _install_shutdown(operations) -> None:

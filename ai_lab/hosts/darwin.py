@@ -7,7 +7,6 @@ systemd instead.
 
 Two consequences worth remembering:
 
-* `enabled` — starts at boot — is always False. Nothing supervises us.
 * Apple silicon has no separate video memory. CPU and GPU share one pool, so
   there is no "VRAM freed" figure to watch. We report the engine process's
   resident memory against total system memory, and mark the reading
@@ -101,6 +100,16 @@ class DarwinHost:
             self._processes.pop(instance_id, None)
             self._close_log(instance_id)
 
+    def state_dir(self) -> Path:
+        """Beside the logs, under the user's own Library.
+
+        Per user, not per machine: the manager here runs as whoever started it,
+        and two accounts on one Mac are two installations.
+        """
+        directory = Path.home() / "Library" / "Application Support" / "AI-Lab"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
     def statuses(self, instance_ids: list[str]) -> dict[str, ProcessStatus]:
         """One at a time, because here that costs nothing.
 
@@ -115,8 +124,7 @@ class DarwinHost:
             process = self._processes.get(instance_id)
             running = process is not None and process.poll() is None
             return ProcessStatus(running=running,
-                                 pid=process.pid if running else None,
-                                 enabled=False)
+                                 pid=process.pid if running else None)
 
     def _close_log(self, instance_id: str) -> None:
         handle = self._handles.pop(instance_id, None)
