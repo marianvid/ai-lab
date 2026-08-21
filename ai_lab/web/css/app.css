@@ -124,6 +124,16 @@ input, select {
    name on the left is what gives way when the row is narrow, never these. */
 .pill.format { flex: none; }
 .row.instance > .inline { flex: none; }
+/* The way in to a model that is answering. Not one of the buttons beside it:
+   those act on the model, this leaves the page for the engine's own. Quiet
+   until pointed at, so a row with one does not shout over the rows without. */
+.chat-link {
+  color: var(--muted); text-decoration: none; white-space: nowrap;
+  font-size: 0.82rem; padding: 0.1rem 0.2rem; border-radius: 4px;
+}
+.chat-link:hover, .chat-link:focus-visible {
+  color: var(--text); text-decoration: underline;
+}
 
 /* Which engine runs this entry. Not a state, so it never takes the colours the
    state pills use. */

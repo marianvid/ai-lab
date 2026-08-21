@@ -148,20 +148,18 @@ describe('the Models page', () => {
                  'the line is spending screen on something the tooltip carries');
   });
 
-  it('makes the chat link look like the buttons beside it', async () => {
-    // Left alone a link takes the browser's colour, which reads as a different
-    // kind of thing sitting in a row of buttons.
+  it('does not dress the way in as one of the buttons', async () => {
+    // It used to be styled as one, and it is not one: those act on the model,
+    // this leaves the page for the engine's own.
     const { view } = await renderPage();
-    const chat = [...view.querySelectorAll('a')]
-      .find((item) => item.textContent.trim() === 'Chat');
-    assert.ok(chat.classList.contains('action'));
+    assert.equal(view.querySelector('.chat-link').classList.contains('action'),
+                 false);
   });
 
   it('offers a way to talk to a model that is ready', async () => {
     // llama.cpp serves its own chat page on the model's port.
     const { view } = await renderPage();
-    const chat = [...view.querySelectorAll('a')]
-      .find((item) => item.textContent.trim() === 'Chat');
+    const chat = view.querySelector('.chat-link');
     assert.ok(chat, 'no way to reach the model');
     assert.equal(chat.getAttribute('href'), 'http://localhost:8080/');
     assert.equal(chat.getAttribute('target'), '_blank');
@@ -172,17 +170,16 @@ describe('the Models page', () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, ready: false }],
     });
-    assert.equal([...view.querySelectorAll('a')]
-      .some((item) => item.textContent.trim() === 'Chat'), false);
+    assert.equal(view.querySelector('.chat-link'), null);
   });
 
   it('offers no chat link when the engine serves no page', async () => {
-    // Building that page needs npm; a machine without node gets an API only.
+    // vLLM serves an API and nothing to look at, and llama.cpp built without
+    // node is the same. A link that could never work is worse than none.
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, web_ui: false }],
     });
-    assert.equal([...view.querySelectorAll('a')]
-      .some((item) => item.textContent.trim() === 'Chat'), false);
+    assert.equal(view.querySelector('.chat-link'), null);
   });
 
   it('builds the chat address from the page, not from the server', async () => {
@@ -191,9 +188,8 @@ describe('the Models page', () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, port: 8099 }],
     });
-    const chat = [...view.querySelectorAll('a')]
-      .find((item) => item.textContent.trim() === 'Chat');
-    assert.equal(chat.getAttribute('href'), 'http://localhost:8099/');
+    assert.equal(view.querySelector('.chat-link').getAttribute('href'),
+                 'http://localhost:8099/');
   });
 
   it('offers Unload for something running, and Load for something stopped', async () => {
@@ -667,7 +663,7 @@ describe('the buttons line up down the page', () => {
   // slot. What must not differ is how many slots there are and where they sit.
   function slots(view, index = 0) {
     return [...view.querySelectorAll('.card.instance')[index]
-      .querySelectorAll('.row.instance button, .row.instance a')]
+      .querySelectorAll('.row.instance .action')]
       .map((node) => node.textContent.trim())
       .map((label) => (label === 'Unload' ? 'Load' : label));
   }
@@ -677,7 +673,7 @@ describe('the buttons line up down the page', () => {
     running: false, ready: false, web_ui: false,
   };
 
-  it('gives every row the same buttons, whatever its state', async () => {
+  it('gives every row the same buttons, whether or not it offers a way in', async () => {
     const { view } = await renderPage({
       '/api/instances': [
         INSTANCE,
@@ -687,34 +683,47 @@ describe('the buttons line up down the page', () => {
     assert.deepEqual(slots(view, 0), slots(view, 1));
   });
 
-  it('offers Chat as a link when there is a page to open', async () => {
+  function chat(view) {
+    return view.querySelector('.chat-link');
+  }
+
+  it('offers a way in to a model that is answering', async () => {
     const { view } = await renderPage();
-    const chat = [...view.querySelectorAll('.row.instance a')]
-      .find((node) => node.textContent.trim() === 'Chat');
-    assert.ok(chat, 'no link');
-    assert.match(chat.getAttribute('href'), /:8080\//);
+    assert.ok(chat(view), 'no link');
+    assert.match(chat(view).getAttribute('href'), /:8080\//);
   });
 
-  it('greys it out for a model that is not running, and says so', async () => {
+  it('offers nothing for a model that is not running', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
     });
-    const chat = button(view, 'Chat');
-    assert.equal(chat.disabled, true);
-    assert.match(chat.getAttribute('title'), /while the model is running/);
+    assert.equal(chat(view), null);
   });
 
-  it('says an engine that serves no page serves no page', async () => {
-    // Not the same as "not running". vLLM will never have one.
-    const { view } = await renderPage({ '/api/instances': [VLLM] });
-    assert.match(button(view, 'Chat').getAttribute('title'), /API only/);
-  });
-
-  it('says a model still loading is still loading', async () => {
+  it('offers nothing for a running vLLM model, which has no page to offer', async () => {
+    // The reason for taking the greyed-out button away: it sat on every vLLM
+    // row promising something none of them could ever do, however long you
+    // waited.
     const { view } = await renderPage({
-      '/api/instances': [{ ...INSTANCE, running: true, ready: false }],
+      '/api/instances': [{ ...VLLM, running: true, ready: true }],
     });
-    assert.match(button(view, 'Chat').getAttribute('title'), /once the model answers/);
+    assert.equal(chat(view), null);
+  });
+
+  it('comes first, so its absence moves nothing after it', async () => {
+    // The right-hand group sits against the right edge and is only as wide as
+    // its contents, so removing something moves whatever is to its left. First
+    // means nothing moves at all.
+    const { view } = await renderPage();
+    const group = view.querySelector('.row.instance > .inline:not(.ident)');
+    assert.ok(group.firstElementChild.classList.contains('chat-link'),
+              `first was ${group.firstElementChild.className}`);
+  });
+
+  it('is not one of the buttons that act on the model', async () => {
+    const { view } = await renderPage();
+    assert.equal(chat(view).classList.contains('action'), false);
+    assert.equal(chat(view).getAttribute('target'), '_blank');
   });
 
   it('keeps the same buttons for a vLLM row as for a llama.cpp one', async () => {

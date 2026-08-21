@@ -337,12 +337,13 @@ function card(instance, models, engines) {
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay
     // together, at the end, out of the middle of the name.
     element('div', { class: 'inline' }, [
+      chatLink(instance),
       formatOf(instance, models)
         ? element('span', { class: 'pill format', text: formatOf(instance, models) })
         : null,
       element('span', { class: 'pill engine',
                         text: engine ? engine.name : instance.engine }),
-      settingsButton, logsButton, chatLink(instance), primary, apply, remove,
+      settingsButton, logsButton, primary, apply, remove,
     ].filter(Boolean)),
   ]);
 
@@ -363,36 +364,33 @@ function card(instance, models, engines) {
   ].filter(Boolean));
 }
 
-// llama.cpp serves a chat page of its own on the model's port.
+// llama.cpp serves a chat page of its own, on the model's own port.
 //
-// Always on the row, and greyed out when there is nothing to open. It used to
-// be left out entirely, and a row with one button fewer than the rows above it
-// puts every button on that line in a different place — so the column of
-// Loads and Unloads you are aiming at stops being a column.
+// Shown only when there is something on the other end, and first in the row's
+// right-hand group so that it can be. That group sits against the right edge
+// and is only as wide as its contents, so removing something from it moves
+// whatever is to its *left* and nothing to its right. First means nothing
+// moves at all — which is why the format pill, the other thing here that comes
+// and goes, is also at that end.
 //
-// There are three reasons it might not open, and they are different enough to
-// be worth saying which: this engine serves no page at all, the model is not
-// running, or it is running and not answering yet.
+// Greying it out instead was worse. vLLM serves no page and never will, so a
+// disabled button sat on eleven rows out of eleven promising something six of
+// them could never do.
+//
+// Not styled as one of the buttons beside it, because it is not one of them:
+// those act on the model, this leaves the page for somewhere else entirely.
+// The arrow says so, and so does opening in a new tab.
 //
 // The address is built from the page you are looking at, not from the server's
 // idea of itself: the manager may be reached by name, by address, or through a
 // tunnel, and the engine sits on the same host under a different port.
 function chatLink(instance) {
-  if (instance.ready && instance.web_ui) {
-    return element('a', {
-      class: 'action', target: '_blank', rel: 'noopener',
-      href: `${window.location.protocol}//${window.location.hostname}:${instance.port}/`,
-      title: 'Open the chat page this engine serves',
-      text: 'Chat',
-    });
-  }
-  return element('button', {
-    class: 'action', text: 'Chat', disabled: 'disabled',
-    title: !instance.web_ui
-      ? 'This engine serves an API only — there is no page to open'
-      : instance.running
-        ? 'Loading — it will open once the model answers'
-        : 'Only while the model is running',
+  if (!instance.ready || !instance.web_ui) return null;
+  return element('a', {
+    class: 'chat-link', target: '_blank', rel: 'noopener',
+    href: `${window.location.protocol}//${window.location.hostname}:${instance.port}/`,
+    title: 'Open the chat page this engine serves, on its own port',
+    text: 'Chat ↗',
   });
 }
 
