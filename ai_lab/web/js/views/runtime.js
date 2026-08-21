@@ -380,9 +380,12 @@ function card(instance, models, engines) {
 // Shaped like the pills it sits beside rather than like the buttons after
 // them, because it belongs with the pills: they describe the model, and this
 // one says the model is answering and here is the door. It borrows their rules
-// outright — same size, same round ends — and differs only in colour, which is
-// the accent the progress bar fills with. The arrow and the new tab say it
-// leaves the page.
+// outright — same size, same round ends — and differs only in colour: the
+// green a finished load ends on, which is the state this link exists in.
+//
+// No arrow on it. The convention for one is "opens elsewhere", which is true,
+// but the two pills beside it are grey and do nothing, and green among them
+// already reads as the one you can press.
 //
 // The address is built from the page you are looking at, not from the server's
 // idea of itself: the manager may be reached by name, by address, or through a
@@ -393,7 +396,7 @@ function chatLink(instance) {
     class: 'pill chat-link', target: '_blank', rel: 'noopener',
     href: `${window.location.protocol}//${window.location.hostname}:${instance.port}/`,
     title: 'Open the chat page this engine serves, on its own port',
-    text: 'Chat ↗',
+    text: 'Chat',
   });
 }
 
