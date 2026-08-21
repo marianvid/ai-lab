@@ -412,10 +412,15 @@ class SupportedFormatTests(unittest.TestCase):
         names = [item["format"] for item in self.operations.remote_sets("org/model")]
         self.assertEqual(names, ["gguf"])
 
-    def test_the_filter_can_be_lifted(self):
-        formats = {item["format"] for item in
-                   self.operations.remote_sets("org/model", only_supported=False)}
-        self.assertEqual(formats, {"gguf", "safetensors"})
+    def test_there_is_no_way_to_ask_for_the_rest(self):
+        """The switch is gone, and so is the argument behind it.
+
+        There was never an answer to what it was for: a machine with no engine
+        that reads safetensors cannot be helped by a list of them, and the
+        download would be thirty gigabytes of nothing.
+        """
+        with self.assertRaises(TypeError):
+            self.operations.remote_sets("org/model", only_supported=False)
 
     def test_supported_formats_follow_the_available_engines(self):
         self.assertEqual(self.operations.supported_formats(), ["gguf"])
@@ -426,15 +431,32 @@ class SupportedFormatTests(unittest.TestCase):
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
         ]
         self.assertEqual(
-            [item["repo"] for item in self.operations.search("weights")],
+            [item["repo"] for item in self.operations.search("weights")["results"]],
             ["org/weights-GGUF"])
 
-    def test_search_filter_can_be_lifted(self):
+    def test_it_says_how_many_it_hid(self):
+        # The one thing the switch was good for. "Nothing found" and "nothing
+        # you can run" are different answers, and a list of length zero cannot
+        # tell them apart.
         self.operations.huggingface.search = lambda query: [
             {"repo": "org/source", "formats": ["safetensors"]},
+            {"repo": "org/other", "formats": ["safetensors"]},
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
         ]
-        self.assertEqual(len(self.operations.search("weights", only_supported=False)), 2)
+        answer = self.operations.search("weights")
+        self.assertEqual(len(answer["results"]), 1)
+        self.assertEqual(answer["hidden"], 2)
+
+    def test_nothing_hidden_is_reported_as_nothing_hidden(self):
+        self.operations.huggingface.search = lambda query: [
+            {"repo": "org/weights-GGUF", "formats": ["gguf"]},
+        ]
+        self.assertEqual(self.operations.search("weights")["hidden"], 0)
+
+    def test_a_search_that_found_nothing_hid_nothing(self):
+        self.operations.huggingface.search = lambda query: []
+        answer = self.operations.search("nothing at all")
+        self.assertEqual(answer, {"results": [], "hidden": 0})
 
 
 @unittest.skipIf(os.geteuid() == 0, "permission bits do not restrain root")

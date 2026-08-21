@@ -13,7 +13,6 @@ import { setStatus } from '../status.js';
 let results = [];        // Hugging Face search results
 let sets = [];           // downloadable models in the opened repository
 let openRepo = null;
-let onlySupported = true;   // hide formats nothing here can run
 let lastQuery = '';
 let currentTransfers = [];
 let redraw = () => {};
@@ -22,7 +21,6 @@ let redraw = () => {};
 // seconds, and rebuilding these would wipe whatever is being typed and steal
 // the focus mid-word.
 let searchRow = null;
-let filterRow = null;
 
 // -- what is on disk --------------------------------------------------------
 
@@ -90,10 +88,18 @@ async function search(query) {
   setStatus(`Searching for “${query}”…`);
   lastQuery = query;
   try {
-    results = await api.search(query, !onlySupported);
+    const answer = await api.search(query);
+    results = answer.results;
     sets = [];
     openRepo = null;
-    setStatus(`${results.length} repositories found`);
+    // "Nothing found" and "nothing you can run" are different answers, and a
+    // list of length zero cannot tell them apart. The server says how many it
+    // filtered out so this can.
+    setStatus(results.length
+      ? `${results.length} repositories found`
+      : answer.hidden
+        ? `${answer.hidden} found, none in a format this machine can run`
+        : `Nothing found for “${query}”`);
   } catch (error) {
     setStatus(error.message, 'error');
   }
@@ -104,7 +110,7 @@ async function openRepository(repo) {
   openRepo = repo;
   sets = [];
   try {
-    sets = await api.remoteSets(repo, !onlySupported);
+    sets = await api.remoteSets(repo);
     setStatus(sets.length
       ? `${sets.length} model${sets.length === 1 ? '' : 's'} in ${repo}`
       : `Nothing in ${repo} that this machine can run`);
@@ -130,24 +136,6 @@ function searchBox() {
     element('button', { class: 'action', text: 'Search', onclick: go }),
   ]);
   return searchRow;
-}
-
-// The label says what ticking the box does and never changes. A caption that
-// rewrites itself when you tick it leaves you unsure what you just agreed to.
-function formatFilter() {
-  if (filterRow) return filterRow;
-  filterRow = element('label', { class: 'inline' }, [
-    element('input', {
-      type: 'checkbox', ...(onlySupported ? { checked: 'checked' } : {}),
-      onchange: async (event) => {
-        onlySupported = event.target.checked;
-        if (lastQuery) await search(lastQuery);
-        redraw();
-      },
-    }),
-    element('span', { text: 'Show only supported formats' }),
-  ]);
-  return filterRow;
 }
 
 async function startDownload(set, button) {
@@ -342,7 +330,6 @@ export async function render(container) {
   // as "nullnull".
   const children = [
     searchBox(),
-    formatFilter(),
     ...results.map(repositoryRow),
     transferList(transfers.filter((transfer) =>
       ['queued', 'running', 'failed'].includes(transfer.state)

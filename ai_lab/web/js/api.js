@@ -60,8 +60,9 @@ export const api = {
   builds: () => request('GET', '/api/builds'),
   checkBuild: (engine) => request('POST', `/api/builds/${encodeURIComponent(engine)}/check`),
   updateBuild: (engine) => request('POST', `/api/builds/${encodeURIComponent(engine)}/update`),
-  search: (q, all) => request(
-    'GET', `/api/hf/search?q=${encodeURIComponent(q)}${all ? '&all=1' : ''}`),
-  remoteSets: (repo, all) =>
-    request('GET', `/api/hf/sets?repo=${encodeURIComponent(repo)}${all ? '&all=1' : ''}`),
+  // Only what this machine can run is listed, and there is no way to ask for
+  // the rest. The search answer carries how many were filtered out.
+  search: (q) => request('GET', `/api/hf/search?q=${encodeURIComponent(q)}`),
+  remoteSets: (repo) =>
+    request('GET', `/api/hf/sets?repo=${encodeURIComponent(repo)}`),
 };

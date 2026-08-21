@@ -504,18 +504,28 @@ class Operations:
 
     # -- downloads ---------------------------------------------------------
 
-    def search(self, query: str, only_supported: bool = True) -> list[dict]:
-        results = self.huggingface.search(query)
-        if not only_supported:
-            return results
-        supported = set(self.supported_formats())
-        return [item for item in results if supported.intersection(item["formats"])]
+    def search(self, query: str) -> dict:
+        """Repositories holding something this machine can run.
 
-    def remote_sets(self, repo: str, only_supported: bool = True) -> list[dict]:
-        """What a repository holds, by default only what this machine can run."""
+        Only those. There was a switch to see the rest, and no answer to what
+        it was for: a machine with no engine that reads safetensors cannot be
+        helped by a list of them.
+
+        `hidden` is what the filter took away, and it is the one thing the
+        switch was good for. Nothing found and nothing *usable* found are
+        different answers, and a list of length zero cannot tell them apart.
+        """
+        results = self.huggingface.search(query)
+        supported = set(self.supported_formats())
+        usable = [item for item in results
+                  if supported.intersection(item["formats"])]
+        return {"results": usable, "hidden": len(results) - len(usable)}
+
+    def remote_sets(self, repo: str) -> list[dict]:
+        """What a repository holds that this machine can run."""
         supported = set(self.supported_formats())
         return [item.json() for item in self.huggingface.sets(repo)
-                if not only_supported or item.format in supported]
+                if item.format in supported]
 
     def download(self, repo: str, name: str, repository_id: str | None = None) -> dict:
         """Queue a complete model, into the repository that holds its format.

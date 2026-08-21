@@ -32,7 +32,7 @@ function responses(overrides = {}) {
                        accelerator: {}, host: {} },
     '/api/downloads': [],
     'POST /api/downloads': TRANSFER,
-    '/api/hf/search': [SEARCH_RESULT],
+    '/api/hf/search': { results: [SEARCH_RESULT], hidden: 0 },
     '/api/hf/sets': [VARIANT],
     ...overrides,
   };
@@ -71,11 +71,13 @@ describe('the Library page', () => {
     assert.equal(after.value, 'qwen3 gguf', 'the refresh ate the query');
   });
 
-  it('filters to runnable formats by default, and says what ticking does', async () => {
+  it('does not ask whether to filter, because there is no other answer', async () => {
+    // A machine with no engine that reads safetensors cannot be helped by a
+    // list of them, and the download would be thirty gigabytes of nothing. The
+    // switch was one more decision in front of a search box.
     const { view } = await renderPage();
-    const box = view.querySelector('input[type="checkbox"]');
-    assert.equal(box.checked, true, 'the filter should start on');
-    assert.match(view.textContent, /Show only supported formats/);
+    assert.equal(view.querySelector('input[type="checkbox"]'), null);
+    assert.equal(view.textContent.includes('supported formats'), false);
   });
 
   it('shows the variants of a repository right beneath it', async () => {
@@ -186,5 +188,38 @@ describe('the Library page', () => {
   it('does not show configured folders that contain no models', async () => {
     const { view } = await renderPage({ '/api/models': [] });
     assert.equal(view.textContent.includes('GGUF models'), false, view.textContent);
+  });
+});
+
+describe('what a search that found nothing means', () => {
+  // Two different answers used to look identical. Either Hugging Face has
+  // nothing by that name, or it has plenty and none of it is in a format this
+  // machine can run — which on the Mac is everything but GGUF. The switch that
+  // showed the rest was the only way to tell, and it is gone.
+
+  async function searchFor(answer) {
+    const context = await renderPage({ '/api/hf/search': answer });
+    const { attachStatus } = await import('../../ai_lab/web/js/status.js');
+    attachStatus(document.getElementById('status'));
+    const input = context.view.querySelector('input.grow');
+    input.value = 'towerinstruct';
+    button(context.view, 'Search').click();
+    await settle();
+    return document.getElementById('status').textContent;
+  }
+
+  it('says so plainly when there really is nothing', async () => {
+    assert.match(await searchFor({ results: [], hidden: 0 }), /Nothing found/);
+  });
+
+  it('says there were results, in formats this machine cannot run', async () => {
+    const text = await searchFor({ results: [], hidden: 4 });
+    assert.match(text, /4 found/);
+    assert.match(text, /none in a format this machine can run/);
+  });
+
+  it('counts what it is showing, not what it hid', async () => {
+    const text = await searchFor({ results: [SEARCH_RESULT], hidden: 9 });
+    assert.match(text, /1 repositories found/);
   });
 });
