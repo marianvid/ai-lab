@@ -146,3 +146,55 @@ class ToolCallingTests(unittest.TestCase):
         choices = offered["tool_parser"].choices
         for name in ("qwen3_coder", "gemma4", "glm47"):
             self.assertIn(name, choices)
+
+
+class MemorySettingsTests(unittest.TestCase):
+    """The three settings that decide whether a context fits at all."""
+
+    def setUp(self):
+        self.engine = VllmEngine(binary="/opt/ai/vllm/.venv/bin/vllm")
+
+    def argv(self, params=None):
+        return self.engine.plan(model(), 8082, params or {}).argv
+
+    def test_nothing_extra_on_the_command_line_by_default(self):
+        argv = self.argv()
+        for flag in ("--kv-cache-dtype", "--enable-prefix-caching",
+                     "--enforce-eager"):
+            self.assertNotIn(flag, argv)
+
+    def test_the_default_cache_precision_is_left_unsaid(self):
+        # "auto" is vLLM's own default. Passing it changes nothing and puts a
+        # flag on the command line that was never a choice.
+        self.assertNotIn("--kv-cache-dtype", self.argv({"kv_cache_dtype": "auto"}))
+
+    def test_a_smaller_cache_precision_reaches_the_command_line(self):
+        argv = self.argv({"kv_cache_dtype": "fp8"})
+        self.assertEqual(argv[argv.index("--kv-cache-dtype") + 1], "fp8")
+
+    def test_a_precision_vllm_does_not_know_is_refused_when_typed(self):
+        with self.assertRaises(ValueError) as caught:
+            self.argv({"kv_cache_dtype": "fp4"})
+        self.assertIn("Cache precision", str(caught.exception))
+
+    def test_prefix_caching_is_a_switch(self):
+        self.assertIn("--enable-prefix-caching", self.argv({"prefix_caching": True}))
+        self.assertNotIn("--enable-prefix-caching", self.argv({"prefix_caching": False}))
+
+    def test_eager_mode_is_a_switch(self):
+        self.assertIn("--enforce-eager", self.argv({"enforce_eager": True}))
+        self.assertNotIn("--enforce-eager", self.argv({"enforce_eager": False}))
+
+    def test_all_three_together(self):
+        argv = self.argv({"kv_cache_dtype": "fp8", "prefix_caching": True,
+                          "enforce_eager": True})
+        for flag in ("--kv-cache-dtype", "--enable-prefix-caching",
+                     "--enforce-eager"):
+            self.assertIn(flag, argv)
+
+    def test_every_setting_explains_itself(self):
+        # The explanation is the tooltip in the interface. A setting with none
+        # is one the reader has to guess at, and these trade against each other
+        # on a single card.
+        for spec in self.engine.params():
+            self.assertTrue(spec.help.strip(), f"{spec.key} has no explanation")

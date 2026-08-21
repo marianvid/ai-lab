@@ -29,6 +29,16 @@ from .probe import http_ok
 # Every one of these was arrived at by running it on this machine. The help
 # text says what it costs, because on a single 32 GB card these settings trade
 # against each other and the trade is not obvious.
+# How the context cache is stored, as vLLM names the choices. From
+# `vllm serve --help=all` on the installed build, same as the parser list
+# below: what is offered here has to exist there.
+KV_CACHE_TYPES = (
+    "auto", "bfloat16", "float16", "fp8", "fp8_ds_mla", "fp8_e4m3",
+    "fp8_e5m2", "fp8_inc", "fp8_per_token_head", "int4_per_token_head",
+    "int8_per_token_head", "nvfp4", "nvfp4_4over6", "turboquant_3bit_nc",
+    "turboquant_4bit_nc", "turboquant_k3v4_nc", "turboquant_k8v4",
+)
+
 # How a model writes a tool call, as vLLM names the formats it can read. Taken
 # from `vllm serve --help=all` on the installed build; the list grows with
 # every release, and a name added upstream has to be added here before it can
@@ -76,6 +86,38 @@ PARAMS = (
                    "pure waste for text work. Measured on Gemma-4: startup "
                    "halved, from 117 seconds to about 50, with no loss of "
                    "throughput."),
+    ParamSpec("kv_cache_dtype", "Cache precision", "choice", "auto",
+              choices=KV_CACHE_TYPES, group="memory",
+              help="How the context cache is stored. `auto` keeps it at the "
+                   "model's own precision. Anything smaller fits more context "
+                   "in the same memory — this is the setting to reach for when "
+                   "a context you want will not start. Measured here: "
+                   "Qwen3-Coder-30B refused 128k because it wanted 12 GiB of "
+                   "cache and had 10.78. The engine names the largest that "
+                   "fits when it refuses, so the number to try is in the "
+                   "error. `fp8` is native on Blackwell, but it wants the "
+                   "FlashInfer kernels: without that package the engine "
+                   "refuses to start and says which one is missing, so try it "
+                   "and read what comes back rather than assuming it works."),
+    ParamSpec("prefix_caching", "Reuse a repeated prompt", "bool", False,
+              group="memory",
+              help="Keep the start of a prompt between requests, so an "
+                   "identical opening is not read again. Worth it for an agent, "
+                   "which sends the same instructions before every step — "
+                   "Claude Code sends about 108,000 characters of them. "
+                   "Measured here on Qwen3-Coder-30B with an 8,400-token "
+                   "preamble: 0.78 s the first time, 0.21 s every time after. "
+                   "Useless for one-off questions that share nothing, where it "
+                   "only spends cache that context would have used."),
+    ParamSpec("enforce_eager", "Skip kernel compilation", "bool", False,
+              group="memory",
+              help="Start without building CUDA graphs. Starting is much "
+                   "faster and every answer afterwards is slower, so it is for "
+                   "trying a model out rather than for using one. The "
+                   "compilation is also cached: measured here, the first vLLM "
+                   "start after a reinstall took 241 seconds and later ones "
+                   "47, so the cost is paid once per model rather than each "
+                   "time."),
     ParamSpec("tool_parser", "Tool calling", "choice", "",
               choices=TOOL_PARSERS, group="memory",
               help="Empty means the model cannot call tools. Anything else "
@@ -129,6 +171,14 @@ class VllmEngine:
         ]
         if settings["language_model_only"]:
             argv.append("--language-model-only")
+        # `auto` is vLLM's own default, so saying it changes nothing and
+        # leaving the flag off keeps the command line to what was chosen.
+        if settings["kv_cache_dtype"] != "auto":
+            argv += ["--kv-cache-dtype", settings["kv_cache_dtype"]]
+        if settings["prefix_caching"]:
+            argv.append("--enable-prefix-caching")
+        if settings["enforce_eager"]:
+            argv.append("--enforce-eager")
         # The two flags go together. vLLM refuses "auto" tool choice unless it
         # has both, so one setting sets both and there is no way to configure
         # half of it.

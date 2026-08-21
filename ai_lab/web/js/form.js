@@ -46,12 +46,22 @@ function input(spec, value) {
   });
 }
 
+// The explanation lives in the tooltip, not on the page.
+//
+// It used to be printed under every label as well. Some of these run to five
+// or six lines — they say what a setting costs, which is the useful part — and
+// a form of a dozen settings became a wall of prose with the fields lost in
+// it. You read one of them when you are deciding about that one setting, and
+// never again.
+//
+// A label that has something to say is marked, so the tooltip is discoverable
+// rather than a thing you find by accident.
 function field(spec, value) {
-  return element('label', { class: 'field', title: spec.help || '' }, [
-    element('span', {}, [
-      element('span', { text: spec.label }),
-      spec.help ? element('small', { class: 'muted', text: spec.help }) : null,
-    ]),
+  return element('label', {
+    class: spec.help ? 'field explained' : 'field',
+    title: spec.help || '',
+  }, [
+    element('span', {}, element('span', { text: spec.label })),
     input(spec, value),
   ]);
 }

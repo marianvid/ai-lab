@@ -379,3 +379,66 @@ describe('stopping a model that is busy', () => {
     assert.equal(dialog(), null, 'a dialog appeared for an unrelated failure');
   });
 });
+
+describe('what a setting explains about itself', () => {
+  // The explanations are long on purpose — they say what a setting costs, and
+  // that is the part worth having. Printed under every label they turned a
+  // form of a dozen settings into a wall of prose with the fields lost in it.
+  // You read one when deciding about that one setting, and never again.
+
+  const EXPLAINED = {
+    ...ENGINE,
+    params: [
+      { key: 'context_size', label: 'Context size', kind: 'int', default: 32768,
+        minimum: 512, maximum: 1048576, choices: [], group: 'memory',
+        help: 'Longest prompt plus answer the model will accept.' },
+      { key: 'threads', label: 'CPU threads', kind: 'int', default: -1,
+        minimum: -1, maximum: 256, choices: [], group: 'memory', help: '' },
+    ],
+  };
+
+  async function openSettings() {
+    const { view } = await renderPage({
+      '/api/settings': { title: 'AI-Lab', engines: [EXPLAINED], repositories: [],
+                         accelerator: {}, host: {} },
+    });
+    button(view, 'Settings').click();
+    await settle();
+    return view;
+  }
+
+  it('keeps the explanation off the page', async () => {
+    const view = await openSettings();
+    assert.equal(view.textContent.includes('Longest prompt plus answer'), false,
+                 'the explanation was printed under the label');
+  });
+
+  it('puts it where hovering finds it', async () => {
+    const view = await openSettings();
+    const field = [...view.querySelectorAll('label.field')]
+      .find((node) => node.textContent.includes('Context size'));
+    assert.equal(field.getAttribute('title'),
+                 'Longest prompt plus answer the model will accept.');
+  });
+
+  it('marks a label that has something to say', async () => {
+    // Otherwise the tooltip is only found by accident.
+    const view = await openSettings();
+    const explained = [...view.querySelectorAll('label.field')]
+      .find((node) => node.textContent.includes('Context size'));
+    assert.ok(explained.classList.contains('explained'));
+  });
+
+  it('leaves a label with nothing to say unmarked', async () => {
+    const view = await openSettings();
+    const plain = [...view.querySelectorAll('label.field')]
+      .find((node) => node.textContent.includes('CPU threads'));
+    assert.equal(plain.classList.contains('explained'), false);
+    assert.equal(plain.getAttribute('title'), '');
+  });
+
+  it('still shows the label itself', async () => {
+    const view = await openSettings();
+    assert.match(view.textContent, /Context size/);
+  });
+});

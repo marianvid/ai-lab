@@ -174,7 +174,14 @@ pre.log {
 .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.6rem 1rem; }
 .field { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
 .field > span { display: flex; flex-direction: column; }
-.field small { font-size: 0.72rem; line-height: 1.3; max-width: 22ch; }
+/* A setting whose label has an explanation behind it. Marked quietly: the
+   cursor changes and the text carries a faint underline, so it is findable
+   without the page shouting about it. */
+.field.explained > span > span {
+  text-decoration: underline dotted var(--border);
+  text-underline-offset: 3px;
+  cursor: help;
+}
 .field input[type="number"], .field select, .field input[type="text"] { min-width: 6rem; }
 
 /* Confirmation for anything irreversible. */
