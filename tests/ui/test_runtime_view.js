@@ -656,3 +656,69 @@ describe('reading what an engine is saying', () => {
     assert.match(pane().textContent, /systemd-journal/);
   });
 });
+
+describe('the buttons line up down the page', () => {
+  // A row with one button fewer than the rows above it puts every button on
+  // that line in a different place, so the column of Loads and Unloads you are
+  // aiming at stops being a column. Every row carries the same buttons; the
+  // ones that would do nothing are greyed out and say why.
+
+  // Load and Unload are one button wearing two labels, so they count as one
+  // slot. What must not differ is how many slots there are and where they sit.
+  function slots(view, index = 0) {
+    return [...view.querySelectorAll('.card.instance')[index]
+      .querySelectorAll('.row.instance button, .row.instance a')]
+      .map((node) => node.textContent.trim())
+      .map((label) => (label === 'Unload' ? 'Load' : label));
+  }
+
+  const VLLM = {
+    ...INSTANCE, id: 'coder-fast', name: 'Fast', engine: 'vllm',
+    running: false, ready: false, web_ui: false,
+  };
+
+  it('gives every row the same buttons, whatever its state', async () => {
+    const { view } = await renderPage({
+      '/api/instances': [
+        INSTANCE,
+        { ...INSTANCE, id: 'other', name: 'Other', running: false, ready: false },
+      ],
+    });
+    assert.deepEqual(slots(view, 0), slots(view, 1));
+  });
+
+  it('offers Chat as a link when there is a page to open', async () => {
+    const { view } = await renderPage();
+    const chat = [...view.querySelectorAll('.row.instance a')]
+      .find((node) => node.textContent.trim() === 'Chat');
+    assert.ok(chat, 'no link');
+    assert.match(chat.getAttribute('href'), /:8080\//);
+  });
+
+  it('greys it out for a model that is not running, and says so', async () => {
+    const { view } = await renderPage({
+      '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
+    });
+    const chat = button(view, 'Chat');
+    assert.equal(chat.disabled, true);
+    assert.match(chat.getAttribute('title'), /while the model is running/);
+  });
+
+  it('says an engine that serves no page serves no page', async () => {
+    // Not the same as "not running". vLLM will never have one.
+    const { view } = await renderPage({ '/api/instances': [VLLM] });
+    assert.match(button(view, 'Chat').getAttribute('title'), /API only/);
+  });
+
+  it('says a model still loading is still loading', async () => {
+    const { view } = await renderPage({
+      '/api/instances': [{ ...INSTANCE, running: true, ready: false }],
+    });
+    assert.match(button(view, 'Chat').getAttribute('title'), /once the model answers/);
+  });
+
+  it('keeps the same buttons for a vLLM row as for a llama.cpp one', async () => {
+    const { view } = await renderPage({ '/api/instances': [INSTANCE, VLLM] });
+    assert.deepEqual(slots(view, 0), slots(view, 1));
+  });
+});

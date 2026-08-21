@@ -363,23 +363,36 @@ function card(instance, models, engines) {
   ].filter(Boolean));
 }
 
-// llama.cpp serves a chat page of its own on the model's port. Only offered
-// once the model answers: before that there is nothing on the other end, and a
-// link to a blank tab is worse than no link.
+// llama.cpp serves a chat page of its own on the model's port.
+//
+// Always on the row, and greyed out when there is nothing to open. It used to
+// be left out entirely, and a row with one button fewer than the rows above it
+// puts every button on that line in a different place — so the column of
+// Loads and Unloads you are aiming at stops being a column.
+//
+// There are three reasons it might not open, and they are different enough to
+// be worth saying which: this engine serves no page at all, the model is not
+// running, or it is running and not answering yet.
 //
 // The address is built from the page you are looking at, not from the server's
 // idea of itself: the manager may be reached by name, by address, or through a
 // tunnel, and the engine sits on the same host under a different port.
 function chatLink(instance) {
-  // Only when the model answers and the engine actually serves a page.
-  // Building that page needs npm, so a machine without node produces a server
-  // with an API and nothing to look at.
-  if (!instance.ready || !instance.web_ui) return null;
-  return element('a', {
-    class: 'action', target: '_blank', rel: 'noopener',
-    href: `${window.location.protocol}//${window.location.hostname}:${instance.port}/`,
-    title: 'Open the chat page this engine serves',
-    text: 'Chat',
+  if (instance.ready && instance.web_ui) {
+    return element('a', {
+      class: 'action', target: '_blank', rel: 'noopener',
+      href: `${window.location.protocol}//${window.location.hostname}:${instance.port}/`,
+      title: 'Open the chat page this engine serves',
+      text: 'Chat',
+    });
+  }
+  return element('button', {
+    class: 'action', text: 'Chat', disabled: 'disabled',
+    title: !instance.web_ui
+      ? 'This engine serves an API only — there is no page to open'
+      : instance.running
+        ? 'Loading — it will open once the model answers'
+        : 'Only while the model is running',
   });
 }
 
