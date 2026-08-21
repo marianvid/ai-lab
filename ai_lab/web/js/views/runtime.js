@@ -377,9 +377,12 @@ function card(instance, models, engines) {
 // disabled button sat on eleven rows out of eleven promising something six of
 // them could never do.
 //
-// Not styled as one of the buttons beside it, because it is not one of them:
-// those act on the model, this leaves the page for somewhere else entirely.
-// The arrow says so, and so does opening in a new tab.
+// Shaped like the pills it sits beside rather than like the buttons after
+// them, because it belongs with the pills: they describe the model, and this
+// one says the model is answering and here is the door. It borrows their rules
+// outright — same size, same round ends — and differs only in colour, which is
+// the accent the progress bar fills with. The arrow and the new tab say it
+// leaves the page.
 //
 // The address is built from the page you are looking at, not from the server's
 // idea of itself: the manager may be reached by name, by address, or through a
@@ -387,7 +390,7 @@ function card(instance, models, engines) {
 function chatLink(instance) {
   if (!instance.ready || !instance.web_ui) return null;
   return element('a', {
-    class: 'chat-link', target: '_blank', rel: 'noopener',
+    class: 'pill chat-link', target: '_blank', rel: 'noopener',
     href: `${window.location.protocol}//${window.location.hostname}:${instance.port}/`,
     title: 'Open the chat page this engine serves, on its own port',
     text: 'Chat ↗',

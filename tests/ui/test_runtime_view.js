@@ -148,12 +148,16 @@ describe('the Models page', () => {
                  'the line is spending screen on something the tooltip carries');
   });
 
-  it('does not dress the way in as one of the buttons', async () => {
-    // It used to be styled as one, and it is not one: those act on the model,
-    // this leaves the page for the engine's own.
+  it('shapes the way in like the pills, not like the buttons', async () => {
+    // It belongs with the pills: they describe the model, and this one says
+    // the model is answering and here is the door. Sharing their class rather
+    // than copying their rules keeps the three the same size and shape
+    // however those rules change.
     const { view } = await renderPage();
-    assert.equal(view.querySelector('.chat-link').classList.contains('action'),
-                 false);
+    const chat = view.querySelector('.chat-link');
+    assert.ok(chat.classList.contains('pill'), 'it is not shaped like a pill');
+    assert.equal(chat.classList.contains('action'), false,
+                 'it is dressed as one of the buttons');
   });
 
   it('offers a way to talk to a model that is ready', async () => {
