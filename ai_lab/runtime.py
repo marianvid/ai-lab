@@ -30,7 +30,8 @@ from .config import Instance
 from .engines.base import Engine
 from .events import EventBus
 from .hosts.base import Host
-from .types import ChangeEvent, ModelSet, Phase, ProcessSpec, RuntimeEvent
+from .types import (ChangeEvent, ModelSet, Phase, ProcessSpec, ProcessStatus,
+                    RuntimeEvent)
 
 SAMPLE_INTERVAL_S = 0.2
 # Starting a process takes seconds; loading weights can take minutes. They get
@@ -213,8 +214,17 @@ class Runtime:
             operation.total_ms = clock.elapsed_ms()
             return self._remember(operation)
 
-    def status(self, instance: Instance, engine: Engine) -> dict:
-        process = self.host.status(instance.id)
+    def status(self, instance: Instance, engine: Engine,
+               process: "ProcessStatus | None" = None) -> dict:
+        """One row of the model list.
+
+        `process` is the supervisor's answer, when the caller has already got
+        it. Reading it is the expensive part of drawing the whole list, and on
+        systemd the answer for every instance comes back in one command — see
+        `Host.statuses`. Left out, this asks for itself.
+        """
+        if process is None:
+            process = self.host.status(instance.id)
         return {
             "id": instance.id,
             "name": instance.name,

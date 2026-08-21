@@ -118,6 +118,13 @@ class Lease:
     gateway: "Gateway"
     instance_id: str
     port: int
+    # What the engine calls its own model. llama.cpp and vLLM are both started
+    # with an explicit name and both refuse a request naming anything else, so
+    # the name the client used has to be translated before forwarding. It is
+    # carried here because it was known when the lease was made: asking for it
+    # afterwards meant reading every instance's state a second time, which is
+    # the expensive question, for an answer that is pure configuration.
+    model_name: str = ""
 
     def __enter__(self) -> "Lease":
         return self
@@ -185,6 +192,16 @@ class Gateway:
         } for instance in self.operations.instances()]
 
     @staticmethod
+    def _engine_name(instance: dict) -> str:
+        """What this entry's engine calls its own model.
+
+        The last segment of the model path, which is the name the engine is
+        started with and the only one it will answer to.
+        """
+        model_id = instance.get("model_id") or ""
+        return model_id.rsplit("/", 1)[-1]
+
+    @staticmethod
     def _aliases(instance: dict) -> list[str]:
         """The names one entry answers to.
 
@@ -203,10 +220,16 @@ class Gateway:
                 unique.append(name.strip())
         return unique
 
-    def resolve(self, wanted: str) -> dict:
-        """The entry serving this name, or NotConfigured naming what is known."""
+    def resolve(self, wanted: str, instances: list[dict] | None = None) -> dict:
+        """The entry serving this name, or NotConfigured naming what is known.
+
+        Takes an optional list already read, because reading it is not cheap:
+        it asks the supervisor about every configured instance and probes each
+        one that is up. See `acquire`, which reads it once and passes it on.
+        """
         key = (wanted or "").strip().lower()
-        instances = self.operations.instances()
+        if instances is None:
+            instances = self.operations.instances()
         for instance in instances:
             if any(alias.lower() == key for alias in self._aliases(instance)):
                 return instance
@@ -224,23 +247,37 @@ class Gateway:
         already loaded. Returns once the model is answering.
         """
         started = time.perf_counter()
-        instance = self.resolve(wanted)
+        # Read once and pass it down. Asking what the instances are doing means
+        # a call to the supervisor for each one and a readiness probe for each
+        # one that is up: measured on the container with eleven instances, about
+        # 125 ms and 28 processes per read. Asking three times for one request —
+        # to resolve the name, to see whether it is ready, to look for strays —
+        # put half a second in front of an engine that answers in 17 ms.
+        #
+        # Nothing else can change it in between: the reads that matter happen
+        # under the card lock, and the gateway is what moves models.
+        instances = self.operations.instances()
+        instance = self.resolve(wanted, instances)
         instance_id, port = instance["id"], instance["port"]
 
         self._card.acquire()
         self._holder = instance_id
         try:
-            if not self._is_ready(instance_id):
+            # Read again now the card is ours. The snapshot above was taken
+            # before the queue, and the request in front may have changed which
+            # model is loaded while this one waited.
+            instances = self.operations.instances()
+            if not self._is_ready(instance_id, instances):
                 self._switch_to(instance_id)
             else:
                 # It is already up, so there is nothing to load. There may
                 # still be something else up beside it, and one model on the
                 # card is the rule with no exceptions — so anything else goes.
-                self._evict_strays(instance_id)
+                self._evict_strays(instance_id, instances)
             self._held = True
             self.counters.requests += 1
             self.counters.waited_s += time.perf_counter() - started
-            return Lease(self, instance_id, port)
+            return Lease(self, instance_id, port, self._engine_name(instance))
         except Exception as error:
             self.counters.last_error = str(error)
             self._holder = None
@@ -320,20 +357,23 @@ class Gateway:
         })
         del self.counters.history[:-self.HISTORY]
 
-    def _clear(self, keep: str | None = None) -> list[str]:
+    def _clear(self, keep: str | None = None,
+               instances: list[dict] | None = None) -> list[str]:
         """Unload every running engine. Returns what was stopped.
 
         `keep` spares one entry, for the case where the model asked for is
-        already up and only its company has to go.
+        already up and only its company has to go. `instances` is an already
+        read list, since the caller usually has one.
         """
         stopped = []
-        for instance in self.operations.instances():
+        for instance in (self.operations.instances() if instances is None
+                         else instances):
             if instance["running"] and instance["id"] != keep:
                 self.operations.unload(instance["id"])
                 stopped.append(instance["id"])
         return stopped
 
-    def _evict_strays(self, instance_id: str) -> None:
+    def _evict_strays(self, instance_id: str, instances: list[dict]) -> None:
         """Unload anything running beside the model that was asked for.
 
         One model on the card is the rule, and it holds even when the request
@@ -347,7 +387,7 @@ class Gateway:
         loaded, and the model that stays is holding memory on purpose, so
         there is no quiet to wait for.
         """
-        evicted = self._clear(keep=instance_id)
+        evicted = self._clear(keep=instance_id, instances=instances)
         if not evicted:
             return
         self.counters.history.append({
@@ -397,8 +437,9 @@ class Gateway:
                 return instance["id"]
         return None
 
-    def _is_ready(self, instance_id: str) -> bool:
-        for instance in self.operations.instances():
+    def _is_ready(self, instance_id: str, instances: list[dict] | None = None) -> bool:
+        for instance in (self.operations.instances() if instances is None
+                         else instances):
             if instance["id"] == instance_id:
                 return bool(instance["ready"])
         return False

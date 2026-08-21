@@ -64,11 +64,7 @@ class ControlTests(unittest.TestCase):
 
         def fake_run(argv, timeout=10.0):
             seen.append(argv)
-            if "is-active" in argv:
-                return result("active\n")
-            if "is-enabled" in argv:
-                return result("enabled\n")
-            return result("4321\n")
+            return result(show(qwen="active enabled 4321"))
 
         with patch("ai_lab.hosts.linux.run", side_effect=fake_run):
             status = host.status("qwen")
@@ -76,6 +72,83 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(status.enabled)
         self.assertEqual(status.pid, 4321)
         self.assertIn("ai-lab-engine@qwen.service", seen[0])
+        self.assertEqual(len(seen), 1, "one instance should still be one command")
+
+
+def show(**instances):
+    """systemd's answer to `systemctl show`, in its own shape.
+
+    The properties come back in whatever order systemd likes — on the real
+    machine MainPID arrives before Id — so the blocks here are written that way
+    rather than tidily, and a parser that relies on position fails against them.
+    """
+    blocks = []
+    for identifier, spec in instances.items():
+        state, enabled, pid = spec.split()
+        blocks.append(f"MainPID={pid}\n"
+                      f"Id=ai-lab-engine@{identifier}.service\n"
+                      f"ActiveState={state}\n"
+                      f"UnitFileState={enabled}")
+    return "\n\n".join(blocks) + "\n"
+
+
+class BatchStatusTests(unittest.TestCase):
+    """Asking systemd about every instance at once.
+
+    One at a time meant three commands per instance. Measured on the container
+    with eleven instances that was 152 ms, and it was the entire cost of
+    drawing the model list — the readiness probes beside it were free. The
+    gateway asks the same question twice per request, so a workflow of short
+    calls paid half a second to reach an engine answering in 17 ms.
+    """
+
+    def statuses(self, output, ids, ok=True):
+        with patch("ai_lab.hosts.linux.run",
+                   return_value=result(output, returncode=0 if ok else 1)) as call:
+            found = LinuxHost().statuses(ids)
+        self.assertEqual(call.call_count, 1, "the whole point is one command")
+        return found
+
+    def test_every_instance_comes_back_from_one_command(self):
+        found = self.statuses(
+            show(a="active enabled 11", b="inactive enabled 0",
+                 c="failed disabled 0"), ["a", "b", "c"])
+        self.assertEqual([found[key].running for key in "abc"],
+                         [True, False, False])
+        self.assertEqual([found[key].enabled for key in "abc"],
+                         [True, True, False])
+        self.assertEqual(found["a"].pid, 11)
+
+    def test_blocks_are_matched_by_name_not_by_position(self):
+        # systemd is under no obligation to answer in the order it was asked.
+        found = self.statuses(show(b="active enabled 22", a="inactive enabled 0"),
+                              ["a", "b"])
+        self.assertTrue(found["b"].running)
+        self.assertFalse(found["a"].running)
+        self.assertEqual(found["b"].pid, 22)
+
+    def test_a_stale_pid_on_a_stopped_unit_is_not_reported(self):
+        # A pid belonging to a process that has exited would be sampled for
+        # accelerator memory and answer with somebody else's numbers.
+        found = self.statuses(show(a="inactive enabled 999"), ["a"])
+        self.assertIsNone(found["a"].pid)
+
+    def test_an_instance_systemd_never_mentions_is_still_answered(self):
+        found = self.statuses(show(a="active enabled 11"), ["a", "ghost"])
+        self.assertIn("ghost", found)
+        self.assertFalse(found["ghost"].running)
+        self.assertFalse(found["ghost"].enabled)
+
+    def test_a_failed_command_reports_stopped_rather_than_raising(self):
+        # Every other reader here treats "could not ask" and "answered no" the
+        # same way, because the alternative is a page that will not draw.
+        found = self.statuses("", ["a", "b"], ok=False)
+        self.assertEqual([found[key].running for key in "ab"], [False, False])
+
+    def test_asking_about_nothing_runs_no_command(self):
+        with patch("ai_lab.hosts.linux.run") as call:
+            self.assertEqual(LinuxHost().statuses([]), {})
+        call.assert_not_called()
 
     def test_no_nvidia_smi_means_no_accelerator_not_a_crash(self):
         with patch("ai_lab.hosts.linux.run",

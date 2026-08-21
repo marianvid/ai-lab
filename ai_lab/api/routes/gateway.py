@@ -57,9 +57,10 @@ def _forwarder(gateway: Gateway, path: str):
 
         # The engine knows its own model by a different name than the entry
         # does, and rejects a name it does not recognise. Ask by the name it
-        # reports rather than passing ours through.
+        # reports rather than passing ours through. The lease carries it, so
+        # this costs nothing.
         outgoing = dict(payload)
-        outgoing["model"] = _engine_name(gateway, lease.instance_id, wanted)
+        outgoing["model"] = lease.model_name or wanted
 
         url = f"http://127.0.0.1:{lease.port}{path}"
         try:
@@ -69,14 +70,3 @@ def _forwarder(gateway: Gateway, path: str):
             raise
     return handle
 
-
-def _engine_name(gateway: Gateway, instance_id: str, fallback: str) -> str:
-    """What this entry's engine calls its own model.
-
-    llama.cpp and vLLM are both started with an explicit name, and both refuse
-    a request naming anything else.
-    """
-    for row in gateway.catalogue():
-        if row["id"] == instance_id:
-            return (row["model_id"] or "").rsplit("/", 1)[-1] or fallback
-    return fallback

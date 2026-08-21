@@ -25,6 +25,7 @@ class FakeHost:
         self._pid = 4013
         self.stopped: list[str] = []
         self.running: set[str] = set()
+        self.status_calls = 0
         self.total_mb = total_mb
         self._curve = list(memory_curve or [0.0])
         self._reading = 0
@@ -51,6 +52,18 @@ class FakeHost:
     def status(self, instance_id: str) -> ProcessStatus:
         running = instance_id in self.running
         return ProcessStatus(running=running, pid=self._pid if running else None)
+
+    def statuses(self, instance_ids: list[str]) -> dict[str, ProcessStatus]:
+        """The batch question, which a fake has nothing to batch.
+
+        It is here because the real hosts have it and a fake that answers a
+        smaller set of questions than the thing it stands in for lets a caller
+        pass its tests and fail on the machine. `self.status_calls` counts what
+        was asked, for the tests that care that the list is drawn with one
+        question rather than one per entry.
+        """
+        self.status_calls += 1
+        return {identifier: self.status(identifier) for identifier in instance_ids}
 
     def accelerator(self, pid=None) -> AcceleratorSnapshot:
         used = self._curve[min(self._reading, len(self._curve) - 1)]

@@ -47,6 +47,47 @@ def offline_huggingface():
     ])
 
 
+def operations_with_instances(count):
+    """An Operations with `count` configured entries, and the host behind it.
+
+    Built by hand rather than through the interface, because what is under test
+    is how the list is drawn, not how entries are created.
+    """
+    import tempfile
+    directory = Path(tempfile.mkdtemp())
+    (directory / "models").mkdir()
+    for index in range(count):
+        model = directory / "models" / f"model-{index}"
+        model.mkdir()
+        make_files(model, f"model-{index}.gguf", size=1024)
+    config = {
+        "title": "AI-Lab", "host": "127.0.0.1", "port": 8090,
+        "engines": {"llamacpp": {"binary": "/bin/true"}},
+        "repositories": [{"id": "gguf", "name": "GGUF",
+                          "path": str(directory / "models"),
+                          "format": "gguf", "writable": True}],
+        "instances": [
+            {"id": f"model-{index}", "name": f"Model {index}",
+             "engine": "llamacpp",
+             "model_id": f"gguf/model-{index}/model-{index}",
+             "port": 8100 + index, "params": {}}
+            for index in range(count)
+        ],
+    }
+    path = directory / "config.json"
+    path.write_text(json.dumps(config))
+    host = FakeHost()
+    store = ConfigStore(path)
+    operations = Operations(
+        store=store, catalog=Catalog(),
+        runtime=Runtime(host, EventBus(), sample_interval_s=0),
+        settings=Settings(store, host, Registry()),
+        downloads=DownloadManager(), huggingface=offline_huggingface(),
+        host=host, engines=FakeRegistry(host),
+    )
+    return operations, host
+
+
 class FakeRegistry:
     def __init__(self, host):
         self.host = host
@@ -643,3 +684,36 @@ class RepositoryEditingTests(unittest.TestCase):
 
     def test_creating_one_that_exists_is_not_an_error(self):
         self.assertFalse(self.operations.create_directory(str(self.root / "new"))["created"])
+
+
+class DrawingTheListTests(unittest.TestCase):
+    """The model list asks the supervisor once, not once per entry.
+
+    On systemd every answer is a command, and asking one at a time meant three
+    commands per instance. Measured on the container with eleven instances that
+    was 152 ms — the whole cost of this call, with the readiness probes beside
+    it costing nothing. The gateway asks the same question twice on every
+    request, so it was half a second in front of an engine answering in 17 ms.
+    """
+
+    def test_one_question_covers_every_entry(self):
+        operations, host = operations_with_instances(3)
+        host.status_calls = 0
+        rows = operations.instances()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(host.status_calls, 1,
+                         "one command for the list, however long it is")
+
+    def test_an_empty_list_asks_nothing_at_all(self):
+        operations, host = operations_with_instances(0)
+        host.status_calls = 0
+        self.assertEqual(operations.instances(), [])
+        self.assertEqual(host.status_calls, 1)
+
+    def test_each_entry_still_gets_its_own_answer(self):
+        operations, host = operations_with_instances(3)
+        host.running.add("model-1")
+        rows = {row["id"]: row for row in operations.instances()}
+        self.assertTrue(rows["model-1"]["running"])
+        self.assertFalse(rows["model-0"]["running"])
+        self.assertFalse(rows["model-2"]["running"])

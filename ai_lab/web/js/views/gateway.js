@@ -16,7 +16,14 @@
 import { api } from '../api.js';
 import { element, seconds } from '../format.js';
 
-const EVERY_MS = 2000;
+// Slower than it looks like it should be, on purpose. Reading these numbers
+// means asking systemd about every configured instance and probing each one
+// that is up: measured on the container with eleven instances, one call costs
+// about 125 ms and spawns 28 processes. And the thing being watched moves far
+// more slowly than that — a model switch takes between twelve and forty-five
+// seconds. A two-second poll was finer than its own subject and cost fourteen
+// processes a second for the privilege.
+const EVERY_MS = 5000;
 let timer = null;
 
 // A heading above its panel, the same shape the Settings page uses.

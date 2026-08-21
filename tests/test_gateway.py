@@ -509,3 +509,56 @@ class BusyGuardTests(unittest.TestCase):
             gateway.acquire("coder")
         self.assertIsNone(gateway.busy())
         gateway.guard("unload", "coder")        # does not raise
+
+
+class OverheadTests(unittest.TestCase):
+    """How many times one request asks what the instances are doing.
+
+    Measured on the container: that question costs about 125 ms and 28
+    processes, because it asks the supervisor about every configured instance
+    and probes each one that is up. A request to an engine that answers in
+    17 ms was taking 500 ms to get there, all of it spent asking the same
+    question over and over.
+
+    The count is asserted rather than the milliseconds: a timing test on a
+    laptop measures the laptop.
+    """
+
+    def counting(self, **running):
+        operations = two_models(**running)
+        operations.reads = 0
+        original = operations.instances
+
+        def counted():
+            operations.reads += 1
+            return original()
+        operations.instances = counted
+        return operations
+
+    def test_a_request_to_a_loaded_model_asks_twice(self):
+        # Once to resolve the name before queueing, once after the card is
+        # taken — the request in front may have changed what is loaded while
+        # this one waited, so the second read cannot be skipped.
+        operations = self.counting(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(operations.reads, 2)
+
+    def test_the_engine_name_costs_no_extra_read(self):
+        # It is pure configuration, and the lease carries it. Asking for it
+        # afterwards meant asking the expensive question again for an answer
+        # that was already in hand.
+        operations = self.counting(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder") as lease:
+            self.assertEqual(lease.model_name, "Qwen3.6-35B")
+        self.assertEqual(operations.reads, 2)
+
+    def test_tidying_up_costs_no_extra_read(self):
+        operations = self.counting(coder=True, reviewer=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(operations.reads, 2)
+        self.assertEqual(operations.unloads, ["reviewer"])

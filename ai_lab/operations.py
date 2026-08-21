@@ -102,10 +102,15 @@ class Operations:
         default, and that is what the interface should say.
         """
         config = self.store.load()
+        # One question to the supervisor for the whole list rather than one per
+        # entry. On systemd that was three commands each: eleven instances cost
+        # 152 ms, which was the entire cost of this call, and the gateway asks
+        # it twice on every request.
+        processes = self.host.statuses([item.id for item in config.instances])
         rows = []
         for item in config.instances:
             engine = self.engines.get(item.engine)
-            row = self.runtime.status(item, engine)
+            row = self.runtime.status(item, engine, processes.get(item.id))
             row["params"] = self._effective(engine, item.params)
             rows.append(row)
         return rows

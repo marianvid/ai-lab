@@ -101,6 +101,15 @@ class DarwinHost:
             self._processes.pop(instance_id, None)
             self._close_log(instance_id)
 
+    def statuses(self, instance_ids: list[str]) -> dict[str, ProcessStatus]:
+        """One at a time, because here that costs nothing.
+
+        This host owns the processes and keeps them in a dictionary, so asking
+        about one is a lookup rather than a command. Only the Linux host, where
+        every answer is a call to systemd, has anything to save by batching.
+        """
+        return {identifier: self.status(identifier) for identifier in instance_ids}
+
     def status(self, instance_id: str) -> ProcessStatus:
         with self._lock:
             process = self._processes.get(instance_id)

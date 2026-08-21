@@ -39,6 +39,16 @@ class Host(Protocol):
         """Whether the process is currently running."""
         ...
 
+    def statuses(self, instance_ids: list[str]) -> dict[str, ProcessStatus]:
+        """The same answer as `status`, for several instances at once.
+
+        Asked whenever the model list is drawn, and by the gateway on every
+        request, so on a machine where asking is expensive it is worth asking
+        once. A host with nothing to gain may leave this alone and let the
+        default ask one at a time.
+        """
+        ...
+
     def accelerator(self, pid: int | None = None) -> AcceleratorSnapshot:
         """Read the accelerator now. Called several times a second.
 
