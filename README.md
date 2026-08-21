@@ -13,9 +13,7 @@ a different idea of what the thing should do. Point your own agent at this
 repository and have it adapt the code to what you have. That is a good deal
 faster than reading it all yourself, and it is how the code got here.
 
-**It is still being built.** The current work is support for agentic workflows —
-an agent naming a model that is not loaded, and getting it loaded rather than a
-refused connection. It works; it is not written up here yet.
+**It is still being built.** Things move; expect the odd rough edge.
 
 Provides a manager for local inference engines. It shows what models are on disk, what
 is loaded on the accelerator right now, and how long a model took to load —
@@ -45,6 +43,51 @@ why it has no version beside it and no update button.
 
 ![Settings](docs/screenshots/settings.png)
 
+## One address for an agent
+
+An agent workflow uses several models — one to read, one to write, one to
+check. Each is a separate entry here, on its own port, and only one of them can
+be on the card at a time. Pointed straight at the engines, an agent naming a
+model that happens not to be running gets a refused connection, and the
+workflow stops there.
+
+The Gateway is one address in front of all of them, speaking the OpenAI shape
+that agent tools already send:
+
+```sh
+curl http://ai-lab.lan:8090/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "reviewer", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+Name any configured model. If it is the one on the card, the request goes
+straight through. If it is not, the card is emptied and that model is loaded
+first — the agent waits longer for that one request and sees nothing else. No
+API key is checked; any value will do. `GET /v1/models` lists every configured
+entry, loaded or not, which is the point: a client is meant to be able to ask
+for one of them.
+
+Two rules, both deliberate:
+
+**One model on the card, with no exceptions.** A request that needs no switch
+still unloads anything else it finds running.
+
+**One request at a time.** Every request takes the card in turn and holds it
+until the last byte of its answer has been written, streamed answers included,
+so a swap can never pull a model out from under one. The consequence is worth
+stating plainly: **two agents on this machine do not run in parallel.** The
+second waits for the first. Running them at the same time needs a second
+machine.
+
+The Gateway page reports what this is costing. The number to read is switches
+as a share of requests: a workflow changing model on most of its steps spends
+its time loading rather than working, and the fix is to reorder the workflow so
+that steps sharing a model run together, not to change a setting here.
+
+Load and Unload on the Models page reach the engines directly, so they ask
+first when the card is mid-answer, and offer to stop it anyway. A wedged model
+has to be stoppable — but by decision rather than by accident.
+
 ## Structure
 
 ```text
@@ -53,6 +96,7 @@ ai_lab/engines/         One file per inference engine
 ai_lab/downloads/       Hugging Face browsing and whole-set transfers
 ai_lab/api/             HTTP routing and the progress event stream
 ai_lab/web/             Browser interface, native ES modules, no build step
+ai_lab/gateway.py       One address for an agent: routing by model name, and swapping
 ai_lab/catalog.py       Finding models on disk, grouping shards into sets
 ai_lab/runtime.py       Load, unload and swap, with measured timings
 ai_lab/settings.py      The settings view

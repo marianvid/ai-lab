@@ -8,7 +8,7 @@ more usefully, what it must *not* contain.
 Dependencies point in a single direction:
 
 ```
-web  →  api  →  operations  →  services  →  engines  →  hosts
+web  →  api  →  gateway  →  operations  →  services  →  engines  →  hosts
 ```
 
 Nothing imports upward, and **no service imports another service**.
@@ -30,6 +30,7 @@ there is exactly one place to look.
 | `settings.py` | Assembling the settings screen from configuration and host | Writing to the accelerator |
 | `builds.py` | Reporting an engine's source version, checking upstream, pulling and recompiling | Running engines, or choosing compile flags |
 | `operations.py` | Joining the services into whole actions | Anything a single service could do alone |
+| `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
 | `api/` | HTTP routing, JSON, the event stream | Any decision about models, engines or formats |
 | `web/` | The browser interface | — |
 
@@ -52,6 +53,51 @@ the services and one below the routes.
 
 The test for whether something belongs there: it reads as a sentence a user
 would say. *Load this instance. Swap it to that model. Download this one.*
+
+### Why `gateway.py` exists
+
+An agent workflow uses several models — one to read, one to write, one to
+check. Each is a separate entry on its own port, and only one of them can be on
+the card. Without something in front of them, an agent naming a model that is
+not running gets a refused connection and the workflow stops there.
+
+The gateway is that front. A request names a model; if it is loaded the request
+goes through, and if it is not, the card is emptied and that model is loaded
+first. The agent waits longer for that one request and sees nothing else.
+
+It sits above `operations.py` because it is a policy about *which* whole action
+to perform, not a whole action itself. It sits below `api/` because it contains
+no HTTP: it decides which entry serves a name and makes sure that entry is the
+one on the card. Forwarding the request and streaming the answer back are the
+web layer's job.
+
+**One model on the card, one request at a time.** That is the design, not a
+limitation being worked around. The models are chosen in advance and known to
+fit; an agent workflow is a sequence, so there is nothing to gain from
+overlapping requests and a great deal to lose from two arriving during a swap.
+The consequence is worth stating plainly: **two agents on this machine do not
+run in parallel.** The second waits for the first.
+
+The rule has no exceptions. A request that needs no switch still unloads
+anything else it finds running — a manager restart can leave two units up, and
+a stray engine holds memory the loaded model wanted for context.
+
+**A switch empties the card and waits before it loads.** The driver returns
+video memory a moment after a process exits, and starting a model on top of
+memory that has not come back yet fails in a way that reads like the new model
+being too large — which sends whoever reads it looking in the wrong place. So a
+switch unloads, polls until the card is under 512 MB, and only then loads. If
+it never goes quiet, the switch fails and says what is still holding it. On
+unified memory there is nothing to wait for and the step is skipped.
+
+**The buttons on the page are the other way in.** Agent traffic is safe from
+itself because every request takes the card in turn. Load, Unload and Apply
+reach the engines directly and know nothing about who is mid-answer, so they
+call `Gateway.guard` first. It refuses while the card is held, names the model
+holding it, and the page offers to go ahead anyway — a wedged model has to be
+stoppable, but that should be a decision rather than an accident. The refusal
+travels as `409` with a `busy` object, because a page cannot act on a message
+it would have to match on the words of.
 
 ### Why `naming.py` exists
 
@@ -157,12 +203,24 @@ rather than per card. On Linux that figure comes from `nvidia-smi
 --query-compute-apps`, whose pids inside the container match the ones systemd
 reports; on macOS it is the process's resident memory.
 
-**A model either fits on the accelerator or it is not loaded.** There is no
-partial-offload setting. Splitting layers between GPU and CPU sends every token
-across the link, and on this machine that link is OCuLink, so the result would
-be slow enough that nobody would want it. `gpu_layers` was removed for that
-reason; a configuration that still names it has the key dropped rather than
-rejected, so an older installation keeps working.
+**A model that does not fit is refused, unless the split was asked for.**
+Before anything starts, the weights are compared against the free memory on the
+card. That is a necessary condition and not a sufficient one — the context
+cache sits on top of the weights — but when the weights alone exceed what is
+free there is no point starting a process to find out, and the alternative is a
+confusing crash a few seconds later.
+
+`gpu_layers` says how much of the model goes on the card. It was removed once,
+on the grounds that splitting a model between card and system memory sends
+every token across the link — OCuLink here — and is slow enough that nobody
+would want it. It came back as a setting rather than a rule, because how slow
+is a measurement and whether it is worth it is not the code's decision. The
+setting says what it costs, in the words a person reads before choosing it:
+moving 20 of 80 layers off the card cut prompt reading to a ninth on this
+machine, while generation suffered far less. A plan that deliberately leaves part of the model
+in system memory is exempt from the fit check: there the weights are not all
+meant to be on the card, so comparing the whole file against free memory
+answers a question nobody asked.
 
 On Apple silicon there is no separate video memory, so the readings carry
 `memory_kind: "unified"` and report the engine process's resident memory
