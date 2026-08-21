@@ -12,7 +12,9 @@ import threading
 import time
 import unittest
 
-from ai_lab.gateway import CardBusy, CouldNotLoad, Gateway, NotConfigured
+from ai_lab.engines.base import ANTHROPIC_PATHS, OPENAI_PATHS
+from ai_lab.gateway import (CardBusy, CouldNotLoad, Gateway, NotConfigured,
+                            ShapeNotServed)
 from ai_lab.runtime import Operation
 from ai_lab.types import AcceleratorSnapshot
 
@@ -42,10 +44,36 @@ class FakeHost:
                                    memory_used_mb=used, memory_total_mb=32000.0)
 
 
+class FakeEngine:
+    """An engine that answers a stated set of request shapes, and nothing else."""
+
+    def __init__(self, shapes):
+        self._shapes = shapes
+
+    def api_paths(self):
+        return self._shapes
+
+
+class FakeRegistry:
+    """The two engines as they really differ: only one speaks both shapes."""
+
+    ENGINES = {
+        "llamacpp": FakeEngine(OPENAI_PATHS),
+        "vllm": FakeEngine(OPENAI_PATHS + ANTHROPIC_PATHS),
+    }
+
+    def get(self, engine_id):
+        try:
+            return self.ENGINES[engine_id]
+        except KeyError:
+            raise KeyError(f"Unknown engine: {engine_id}") from None
+
+
 class FakeOperations:
     """Just enough of Operations to drive the gateway."""
 
     def __init__(self, entries, lag=0):
+        self.engines = FakeRegistry()
         self._entries = {e["id"]: dict(e) for e in entries}
         self.loads = []
         self.unloads = []
@@ -68,9 +96,9 @@ class FakeOperations:
         return Operation(instance_id=instance_id, kind="unload", ok=True)
 
 
-def entry(identifier, name, model_id, port, running=False):
+def entry(identifier, name, model_id, port, running=False, engine="llamacpp"):
     return {"id": identifier, "name": name, "model_id": model_id, "port": port,
-            "engine": "llamacpp", "running": running, "ready": running,
+            "engine": engine, "running": running, "ready": running,
             "params": {}, "enabled": True, "pid": None, "web_ui": False,
             "last_operation": None}
 
@@ -562,3 +590,90 @@ class OverheadTests(unittest.TestCase):
             pass
         self.assertEqual(operations.reads, 2)
         self.assertEqual(operations.unloads, ["reviewer"])
+
+
+def mixed_engines(**running):
+    """One entry on each engine, which is the whole point of these tests."""
+    return FakeOperations([
+        entry("coder", "Coding", "gguf/qwen/Qwen3.6-35B", 8080,
+              running.get("coder", False), engine="llamacpp"),
+        entry("fast", "Fast", "nvfp4/qwen3-coder-30b", 8082,
+              running.get("fast", False), engine="vllm"),
+    ])
+
+
+class RequestShapeTests(unittest.TestCase):
+    """Two ways of writing the same request, and not every engine reads both.
+
+    Nearly everything speaks the OpenAI shape. A client written against
+    Anthropic's own library sends `/v1/messages` instead. vLLM answers that
+    one; llama.cpp does not.
+
+    The engine says which it answers, so nothing above has to know one engine
+    from another — and adding a third shape, or an engine that speaks it, is a
+    line in that engine's file.
+    """
+
+    def test_the_usual_shape_works_on_either_engine(self):
+        gateway = quick(mixed_engines(coder=True))
+        with gateway.acquire("coder", shape="/v1/chat/completions") as lease:
+            self.assertEqual(lease.port, 8080)
+
+    def test_the_other_shape_works_where_the_engine_answers_it(self):
+        gateway = quick(mixed_engines(fast=True))
+        with gateway.acquire("fast", shape="/v1/messages") as lease:
+            self.assertEqual(lease.port, 8082)
+
+    def test_the_other_shape_is_refused_where_it_is_not_answered(self):
+        gateway = quick(mixed_engines(coder=True))
+        with self.assertRaises(ShapeNotServed) as caught:
+            gateway.acquire("coder", shape="/v1/messages")
+        self.assertIn("llamacpp", str(caught.exception))
+
+    def test_the_refusal_names_the_models_that_would_have_worked(self):
+        # A client does not know which of its models is on which engine, and a
+        # refusal that only says no leaves it with nowhere to go.
+        gateway = quick(mixed_engines(coder=True))
+        with self.assertRaises(ShapeNotServed) as caught:
+            gateway.acquire("coder", shape="/v1/messages")
+        self.assertIn("fast", str(caught.exception))
+
+    def test_it_says_so_plainly_when_nothing_answers_the_shape(self):
+        operations = FakeOperations([
+            entry("only", "Only", "gguf/a/a", 8080, True, engine="llamacpp")])
+        gateway = quick(operations)
+        with self.assertRaises(ShapeNotServed) as caught:
+            gateway.acquire("only", shape="/v1/messages")
+        self.assertIn("No configured model answers it", str(caught.exception))
+
+    def test_nothing_is_loaded_for_a_shape_that_will_be_refused(self):
+        # The refusal happens before the card is touched. Loading a model for
+        # forty seconds and then saying no would be the worst of both.
+        operations = mixed_engines()
+        gateway = quick(operations)
+        with self.assertRaises(ShapeNotServed):
+            gateway.acquire("coder", shape="/v1/messages")
+        self.assertEqual(operations.loads, [])
+        self.assertEqual(operations.unloads, [])
+
+    def test_a_refused_shape_does_not_leave_the_card_taken(self):
+        operations = mixed_engines(coder=True)
+        gateway = quick(operations)
+        with self.assertRaises(ShapeNotServed):
+            gateway.acquire("coder", shape="/v1/messages")
+        self.assertIsNone(gateway.busy())
+        with gateway.acquire("coder", shape="/v1/chat/completions"):
+            pass
+
+    def test_no_shape_given_means_no_check(self):
+        # The card can be taken for reasons that are not a forwarded request.
+        gateway = quick(mixed_engines(coder=True))
+        with gateway.acquire("coder"):
+            pass
+
+    def test_the_listing_says_which_shapes_each_entry_answers(self):
+        gateway = quick(mixed_engines())
+        rows = {row["id"]: row for row in gateway.catalogue()}
+        self.assertIn("/v1/messages", rows["fast"]["shapes"])
+        self.assertNotIn("/v1/messages", rows["coder"]["shapes"])
+        self.assertIn("/v1/chat/completions", rows["coder"]["shapes"])

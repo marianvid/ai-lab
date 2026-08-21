@@ -90,3 +90,59 @@ class ParamTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToolCallingTests(unittest.TestCase):
+    """Letting a model call tools, which needs two flags that go together.
+
+    A model that wants to use a tool does not return structured data. It writes
+    text, and every model family writes it differently — Qwen one way, Gemma
+    another. vLLM has to be told which of those to expect before it will turn
+    that text back into a call, and it refuses "auto" tool choice without both
+    the switch and the format.
+
+    Two flags that must both be present or both absent is a pair that gets set
+    half-way, so there is one setting here rather than two.
+    """
+
+    def setUp(self):
+        self.engine = VllmEngine(binary="/opt/ai/vllm/.venv/bin/vllm")
+
+    def argv(self, params=None):
+        return self.engine.plan(model(), 8082, params or {}).argv
+
+    def test_off_by_default(self):
+        # Most work needs no tools, and turning it on costs a startup flag
+        # that has to name a format nobody has chosen yet.
+        argv = self.argv()
+        self.assertNotIn("--enable-auto-tool-choice", argv)
+        self.assertNotIn("--tool-call-parser", argv)
+
+    def test_naming_a_format_turns_it_on(self):
+        argv = self.argv({"tool_parser": "qwen3_coder"})
+        self.assertIn("--enable-auto-tool-choice", argv)
+        self.assertEqual(argv[argv.index("--tool-call-parser") + 1], "qwen3_coder")
+
+    def test_the_switch_and_the_format_are_never_separated(self):
+        # vLLM starts, and then refuses every request from an agent, if it has
+        # one without the other.
+        argv = self.argv({"tool_parser": "gemma4"})
+        self.assertEqual(argv.count("--enable-auto-tool-choice"), 1)
+        self.assertEqual(argv.count("--tool-call-parser"), 1)
+
+    def test_empty_means_off_rather_than_an_empty_flag(self):
+        argv = self.argv({"tool_parser": ""})
+        self.assertNotIn("--enable-auto-tool-choice", argv)
+
+    def test_a_format_vllm_does_not_know_is_refused_when_typed(self):
+        # Rather than as an engine that will not start, minutes later, with a
+        # message about argument parsing.
+        with self.assertRaises(ValueError) as caught:
+            self.argv({"tool_parser": "qwen-coder"})
+        self.assertIn("Tool calling", str(caught.exception))
+
+    def test_the_formats_this_machine_actually_uses_are_offered(self):
+        offered = dict((spec.key, spec) for spec in self.engine.params())
+        choices = offered["tool_parser"].choices
+        for name in ("qwen3_coder", "gemma4", "glm47"):
+            self.assertIn(name, choices)

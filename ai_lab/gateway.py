@@ -84,6 +84,16 @@ class CouldNotLoad(RuntimeError):
     """The entry exists but the card could not be made ready for it."""
 
 
+class ShapeNotServed(ValueError):
+    """The entry exists, but its engine does not answer that kind of request.
+
+    A request can arrive in more than one shape, and not every engine speaks
+    every shape. Refused here, with the entries that would have worked, rather
+    than forwarded to an engine that would answer 404 about a path the client
+    never chose.
+    """
+
+
 class CardBusy(RuntimeError):
     """The card is serving a request, and the action asked for would cut it off.
 
@@ -189,7 +199,17 @@ class Gateway:
             "loaded": bool(instance["running"]),
             "ready": bool(instance["ready"]),
             "aliases": self._aliases(instance),
+            # Which shapes of request this one answers. A client that speaks
+            # only one of them can tell from the listing which models are open
+            # to it, instead of finding out by being refused.
+            "shapes": self._shapes(instance),
         } for instance in self.operations.instances()]
+
+    def _shapes(self, instance: dict) -> list[str]:
+        try:
+            return list(self.operations.engines.get(instance["engine"]).api_paths())
+        except KeyError:
+            return []
 
     @staticmethod
     def _engine_name(instance: dict) -> str:
@@ -240,11 +260,15 @@ class Gateway:
 
     # -- taking the card ----------------------------------------------------
 
-    def acquire(self, wanted: str) -> Lease:
+    def acquire(self, wanted: str, shape: str | None = None) -> Lease:
         """Take the card with the named model on it.
 
         Waits for the request in front, then switches models if this one is not
         already loaded. Returns once the model is answering.
+
+        `shape` is the kind of request about to be forwarded. Checked before
+        anything is loaded: an entry whose engine does not answer that shape is
+        refused straight away rather than after a forty-second load.
         """
         started = time.perf_counter()
         # Read once and pass it down. Asking what the instances are doing means
@@ -258,6 +282,8 @@ class Gateway:
         # under the card lock, and the gateway is what moves models.
         instances = self.operations.instances()
         instance = self.resolve(wanted, instances)
+        if shape is not None:
+            self._refuse_wrong_shape(instance, shape, instances)
         instance_id, port = instance["id"], instance["port"]
 
         self._card.acquire()
@@ -298,6 +324,34 @@ class Gateway:
             self._held = False
             self._holder = None
             self._card.release()
+
+    # -- which shapes an entry answers --------------------------------------
+
+    def _answers(self, instance: dict, shape: str) -> bool:
+        """Whether this entry's engine answers this kind of request."""
+        try:
+            engine = self.operations.engines.get(instance["engine"])
+        except KeyError:
+            return False
+        return shape in engine.api_paths()
+
+    def _refuse_wrong_shape(self, instance: dict, shape: str,
+                            instances: list[dict]) -> None:
+        """Say no, and say which entries would have worked.
+
+        A client that sent the wrong shape does not know which of its models
+        are on which engine, and has no way to find out from a refusal that
+        only says no. Naming them turns a dead end into one edit.
+        """
+        if self._answers(instance, shape):
+            return
+        able = sorted(other["id"] for other in instances
+                      if self._answers(other, shape))
+        raise ShapeNotServed(
+            f"{instance['id']} runs on {instance['engine']}, which does not "
+            f"answer {shape}. "
+            + (f"Configured models that do: {', '.join(able)}." if able
+               else "No configured model answers it."))
 
     # -- what the buttons on the page have to respect -----------------------
 

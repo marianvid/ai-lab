@@ -23,12 +23,32 @@ from __future__ import annotations
 
 from ..types import Format, ModelSet
 from ..hosts.command import which
-from .base import LaunchPlan, ParamSpec, validate
+from .base import ANTHROPIC_PATHS, OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
 
 # Every one of these was arrived at by running it on this machine. The help
 # text says what it costs, because on a single 32 GB card these settings trade
 # against each other and the trade is not obvious.
+# How a model writes a tool call, as vLLM names the formats it can read. Taken
+# from `vllm serve --help=all` on the installed build; the list grows with
+# every release, and a name added upstream has to be added here before it can
+# be chosen. Empty comes first and means tool calling is off.
+#
+# There is no free-text setting here on purpose. A parser name is checked
+# against this list, so a typo is refused when it is typed rather than
+# discovered as an engine that will not start.
+TOOL_PARSERS = (
+    "", "apertus", "cohere_command3", "cohere_command4", "deepseek_v3",
+    "deepseek_v31", "deepseek_v32", "deepseek_v4", "dots", "ernie45",
+    "functiongemma", "gemma4", "gigachat3", "glm45", "glm47", "granite",
+    "granite-20b-fc", "granite4", "hermes", "hunyuan_a13b", "hy_v3", "inkling",
+    "internlm", "jamba", "kimi_k2", "kimi_k3", "lfm2", "ling3", "llama3_json",
+    "llama4_json", "llama4_pythonic", "longcat", "mimo", "minicpm5",
+    "minimax_m2", "minimax_m3", "mistral", "muse_glimmer", "olmo3", "openai",
+    "phi4_mini_json", "poolside_v1", "pythonic", "qwen3_coder", "qwen3_xml",
+    "seed_oss", "step3", "step3p5", "xlam",
+)
+
 PARAMS = (
     ParamSpec("context_size", "Context size", "int", 32768,
               minimum=512, maximum=1048576, group="memory",
@@ -56,6 +76,17 @@ PARAMS = (
                    "pure waste for text work. Measured on Gemma-4: startup "
                    "halved, from 117 seconds to about 50, with no loss of "
                    "throughput."),
+    ParamSpec("tool_parser", "Tool calling", "choice", "",
+              choices=TOOL_PARSERS, group="memory",
+              help="Empty means the model cannot call tools. Anything else "
+                   "turns tool calling on and says how this model writes a "
+                   "call, which differs by model family: qwen3_coder for "
+                   "Qwen3-Coder, gemma4 for Gemma-4, glm47 for GLM-4.7. "
+                   "Needed by any agent that uses tools — Claude Code refuses "
+                   "to start without it, with vLLM's own message about "
+                   "--enable-auto-tool-choice. Picking the wrong one is not "
+                   "silent: the model answers, and its tool calls arrive as "
+                   "text nobody acts on."),
 )
 
 # Formats vLLM reads. NVFP4 arrives in two different packagings —
@@ -98,8 +129,25 @@ class VllmEngine:
         ]
         if settings["language_model_only"]:
             argv.append("--language-model-only")
+        # The two flags go together. vLLM refuses "auto" tool choice unless it
+        # has both, so one setting sets both and there is no way to configure
+        # half of it.
+        if settings["tool_parser"]:
+            argv += ["--enable-auto-tool-choice",
+                     "--tool-call-parser", settings["tool_parser"]]
         # No chat page: vLLM serves an API and nothing a person can open.
         return LaunchPlan(argv=argv, env={}, health_path="/health", web_ui=False)
 
     def ready(self, port: int) -> bool:
         return http_ok(port, "/health")
+
+    def api_paths(self) -> tuple[str, ...]:
+        """Both shapes.
+
+        Besides the usual one, vLLM serves `/v1/messages` — the shape a client
+        written against Anthropic's own library sends. It is the same models
+        answering; only the wording of the request differs. That is also why
+        vLLM depends on the `anthropic` package: it borrows the request and
+        answer definitions rather than writing them out again.
+        """
+        return OPENAI_PATHS + ANTHROPIC_PATHS

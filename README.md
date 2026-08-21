@@ -88,6 +88,49 @@ Load and Unload on the Models page reach the engines directly, so they ask
 first when the card is mid-answer, and offer to stop it anyway. A wedged model
 has to be stoppable — but by decision rather than by accident.
 
+### Two ways of writing a request
+
+Nearly every client speaks the shape above. A client written against
+Anthropic's own library speaks a different one and posts to `/v1/messages`
+instead. Both are accepted here.
+
+Not every engine answers both. vLLM does; llama.cpp does not. An entry asked
+for a shape its engine cannot answer is refused by name, before anything is
+loaded, and told which entries would have worked:
+
+```
+gemma-general runs on llamacpp, which does not answer /v1/messages.
+Configured models that do: coder-fast, glm-flash, qwen36-nvfp4, text-bulk.
+```
+
+Which shapes each entry answers is in `GET /v1/models`, so a client can look
+rather than guess. The engine declares it, so adding a shape — or an engine
+that speaks one — is a line in that engine's file and nothing else changes.
+
+### Running Claude Code against a model on your own card
+
+This works, and it needs one setting most models do not have on by default.
+
+An agent that uses tools needs the engine to understand how *this* model writes
+a tool call. A model does not return structured data when it wants to use a
+tool; it writes text, and every model family writes it differently. vLLM has to
+be told which to expect, and refuses tool use outright until it is. That is the
+**Tool calling** setting on the entry: empty means off, otherwise it names the
+model's family — `qwen3_coder`, `gemma4`, `glm47`.
+
+With that set, and a context window big enough for the agent's own prompt:
+
+```sh
+ANTHROPIC_BASE_URL=http://ai-lab.lan:8090 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_MODEL=coder-fast CLAUDE_CODE_MAX_CONTEXT_TOKENS=98304 claude -p "read note.txt and tell me which colour it mentions"
+```
+
+Measured here on an RTX PRO 4500 with Qwen3-Coder-30B at NVFP4: Claude Code
+sends about 108,000 characters of prompt and tool definitions before your own
+question, so 32k of context is not enough. 128k did not fit either — vLLM
+wanted 12 GiB of cache and had 10.78 — and said so, naming 117,776 as the
+largest that would. 96k fits, loads in 70 seconds, and leaves the card at
+29.6 GB of 32.6.
+
 ## Structure
 
 ```text

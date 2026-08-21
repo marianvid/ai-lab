@@ -82,6 +82,18 @@ def validate(specs: tuple[ParamSpec, ...], values: dict) -> dict:
     }
 
 
+# The shapes a request can arrive in. Two are in circulation, and they are two
+# ways of writing the same thing rather than two kinds of thing.
+#
+# OPENAI is what nearly everything speaks, and every engine here answers it.
+# ANTHROPIC is the other one; a client written against Anthropic's own library
+# sends this, and only some engines understand it. An engine says which it
+# answers through `Engine.api_paths`, so the manager never has to know one
+# engine from another.
+OPENAI_PATHS = ("/v1/chat/completions", "/v1/completions", "/v1/embeddings")
+ANTHROPIC_PATHS = ("/v1/messages", "/v1/messages/count_tokens")
+
+
 @dataclass(frozen=True, slots=True)
 class LaunchPlan:
     """The command line for one instance, and how to tell when it is ready."""
@@ -121,5 +133,16 @@ class Engine(Protocol):
 
         Polled repeatedly during a load, so it must be cheap and must never
         raise.
+        """
+        ...
+
+    def api_paths(self) -> tuple[str, ...]:
+        """The request shapes this engine answers.
+
+        Every engine answers `OPENAI_PATHS`. One that also speaks another shape
+        adds it here, and the front door then accepts that shape for its
+        entries and refuses it for the rest — with a sentence naming which
+        entries would have worked, rather than passing the request on to an
+        engine that will reject it in its own words.
         """
         ...

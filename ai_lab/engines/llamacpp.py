@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ..types import Format, ModelSet
 from ..hosts.command import which
-from .base import LaunchPlan, ParamSpec, validate
+from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
 
 CACHE_TYPES = ("f16", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0")
@@ -228,3 +228,12 @@ class LlamaCppEngine:
 
     def ready(self, port: int) -> bool:
         return http_ok(port, "/health")
+
+    def api_paths(self) -> tuple[str, ...]:
+        """The OpenAI shape, and only that one.
+
+        llama.cpp's server does not serve `/v1/messages`. Said here rather than
+        assumed anywhere else, so an entry on this engine is refused that shape
+        with an explanation instead of a puzzling 404 from the engine.
+        """
+        return OPENAI_PATHS

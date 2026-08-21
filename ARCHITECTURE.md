@@ -92,6 +92,23 @@ switch unloads, polls until the card is under 512 MB, and only then loads. If
 it never goes quiet, the switch fails and says what is still holding it. On
 unified memory there is nothing to wait for and the step is skipped.
 
+**A request arrives in one of two shapes, and the engine says which it reads.**
+Nearly every client speaks the OpenAI shape. A client written against
+Anthropic's own library posts to `/v1/messages` instead — the same models
+answering, only the wording of the request differs. vLLM serves both; llama.cpp
+serves one.
+
+`Engine.api_paths` is where that is stated, next to the formats the engine
+reads and the settings it takes, so nothing above has to know one engine from
+another. The front door registers every shape any engine can answer, and an
+entry asked for a shape its engine cannot answer is refused before the card is
+touched — with the entries that *would* have worked, because a client does not
+know which of its models runs on which engine and a refusal that only says no
+leaves it nowhere to go.
+
+Refusing early matters: the alternative is a forty-second load followed by a
+404 from the engine about a path the client never chose.
+
 **The buttons on the page are the other way in.** Agent traffic is safe from
 itself because every request takes the card in turn. Load, Unload and Apply
 reach the engines directly and know nothing about who is mid-answer, so they

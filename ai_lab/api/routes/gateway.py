@@ -1,8 +1,14 @@
-"""The OpenAI-compatible front door.
+"""The front door: one address for every configured model.
 
-One address for every configured model. A client names the model it wants; if
-that model is not loaded it is loaded first, and the client only notices that
-the first request took longer.
+A client names the model it wants; if that model is not loaded it is loaded
+first, and the client only notices that the first request took longer.
+
+Requests arrive in one of two shapes. Nearly everything speaks the OpenAI one.
+A client written against Anthropic's own library speaks the other, and only
+some engines answer it — vLLM does, llama.cpp does not. Both are accepted here
+and an entry that cannot answer a shape is refused by name, because the
+alternative is forwarding the request to an engine that replies 404 about a
+path the client never chose.
 
 This file decides nothing about models. It reads the name out of the body, asks
 `Gateway` for a lease, and forwards the request to whichever port that lease
@@ -11,16 +17,21 @@ points at.
 
 from __future__ import annotations
 
+from ...engines.base import ANTHROPIC_PATHS, OPENAI_PATHS
 from ...gateway import Gateway
 from ..passthrough import forward
+
+# Every shape any engine here can answer. Registered as routes whatever is
+# configured: a path that exists and explains why this model cannot serve it is
+# more use than one that does not exist at all.
+FORWARDED = OPENAI_PATHS + ANTHROPIC_PATHS
 
 
 def register(router, operations, gateway: Gateway) -> None:
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway))
     router.add("GET", "/api/gateway", lambda **_: gateway.stats())
-    for path in ("/v1/chat/completions", "/v1/completions", "/v1/embeddings"):
-        router.add("POST", path,
-                   _forwarder(gateway, path))
+    for path in FORWARDED:
+        router.add("POST", path, _forwarder(gateway, path))
 
 
 def _catalogue(gateway: Gateway) -> dict:
@@ -39,7 +50,8 @@ def _catalogue(gateway: Gateway) -> dict:
             # ignores unknown fields. A person reading this by hand wants to
             # know which of these are up.
             "ai_lab": {"loaded": row["loaded"], "ready": row["ready"],
-                       "port": row["port"], "aliases": row["aliases"]},
+                       "port": row["port"], "aliases": row["aliases"],
+                       "shapes": row["shapes"]},
         })
     return {"object": "list", "data": data}
 
@@ -53,7 +65,9 @@ def _forwarder(gateway: Gateway, path: str):
 
         # The lease is held until the last byte of the answer has been read, so
         # a swap cannot pull the model out from under a stream in progress.
-        lease = gateway.acquire(wanted)
+        # `path` goes with it: an entry whose engine does not answer this shape
+        # is refused before anything is loaded, not after.
+        lease = gateway.acquire(wanted, shape=path)
 
         # The engine knows its own model by a different name than the entry
         # does, and rejects a name it does not recognise. Ask by the name it
