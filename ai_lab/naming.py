@@ -27,6 +27,29 @@ COMPANION_NAMES = frozenset({
 })
 COMPANION_PREFIXES = ("tokenizer",)
 
+# Weight files that are a part of a model rather than a model of their own.
+#
+# A vision projector is the clear case. `mmproj-gemma-4-26B-A4B-it-f16.gguf`
+# sits beside the model's own GGUF and holds the part that turns a picture into
+# something the model can read. It ends in .gguf and it really is weights, but
+# llama.cpp is handed it with --mmproj *alongside* the model; on its own it
+# loads nothing. Counted as a model it becomes a second entry in the library
+# that can never be started — the same fault that used to make
+# `model_mtp.safetensors` look like a model, which the directory-is-the-model
+# rule fixed for every format except GGUF. GGUF needs saying explicitly,
+# because there one file really is one model.
+# The separator is part of the rule. Matching a bare "mmproj" would also catch
+# a model that happens to begin with those letters, and silently hiding a real
+# model is a worse fault than showing a projector.
+PART_PREFIXES = ("mmproj-",)
+PART_NAMES = frozenset({"mmproj"})
+
+
+def is_part(name: str) -> bool:
+    """Whether a weight file is a component of a model rather than a model."""
+    base = stem(name).lower()
+    return base in PART_NAMES or base.startswith(PART_PREFIXES)
+
 
 def is_weight(name: str) -> bool:
     return any(name.lower().endswith(suffix) for suffix in WEIGHT_SUFFIXES)

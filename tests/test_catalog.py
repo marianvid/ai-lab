@@ -141,3 +141,68 @@ class DirectoryIsTheModelTests(unittest.TestCase):
     def test_gguf_still_gets_one_model_per_file(self):
         models = self.build("gguf", ["alpha.gguf", "beta.gguf"])
         self.assertEqual(sorted(m.name for m in models), ["alpha", "beta"])
+
+
+class VisionProjectorTests(unittest.TestCase):
+    """A projector is weights, but it is not a model.
+
+    `mmproj-<model>-f16.gguf` sits beside a GGUF model and holds the part that
+    turns a picture into something the model can read. llama.cpp is handed it
+    with --mmproj alongside the model; started on its own it serves nothing.
+
+    Left as a model it becomes a library entry that can never be started, and
+    an entry pointing at it blocks deleting the real model — the pair that made
+    `model_mtp.safetensors` a problem for safetensors. There the
+    directory-is-the-model rule solved it. GGUF has no such rule, because there
+    one file genuinely is one model, so this has to be said out loud.
+    """
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.root = Path(self._temporary.name)
+        self.addCleanup(self._temporary.cleanup)
+
+    def scan(self):
+        return Catalog().scan([repository(self.root, format="gguf")])
+
+    def test_a_projector_is_not_a_second_model(self):
+        make_files(self.root / "gemma-4-26b-a4b",
+                   "gemma-4-26B-A4B-it-Q4_K_M.gguf", size=100)
+        make_files(self.root / "gemma-4-26b-a4b",
+                   "mmproj-gemma-4-26B-A4B-it-f16.gguf", size=10)
+        models = self.scan()
+        self.assertEqual([model.name for model in models],
+                         ["gemma-4-26B-A4B-it-Q4_K_M"])
+
+    def test_the_projector_still_belongs_to_the_model(self):
+        # Attached, not ignored: it has to travel with the model when the whole
+        # set is downloaded or deleted.
+        make_files(self.root / "qwen", "Qwen-Q4_K_M.gguf", size=100)
+        make_files(self.root / "qwen", "mmproj-Qwen-bf16.gguf", size=10)
+        model = self.scan()[0]
+        self.assertIn("mmproj-Qwen-bf16.gguf",
+                      [Path(item.path).name for item in model.files])
+
+    def test_the_model_is_still_what_gets_started(self):
+        # The entrypoint must be the model, never the projector, whichever way
+        # the two happen to sort.
+        make_files(self.root / "qwen", "Qwen-Q4_K_M.gguf", size=100)
+        make_files(self.root / "qwen", "mmproj-Qwen-bf16.gguf", size=10)
+        self.assertTrue(self.scan()[0].entrypoint.endswith("Qwen-Q4_K_M.gguf"))
+
+    def test_a_projector_on_its_own_is_no_model_at_all(self):
+        make_files(self.root / "stray", "mmproj-something-f16.gguf", size=10)
+        self.assertEqual(self.scan(), [])
+
+    def test_a_model_merely_starting_with_the_letters_is_untouched(self):
+        # The separator is part of the rule. Hiding a real model because its
+        # name begins with the same letters is a worse fault than showing a
+        # projector, so the match has to be the projector's actual shape.
+        make_files(self.root / "odd", "mmprojector-lab-Q4_K_M.gguf", size=100)
+        self.assertEqual([model.name for model in self.scan()],
+                         ["mmprojector-lab-Q4_K_M"])
+
+    def test_a_projector_named_without_a_model_is_still_a_projector(self):
+        make_files(self.root / "plain", "Qwen-Q4_K_M.gguf", size=100)
+        make_files(self.root / "plain", "mmproj.gguf", size=10)
+        self.assertEqual([model.name for model in self.scan()], ["Qwen-Q4_K_M"])

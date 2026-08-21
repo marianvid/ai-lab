@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import Repository
-from .naming import base_name, is_companion, is_weight, missing_shards
+from .naming import base_name, is_companion, is_part, is_weight, missing_shards
 from .types import Format, ModelFile, ModelSet
 
 
@@ -107,9 +107,12 @@ class Catalog:
         for path in sorted(directory.iterdir()):
             if not path.is_file():
                 continue
-            if is_weight(path.name):
+            # A part is weights, but not a model: it goes with whatever else
+            # is in the directory rather than becoming an entry of its own.
+            # The order matters — a vision projector passes `is_weight`.
+            if is_weight(path.name) and not is_part(path.name):
                 weights.append(path)
-            elif is_companion(path.name):
+            elif is_companion(path.name) or is_part(path.name):
                 companions.append(path)
         return weights, companions
 

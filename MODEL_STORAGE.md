@@ -103,6 +103,47 @@ Two consequences that caused real bugs:
 So a directory holding five weight files plus a tokenizer is **one** thing to
 show in the interface, not six.
 
+### A projector is weights, but it is not a model
+
+`mmproj-gemma-4-26B-A4B-it-f16.gguf` sits beside a GGUF model and holds the part
+that turns a picture into something the model can read. It ends in `.gguf` and it
+really is weights, but llama.cpp is handed it with `--mmproj` *alongside* the
+model; started on its own it serves nothing.
+
+It is the GGUF version of the `model_mtp.safetensors` problem above. For every
+other format the directory-is-the-model rule takes care of it. GGUF has no such
+rule — there one file genuinely is one model — so this one is named explicitly,
+in `naming.py`. A projector is attached to the model in its directory, the way a
+tokenizer is, and never listed on its own.
+
+Left as a model it becomes a library entry that can never be started, and an
+entry pointing at it blocks deleting the real model beside it.
+
+## The same layout on the Mac
+
+The M3 Max keeps its models at `/Volumes/Marian_Backup/models`, with the same
+format-first tree — `gguf/`, `safetensors/`, `fp8/`, `nvfp4/` — so a path means
+the same thing on both machines and a model can be moved across without being
+reorganised.
+
+Two differences that are not going away:
+
+- **Only `gguf/` has anything in it, and only llama.cpp reads it.** vLLM needs
+  CUDA; Apple silicon offers Metal. The interface shows vLLM greyed out with
+  that reason rather than pretending it might work. `fp8/` and `nvfp4/` exist
+  for symmetry and are empty.
+- **Memory is unified**, so there is no separate pool of video memory to wait
+  for after an unload. The step that polls until the card goes quiet is skipped
+  entirely, and the readings report the engine process's resident memory
+  instead.
+
+Weights arrive through the Hugging Face cache and do not stay there. That cache
+keeps a repository directory of hashed blobs with a snapshot of symlinks over
+them, which is a fine way to download and a poor way to keep anything: the name
+on disk is a hash, one file can be a snapshot of another, and nothing says which
+quantisation you are looking at. Moving a model into the store is what makes it
+a model rather than a download.
+
 ## Weight formats on NVIDIA hardware
 
 Relevant context for choosing what to download, given a single RTX PRO 4500
