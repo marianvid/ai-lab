@@ -717,3 +717,48 @@ class DrawingTheListTests(unittest.TestCase):
         self.assertTrue(rows["model-1"]["running"])
         self.assertFalse(rows["model-0"]["running"])
         self.assertFalse(rows["model-2"]["running"])
+
+
+class EngineOutputTests(unittest.TestCase):
+    """What an engine is saying about itself, while it runs.
+
+    A model that answers oddly or slowly is explaining itself the whole time,
+    and reading that used to mean ssh and journalctl.
+    """
+
+    def setUp(self):
+        self.operations, self.host = operations_with_instances(2)
+        self.host.log_lines = ["INFO listening on 8100", "INFO slot released"]
+
+    def test_a_running_model_hands_over_what_it_printed(self):
+        self.host.running.add("model-0")
+        answer = self.operations.logs("model-0")
+        self.assertTrue(answer["running"])
+        self.assertEqual(answer["lines"], self.host.log_lines)
+
+    def test_a_stopped_model_is_answered_but_with_nothing(self):
+        # Deliberate. systemd keeps a journal after a unit exits and macOS
+        # keeps no log at all once the process is gone, so a page offering
+        # this for a stopped model would work on one machine and not the
+        # other. Why a model would not *start* is a different question, and
+        # the failed load already carries that sentence.
+        answer = self.operations.logs("model-0")
+        self.assertFalse(answer["running"])
+        self.assertEqual(answer["lines"], [])
+
+    def test_an_unknown_instance_is_a_missing_thing(self):
+        # A KeyError, so the web layer answers 404 without being told.
+        with self.assertRaises(KeyError):
+            self.operations.logs("no-such-entry")
+
+    def test_how_many_lines_is_the_caller_s_choice(self):
+        self.host.running.add("model-0")
+        seen = {}
+        original = self.host.logs
+
+        def counted(instance_id, lines=15):
+            seen["lines"] = lines
+            return original(instance_id, lines)
+        self.host.logs = counted
+        self.operations.logs("model-0", lines=500)
+        self.assertEqual(seen["lines"], 500)

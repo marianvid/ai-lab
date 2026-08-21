@@ -5,7 +5,7 @@
 // reached the user because nothing was watching.
 
 import assert from 'node:assert/strict';
-import { after, before, describe, it } from 'node:test';
+import { after, before, beforeEach, describe, it } from 'node:test';
 
 import { installDom, button, settle } from './support/dom.js';
 
@@ -554,5 +554,105 @@ describe('a load that fails', () => {
     assert.equal(document.querySelector('dialog'), null,
                  'a success should not interrupt');
     assert.match(document.getElementById('status').textContent, /12.7 s/);
+  });
+});
+
+describe('reading what an engine is saying', () => {
+  // A model that answers oddly or slowly is talking about itself the whole
+  // time, and until now that meant ssh and journalctl.
+
+  const LINES = ['INFO server listening on 8080', 'INFO slot released'];
+
+  // The panel is one panel for the whole page, so it keeps its state in the
+  // module. In a browser that is right — there is one page. Here each test
+  // builds a fresh document, and a panel left open belongs to the last one.
+  // It also runs a timer, which would keep the test process alive.
+  beforeEach(async () => {
+    const { closeLogs } = await import('../../ai_lab/web/js/logpane.js');
+    closeLogs();
+  });
+  after(async () => {
+    const { closeLogs } = await import('../../ai_lab/web/js/logpane.js');
+    closeLogs();
+  });
+
+  function pane() {
+    return document.querySelector('.logpane');
+  }
+
+  async function withLogs(overrides = {}) {
+    const { view } = await renderPage({
+      '/api/instances/qwen-coder/logs': { id: 'qwen-coder', running: true, lines: LINES },
+      ...overrides,
+    });
+    return view;
+  }
+
+  it('offers a log button on the row', async () => {
+    const view = await withLogs();
+    assert.doesNotThrow(() => button(view, 'Log'));
+  });
+
+  it('refuses it for a model that is not running', async () => {
+    // A stopped model has a journal on Linux and no log at all on macOS, so
+    // offering it would work on one machine and not the other.
+    const view = await withLogs({
+      '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
+    });
+    assert.equal(button(view, 'Log').disabled, true);
+  });
+
+  it('opens a panel with what the engine printed', async () => {
+    const view = await withLogs();
+    button(view, 'Log').click();
+    await settle();
+    assert.ok(pane(), 'no panel appeared');
+    assert.match(pane().textContent, /slot released/);
+  });
+
+  it('names the model the panel is about', async () => {
+    const view = await withLogs();
+    button(view, 'Log').click();
+    await settle();
+    assert.match(pane().textContent, /Coding/);
+  });
+
+  it('closes again when the same button is pressed', async () => {
+    // The button is the toggle, so it has to say which way it will go.
+    const view = await withLogs();
+    button(view, 'Log').click();
+    await settle();
+    assert.doesNotThrow(() => button(document.body, 'Hide log'));
+    button(document.body, 'Hide log').click();
+    await settle();
+    assert.equal(pane(), null);
+  });
+
+  it('sits outside the list, so a long page does not carry it off', async () => {
+    const view = await withLogs();
+    button(view, 'Log').click();
+    await settle();
+    assert.equal(view.contains(pane()), false,
+                 'the panel was drawn inside the scrolling list');
+  });
+
+  it('says so when the engine has printed nothing yet', async () => {
+    const view = await withLogs({
+      '/api/instances/qwen-coder/logs': { id: 'qwen-coder', running: true, lines: [] },
+    });
+    button(view, 'Log').click();
+    await settle();
+    assert.match(pane().textContent, /printed nothing yet/);
+  });
+
+  it('shows the reason rather than emptying itself when the read fails', async () => {
+    const view = await withLogs({
+      '/api/instances/qwen-coder/logs': {
+        __status: 400, error: 'the manager is not in the systemd-journal group',
+      },
+    });
+    button(view, 'Log').click();
+    await settle();
+    assert.match(pane().textContent, /systemd-journal/);
   });
 });

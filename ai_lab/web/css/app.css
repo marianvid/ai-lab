@@ -294,3 +294,23 @@ a.action:hover { border-color: var(--accent); color: var(--accent); }
   border: 1px solid var(--border); border-radius: 6px;
 }
 #theme:hover { color: var(--text); border-color: var(--accent); }
+
+/* The engine's own output, pinned to the bottom of the window.
+
+   Fixed rather than placed in the page: with a dozen entries the list is
+   longer than the screen, and a panel that scrolled with it would be somewhere
+   else by the time you had read a line. The list scrolls behind this. */
+.logpane {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--panel); border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.25);
+  display: flex; flex-direction: column; max-height: 42vh;
+}
+.logpane .log-head { padding: 0.5rem 1.25rem; border-bottom: 1px solid var(--border); }
+.logpane .log-output {
+  margin: 0; padding: 0.75rem 1.25rem; overflow: auto; flex: 1;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre; color: var(--text);
+}
+/* Room to scroll past the panel, so the last row is not stuck underneath it. */
+body:has(.logpane) main { padding-bottom: 44vh; }

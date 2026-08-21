@@ -47,6 +47,7 @@ export const api = {
     request('POST', `/api/instances/${encodeURIComponent(id)}/apply`,
             force ? { ...changes, force: true } : changes),
   gateway: () => request('GET', '/api/gateway'),
+  logs: (id) => request('GET', `/api/instances/${encodeURIComponent(id)}/logs`),
   update: (id, changes) =>
     request('PATCH', `/api/instances/${encodeURIComponent(id)}`, changes),
   newInstanceForm: () => request('GET', '/api/instances/new'),

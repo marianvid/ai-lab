@@ -134,6 +134,15 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"], "Port 8080 is already in use")
 
+    def test_a_message_written_as_a_sentence_arrives_as_one(self):
+        # KeyError renders its argument with repr(), so "Unknown instance:
+        # nope" would reach the screen wrapped in quotes. Six places raise one
+        # that way and this is where they are all unwrapped.
+        status, payload = self.call("POST", "/api/instances/nope/unload")
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["error"], "nope",
+                         f"arrived as {payload['error']!r}")
+
     def test_a_subclass_lands_on_its_parent_rule(self):
         # Looked up by exact type, a KeyError subclass misses the 404 rule and
         # leaves as a bad request. The gateway raises one for a model name

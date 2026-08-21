@@ -38,6 +38,22 @@ STATUS = {
 }
 
 
+def _message(error: Exception) -> str:
+    """The sentence to show a person.
+
+    KeyError is the awkward one. It renders its argument with repr(), so a
+    message written as a sentence — "Unknown instance: nope" — arrives wrapped
+    in quotes and with anything inside it escaped. Six places raise one that
+    way, and fixing them one at a time only lasts until the seventh. This is
+    the layer that turns an exception into something read on a screen, so it
+    is the layer that unwraps it.
+    """
+    if isinstance(error, KeyError) and len(error.args) == 1 \
+            and isinstance(error.args[0], str):
+        return error.args[0]
+    return str(error) or error.__class__.__name__
+
+
 def status_for(error: Exception) -> HTTPStatus:
     """The first rule that matches, following inheritance.
 
@@ -120,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
         copies what it is given and knows nothing about what is in it.
         """
         status = status_for(error)
-        payload = {"error": str(error) or error.__class__.__name__}
+        payload = {"error": _message(error)}
         detail = getattr(error, "detail", None)
         if isinstance(detail, dict):
             payload.update(detail)

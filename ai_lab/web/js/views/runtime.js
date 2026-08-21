@@ -10,6 +10,7 @@ import { onProgress } from '../events.js';
 import { settingsForm } from '../form.js';
 import { bytes, element, seconds } from '../format.js';
 import { setStatus } from '../status.js';
+import { onPanelChange, toggleLogs, watching } from '../logpane.js';
 
 const progress = new Map();     // instance id -> latest event
 const open = new Set();         // rows with their settings expanded
@@ -283,6 +284,19 @@ function card(instance, models, engines) {
     onclick: () => removeInstance(instance),
   });
 
+  // Only while it is running. A stopped model has a journal on Linux and no
+  // log at all on macOS, so offering it would work on one machine and not the
+  // other — and why a model *would not start* is answered by the sentence a
+  // failed load already carries.
+  const logsButton = element('button', {
+    class: 'action', text: watching() === instance.id ? 'Hide log' : 'Log',
+    title: instance.running
+      ? 'What this engine is printing about itself'
+      : 'Only while the model is running',
+    ...(instance.running ? {} : { disabled: 'disabled' }),
+    onclick: () => toggleLogs(instance),
+  });
+
   const settingsButton = element('button', {
     class: 'action', text: expanded ? 'Hide settings' : 'Settings',
     onclick: () => {
@@ -328,7 +342,7 @@ function card(instance, models, engines) {
         : null,
       element('span', { class: 'pill engine',
                         text: engine ? engine.name : instance.engine }),
-      settingsButton, chatLink(instance), primary, apply, remove,
+      settingsButton, logsButton, chatLink(instance), primary, apply, remove,
     ].filter(Boolean)),
   ]);
 
@@ -450,6 +464,9 @@ function addCard(form) {
 export async function render(container) {
   subscribe();
   redraw = () => render(container);
+  // The panel is pinned to the window, not drawn in the list, so the button
+  // label is the only thing here that has to follow it.
+  onPanelChange(() => redraw());
 
   const [instances, models, settings] = await Promise.all([
     api.instances(), api.models(), api.settings(),

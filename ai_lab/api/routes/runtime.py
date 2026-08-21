@@ -40,6 +40,9 @@ def register(router, operations, gateway=None) -> None:
         return operations.apply_and_reload(id, changes)
 
     router.add("GET", "/api/instances", lambda **_: operations.instances())
+    router.add("GET", "/api/instances/{id}/logs",
+               lambda id, query=None, **_: operations.logs(
+                   id, lines=int((query or {}).get("lines") or 200)))
     router.add("GET", "/api/instances/new", lambda **_: operations.new_instance_form())
     router.add("POST", "/api/instances",
                lambda body=None, **_: operations.create_instance(body or {}))

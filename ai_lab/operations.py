@@ -162,6 +162,22 @@ class Operations:
     def unload(self, instance_id: str) -> Operation:
         return self.runtime.unload(instance_id)
 
+    def logs(self, instance_id: str, lines: int = 200) -> dict:
+        """What the engine has printed about itself.
+
+        Read only while the model is running. A stopped instance has a log on
+        Linux, where systemd keeps the journal after the unit exits, and none
+        on macOS, where the file belongs to a process that is gone — so a page
+        offering it for a stopped model would work on one machine and not the
+        other. Whether it *would not start* is a different question, answered
+        by the sentence a failed load already carries.
+        """
+        instance = self.store.load().instance(instance_id)   # raises if unknown
+        if not self.host.status(instance.id).running:
+            return {"id": instance_id, "running": False, "lines": []}
+        return {"id": instance_id, "running": True,
+                "lines": self.host.logs(instance_id, lines=lines)}
+
     # -- configuring instances ---------------------------------------------
 
     def suggest_port(self) -> int:
