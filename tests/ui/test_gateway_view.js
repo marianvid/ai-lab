@@ -122,7 +122,7 @@ describe('the Gateway page', () => {
 
   it('reports the time to the first token', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /Time to first token\s*0.42 s/);
+    assert.match(view.textContent, /Time to first token \(s\)\s*0.42/);
   });
 
   it('reports how many are waiting', async () => {

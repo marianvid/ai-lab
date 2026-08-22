@@ -132,12 +132,12 @@ function activity(stats) {
          'Requests waiting for a model that is not loaded.'),
     line('Requests per minute', String(stats.requests_per_minute),
          'In the last sixty seconds.'),
-    line('Time to first token', `${stats.average_first_token_s} s`,
+    line('Time to first token (s)', String(stats.average_first_token_s),
          'Averaged over requests that asked for streaming. Without it an '
          + 'engine sends nothing until the answer is finished, so its first '
          + 'byte is the whole generation.'),
     line('Switches', String(stats.switches)),
-    line('Average switch', `${stats.average_switch_s} s`),
+    line('Average switch (s)', String(stats.average_switch_s)),
     line('Time spent switching', `${stats.switching_share}%`,
          'Of the time this was working — answering or loading — how much went '
          + 'on loading.'),
