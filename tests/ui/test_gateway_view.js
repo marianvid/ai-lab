@@ -128,39 +128,14 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /Time to first token\s*0.42 s/);
   });
 
-  it('splits a client\'s wait into the half each side is responsible for', async () => {
-    // Queue and loading is the manager's doing; time to first token is the
-    // model's. Which of the two is larger says where to look when a workflow
-    // feels slow.
-    const { view } = await renderPage();
-    assert.match(view.textContent, /Queue and loading\s*1.4 s/);
-    const queue = [...view.querySelectorAll('.row')]
-      .find((node) => node.textContent.includes('Queue and loading'));
-    assert.match(queue.getAttribute('title'), /Nothing of the answer/);
+  it('reports how many are waiting', async () => {
+    const { view } = await renderPage({ waiting: 7 });
+    assert.match(view.textContent, /Queue size\s*7/);
   });
 
   it('states the share of working time spent loading', async () => {
     const { view } = await renderPage();
     assert.match(view.textContent, /18.5%/);
-  });
-
-  it('says plainly when more time goes on loading than answering', async () => {
-    const { view } = await renderPage({ switching_share: 71 });
-    assert.match(view.textContent, /reorder the workflow/);
-  });
-
-  it('does not accuse a well-behaved workflow of thrashing', async () => {
-    const { view } = await renderPage({ switching_share: 3 });
-    assert.match(view.textContent, /mostly answering/);
-  });
-
-  it('says nothing has been loaded yet before any switch', async () => {
-    const { view } = await renderPage({
-      switches: 0, switching_share: 0, average_switch_s: 0,
-      requests_per_minute: 0, average_first_token_s: 0, recent: [],
-    });
-    assert.equal(view.textContent.includes('NaN'), false, view.textContent);
-    assert.match(view.textContent, /nothing loaded yet/);
   });
 
   it('writes a switch as the move it was, with the time on the right', async () => {

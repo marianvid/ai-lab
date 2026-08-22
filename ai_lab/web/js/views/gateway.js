@@ -195,35 +195,20 @@ function limits(stats, redraw) {
 // grows while you watch it and means the same at 40 as at 40,000; a rate, an
 // average and a share stay comparable to themselves.
 function traffic(stats) {
-  const share = stats.switching_share;
-  const verdict = !stats.switches ? 'nothing loaded yet'
-    : share >= 50 ? 'more time loading models than answering — reorder the '
-                    + 'workflow so steps sharing a model run together'
-    : share >= 20 ? 'a fair share of the time goes on loading'
-    : 'mostly answering';
   return section('Traffic', [
     line('Requests per minute', String(stats.requests_per_minute),
          'In the last sixty seconds. Zero when nothing is happening.'),
-    line('Queue and loading', `${stats.average_wait_s} s`,
-         'From a request arriving to the engine seeing it: the queue in front '
-         + 'of it, and a model change if one was needed. Nothing of the '
-         + 'answer. This half is the manager\u2019s doing.'),
+    line('Queue size', String(stats.waiting),
+         'Requests waiting for a model that is not loaded.'),
     line('Time to first token', `${stats.average_first_token_s} s`,
-         'From the engine seeing the request to the first token coming back — '
-         + 'reading the prompt, mostly. This half is the model\u2019s doing. '
-         + 'Averaged over requests that asked for streaming: without it an '
+         'Averaged over requests that asked for streaming. Without it an '
          + 'engine sends nothing until the answer is finished, so its first '
-         + 'byte is the whole generation and the two do not average together. '
-         + 'The two lines above add up to how long a client waits to see '
-         + 'anything.'),
+         + 'byte is the whole generation.'),
     line('Switches', String(stats.switches)),
     line('Average switch', `${stats.average_switch_s} s`),
-    line('Time spent switching', `${share}%`,
+    line('Time spent switching', `${stats.switching_share}%`,
          'Of the time this was working — answering or loading — how much went '
-         + 'on loading. Measured against the working time rather than the '
-         + 'clock, so a machine that sits idle overnight does not flatter a '
-         + 'workflow that spends its life swapping.'),
-    element('p', { class: 'muted', text: verdict }),
+         + 'on loading.'),
   ]);
 }
 
