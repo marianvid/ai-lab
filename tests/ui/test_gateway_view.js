@@ -233,8 +233,6 @@ describe('the limits, on the page that shows what they cost', () => {
       'PATCH /api/gateway': { __status: 400,
                               error: 'between_bytes_s must be between 1.0 and 3600.0' },
     });
-    const { attachStatus } = await import('../../ai_lab/web/js/status.js');
-    attachStatus(context.document.getElementById('status'));
     const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
     await render(context.view);
     await settle();
@@ -244,7 +242,9 @@ describe('the limits, on the page that shows what they cost', () => {
     await settle();
     const { stopRefreshing } = await import('../../ai_lab/web/js/views/gateway.js');
     stopRefreshing();
-    const told = context.document.getElementById('status').textContent;
+    // A refusal takes the page, rather than whispering at the bottom of it.
+    const dialog = context.document.querySelector('dialog');
+    const told = dialog ? dialog.textContent : '';
     context.window.close();          // after reading it: closing empties it
     assert.match(told, /must be between/);
   });

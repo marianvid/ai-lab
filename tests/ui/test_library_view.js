@@ -197,15 +197,17 @@ describe('what a search that found nothing means', () => {
   // machine can run — which on the Mac is everything but GGUF. The switch that
   // showed the rest was the only way to tell, and it is gone.
 
+  // Said where the results would be, right under the box that was typed into.
+  // There used to be a line at the foot of the page for this; it was a long
+  // way from where anybody was looking, and the next action wiped it.
   async function searchFor(answer) {
     const context = await renderPage({ '/api/hf/search': answer });
-    const { attachStatus } = await import('../../ai_lab/web/js/status.js');
-    attachStatus(document.getElementById('status'));
     const input = context.view.querySelector('input.grow');
     input.value = 'towerinstruct';
     button(context.view, 'Search').click();
     await settle();
-    return document.getElementById('status').textContent;
+    const said = context.view.querySelector('.outcome');
+    return said ? said.textContent : '';
   }
 
   it('says so plainly when there really is nothing', async () => {
@@ -218,8 +220,18 @@ describe('what a search that found nothing means', () => {
     assert.match(text, /none in a format this machine can run/);
   });
 
-  it('counts what it is showing, not what it hid', async () => {
-    const text = await searchFor({ results: [SEARCH_RESULT], hidden: 9 });
-    assert.match(text, /1 repositories found/);
+  it('says nothing at all when there are results to look at', async () => {
+    // The list is the answer. Counting it in a sentence beside it was the
+    // page telling you what you could already see — and it counted what it
+    // was showing, never what it hid, which nobody could tell from the
+    // sentence anyway.
+    const context = await renderPage({
+      '/api/hf/search': { results: [SEARCH_RESULT], hidden: 9 } });
+    const input = context.view.querySelector('input.grow');
+    input.value = 'towerinstruct';
+    button(context.view, 'Search').click();
+    await settle();
+    assert.equal(context.view.querySelector('.outcome'), null);
+    assert.match(context.view.textContent, /unsloth\/Qwen3-GGUF/);
   });
 });

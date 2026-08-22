@@ -2,10 +2,11 @@
 // Everything here is read-only by decision.
 
 import { api } from '../api.js';
+import { showNotice } from '../confirm.js';
 import { chooseFolder } from '../browse.js';
+import { whileWorking } from '../working.js';
 import { onLog } from '../events.js';
 import { bytes, element, seconds } from '../format.js';
-import { setStatus } from '../status.js';
 
 // Lines arriving while a build runs, kept here so switching tabs and coming
 // back does not lose them.
@@ -25,8 +26,9 @@ function subscribeToBuildLog() {
       pane.textContent = lines.join('\n');
       pane.scrollTop = pane.scrollHeight;
     }
-    if (event.stream === 'status') setStatus(event.text, 'muted');
-    if (event.stream === 'err') setStatus(event.text, 'error');
+    // A build's own progress and its errors both belong in the pane above,
+    // with the rest of that build's output. Splitting them across two places
+    // meant reading a compile in two directions at once.
   });
 }
 
@@ -69,13 +71,14 @@ function repositoryRow(item, refresh) {
 
   const save = async (path) => {
     field.value = path;
-    setStatus(`Saving ${item.name}…`);
     try {
       await api.updateRepository(item.id, { path });
-      setStatus(`${item.name} now points at ${path}`, 'ok');
+      // Nothing is said on success: the field now shows the new path, which
+      // is the whole message.
       refresh();
     } catch (error) {
-      setStatus(error.message, 'error');
+      await showNotice({ title: `Could not point ${item.name} at ${path}`,
+                         body: error.message });
     }
   };
 
@@ -129,29 +132,34 @@ function engineState(engine) {
 function sourceControls(engine, source, refresh) {
   const check = element('button', {
     class: 'action', text: 'Check for updates',
-    onclick: async () => {
-      setStatus('Asking upstream…');
+    // The answer is the pill beside the engine's name: it becomes either
+    // "available" or "<version> available". Saying the same thing in a
+    // sentence as well was two places to keep in step.
+    onclick: (event) => whileWorking(event.target, 'Checking…', async () => {
       try {
-        const result = await api.checkBuild(engine.id);
-        setStatus(result.update_available
-          ? `${result.latest} is available (you have ${result.installed})`
-          : `Up to date at ${result.installed}`, 'ok');
+        await api.checkBuild(engine.id);
         refresh();
-      } catch (error) { setStatus(error.message, 'error'); }
-    },
+      } catch (error) {
+        await showNotice({ title: `Could not check ${engine.name}`,
+                           body: error.message });
+      }
+    }),
   });
 
   const update = source.update_available
     ? element('button', {
         class: 'action', text: `Update to ${source.latest}`,
-        onclick: async () => {
+        // The pill turns to "building…" and the log pane starts filling.
+        onclick: (event) => whileWorking(event.target, 'Starting…', async () => {
           try {
             await api.updateBuild(engine.id);
             logs.set(engine.id, []);
-            setStatus('Build started', 'ok');
             refresh();
-          } catch (error) { setStatus(error.message, 'error'); }
-        },
+          } catch (error) {
+            await showNotice({ title: `Could not build ${engine.name}`,
+                               body: error.message });
+          }
+        }),
       })
     : null;
 

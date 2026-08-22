@@ -6,10 +6,10 @@
 // before you could do anything with it.
 
 import { api } from '../api.js';
-import { confirmDestructive } from '../confirm.js';
+import { confirmDestructive, showNotice } from '../confirm.js';
+import { whileWorking } from '../working.js';
 import { capabilities } from '../icons.js';
 import { bytes, element } from '../format.js';
-import { setStatus } from '../status.js';
 
 let results = [];        // Hugging Face search results
 let sets = [];           // downloadable models in the opened repository
@@ -33,12 +33,11 @@ async function remove(model) {
           + 'This cannot be undone.',
   });
   if (!confirmed) return;
-  setStatus(`Deleting ${model.name}…`);
   try {
-    const result = await api.deleteModel(model.id);
-    setStatus(`Deleted ${result.deleted}, freed ${bytes(result.freed_bytes)}`, 'ok');
+    await api.deleteModel(model.id);
   } catch (error) {
-    setStatus(error.message, 'error');
+    await showNotice({ title: `Could not delete ${model.name}`,
+                       body: error.message });
   }
   redraw();
 }
@@ -63,7 +62,8 @@ function modelRow(model) {
     element('td', {}, state),
     element('td', { class: 'number' },
       element('button', { class: 'action danger', text: 'Delete',
-                          onclick: () => remove(model) })),
+                          onclick: (event) => whileWorking(
+                            event.target, 'Deleting…', () => remove(model)) })),
   ]);
 }
 
@@ -90,39 +90,44 @@ function repositorySection(repository, models) {
 
 // -- getting more -----------------------------------------------------------
 
+// What the last search came back with, said where the results are drawn.
+//
+// "Nothing found" and "nothing you can run" are different answers and a list of
+// length zero cannot tell them apart, so the server says how many it filtered
+// out and this repeats it. Kept beside the empty space it explains rather than
+// at the foot of the page, which is a long way from where you are looking.
+let outcome = '';
+
 async function search(query) {
-  setStatus(`Searching for “${query}”…`);
+  outcome = 'Searching…';
   lastQuery = query;
   try {
     const answer = await api.search(query);
     results = answer.results;
     sets = [];
     openRepo = null;
-    // "Nothing found" and "nothing you can run" are different answers, and a
-    // list of length zero cannot tell them apart. The server says how many it
-    // filtered out so this can.
-    setStatus(results.length
-      ? `${results.length} repositories found`
+    outcome = results.length
+      ? ''
       : answer.hidden
         ? `${answer.hidden} found, none in a format this machine can run`
-        : `Nothing found for “${query}”`);
+        : `Nothing found for “${query}”`;
   } catch (error) {
-    setStatus(error.message, 'error');
+    outcome = '';
+    await showNotice({ title: 'Search failed', body: error.message });
   }
 }
 
 async function openRepository(repo) {
-  setStatus(`Reading ${repo}…`);
+  outcome = `Reading ${repo}…`;
   openRepo = repo;
   sets = [];
   try {
     sets = await api.remoteSets(repo);
-    setStatus(sets.length
-      ? `${sets.length} model${sets.length === 1 ? '' : 's'} in ${repo}`
-      : `Nothing in ${repo} that this machine can run`);
+    outcome = sets.length ? '' : `Nothing in ${repo} that this machine can run`;
   } catch (error) {
     openRepo = null;
-    setStatus(error.message, 'error');
+    outcome = '';
+    await showNotice({ title: `Could not read ${repo}`, body: error.message });
   }
 }
 
@@ -145,29 +150,29 @@ function searchBox() {
 }
 
 async function startDownload(set, button) {
-  button.disabled = true;
-  button.textContent = 'Preparing…';
-  setStatus(`Preparing ${set.name}…`);
-  try {
-    // No destination: the server puts it where that format lives.
-    const transfer = await api.download(set.repo, set.name);
-    currentTransfers = [
-      ...currentTransfers.filter((item) => item.id !== transfer.id), transfer,
-    ];
-    setStatus(`Downloading ${set.name}`, 'ok');
-  } catch (error) {
-    setStatus(error.message, 'error');
-  }
+  await whileWorking(button, 'Preparing…', async () => {
+    try {
+      // No destination: the server puts it where that format lives.
+      const transfer = await api.download(set.repo, set.name);
+      currentTransfers = [
+        ...currentTransfers.filter((item) => item.id !== transfer.id), transfer,
+      ];
+      // Nothing is said on success: a progress bar for this download appears
+      // on the very next redraw, which says it better than a sentence.
+    } catch (error) {
+      await showNotice({ title: `Could not download ${set.name}`,
+                         body: error.message });
+    }
+  });
   await redraw();
 }
 
 async function cancelDownload(transfer) {
-  setStatus(`Cancelling ${transfer.name}…`);
   try {
     await api.cancelDownload(transfer.id);
-    setStatus(`Cancelled ${transfer.name}`);
   } catch (error) {
-    setStatus(error.message, 'error');
+    await showNotice({ title: `Could not cancel ${transfer.name}`,
+                       body: error.message });
   }
   await redraw();
 }
@@ -336,6 +341,9 @@ export async function render(container) {
   // as "nullnull".
   const children = [
     searchBox(),
+    // Right under the box that was typed into, above where the results would
+    // be. Empty whenever there are results to look at instead.
+    outcome ? element('p', { class: 'muted outcome', text: outcome }) : null,
     ...results.map(repositoryRow),
     transferList(transfers.filter((transfer) =>
       ['queued', 'running', 'failed'].includes(transfer.state)

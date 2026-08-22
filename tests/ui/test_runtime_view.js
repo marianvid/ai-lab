@@ -492,19 +492,11 @@ describe('a load that fails', () => {
          + 'maximum model length is 120256.',
   };
 
-  // The status line is attached by the entry point, not by a view, so a test
-  // that renders a view on its own has to do it.
-  async function attachFooter() {
-    const { attachStatus } = await import('../../ai_lab/web/js/status.js');
-    attachStatus(document.getElementById('status'));
-  }
-
   async function failLoad() {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
       '/api/instances/qwen-coder/load': REFUSED,
     });
-    await attachFooter();
     button(view, 'Load').click();
     await settle();
     return document.querySelector('dialog');
@@ -530,23 +522,36 @@ describe('a load that fails', () => {
     assert.match((await failLoad()).textContent, /failed/);
   });
 
-  it('leaves the message in the status line as well', async () => {
-    // For anyone who dismisses it and then wonders what it said.
-    await failLoad();
-    assert.match(document.getElementById('status').textContent, /120256/);
-  });
-
-  it('says nothing extra when a load succeeds', async () => {
+  it('does not interrupt when a load succeeds', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
       '/api/instances/qwen-coder/load': { ok: true, total_ms: 12700, steps: [] },
     });
-    await attachFooter();
     button(view, 'Load').click();
     await settle();
     assert.equal(document.querySelector('dialog'), null,
                  'a success should not interrupt');
-    assert.match(document.getElementById('status').textContent, /12.7 s/);
+  });
+
+  it('puts how long the load took on the row, where it stays', async () => {
+    // It used to be a line at the foot of the page. A load runs from four
+    // seconds to a minute, so you look away — and by the time you look back
+    // the next action has wiped that line. On the row it belongs to an entry
+    // and survives everything except another load of the same entry.
+    const loaded = { ...INSTANCE,
+                     last_operation: { ok: true, kind: 'load', total_ms: 12700,
+                                       steps: [] } };
+    const { view } = await renderPage({ '/api/instances': [loaded] });
+    assert.match(view.querySelector('.row.instance .took').textContent, /12.7/);
+  });
+
+  it('shows no time for an entry whose last load failed', async () => {
+    // A duration next to a load that did not work reads as a success.
+    const broken = { ...INSTANCE, running: false, ready: false,
+                     last_operation: { ok: false, kind: 'load', total_ms: 73189,
+                                       steps: [], error: 'would not start' } };
+    const { view } = await renderPage({ '/api/instances': [broken] });
+    assert.equal(view.querySelector('.row.instance .took'), null);
   });
 });
 

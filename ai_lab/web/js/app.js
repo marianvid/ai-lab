@@ -7,7 +7,6 @@
 import { api } from './api.js';
 import { onChange, startEventStream } from './events.js';
 import { element } from './format.js';
-import { attachStatus } from './status.js';
 import { installTheme } from './theme.js';
 
 import { render as renderSettings } from './views/settings.js';
@@ -40,7 +39,6 @@ const VIEWS = [
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 
-attachStatus(document.getElementById('status'));
 installTheme(document.getElementById('theme'));
 
 let current = VIEWS[0];

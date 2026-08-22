@@ -7,10 +7,10 @@
 import { api } from '../api.js';
 import { confirmDestructive, showNotice } from '../confirm.js';
 import { capabilities, suppressed } from '../icons.js';
+import { whileWorking } from '../working.js';
 import { onProgress } from '../events.js';
 import { settingsForm } from '../form.js';
 import { bytes, element, seconds } from '../format.js';
-import { setStatus } from '../status.js';
 import { onPanelChange, toggleLogs, watching } from '../logpane.js';
 
 const progress = new Map();     // instance id -> latest event
@@ -74,25 +74,20 @@ function subscribe() {
 
 // -- actions ----------------------------------------------------------------
 
-// A failure interrupts; a success does not.
+// A failure interrupts; a success says nothing.
 //
-// A load takes between four seconds and a minute, so you look away. The status
-// line is right for "finished in 12.7 s" and wrong for "it would not start":
-// the page is long, that line sits below it with no border and no background,
-// and the next action wipes it. The explanation is also the useful part — an
-// engine that refuses a context says which one would have fitted — and it is
-// worth taking the page away for.
+// A success has already been shown: the row redraws, the bar fills, the state
+// changes, and how long the load took appears on the row itself. A sentence
+// repeating that is noise. A failure is the opposite — the explanation is the
+// useful part, an engine that refuses a context says which one would have
+// fitted, and it is worth taking the page away for.
 function failed(label, detail) {
-  setStatus(detail, 'error');
   return showNotice({ title: `${label} failed`, body: detail });
 }
 
 function report(label, result) {
   const operation = result.operation || result;
   if (operation.ok === false) return failed(label, operation.error);
-  if (operation.total_ms !== undefined) {
-    setStatus(`${label} finished in ${seconds(operation.total_ms)}`, 'ok');
-  } else setStatus(`${label} done`, 'ok');
   return undefined;
 }
 
@@ -112,17 +107,12 @@ async function askThenForce(label, work, busy) {
         + 'Going ahead abandons that load.',
     confirmLabel: 'Stop it anyway',
   });
-  if (!forced) {
-    setStatus(`Left ${who} alone.`, 'ok');
-    return;
-  }
-  setStatus(`${label}, forced…`);
+  if (!forced) return;
   await report(label, await work(true));
 }
 
 // `work` takes one argument: whether to go ahead despite a busy card.
 async function run(label, work) {
-  setStatus(`${label}…`);
   try {
     await report(label, await work(false));
   } catch (error) {
@@ -145,13 +135,11 @@ async function removeInstance(instance) {
     confirmLabel: 'Remove',
   });
   if (!confirmed) return;
-  setStatus(`Removing ${instance.id}…`);
   try {
     await api.deleteInstance(instance.id);
     open.delete(instance.id);
-    setStatus(`Removed ${instance.id}. Its files are still in Library.`, 'ok');
   } catch (error) {
-    setStatus(error.message, 'error');
+    await failed(`Removing ${instance.id}`, error.message);
   }
   await redraw();
 }
@@ -209,6 +197,21 @@ function modelName(instance, models) {
   return model ? model.name : instance.model_id;
 }
 
+// How long the last load took, on the row rather than in a line at the foot of
+// the page. A load runs from four seconds to a minute, so you look away and
+// come back — and a footer message is gone by then, wiped by whatever was
+// pressed next. Here it stays with the entry it belongs to. The breakdown by
+// phase is in the tooltip; this is the one number worth seeing without asking.
+function lastLoad(instance) {
+  const operation = instance.last_operation;
+  if (!operation || operation.total_ms === undefined || operation.ok === false) {
+    return null;
+  }
+  return element('span', { class: 'muted took',
+                           text: seconds(operation.total_ms),
+                           title: 'How long the last load or unload took' });
+}
+
 // What this row will actually be able to do: what the weights can do, less
 // whatever its own settings switch off.
 function canDo(instance, models) {
@@ -260,10 +263,8 @@ function card(instance, models, engines) {
     title: expanded ? 'Write these settings down without touching the card'
                     : 'Open Settings to change something first',
     disabled: 'disabled',
-    onclick: async () => {
-      save.disabled = true;
-      await run(`Saving ${instance.id}`, () => api.update(instance.id, edits()));
-    },
+    onclick: () => whileWorking(save, 'Saving…', () =>
+      run(`Saving ${instance.id}`, () => api.update(instance.id, edits()))),
   });
   if (form) form.watch(() => { save.disabled = !form.changed(); });
 
@@ -276,22 +277,25 @@ function card(instance, models, engines) {
                   : 'Open Settings to change something first')
       : 'Nothing is running — use Load',
     ...(instance.running && expanded ? {} : { disabled: 'disabled' }),
-    onclick: () => run(`Reloading ${instance.id}`, (force) =>
-      api.apply(instance.id, edits(), force)),
+    onclick: () => whileWorking(apply, 'Reloading…', () =>
+      run(`Reloading ${instance.id}`, (force) =>
+        api.apply(instance.id, edits(), force))),
   });
 
   const primary = instance.running
     ? element('button', {
         class: 'action', text: 'Unload',
-        onclick: () => run(`Unloading ${instance.id}`,
-                           (force) => api.unload(instance.id, force)),
+        onclick: () => whileWorking(primary, 'Unloading…', () =>
+          run(`Unloading ${instance.id}`,
+              (force) => api.unload(instance.id, force))),
       })
     : element('button', {
         class: 'action', text: 'Load',
-        onclick: () => run(`Loading ${instance.id}`, async (force) => {
-          if (expanded) await api.update(instance.id, edits());
-          return api.load(instance.id, force);
-        }),
+        onclick: () => whileWorking(primary, 'Loading…', () =>
+          run(`Loading ${instance.id}`, async (force) => {
+            if (expanded) await api.update(instance.id, edits());
+            return api.load(instance.id, force);
+          })),
       });
 
   const remove = element('button', {
@@ -300,7 +304,8 @@ function card(instance, models, engines) {
       ? 'Unload this entry before removing it'
       : 'Remove this entry; downloaded files stay in Library',
     ...(instance.running ? { disabled: 'disabled' } : {}),
-    onclick: () => removeInstance(instance),
+    onclick: () => whileWorking(remove, 'Removing…',
+                                () => removeInstance(instance)),
   });
 
   // Only while it is running. A stopped model has a journal on Linux and no
@@ -356,7 +361,8 @@ function card(instance, models, engines) {
       element('strong', { text: instance.id,
                           title: 'The name to send as "model" in a request' }),
       element('span', { class: 'muted model', text: modelName(instance, models) }),
-    ]),
+      lastLoad(instance),
+    ].filter(Boolean)),
     // Right: what will actually run it, then the things you press. Format and
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay
     // together, at the end, out of the middle of the name.

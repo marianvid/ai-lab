@@ -15,7 +15,7 @@
 
 import { api } from '../api.js';
 import { element, seconds } from '../format.js';
-import { setStatus } from '../status.js';
+import { showNotice } from '../confirm.js';
 
 // Slower than it looks like it should be, on purpose. Reading these numbers
 // means asking systemd about every configured instance and probing each one
@@ -203,9 +203,11 @@ function limits(stats, redraw) {
       save.disabled = true;
       try {
         await api.updateGateway(changes);
-        setStatus('Gateway limits saved', 'ok');
+        // Nothing is said on success: the fields keep the saved values and
+        // Save goes back to sleep, which is the confirmation.
       } catch (error) {
-        setStatus(error.message, 'error');
+        await showNotice({ title: 'Could not save the gateway limits',
+                           body: error.message });
       }
       redraw();
     },

@@ -71,7 +71,6 @@ nav button.active { color: var(--text); border-bottom-color: var(--accent); }
    the left third with the rest empty, and every page reads better with the
    space split between the two sides. */
 main { padding: 1.25rem; max-width: 1100px; margin: 0 auto; }
-footer { padding: 0.6rem 1.25rem; font-size: 0.85rem; min-height: 2rem; }
 
 h2 { font-size: 1.05rem; margin: 0 0 0.75rem; }
 h3 { font-size: 0.92rem; margin: 1.5rem 0 0.5rem; color: var(--muted); font-weight: 600; }
@@ -413,3 +412,10 @@ body:has(.logpane) main { padding-bottom: 44vh; }
   opacity: 0.75;
   vertical-align: -0.15em;
 }
+
+/* How long the last load took, beside the name it belongs to. Quiet: it is
+   worth a glance, not a read. */
+.took { font-size: 0.8rem; opacity: 0.7; }
+
+/* What a search came back with, in the space where the results would be. */
+.outcome { margin: 0.75rem 0 0; }
