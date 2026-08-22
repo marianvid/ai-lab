@@ -251,6 +251,22 @@ function card(instance, models, engines) {
         ...(item.id === instance.model_id ? { selected: 'selected' } : {}),
       })));
 
+  // Settings are configuration, and configuration can be written down whether
+  // or not anything is running. Without this the only ways to save a setting
+  // were to start the model or to restart it — so unticking a box on a stopped
+  // entry did nothing at all, silently, and the entry kept the old value.
+  const save = element('button', {
+    class: 'action', text: 'Save',
+    title: expanded ? 'Write these settings down without touching the card'
+                    : 'Open Settings to change something first',
+    disabled: 'disabled',
+    onclick: async () => {
+      save.disabled = true;
+      await run(`Saving ${instance.id}`, () => api.update(instance.id, edits()));
+    },
+  });
+  if (form) form.watch(() => { save.disabled = !form.changed(); });
+
   // Always visible so the row does not change shape, but only usable when it
   // would do something: applying settings means restarting the model.
   const apply = element('button', {
@@ -340,19 +356,19 @@ function card(instance, models, engines) {
       element('strong', { text: instance.id,
                           title: 'The name to send as "model" in a request' }),
       element('span', { class: 'muted model', text: modelName(instance, models) }),
-      ...canDo(instance, models),
     ]),
     // Right: what will actually run it, then the things you press. Format and
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay
     // together, at the end, out of the middle of the name.
     element('div', { class: 'inline' }, [
       chatLink(instance),
+      ...canDo(instance, models),
       formatOf(instance, models)
         ? element('span', { class: 'pill format', text: formatOf(instance, models) })
         : null,
       element('span', { class: 'pill engine',
                         text: engine ? engine.name : instance.engine }),
-      settingsButton, logsButton, primary, apply, remove,
+      settingsButton, logsButton, primary, save, apply, remove,
     ].filter(Boolean)),
   ]);
 

@@ -23,7 +23,15 @@ const MODEL = {
 };
 const ENGINE = {
   id: 'vllm', name: 'vLLM', available: true, reason: '', binary: '/bin/vllm',
-  formats: ['nvfp4'], params: [],
+  formats: ['nvfp4'],
+  params: [
+    { key: 'context_size', label: 'Context size', kind: 'int', default: 32768,
+      minimum: 512, maximum: 1048576, choices: [], help: '', group: 'memory',
+      advanced: false },
+    { key: 'language_model_only', label: 'Text only', kind: 'bool',
+      default: false, minimum: null, maximum: null, choices: [], help: '',
+      group: 'memory', advanced: false },
+  ],
 };
 
 const REPOSITORY = {
@@ -127,5 +135,86 @@ describe('what a model can do, in Library', () => {
     await render(context.view);
     await settle();
     assert.deepEqual(icons(context.view), ['Can call tools', 'Can read pictures']);
+  });
+});
+
+describe('saving a setting without touching the card', () => {
+  let dom;
+  before(() => { dom = installDom(responses()); });
+  after(() => dom.restore && dom.restore());
+  beforeEach(() => { document.body.innerHTML = ''; });
+
+  function find(view, label) {
+    return [...view.querySelectorAll('button')]
+      .find((node) => node.textContent.trim() === label);
+  }
+
+  function openSettings(view) {
+    find(view, 'Settings').click();
+  }
+
+  it('offers Save on a stopped entry, where Apply & reload cannot help', async () => {
+    // The fault this exists for: unticking a box on a stopped entry did
+    // nothing at all. Apply & reload was disabled because nothing was running,
+    // and it was the only thing that wrote settings down.
+    const stopped = { ...INSTANCE, running: false, ready: false };
+    const { view } = await renderModels({ '/api/instances': [stopped] });
+    assert.ok(find(view, 'Save'), 'a stopped entry must still be able to save');
+    assert.ok(find(view, 'Apply & reload').disabled);
+  });
+
+  it('keeps Save asleep until something is actually touched', async () => {
+    const stopped = { ...INSTANCE, running: false, ready: false };
+    const { view } = await renderModels({ '/api/instances': [stopped] });
+    openSettings(view);
+    await settle();
+    assert.equal(find(view, 'Save').disabled, true, 'nothing changed yet');
+
+    const box = view.querySelector('input[data-key="language_model_only"]');
+    box.checked = !box.checked;
+    box.dispatchEvent(new window.Event('change', { bubbles: true }));
+    assert.equal(find(view, 'Save').disabled, false, 'a touched box should wake Save');
+  });
+
+  it('writes the setting down and does not start or stop anything', async () => {
+    const stopped = { ...INSTANCE, running: false, ready: false,
+                      params: { ...INSTANCE.params, language_model_only: true } };
+    const { view, calls } = await renderModels({ '/api/instances': [stopped] });
+    openSettings(view);
+    await settle();
+
+    const box = view.querySelector('input[data-key="language_model_only"]');
+    box.checked = false;
+    box.dispatchEvent(new window.Event('change', { bubbles: true }));
+    find(view, 'Save').click();
+    await settle();
+
+    const wrote = calls.find((call) => call.method === 'PATCH');
+    assert.ok(wrote, 'nothing was written down');
+    assert.equal(JSON.parse(wrote.body).params.language_model_only, false);
+    assert.equal(calls.some((call) => /\/(load|unload)/.test(call.path)), false,
+                 'saving a setting must not touch the card');
+  });
+});
+
+describe('where the icons sit', () => {
+  let dom;
+  before(() => { dom = installDom(responses()); });
+  after(() => dom.restore && dom.restore());
+  beforeEach(() => { document.body.innerHTML = ''; });
+
+  it('puts them on the right, immediately before the format', async () => {
+    const { view } = await renderModels();
+    const right = view.querySelector('.row.instance > div:last-child');
+    const marks = [...right.children]
+      .filter((node) => node.matches('svg.capability, .pill.format'))
+      .map((node) => (node.matches('svg') ? 'icon' : 'format'));
+    assert.deepEqual(marks, ['icon', 'icon', 'format']);
+  });
+
+  it('leaves the name on the left with nothing but the model beside it', async () => {
+    const { view } = await renderModels();
+    const left = view.querySelector('.row.instance .ident');
+    assert.equal(left.querySelectorAll('svg.capability').length, 0);
   });
 });

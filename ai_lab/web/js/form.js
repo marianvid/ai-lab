@@ -98,5 +98,28 @@ export function settingsForm(specs, values = {}) {
     return collected;
   };
 
-  return { node: container, read };
+  // Has anything actually been touched? Compared against the values the form
+  // opened with, and only over the fields it drew — a setting it did not draw
+  // cannot have been changed by looking at it.
+  const changed = () => {
+    const now = read();
+    return container.querySelectorAll('[data-key]').length > 0
+      && [...container.querySelectorAll('[data-key]')].some((node) => {
+        const key = node.dataset.key;
+        const spec = specs.find((item) => item.key === key);
+        if (!spec) return false;
+        const before = values[key] !== undefined ? values[key] : spec.default;
+        return now[key] !== before;
+      });
+  };
+
+  // Run something whenever a field is touched. Both events, because a
+  // checkbox and a menu report "change" while a text box reports "input", and
+  // a Save button that only wakes for one of them is worse than none.
+  const watch = (whenTouched) => {
+    container.addEventListener('input', whenTouched);
+    container.addEventListener('change', whenTouched);
+  };
+
+  return { node: container, read, changed, watch };
 }
