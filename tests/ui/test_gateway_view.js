@@ -35,8 +35,6 @@ const STATS = {
       engines: ['llama.cpp', 'vLLM'] },
     { path: '/v1/completions', models: ['coder', 'fast'],
       engines: ['llama.cpp', 'vLLM'] },
-    { path: '/v1/embeddings', models: ['coder', 'fast'],
-      engines: ['llama.cpp', 'vLLM'] },
     { path: '/v1/messages', models: ['fast'], engines: ['vLLM'] },
     { path: '/v1/messages/count_tokens', models: ['fast'], engines: ['vLLM'] },
   ],

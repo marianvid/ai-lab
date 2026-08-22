@@ -85,12 +85,19 @@ def validate(specs: tuple[ParamSpec, ...], values: dict) -> dict:
 # The shapes a request can arrive in. Two are in circulation, and they are two
 # ways of writing the same thing rather than two kinds of thing.
 #
+# Only what works with the engine started as it is. `/v1/embeddings` was here
+# and is not: llama.cpp answers it only when started with `--embeddings`, which
+# is not an addition but a switch — a server started that way stops answering
+# chat at all. So it is a different kind of entry with a dedicated model, not a
+# path to advertise on entries that would refuse it. Every model here refused
+# it, with a 501, while the page said every model answered it.
+#
 # OPENAI is what nearly everything speaks, and every engine here answers it.
 # ANTHROPIC is the other one; a client written against Anthropic's own library
 # sends this, and only some engines understand it. An engine says which it
 # answers through `Engine.api_paths`, so the manager never has to know one
 # engine from another.
-OPENAI_PATHS = ("/v1/chat/completions", "/v1/completions", "/v1/embeddings")
+OPENAI_PATHS = ("/v1/chat/completions", "/v1/completions")
 ANTHROPIC_PATHS = ("/v1/messages", "/v1/messages/count_tokens")
 
 
