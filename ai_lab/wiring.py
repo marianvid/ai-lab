@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .builds import Builds
+from .capabilities import Known
 from .catalog import Catalog
 from .config import ConfigStore
 from .downloads import DownloadManager, HuggingFaceClient
@@ -39,13 +40,27 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     builds = Builds(engine_settings, bus)
     # Keeps the version figures current without anyone pressing anything.
     builds.watch()
+    # What each model's files say it can do, read once and kept beside the
+    # rest of the state: a quarter of a second per GGUF model otherwise, on
+    # every scan of the library.
+    known = Known(host.state_dir())
+
+    def learn_about_new_models(_destination) -> None:
+        """Read a newly downloaded model's files now, not when a page asks.
+
+        A full scan, because that is the only way in: everything already
+        known is answered from memory, so what this actually costs is reading
+        the one model that just arrived.
+        """
+        operations.models()
+
     operations = Operations(
         store=store,
-        catalog=Catalog(),
+        catalog=Catalog(known),
         runtime=Runtime(host, bus),
         settings=Settings(store, host, engines),
         engines=engines,
-        downloads=DownloadManager(bus=bus),
+        downloads=DownloadManager(bus=bus, arrived=learn_about_new_models),
         huggingface=HuggingFaceClient(),
         host=host,
         builds=builds,

@@ -693,4 +693,5 @@ class Operations:
         return {"id": model.id, "name": model.name, "format": model.format.value,
                 "entrypoint": model.entrypoint, "size_bytes": model.size_bytes,
                 "file_count": len(model.files), "complete": model.complete,
-                "missing": list(model.missing)}
+                "missing": list(model.missing),
+                "capabilities": sorted(model.capabilities)}

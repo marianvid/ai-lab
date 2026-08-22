@@ -6,6 +6,7 @@
 
 import { api } from '../api.js';
 import { confirmDestructive, showNotice } from '../confirm.js';
+import { capabilities, suppressed } from '../icons.js';
 import { onProgress } from '../events.js';
 import { settingsForm } from '../form.js';
 import { bytes, element, seconds } from '../format.js';
@@ -208,6 +209,14 @@ function modelName(instance, models) {
   return model ? model.name : instance.model_id;
 }
 
+// What this row will actually be able to do: what the weights can do, less
+// whatever its own settings switch off.
+function canDo(instance, models) {
+  const model = models.find((item) => item.id === instance.model_id);
+  if (!model) return [];
+  return capabilities(model.capabilities, suppressed(instance.params));
+}
+
 function formatOf(instance, models) {
   const model = models.find((item) => item.id === instance.model_id);
   return model ? model.format : '';
@@ -331,6 +340,7 @@ function card(instance, models, engines) {
       element('strong', { text: instance.id,
                           title: 'The name to send as "model" in a request' }),
       element('span', { class: 'muted model', text: modelName(instance, models) }),
+      ...canDo(instance, models),
     ]),
     // Right: what will actually run it, then the things you press. Format and
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay

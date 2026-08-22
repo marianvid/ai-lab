@@ -26,6 +26,7 @@ there is exactly one place to look.
 | `hosts/base.py` | The questions every platform must answer, including `statuses` — the same question as `status`, asked about several instances at once | — |
 | `engines/` | Per engine: formats read, settings offered, command line built, readiness probe | Process supervision, filesystem scanning |
 | `catalog.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
+| `capabilities.py` | Reading a model's own files to find out whether it can call tools or read pictures, and remembering the answer | Which engine will run it, and what any setting says |
 | `runtime.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |
 | `downloads/` | Hugging Face browsing and fetching whole model sets | Deciding what a model *is* — that is the catalog's rule |
 | `settings.py` | Assembling the settings screen from configuration and host | Writing to the accelerator |
@@ -229,6 +230,40 @@ The catalog applies shard rules to files on disk; the downloader applies the
 same rules to a listing from Hugging Face. They must agree, or a model
 downloads as one thing and appears in the library as another. Since neither may
 import the other, the rules live below both.
+
+### Why `capabilities.py` exists
+
+Two things a model can do are worth seeing before choosing it: whether it can
+call tools, and whether it can read pictures. Neither is written down anywhere
+in this project's configuration — both are properties of the weights, and the
+only honest place to learn them is the model's own files.
+
+For a directory of weights it is the config beside them, and pictures need two
+marks rather than one: a vision section *and* a token to put a picture in. A
+text model's config can name a vision tower it does not use, and one mark alone
+was enough to claim a model could see when it could not.
+
+For GGUF it is the chat template, which sits inside the single weights file
+about 6 to 16 MB in, behind the vocabulary. A template that mentions tools is a
+model that was taught to ask for them. Pictures there are a separate file
+beside it, `mmproj-*.gguf`, which is what llama.cpp is handed to see with — and
+so a copy of the same model downloaded without that file genuinely cannot see,
+which is what the library then shows.
+
+Reading it costs about a quarter of a second per GGUF model: 2.1 seconds for
+the twenty models on the container, measured, and that is on the way to drawing
+a page. So the answer is written down, in the state directory beside everything
+else the manager remembers, keyed by the path with the file's size and
+modification time. The second read of that library takes 26 ms. A model
+replaced under the same name is read again rather than believed. A finished
+download reads the new model straight away, on the download worker, so nobody
+waits for it in front of a page.
+
+**The weights decide what a model can do; a setting can only take something
+away.** vLLM's "Text only" loads a model that can see without the part that
+sees. So the interface subtracts: capabilities come from the files, the entry's
+settings remove what they switch off, and what is left is what the running
+model will actually do. Nothing may add a capability the weights do not have.
 
 ## Two decisions worth knowing
 

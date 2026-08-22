@@ -7,6 +7,7 @@
 
 import { api } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
+import { capabilities } from '../icons.js';
 import { bytes, element } from '../format.js';
 import { setStatus } from '../status.js';
 
@@ -50,7 +51,12 @@ function modelRow(model) {
         text: `missing ${model.missing.length}`, title: model.missing.join(', '),
       });
   return element('tr', {}, [
-    element('td', {}, element('strong', { text: model.name })),
+    // On disk there is no entry and so nothing to switch anything off: these
+    // are what the weights themselves can do.
+    element('td', {}, element('span', { class: 'inline ident' }, [
+      element('strong', { text: model.name }),
+      ...capabilities(model.capabilities),
+    ])),
     element('td', { class: 'muted', text: model.format }),
     element('td', { class: 'number', text: bytes(model.size_bytes) }),
     element('td', { class: 'number muted', text: String(model.file_count) }),

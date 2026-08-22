@@ -55,6 +55,10 @@ class ModelSet:
     files: tuple[ModelFile, ...]
     complete: bool = True
     missing: tuple[str, ...] = ()
+    # What the weights can do, read from the model's own files rather than
+    # configured: whether it can read pictures, and whether it has been taught
+    # to ask for tools. An entry can take these away; it cannot add them.
+    capabilities: frozenset[str] = frozenset()
 
     @property
     def size_bytes(self) -> int:

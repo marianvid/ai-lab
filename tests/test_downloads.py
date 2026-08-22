@@ -17,9 +17,10 @@ class FakeResponse(io.BytesIO):
         self.close()
 
 
-def remote_set(complete=True, sizes=(("a.gguf", 8),)):
+def remote_set(complete=True, sizes=(("a.gguf", 8),), repo="org/model",
+               name="model"):
     return RemoteSet(
-        repo="org/model", name="model", format="gguf",
+        repo=repo, name=name, format="gguf",
         files=tuple(RemoteFile(path=name, size_bytes=size) for name, size in sizes),
         complete=complete, missing=() if complete else ("a-00002-of-00002",),
     )
@@ -156,3 +157,46 @@ class DownloadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AfterItArrives(DownloadTests):
+    """A model that has landed is read straight away, on this thread."""
+
+    def test_a_finished_download_says_so(self):
+        landed = []
+        manager = DownloadManager(opener=self.opener(),
+                                  arrived=lambda where: landed.append(where))
+        transfer = manager.enqueue(remote_set(sizes=(("a.gguf", 8),)),
+                                   self.destination)
+        self.wait(manager, transfer)
+        self.assertEqual(transfer.state, State.DONE)
+        self.assertEqual(landed, [self.destination])
+
+    def test_a_failed_download_does_not(self):
+        def broken(url, resume_from):
+            raise OSError("the network went away")
+
+        landed = []
+        manager = DownloadManager(opener=broken,
+                                  arrived=lambda where: landed.append(where))
+        transfer = manager.enqueue(remote_set(sizes=(("a.gguf", 8),)),
+                                   self.destination)
+        self.wait(manager, transfer)
+        self.assertEqual(transfer.state, State.FAILED)
+        self.assertEqual(landed, [], "read a model that never finished arriving")
+
+    def test_a_reader_that_throws_does_not_break_the_queue(self):
+        """The download worked. Whatever this was for can wait; the bytes cannot."""
+        def angry(where):
+            raise RuntimeError("could not read the new model")
+
+        manager = DownloadManager(opener=self.opener(), arrived=angry)
+        first = manager.enqueue(remote_set(sizes=(("a.gguf", 8),)), self.destination)
+        self.wait(manager, first)
+        self.assertEqual(first.state, State.DONE)
+
+        # The worker thread is still alive and still takes work.
+        second = manager.enqueue(remote_set(name="second", sizes=(("b.gguf", 8),)),
+                                 self.destination)
+        self.wait(manager, second)
+        self.assertEqual(second.state, State.DONE)

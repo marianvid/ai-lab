@@ -78,8 +78,15 @@ class DownloadManager:
     """Accepts model sets, downloads them one at a time, reports progress."""
 
     def __init__(self, opener: Callable | None = None,
-                 bus: EventBus | None = None) -> None:
+                 bus: EventBus | None = None,
+                 arrived: Callable | None = None) -> None:
         self._bus = bus
+        # Run once when a model has finished arriving, on the worker thread.
+        # This module does not know or care what the work is; whoever built it
+        # decided that. Today it is reading the new files to find out what the
+        # model can do, which takes a quarter of a second and is much better
+        # spent here than in front of somebody opening a page.
+        self._arrived = arrived
         self._announced = 0.0
         self._transfers: dict[str, Transfer] = {}
         self._plans: dict[str, tuple[RemoteSet, Path]] = {}
@@ -175,8 +182,17 @@ class DownloadManager:
                 transfer.error = str(error) or error.__class__.__name__
         # A finished transfer also means a new model on disk.
         self._announce(force=True)
-        if self._bus is not None and transfer.state is State.DONE:
-            self._bus.publish(ChangeEvent(topic="models"))
+        if transfer.state is State.DONE:
+            if self._bus is not None:
+                self._bus.publish(ChangeEvent(topic="models"))
+            if self._arrived is not None:
+                # Never let this stop the queue. The download succeeded; that
+                # is the promise made to whoever asked for it, and whatever
+                # this was going to do can be done again later.
+                try:
+                    self._arrived(destination)
+                except Exception:
+                    pass
 
     def _file(self, transfer: Transfer, repo: str, item: RemoteFile,
               destination: Path) -> None:

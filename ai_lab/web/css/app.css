@@ -401,3 +401,15 @@ body:has(.logpane) main { padding-bottom: 44vh; }
   }
   .gateway-grid > .at-queue > .section > .card { max-height: 50vh; }
 }
+
+/* What a model can do, drawn beside its name. Sized to the text around it
+   rather than to a fixed pixel count, so it stays in proportion when the
+   browser's font size changes. Slightly dimmer than the name: these are worth
+   noticing, not worth reading first. */
+.icon.capability {
+  width: 1.05em;
+  height: 1.05em;
+  flex: none;
+  opacity: 0.75;
+  vertical-align: -0.15em;
+}

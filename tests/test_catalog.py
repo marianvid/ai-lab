@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -206,3 +207,41 @@ class VisionProjectorTests(unittest.TestCase):
         make_files(self.root / "plain", "Qwen-Q4_K_M.gguf", size=100)
         make_files(self.root / "plain", "mmproj.gguf", size=10)
         self.assertEqual([model.name for model in self.scan()], ["Qwen-Q4_K_M"])
+
+
+class CarryingCapabilities(unittest.TestCase):
+    """A model found on disk says what it can do, or says nothing at all."""
+
+    class Answers:
+        """Stands in for the reader, so this tests the wiring, not the parsing."""
+
+        def __init__(self, answer=frozenset({"tools"})):
+            self.answer = answer
+            self.asked = []
+
+        def of(self, entrypoint, is_gguf, companions):
+            self.asked.append((entrypoint, is_gguf))
+            return self.answer
+
+    def _repository(self, root):
+        (root / "a-model").mkdir()
+        (root / "a-model" / "model.gguf").write_bytes(b"x")
+        return Repository(id="r", name="r", path=str(root), format="gguf")
+
+    def test_the_answer_reaches_the_model(self):
+        root = Path(tempfile.mkdtemp())
+        answers = self.Answers()
+        found = Catalog(answers).scan([self._repository(root)])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].capabilities, frozenset({"tools"}))
+        # Asked about what the engine is handed — the weights file for GGUF,
+        # not the directory holding it.
+        self.assertEqual(len(answers.asked), 1)
+        self.assertTrue(answers.asked[0][0].endswith("model.gguf"))
+        self.assertTrue(answers.asked[0][1])
+
+    def test_a_catalog_with_nobody_to_ask_still_scans(self):
+        root = Path(tempfile.mkdtemp())
+        found = Catalog().scan([self._repository(root)])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].capabilities, frozenset())

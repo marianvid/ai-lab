@@ -23,7 +23,15 @@ from .types import Format, ModelFile, ModelSet
 
 
 class Catalog:
-    """Scans repositories and returns the models found in them."""
+    """Scans repositories and returns the models found in them.
+
+    `known` remembers what each model's files said it can do, so they are
+    opened once. Without one, nothing is worked out and every model reports no
+    capabilities — which is what a test that does not care about them wants.
+    """
+
+    def __init__(self, known=None) -> None:
+        self.known = known
 
     def scan(self, repositories: list[Repository]) -> list[ModelSet]:
         models: list[ModelSet] = []
@@ -142,15 +150,25 @@ class Catalog:
         parts = ([repository.id, *relative.parts[:-1], base]
                  if self._directory_is_the_model(repository) and relative.parts
                  else [repository.id, *relative.parts, base])
+        entrypoint = str(self._entrypoint(repository, directory, shards))
         return ModelSet(
             id="/".join(parts),
             name=base,
             format=Format(repository.format),
-            entrypoint=str(self._entrypoint(repository, directory, shards)),
+            entrypoint=entrypoint,
             files=files,
             complete=complete,
             missing=missing,
+            capabilities=self._can_do(repository, entrypoint, companions),
         )
+
+    def _can_do(self, repository: Repository, entrypoint: str,
+                companions: list[Path]) -> frozenset[str]:
+        if self.known is None:
+            return frozenset()
+        return self.known.of(entrypoint,
+                             repository.format == Format.GGUF.value,
+                             [path.name for path in companions])
 
     @staticmethod
     def _entrypoint(repository: Repository, directory: Path, shards: list[Path]) -> Path:
