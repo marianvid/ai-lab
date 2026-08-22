@@ -230,7 +230,24 @@ launcher understands nothing else. The unit runs as `ai-lab-manager`, the same
 user as the manager, so a manager-written command line grants no privilege the
 manager did not already have.
 
-**Asking what is running is the expensive question, and it is asked in bulk.**
+**Asking what is running is the expensive question, and most work does not
+need it.** Which entry answers to a name, which engine runs it, what settings
+it has — that is the configuration file, 0.05 ms to read. What every instance
+is *doing* costs 73 ms, and the front door needs it only when something outside
+may have moved a model: at startup, or after a button on the page. `configured`
+answers the first kind of question and `instances` the second, and the
+difference between them is the whole of the gateway's per-request cost —
+measured on the container at 19 ms through it against 17.8 ms straight to the
+engine.
+
+Two things were paying for it without needing to. Working out an entry's
+effective settings went through `_resolve`, which also finds the model on disk
+and so walked every model directory: 11 ms for an answer made entirely of
+configuration and the engine's own rules. And the front door asked what
+everything was doing on every request, to notice a card somebody else had
+changed — which it now asks once, after being told it might have been.
+
+**Asking what is running is done in bulk when it is done at all.**
 Drawing the model list needs the state of every configured instance, and the
 gateway needs it on every request. On systemd each answer is a command — three
 per instance, for whether it is active, whether it is enabled, and its pid — so

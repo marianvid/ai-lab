@@ -122,6 +122,17 @@ class FakeOperations:
         entry.update(running=True, ready=True, active_params=active)
         return Operation(instance_id=instance_id, kind="load", ok=True, total_ms=1200)
 
+    def configured(self):
+        """Every entry, configuration only — no supervisor, no probe.
+
+        Counted apart from `instances`, because the point of it is that it is
+        the cheap question and the front door asks it on every request.
+        """
+        self.cheap_reads += 1
+        return [{key: entry[key] for key in
+                 ("id", "name", "engine", "model_id", "port", "params")}
+                for entry in self._entries.values()]
+
     def instance(self, instance_id):
         """One entry, configuration only — no supervisor, no probe.
 
@@ -618,25 +629,35 @@ class OverheadTests(unittest.TestCase):
         operations.instances = counted
         return operations
 
-    def test_a_request_to_a_loaded_model_asks_once(self):
-        # It was three, then two, now one. The second read existed because the
-        # card was taken with a plain lock and the world might have changed
-        # while this request waited. The scheduler knows what it put there, so
-        # there is nothing to check again.
+    def test_a_warm_request_never_asks_the_supervisor(self):
+        """The expensive question is not asked on the ordinary path at all.
+
+        It was three reads, then two, then one, and now none. Everything the
+        front door needs to route a request — which entry answers to a name,
+        which engine runs it, what settings it has — is the configuration file,
+        at 0.05 ms. What every instance is *doing* costs 73 ms on the container,
+        and that is only needed when something outside may have moved a model.
+        """
+        operations = self.counting(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass                                 # the first look adopts the card
+        before = operations.reads
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(operations.reads, before,
+                         "it asked the supervisor for a request that needed nothing")
+        self.assertGreater(operations.cheap_reads, 0)
+
+    def test_the_first_request_looks_once_so_it_can_take_up_what_is_there(self):
+        # systemd keeps engines across a manager restart, so a manager coming
+        # back finds its model still answering. One look, then it is believed.
         operations = self.counting(coder=True)
         gateway = quick(operations)
         with gateway.acquire("coder"):
             pass
         self.assertEqual(operations.reads, 1)
-
-    def test_a_second_request_to_the_same_model_asks_once_more(self):
-        operations = self.counting(coder=True)
-        gateway = quick(operations)
-        with gateway.acquire("coder"):
-            pass
-        with gateway.acquire("coder"):
-            pass
-        self.assertEqual(operations.reads, 2, "one read per request, no more")
+        self.assertEqual(operations.loads, [], "it reloaded what was already up")
 
     def test_the_engine_name_costs_no_extra_read(self):
         # It is pure configuration, and the lease carries it. Asking for it

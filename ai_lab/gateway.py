@@ -367,17 +367,22 @@ class Gateway:
         model off the card to load twenty-one gigabytes for nobody.
         """
         started = time.perf_counter()
-        instances = self.operations.instances()
-        instance = self.resolve(wanted, instances)
+        # The configuration, not the supervisor. Which entry answers to a name,
+        # which engine runs it, what settings it has — all of that is the file,
+        # at 0.05 ms. Asking what every instance is *doing* costs 73 ms on the
+        # container, and this path needs that only when something outside may
+        # have changed the card.
+        entries = self.operations.configured()
+        instance = self.resolve(wanted, entries)
         if shape is not None:
-            self._refuse_wrong_shape(instance, shape, instances)
+            self._refuse_wrong_shape(instance, shape, entries)
         instance_id, port = instance["id"], instance["port"]
         # Always the full settings, never only what was asked for. A request
         # naming no settings and one naming exactly the configured ones are
         # asking for the same thing, and comparing partial dictionaries would
         # make them different — a reload for nothing, on every other request.
         asked_for = self.operations.effective_params(instance_id, settings or {})
-        self._adopt_what_is_there(instances)
+        self._adopt_what_is_there()
 
         try:
             self.scheduler.enter(Shape.of(instance_id, asked_for),
@@ -403,7 +408,7 @@ class Gateway:
         """Give a place back, and let in whoever can go next."""
         self.scheduler.leave()
 
-    def _adopt_what_is_there(self, instances: list[dict]) -> None:
+    def _adopt_what_is_there(self) -> None:
         """Tell the scheduler what is already on the card, once.
 
         Only after something outside may have changed it — a manager that has
@@ -418,6 +423,9 @@ class Gateway:
         if not self._resweep:
             return
         self._resweep = False
+        # The expensive question, asked once after an outside change rather
+        # than on every request.
+        instances = self.operations.instances()
         running = [item for item in instances if item["running"] and item["ready"]]
         if len(running) != 1 or any(item["running"] for item in instances
                                     if item["id"] != running[0]["id"]):

@@ -97,6 +97,24 @@ class Operations:
             models = [item for item in models if item.format in formats]
         return [self._model(item) for item in models]
 
+    def configured(self) -> list[dict]:
+        """Every entry, without asking what any of them is doing.
+
+        `instances` asks the supervisor about all of them and probes each one
+        that is up: 73 ms on the container with eleven configured, nearly all
+        of it the one command to systemd. Most questions are not about that —
+        which entry answers to a name, which engine runs it, what settings it
+        has — and those are the configuration, which costs 0.05 ms to read.
+        """
+        config = self.store.load()
+        rows = []
+        for item in config.instances:
+            engine = self.engines.get(item.engine)
+            rows.append({"id": item.id, "name": item.name, "engine": item.engine,
+                         "model_id": item.model_id, "port": item.port,
+                         "params": self._effective(engine, item.params)})
+        return rows
+
     def instances(self) -> list[dict]:
         """Every configured model, with the settings that will actually apply.
 
@@ -120,13 +138,7 @@ class Operations:
         return rows
 
     def instance(self, instance_id: str) -> dict:
-        """One configured entry, without asking what any of them are doing.
-
-        `instances` asks the supervisor about every entry and probes each one
-        that is up — 152 ms on the container with eleven configured. This
-        answers questions that are pure configuration, and the gateway asks one
-        of those on every request.
-        """
+        """One configured entry, without asking what it is doing. See `configured`."""
         item = self.store.load().instance(instance_id)     # raises if unknown
         engine = self.engines.get(item.engine)
         return {"id": item.id, "name": item.name, "engine": item.engine,
@@ -177,7 +189,11 @@ class Operations:
         rules do the checking, so a setting it does not have is refused here
         for the same reason it would be refused in the page.
         """
-        instance, _ = self._resolve(instance_id)
+        # Not `_resolve`: that also finds the model on disk, which means
+        # walking every model directory — 11 ms on the container, for an answer
+        # made entirely of the configuration and the engine's own rules. This
+        # is asked on every request through the front door.
+        instance = self.store.load().instance(instance_id)
         engine = self.engines.get(instance.engine)
         return validate(engine.params(), {**instance.params, **settings})
 
