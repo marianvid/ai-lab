@@ -23,14 +23,16 @@ The number is the engine's own, per entry: slots for llama.cpp, sequences for
 vLLM. Ask the engine, do not guess from a setting name.
 
 Requests wanting a different model wait, and the queueing rules are in
-`scheduler.py` — including the two that are easy to get wrong and impossible to
-notice: a busy model must stop admitting the moment somebody waits for another,
-and a model just loaded must not admit arrivals ahead of who was already
-waiting. Without either, one model starves the other for ever.
+`scheduler.py`. In one line: **the queue is served in order, and requests next
+to each other wanting the same model go in together.**
 
-**The oldest waiting request decides what is loaded next.** Strictly, with no
-trade for fewer loads — because the fifty requests for one model may be waiting
-on the answer to the one request for another.
+Nothing younger is served first, ever — not even when it wants the model that
+is already loaded and would cost nothing. It arrived after the request that is
+waiting, and a workflow can be held up by exactly that one.
+
+The guard that makes it work: the moment anybody waits, the door closes for the
+model on the card. Without it a busy model never goes idle, the switch never
+happens, and the other request waits for ever.
 
 Which leads to the one thing to design workflows around: **a request must not
 wait, inside itself, on another request to this same gateway.** Fill every

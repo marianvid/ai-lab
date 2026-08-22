@@ -448,3 +448,58 @@ def _record(s, shape, served, index):
     except Exception:
         return
     served.append(index)
+
+
+class InOrderTests(unittest.TestCase):
+    """The queue is served in order. Nothing younger goes first.
+
+    The run at the front goes in together; it stops at the first request
+    wanting something else. Sweeping up the later ones of the same shape is
+    tempting — same model, already loaded, free — and it was written that way
+    first. But they arrived after the request that wants something else, and
+    serving them ahead of it is what oldest-first exists to prevent.
+    """
+
+    def order_of(self, queue, places=1):
+        """Run a queue through and report which shapes were loaded, in order."""
+        card = Card(places=places)
+        s = scheduler(card)
+        s.enter("start")
+        s.leave()
+        threads = []
+        for shape in queue:
+            threads.append(run(_hold, s, shape, 0.05))
+            time.sleep(0.03)
+        for thread in threads:
+            thread.join(timeout=10)
+        return card.switches[1:]                # drop the "start"
+
+    def test_a_later_request_does_not_jump_the_one_already_waiting(self):
+        # b, b, c, b — the last b arrived after c and must be served after it.
+        self.assertEqual(self.order_of(["b", "b", "c", "b"]), ["b", "c", "b"])
+
+    def test_a_run_at_the_front_goes_in_as_one(self):
+        self.assertEqual(self.order_of(["b", "b", "b", "c"], places=4),
+                         ["b", "c"])
+
+    def test_alternating_requests_swap_on_every_one(self):
+        # The cost of the rule, and it is not hidden. Two models genuinely
+        # wanted at once is the card's limit, not this file's.
+        self.assertEqual(self.order_of(["b", "c", "b", "c"]),
+                         ["b", "c", "b", "c"])
+
+    def test_the_run_is_taken_by_position_not_by_counting_the_whole_queue(self):
+        # Four want b in total, but only the two at the front are in the run.
+        card = Card(places=4)
+        s = scheduler(card)
+        s.enter("a")
+        for shape in ("b", "b", "c", "b", "b"):
+            run(_hold, s, shape, 0.4)
+            time.sleep(0.03)
+        time.sleep(0.05)
+        s.leave()
+        time.sleep(0.25)
+        self.assertEqual(s.state()["in_flight"], 2,
+                         "it swept up the two behind the request for c")
+        self.assertEqual([w["shape"] for w in s.state()["waiting"]],
+                         ["c", "b", "b"])

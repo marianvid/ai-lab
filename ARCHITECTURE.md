@@ -103,10 +103,22 @@ Two of them are easy to get wrong and impossible to notice afterwards:
   wants the model being loaded. Without it the model just loaded starves the
   one that was waiting — the same fault with the names swapped.
 
-**The oldest waiting request decides what is loaded next**, strictly, with
-nothing traded for fewer loads. The fifty requests for one model may be waiting
-on the answer to the one request for another, and serving them first would be
-optimising a workflow into a standstill.
+**The queue is served in order, and requests next to each other wanting the
+same model go in together.** That is the whole rule. The run stops at the first
+request wanting something else, however many more of the first model are behind
+it.
+
+Sweeping those later ones up is tempting — same model, already loaded, free —
+and it was written that way first. They arrived after the request that wants
+something else, though, and serving them ahead of it is what oldest-first
+exists to prevent. A workflow can be held up by that older request, and no
+number of cheaply-served younger ones makes up for holding it longer.
+
+The cost is not hidden: requests that alternate between two models swap on
+every one of them. Two models genuinely needed at once is the card's limit, and
+no ordering rule escapes it. Nothing is traded for fewer loads — no dwell time,
+no batching by size — because the fifty requests for one model may be waiting
+on the answer to the one request for another.
 
 Which gives the one thing to design workflows around: **a request must not
 wait, inside itself, on another request to this gateway.** Fill every place

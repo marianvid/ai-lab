@@ -78,11 +78,15 @@ over one model.
 Measured here on an RTX PRO 4500 with Qwen3-Coder-30B at eight places: eight
 requests at once took 1.2 s against 3.1 s one after another.
 
-**Requests for a different model wait, oldest first.** When the card empties,
-the oldest waiting request decides what is loaded next, and everything waiting
-for that same model goes in with it. Strictly by age, with nothing traded for
-fewer loads — the fifty requests for one model may be waiting on the answer to
-the one request for another.
+**Requests for a different model wait, and the queue is served in order.**
+Requests next to each other wanting the same model go in together; the run
+stops at the first one wanting something else. Nothing younger is served first,
+even when it wants the model already loaded and would cost nothing — the fifty
+requests for one model may be waiting on the answer to the one request for
+another.
+
+The cost is not hidden: requests that alternate between two models swap on
+every one of them.
 
 Two consequences worth designing around:
 

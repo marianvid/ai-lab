@@ -33,17 +33,31 @@ When a request finishes it frees a place, and then:
 
 ## Switching
 
-The **oldest waiting request wins**, and its shape is loaded. Then everything
-in the queue wanting that same shape *at that moment* goes in together — a
-photograph. Requests arriving afterwards wait for the next round, even for the
-shape just loaded. Without that, the model that has just been loaded starves
-the one that was waiting, which is the first problem again with the names
-swapped.
+**The queue is served in order. Requests next to each other wanting the same
+shape go in together.**
 
-Oldest-wins is strict. There is no dwell time, no batching by size, nothing
-that trades fairness for fewer loads — because the fifty requests for one model
-may be waiting on the answer to the one request for another, and serving them
-first would be optimising the workflow into a standstill.
+That is the whole rule. The oldest request decides what is loaded, and the run
+of requests behind it wanting the same thing comes with it. The run stops at
+the first request wanting something else — everything from there stays in the
+queue, however many more of the first shape are behind it.
+
+It is tempting to sweep up those later ones too: same model, already loaded,
+free. It was written that way first. But they arrived *after* the request that
+wants something else, and serving them ahead of it is the thing oldest-first
+exists to prevent. A workflow can be held up by that older request, and no
+amount of cheaply-served younger ones makes up for holding it longer.
+
+The cost is real and is not hidden: requests that alternate between two models
+swap on every one of them. Two models genuinely needed at once is the card's
+limit, not this file's, and no ordering rule escapes it.
+
+Requests arriving *while* a model loads wait for the next round, even for the
+shape being loaded. Without that, the model just loaded starves the one that
+was waiting — the door problem again with the names swapped.
+
+There is no dwell time, no batching by size, nothing that trades fairness for
+fewer loads: the fifty requests for one model may be waiting on the answer to
+the one request for another.
 
 The consequence to design workflows around: **a request must not wait, inside
 itself, on another request to this same gateway.** Fifty in-flight requests all
@@ -272,25 +286,30 @@ class Scheduler:
                 continue
             if self._in_flight:
                 break                           # must empty before swapping
-            # The photograph is taken now, before the load. Whatever arrives
-            # while a model is loading belongs to the next round, even if it
-            # wants the shape being loaded — otherwise the model just loaded
-            # starves the one that was waiting, which is the first problem
-            # again with the names swapped.
+            # The run at the front of the queue, and only that. Everything
+            # from the first request wanting something else stays where it is,
+            # however many more of this shape are behind it.
             #
-            # Clients that have gone are dropped while it is taken, not after.
-            # After is too late: the swap has happened, the model that was
-            # working is off the card, and the load was for nobody. That is the
-            # fault this whole file exists to prevent, and checking a moment
-            # too late reproduces it exactly.
+            # Taking all of them would serve requests younger than the one
+            # already waiting, and the whole point of oldest-first is that a
+            # workflow may be held up by exactly that older request. Whether
+            # somebody younger could have been served cheaply is not the
+            # question; whether they arrived later is.
+            #
+            # Clients that have gone are dropped while the run is taken, not
+            # after. After is too late: the swap has happened, the model that
+            # was working is off the card, and the load was for nobody. That is
+            # the fault this whole file exists to prevent, and checking a
+            # moment too late reproduces it exactly.
             shape = head.shape
-            photograph, remaining = [], []
-            for entry in self._queue:
-                if entry.shape != shape:
-                    remaining.append(entry)
-                elif not self._gone(entry):
+            photograph = []
+            taken = 0
+            while taken < len(self._queue) and self._queue[taken].shape == shape:
+                entry = self._queue[taken]
+                taken += 1
+                if not self._gone(entry):
                     photograph.append(entry)
-            self._queue = remaining
+            self._queue = self._queue[taken:]
             if not photograph:
                 continue                        # all gone: try the next shape
             self._switching = True
@@ -322,16 +341,10 @@ class Scheduler:
                     continue
                 self._in_flight += 1
                 ready.append(entry)
-            # More were waiting for this shape than fit. They belong to the
-            # round that is now running, so they go back at the *front* and are
-            # let in as places free.
-            #
-            # At the back they would sit behind whatever arrived while the
-            # model was loading — including a request for another model, which
-            # would then be served in the middle of their round. Twelve
-            # requests to a model with eight places, plus one for another
-            # model, cost two extra swaps that way: measured as a -> b -> c ->
-            # b where a -> b -> c was the whole of the work.
+            # More were in the run than fit. They go back at the front, in
+            # order, and are let in as places free — they are still the oldest
+            # requests waiting, and putting them behind newer ones would be the
+            # same unfairness by another route.
             self._queue[:0] = overflow
         return ready
 
