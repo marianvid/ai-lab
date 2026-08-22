@@ -40,6 +40,9 @@ const STATS = {
     { path: '/v1/messages', models: ['fast'], engines: ['vLLM'] },
     { path: '/v1/messages/count_tokens', models: ['fast'], engines: ['vLLM'] },
   ],
+  card: { used_mb: 3546, total_mb: 32623, kind: 'dedicated',
+          busy_percent: 41, temperature_c: 32,
+          ram_used_mb: 8200, ram_total_mb: 64000 },
   queue_runs: [],
   recent: [],
 };
@@ -376,5 +379,52 @@ describe('what is happening, in one word', () => {
       waiting_for: [{ instance_id: 'reviewer', waiting: 1, longest_wait_s: 1 }],
     });
     assert.match(view.textContent, /waiting to swap/);
+  });
+});
+
+describe('what the card says about itself', () => {
+  it('shows how much of it is used', async () => {
+    // The binding constraint on a machine that holds one model at a time.
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Card memory\s*3546 \/ 32623 MB/);
+  });
+
+  it('shows whether it is working or only holding memory', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Card busy\s*41%/);
+  });
+
+  it('shows the temperature', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /32 °C/);
+  });
+
+  it('says nothing about load or heat where there is nothing to read', async () => {
+    // Apple silicon reports neither. A dash would be a number that means
+    // something else.
+    const { view } = await renderPage({
+      card: { used_mb: 64200, total_mb: 131072, kind: 'unified',
+              busy_percent: null, temperature_c: null,
+              ram_used_mb: 0, ram_total_mb: 0 },
+    });
+    assert.match(view.textContent, /64200 \/ 131072 MB/);
+    assert.equal(view.textContent.includes('Card busy'), false);
+    assert.equal(view.textContent.includes('°C'), false);
+    assert.equal(view.textContent.includes('System memory'), false,
+                 'unified memory is one pool, reported twice');
+  });
+
+  it('says nothing at all when there is no accelerator', async () => {
+    const { view } = await renderPage({ card: {} });
+    assert.equal(view.textContent.includes('Card memory'), false);
+  });
+});
+
+describe('the machine behind the card', () => {
+  it('shows how much of the system memory is in use', async () => {
+    // Where a model is split between the card and here, this is the half that
+    // does not show on the card reading.
+    const { view } = await renderPage();
+    assert.match(view.textContent, /System memory\s*8200 \/ 64000 MB/);
   });
 });

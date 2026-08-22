@@ -70,6 +70,24 @@ class LinuxHost:
             operating_system="Linux",
         )
 
+    def system_memory(self) -> tuple[float, float]:
+        """From /proc/meminfo, which is a file read rather than a command.
+
+        `MemAvailable` rather than `MemFree`: the kernel counts cache it would
+        drop under pressure as available, and free alone reads as an alarming
+        number on a machine that is behaving perfectly.
+        """
+        try:
+            values = {}
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                name, _, rest = line.partition(":")
+                if name in ("MemTotal", "MemAvailable"):
+                    values[name] = float(rest.strip().split()[0]) / 1024.0
+            total = values.get("MemTotal", 0.0)
+            return max(0.0, total - values.get("MemAvailable", total)), total
+        except (OSError, ValueError, IndexError):
+            return 0.0, 0.0
+
     def state_dir(self) -> Path:
         """The directory the unit files already give the manager to write in."""
         return STATE_DIR

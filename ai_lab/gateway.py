@@ -726,6 +726,10 @@ class Gateway:
             # — an entry's engine and what that engine serves — so the page can
             # say it without the expensive question.
             "shapes": self._shapes_offered(),
+            # The card itself. One reading gives all three, so the second and
+            # third are free once the first has been asked for — 35 ms on the
+            # container, against a page that is otherwise 9.
+            "card": self._card_reading(),
             "requests_per_minute": self._rate(),
             "average_first_token_s": round(
                 counters.first_token_s / counters.first_tokens, 2)
@@ -744,6 +748,31 @@ class Gateway:
             "recent": list(reversed(counters.history[-10:])),
         }
 
+
+    def _card_reading(self) -> dict:
+        """Memory, load and temperature, as the accelerator reports them.
+
+        Memory is the binding constraint on a machine like this, and the other
+        two arrive in the same answer. On unified memory there is no separate
+        pool and no temperature to read, so those come back empty rather than
+        as a number meaning something else.
+        """
+        try:
+            snapshot = self.operations.host.accelerator()
+        except Exception:
+            return {}
+        used, total = self.operations.host.system_memory()
+        return {
+            "used_mb": round(snapshot.memory_used_mb),
+            "total_mb": round(snapshot.memory_total_mb),
+            "kind": snapshot.memory_kind,
+            "busy_percent": snapshot.utilization_percent,
+            "temperature_c": snapshot.temperature_c,
+            # The machine's own memory, where there is a separate pool to
+            # report. A model split between card and system memory lives here.
+            "ram_used_mb": round(used),
+            "ram_total_mb": round(total),
+        }
 
     def _rate(self) -> float:
         """Requests in the last minute. Zero when nothing is happening.

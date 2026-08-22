@@ -33,6 +33,10 @@ class FakeHost:
         self.lag = lag
         self.readings = 0
 
+    def system_memory(self):
+        """A machine with a separate pool, so the page has something to draw."""
+        return 8000.0, 64000.0
+
     def accelerator(self):
         self.readings += 1
         running = any(e["running"] for e in self.operations.instances())
@@ -1105,8 +1109,9 @@ class ShapesOfferedTests(unittest.TestCase):
         self.assertEqual(rows["/v1/messages"], ["fast"])
 
     def test_it_costs_only_the_configuration(self):
-        # The page asks for this every few seconds. Asking the supervisor what
-        # every instance is doing would undo the reason the page is cheap.
+        # Asked every few seconds by the page. Working out which engine answers
+        # what is the configuration; asking the supervisor what every instance
+        # is doing would undo the reason the page is cheap.
         operations = mixed_engines()
         reads = {"n": 0}
         original = operations.instances
@@ -1115,7 +1120,7 @@ class ShapesOfferedTests(unittest.TestCase):
             reads["n"] += 1
             return original()
         operations.instances = counted
-        quick(operations).stats()
+        quick(operations)._shapes_offered()
         self.assertEqual(reads["n"], 0)
 
 
@@ -1159,3 +1164,22 @@ class QueueRunsTests(unittest.TestCase):
     def test_an_empty_queue_has_no_turns(self):
         gateway = quick(busy_models(coder=True))
         self.assertEqual(gateway.stats()["queue_runs"], [])
+
+
+class CardReadingTests(unittest.TestCase):
+    """What the accelerator reports, on the page that watches it."""
+
+    def test_memory_is_reported(self):
+        card = quick(two_models()).stats()["card"]
+        self.assertEqual(card["total_mb"], 32000)
+        self.assertIn("used_mb", card)
+
+    def test_a_card_that_cannot_be_read_reports_nothing_rather_than_zero(self):
+        # Zero of zero would read as an empty card, which is a different thing
+        # from a card nobody could ask.
+        operations = two_models()
+
+        def refuse():
+            raise RuntimeError("nvidia-smi is not here")
+        operations.host.accelerator = refuse
+        self.assertEqual(quick(operations).stats()["card"], {})

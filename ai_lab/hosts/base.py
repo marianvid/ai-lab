@@ -40,6 +40,19 @@ class Host(Protocol):
         """Whether the process is currently running."""
         ...
 
+    def system_memory(self) -> tuple[float, float]:
+        """How much of the machine's own memory is in use, and how much there is.
+
+        In megabytes, used first. `(0.0, 0.0)` where it cannot be read, which
+        reads as "no answer" rather than as an empty machine.
+
+        Separate from the accelerator: a model split between card and system
+        memory lives here, and so does everything an engine keeps outside the
+        card. On unified memory the two are the same pool and the accelerator
+        reading already covers it.
+        """
+        ...
+
     def state_dir(self) -> "Path":
         """Where this machine keeps things the manager must not lose.
 

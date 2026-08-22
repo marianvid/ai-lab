@@ -65,6 +65,10 @@ class FakeHost:
         self.status_calls += 1
         return {identifier: self.status(identifier) for identifier in instance_ids}
 
+    def system_memory(self):
+        """A machine with a separate pool, so the page has something to draw."""
+        return 8000.0, 64000.0
+
     def accelerator(self, pid=None) -> AcceleratorSnapshot:
         used = self._curve[min(self._reading, len(self._curve) - 1)]
         self._reading += 1

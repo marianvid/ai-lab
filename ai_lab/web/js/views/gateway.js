@@ -87,6 +87,36 @@ function address(stats) {
   ]);
 }
 
+// What the accelerator says about itself. Memory is the binding constraint on
+// a machine that holds one model at a time; the other two arrive in the same
+// reading, so they cost nothing extra.
+function cardLines(card) {
+  if (!card.total_mb) return [];
+  const share = Math.round((100 * card.used_mb) / card.total_mb);
+  const lines = [
+    line('Card memory', `${card.used_mb} / ${card.total_mb} MB`,
+         card.kind === 'unified'
+           ? 'Apple silicon shares one pool between the chip and everything '
+             + 'else, so this is what the engines hold against the machine.'
+           : `${share}% of the card`),
+  ];
+  if (card.busy_percent !== null && card.busy_percent !== undefined) {
+    lines.push(line('Card busy', `${card.busy_percent}%`,
+                    'A model can hold memory and do nothing. This says whether '
+                    + 'it is working.'));
+  }
+  if (card.temperature_c !== null && card.temperature_c !== undefined) {
+    lines.push(line('Temperature', `${card.temperature_c} °C`));
+  }
+  if (card.ram_total_mb) {
+    lines.push(line('System memory', `${card.ram_used_mb} / ${card.ram_total_mb} MB`,
+                    'The machine\u2019s own memory. A model split between the '
+                    + 'card and here lives in it, and so does everything an '
+                    + 'engine keeps outside the card.'));
+  }
+  return lines;
+}
+
 function activity(stats) {
   const status = stats.switching ? 'loading a model'
     : stats.in_flight && stats.waiting ? 'working, with a queue'
@@ -112,6 +142,7 @@ function activity(stats) {
     line('Time spent switching', `${stats.switching_share}%`,
          'Of the time this was working — answering or loading — how much went '
          + 'on loading.'),
+    ...cardLines(stats.card || {}),
     stats.last_error
       ? element('p', { class: 'error', text: `Last error: ${stats.last_error}` })
       : null,

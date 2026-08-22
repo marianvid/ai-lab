@@ -100,6 +100,15 @@ class DarwinHost:
             self._processes.pop(instance_id, None)
             self._close_log(instance_id)
 
+    def system_memory(self) -> tuple[float, float]:
+        """Nothing, on purpose.
+
+        Apple silicon shares one pool between the chip and everything else, so
+        the accelerator reading is already the machine's memory. Reporting it
+        twice under two names would suggest there are two of them.
+        """
+        return 0.0, 0.0
+
     def state_dir(self) -> Path:
         """Beside the logs, under the user's own Library.
 
