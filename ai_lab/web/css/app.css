@@ -376,7 +376,6 @@ body:has(.logpane) main { padding-bottom: 44vh; }
 .gateway-grid .row.now { border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
 .gateway-grid .row.now > span:first-child { font-weight: 600; }
 
-.gateway-grid code { font-size: 0.8rem; }
 
 @media (max-width: 60rem) {
   .gateway-grid {

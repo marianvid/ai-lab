@@ -42,6 +42,16 @@ function line(label, value, title) {
   ]);
 }
 
+// The same, for something that is not a measurement. An address and a key are
+// things to read and copy, not figures to compare, so they do not take the
+// emphasis the numbers get.
+function plain(label, value, title) {
+  return element('div', { class: 'row', ...(title ? { title } : {}) }, [
+    element('span', { class: 'muted', text: label }),
+    element('span', { class: 'muted', text: value }),
+  ]);
+}
+
 // Where to point an agent. Built from the page being looked at rather than
 // from the server's idea of itself: the manager may be reached by name, by
 // address, or through a tunnel, and the answer has to be the address that
@@ -66,14 +76,14 @@ function address(stats) {
     return element('div', { class: 'row tight', title: everyone
       ? 'Every configured model answers this'
       : `${row.models.length} of ${all}: ${row.models.join(', ')}` }, [
-      element('code', { text: row.path }),
+      element('span', { class: 'muted', text: row.path }),
       element('span', { class: 'muted', text: who }),
     ]);
   });
 
   return section('Server address', [
-    line('Base URL', `${base}/v1`),
-    line('API key', 'none'),
+    plain('Base URL', `${base}/v1`),
+    plain('API key', 'none'),
     element('h4', { text: 'Endpoints' }),
     ...shapes,
   ]);
