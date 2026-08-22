@@ -335,16 +335,41 @@ a.action:hover { border-color: var(--accent); color: var(--accent); }
 /* Room to scroll past the panel, so the last row is not stuck underneath it. */
 body:has(.logpane) main { padding-bottom: 44vh; }
 
-/* The Gateway page in two columns where there is room for two.
+/* The Gateway page, laid out rather than stacked.
 
-   Its sections are short and unrelated — where to point an agent, what is
-   happening now, what it has cost, the limits — so stacking them made a long
-   page of small blocks with the last one below the fold. Each stays whole:
-   a section is never split down the middle of itself. */
-.columns {
+   Its sections are short and unrelated, and they are not equally important.
+   Where to point an agent is what somebody opens this page for the first time
+   to read, so it is wide and first. What is happening now and what it has cost
+   are glances, so they sit narrow beside it. The limits and the recent
+   switches are the bottom half, side by side.
+
+   One column when the window is too narrow for three, in the same order. */
+.gateway-grid {
   display: grid; gap: 0 1.5rem;
-  grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-areas:
+    "address address side"
+    "limits  recent  recent";
   align-items: start;
 }
-.columns > .section { break-inside: avoid; }
-.columns code { font-size: 0.8rem; }
+.gateway-grid > .at-address { grid-area: address; }
+.gateway-grid > .at-side    { grid-area: side; }
+.gateway-grid > .at-limits  { grid-area: limits; }
+.gateway-grid > .at-recent  { grid-area: recent; }
+
+/* The bottom two share a height: the taller decides, and the list of recent
+   switches scrolls inside itself rather than dragging the page down. */
+.gateway-grid > .at-limits,
+.gateway-grid > .at-recent { align-self: stretch; display: flex; }
+.gateway-grid > .at-limits > .section,
+.gateway-grid > .at-recent > .section { flex: 1; display: flex; flex-direction: column; }
+.gateway-grid > .at-recent > .section > .card { overflow-y: auto; }
+
+.gateway-grid code { font-size: 0.8rem; }
+
+@media (max-width: 60rem) {
+  .gateway-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas: "address" "side" "limits" "recent";
+  }
+}

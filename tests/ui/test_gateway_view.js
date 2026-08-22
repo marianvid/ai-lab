@@ -30,11 +30,14 @@ const STATS = {
   total_switch_s: 62.4,
   last_error: '',
   shapes: [
-    { path: '/v1/chat/completions', models: ['coder', 'fast'] },
-    { path: '/v1/completions', models: ['coder', 'fast'] },
-    { path: '/v1/embeddings', models: ['coder', 'fast'] },
-    { path: '/v1/messages', models: ['fast'] },
-    { path: '/v1/messages/count_tokens', models: ['fast'] },
+    { path: '/v1/chat/completions', models: ['coder', 'fast'],
+      engines: ['llama.cpp', 'vLLM'] },
+    { path: '/v1/completions', models: ['coder', 'fast'],
+      engines: ['llama.cpp', 'vLLM'] },
+    { path: '/v1/embeddings', models: ['coder', 'fast'],
+      engines: ['llama.cpp', 'vLLM'] },
+    { path: '/v1/messages', models: ['fast'], engines: ['vLLM'] },
+    { path: '/v1/messages/count_tokens', models: ['fast'], engines: ['vLLM'] },
   ],
   recent: [
     { at: 1, loaded: 'coder', unloaded: ['reviewer'], took_s: 31.2, load_ms: 28100 },
@@ -46,8 +49,11 @@ async function renderPage(overrides = {}) {
   const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
   await render(context.view);
   await settle();
-  // The view keeps itself fresh on a timer; closing the window cancels it so
-  // the test run can finish.
+  // The view keeps itself fresh on a timer. Stopping it explicitly rather than
+  // relying on the window closing: the timer would otherwise fire into a
+  // window that is gone.
+  const { stopRefreshing } = await import('../../ai_lab/web/js/views/gateway.js');
+  stopRefreshing();
   context.window.close();
   return context;
 }
@@ -248,18 +254,35 @@ describe('what can be sent to the front door', () => {
     assert.match(view.textContent, /every model/);
   });
 
-  it('names the models when only some answer a shape', async () => {
-    // Otherwise you send it, get refused, and have to guess which to try.
+  it('names the engine when only some answer a shape', async () => {
+    // The engine, not the models: a list of names grows every time an entry is
+    // added and is stale by the next one. "vLLM models" says it once and stays
+    // true. The names are in the tooltip for anyone who wants them.
     const { view } = await renderPage();
     const row = [...view.querySelectorAll('.row')]
       .find((node) => node.textContent.includes('/v1/messages'));
-    assert.match(row.textContent, /1 of 2: fast/);
+    assert.match(row.textContent, /vLLM models/);
+    assert.match(row.getAttribute('title'), /1 of 2: fast/);
   });
 
-  it('lays the page out in columns', async () => {
-    // Its sections are short and unrelated, so stacking them put the last one
-    // below the fold for no reason.
+  it('says no key is needed rather than describing what is not checked', async () => {
     const { view } = await renderPage();
-    assert.ok(view.classList.contains('columns'));
+    assert.match(view.textContent, /none/);
+  });
+
+  it('lays the page out, and in its own element', async () => {
+    // The class used to go on the page container, which every tab shares — so
+    // Models and Library inherited a layout meant for this page.
+    const { view } = await renderPage();
+    assert.equal(view.classList.contains('columns'), false,
+                 'it wrote a layout onto the shared container');
+    assert.ok(view.querySelector('.gateway-grid'));
+  });
+
+  it('gives each section its place in the grid', async () => {
+    const { view } = await renderPage();
+    for (const place of ['at-address', 'at-side', 'at-limits', 'at-recent']) {
+      assert.ok(view.querySelector(`.${place}`), `nothing at ${place}`);
+    }
   });
 });

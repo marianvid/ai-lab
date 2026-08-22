@@ -58,19 +58,22 @@ function address(stats) {
   // answer Anthropic's.
   const shapes = stats.shapes.map((row) => {
     const everyone = row.models.length === all;
-    return element('div', { class: 'row', title: everyone
+    // The engine, not the models. A list of names grows every time an entry is
+    // added and is stale by the next one; "vLLM models" says it once and stays
+    // true.
+    const who = everyone ? 'every model'
+      : `${row.engines.join(' and ')} models`;
+    return element('div', { class: 'row tight', title: everyone
       ? 'Every configured model answers this'
-      : `Only these answer it: ${row.models.join(', ')}` }, [
+      : `${row.models.length} of ${all}: ${row.models.join(', ')}` }, [
       element('code', { text: row.path }),
-      element('span', { class: 'muted', text: everyone
-        ? 'every model'
-        : `${row.models.length} of ${all}: ${row.models.join(', ')}` }),
+      element('span', { class: 'muted', text: who }),
     ]);
   });
 
   return section('Where to point an agent', [
     line('Base URL', `${base}/v1`),
-    line('API key', 'not checked — any value will do'),
+    line('API key', 'none — any value will do, and none is fine'),
     element('p', { class: 'muted',
                    text: 'Name any configured model in the request. If it is '
                          + 'not the one on the card, it is loaded first and '
@@ -210,10 +213,19 @@ function recent(stats) {
   }));
 }
 
+// Stop refreshing, whatever the page is doing.
+//
+// The timer stops itself when it finds the container holding somebody else's
+// work, but that is on its next tick — up to five seconds later. Anything that
+// wants the page gone *now* says so rather than waiting for it to notice.
+export function stopRefreshing() {
+  if (timer) { window.clearInterval(timer); timer = null; }
+}
+
 export async function render(container) {
   // One timer at a time. Leaving the old one running would make the page
   // redraw twice as often for every visit to this tab.
-  if (timer) { window.clearInterval(timer); timer = null; }
+  stopRefreshing();
 
   let stats;
   try {
@@ -223,15 +235,16 @@ export async function render(container) {
     return;
   }
 
-  container.classList.add('columns');
-  container.replaceChildren(...[
-    address(stats), state(stats), traffic(stats),
-    limits(stats, () => render(container)), recent(stats),
-  ]);
+  // The grid is its own element rather than the shared page container: a
+  // class put on that one stays behind when another tab is opened, and the
+  // Models and Library pages inherited a layout meant for this one.
+  container.replaceChildren(element('div', { class: 'gateway-grid' }, [
+    element('div', { class: 'at-address' }, address(stats)),
+    element('div', { class: 'at-side' }, [state(stats), traffic(stats)]),
+    element('div', { class: 'at-limits' }, limits(stats, () => render(container))),
+    element('div', { class: 'at-recent' }, recent(stats)),
+  ]));
 
-  // Stop as soon as the tab is left: `container` is emptied and refilled by
-  // whichever view is drawn next, so its contents no longer being ours is the
-  // signal that this view is gone.
   // window.setInterval rather than the bare global, so closing the page
   // cancels it. A timer that outlives the window keeps the whole thing alive.
   const mine = container.firstChild;

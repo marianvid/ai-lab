@@ -735,3 +735,38 @@ describe('the buttons line up down the page', () => {
     assert.deepEqual(slots(view, 0), slots(view, 1));
   });
 });
+
+describe('one page does not lay out another', () => {
+  it('leaves the Models page as it was', async () => {
+    // The Gateway page used to put its layout class on the page container,
+    // which every tab shares, so Models and Library came out in columns after
+    // a visit to it.
+    const context = installDom(responses({
+      '/api/gateway': {
+        current: null, current_settings: {}, busy: false, holder: null,
+        in_flight: 0, places: 0, switching: false, waiting: 0, waiting_for: [],
+        longest_wait_s: 0, max_waiting: 150, first_byte_s: 120,
+        between_bytes_s: 30, requests: 0, switches: 0, average_wait_s: 0,
+        average_switch_s: 0, total_switch_s: 0, last_error: '',
+        shapes: [{ path: '/v1/chat/completions', models: ['qwen-coder'],
+                   engines: ['llama.cpp'] }],
+        recent: [],
+      },
+    }));
+    const gateway = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    await gateway.render(context.view);
+    await settle();
+    const { render } = await import(`../../ai_lab/web/js/views/runtime.js?${Math.random()}`);
+    await render(context.view);
+    await settle();
+    const { closeLogs } = await import('../../ai_lab/web/js/logpane.js');
+    closeLogs();
+    gateway.stopRefreshing();
+    assert.equal(context.view.className, '',
+                 `the container kept "${context.view.className}"`);
+    assert.equal(context.view.querySelector('.gateway-grid'), null);
+    // Not closing the window: the timers this test started are stopped above,
+    // and closing it out from under whatever jsdom is still finishing raises
+    // from inside jsdom rather than from anything under test.
+  });
+});

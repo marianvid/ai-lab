@@ -711,14 +711,23 @@ class Gateway:
         anybody whose tool speaks the second.
         """
         answers: dict[str, list[str]] = {}
+        engines_for: dict[str, set] = {}
         for entry in self.operations.configured():
             try:
-                paths = self.operations.engines.get(entry["engine"]).api_paths()
+                engine = self.operations.engines.get(entry["engine"])
+                paths = engine.api_paths()
             except Exception:
                 continue
             for path in paths:
                 answers.setdefault(path, []).append(entry["id"])
-        return [{"path": path, "models": sorted(models)}
+                # The engines, as well as the models. A shape only some answer
+                # is answered by an engine, not by a list of names that grows
+                # every time an entry is added — "vLLM models" says it once and
+                # stays true.
+                engines_for.setdefault(path, set()).add(
+                    getattr(engine, "display_name", entry["engine"]))
+        return [{"path": path, "models": sorted(models),
+                  "engines": sorted(engines_for[path])}
                 for path, models in sorted(answers.items())]
 
 
