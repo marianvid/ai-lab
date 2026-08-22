@@ -340,25 +340,35 @@ body:has(.logpane) main { padding-bottom: 44vh; }
 
 /* The Gateway page, laid out rather than stacked.
 
-   Activity is the tallest and stands alone on the left. The address and the
-   limits are short, so they stack beside it and the two columns come out level.
-   The queue runs the width underneath, because it grows downwards and there is
-   nothing to put beside it.
+   The address and the limits are short and are read when something is being
+   set up; together they balance Activity, which is nine lines and is what the
+   page is left open for. The queue takes whatever height is left and scrolls
+   inside itself: it is the only part that grows without limit, and a page that
+   grew with it would put the rest above the fold and then off it.
 
    One column when the window is too narrow for two, in the same order. */
 .gateway-grid {
   display: grid; gap: 0 1.5rem;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto 1fr;
   grid-template-areas:
-    "activity address"
-    "activity limits"
+    "address  activity"
+    "limits   activity"
     "queue    queue";
   align-items: start;
+  /* What is left of the window under the header, the tabs and the status
+     line. The queue row is the one that takes it. */
+  min-height: calc(100vh - 11rem);
 }
-.gateway-grid > .at-activity { grid-area: activity; }
 .gateway-grid > .at-address  { grid-area: address; }
 .gateway-grid > .at-limits   { grid-area: limits; }
-.gateway-grid > .at-queue    { grid-area: queue; }
+.gateway-grid > .at-activity { grid-area: activity; }
+.gateway-grid > .at-queue    {
+  grid-area: queue; align-self: stretch;
+  display: flex; min-height: 0;
+}
+.gateway-grid > .at-queue > .section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.gateway-grid > .at-queue > .section > .card { flex: 1; overflow-y: auto; min-height: 0; }
 
 .gateway-grid .swap {
   white-space: pre; overflow: hidden; text-overflow: ellipsis;
@@ -371,6 +381,9 @@ body:has(.logpane) main { padding-bottom: 44vh; }
 @media (max-width: 60rem) {
   .gateway-grid {
     grid-template-columns: 1fr;
-    grid-template-areas: "activity" "address" "limits" "queue";
+    grid-template-rows: auto;
+    grid-template-areas: "address" "limits" "activity" "queue";
+    min-height: 0;
   }
+  .gateway-grid > .at-queue > .section > .card { max-height: 50vh; }
 }
