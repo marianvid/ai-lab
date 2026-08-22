@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { showNotice } from '../confirm.js';
 import { chooseFolder } from '../browse.js';
 import { whileWorking } from '../working.js';
+import { reviewUpdate } from './whatchanges.js';
 import { onLog } from '../events.js';
 import { bytes, element, seconds } from '../format.js';
 
@@ -130,7 +131,14 @@ function engineState(engine) {
 }
 
 function sourceControls(engine, source, refresh) {
-  const check = element('button', {
+  // An engine built here has a checkout to check and to rebuild. One installed
+  // as packages — vLLM — has neither, and used to get no controls at all: no
+  // way to see what a newer version would bring, because there was no button
+  // to hang it on. Reading what would change needs no checkout, so it is
+  // offered either way; only the two that act on a checkout are hidden.
+  const buildable = Boolean(source && source.exists);
+
+  const check = buildable ? element('button', {
     class: 'action', text: 'Check for updates',
     // The answer is the pill beside the engine's name: it becomes either
     // "available" or "<version> available". Saying the same thing in a
@@ -144,26 +152,30 @@ function sourceControls(engine, source, refresh) {
                            body: error.message });
       }
     }),
+  }) : null;
+
+  // Nothing here updates anything. Pressing this reads what the update would
+  // bring — what changes, what upstream wrote, which packages would be
+  // replaced — and the real Update button is at the foot of *that*. An update
+  // taken without reading it is a hope, and this machine runs one card.
+  const review = element('button', {
+    class: 'action', text: (source && source.update_available)
+      ? `Review ${source.latest}` : 'What would change',
+    title: 'Read what this update brings before taking it',
+    onclick: (event) => whileWorking(event.target, 'Reading…', () =>
+      reviewUpdate(engine, !buildable ? null : async () => {
+        try {
+          await api.updateBuild(engine.id);
+          logs.set(engine.id, []);
+          refresh();
+        } catch (error) {
+          await showNotice({ title: `Could not build ${engine.name}`,
+                             body: error.message });
+        }
+      })),
   });
 
-  const update = source.update_available
-    ? element('button', {
-        class: 'action', text: `Update to ${source.latest}`,
-        // The pill turns to "building…" and the log pane starts filling.
-        onclick: (event) => whileWorking(event.target, 'Starting…', async () => {
-          try {
-            await api.updateBuild(engine.id);
-            logs.set(engine.id, []);
-            refresh();
-          } catch (error) {
-            await showNotice({ title: `Could not build ${engine.name}`,
-                               body: error.message });
-          }
-        }),
-      })
-    : null;
-
-  return element('div', { class: 'inline' }, [check, update].filter(Boolean));
+  return element('div', { class: 'inline' }, [check, review].filter(Boolean));
 }
 
 function engineCard(engine, refresh) {
@@ -187,7 +199,7 @@ function engineCard(engine, refresh) {
           ? `built from ${source.path}${source.commit ? ` (${source.commit})` : ''}`
           : '',
       }),
-      source && source.exists ? sourceControls(engine, source, refresh) : null,
+      engine.available ? sourceControls(engine, source, refresh) : null,
     ].filter(Boolean)),
   ];
 

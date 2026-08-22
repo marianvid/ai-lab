@@ -30,7 +30,8 @@ there is exactly one place to look.
 | `runtime.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |
 | `downloads/` | Hugging Face browsing and fetching whole model sets | Deciding what a model *is* — that is the catalog's rule |
 | `settings.py` | Assembling the settings screen from configuration and host | Writing to the accelerator |
-| `builds.py` | Reporting an engine's source version, checking upstream, pulling and recompiling | Running engines, or choosing compile flags |
+| `builds.py` | Reporting an engine's source version, checking upstream, moving to a tag and recompiling | Running engines, or choosing compile flags |
+| `changes/` | What an update would bring, read before anything is pressed: commits waiting, notes written upstream, packages that would be replaced | Doing the update — it only reads |
 | `operations.py` | Joining the services into whole actions | Anything a single service could do alone |
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
@@ -264,6 +265,46 @@ away.** vLLM's "Text only" loads a model that can see without the part that
 sees. So the interface subtracts: capabilities come from the files, the entry's
 settings remove what they switch off, and what is left is what the running
 model will actually do. Nothing may add a capability the weights do not have.
+
+### Why `changes/` exists
+
+An update should be a decision, not a hope. Before either engine is updated,
+this answers *what would change?* — and the two engines are genuinely
+different, so they are not forced to look alike.
+
+llama.cpp is a checkout, so its changes are commits: already on disk after a
+fetch, no network beyond that, and a great many of them. 138 were waiting on
+the container in one measurement, of which 26 were for Vulkan, SYCL, Metal,
+OpenCL and ROCm — none of which exist there — 23 were build scripts and 10 were
+its own web page. So they are sorted against what this machine actually uses:
+62 mattered, 76 did not. Nothing is dropped; what does not apply is kept behind
+a count, because a summary that quietly throws things away is one nobody can
+trust. Nothing about *this* machine is written down by hand — the accelerator
+decides which hardware matters, and the configured entries decide the rest,
+including whether the vision code is worth reading at all.
+
+vLLM arrives as ready-built packages, so there are no commits and nothing is
+recompiled. What there is instead is better — notes written by people, for
+somebody about to install — and those are shown as written. Sifting a release
+note by guessing at prefixes would damage the one thing that was written for a
+reader.
+
+But notes describe a *version*, and say nothing about what happens to this
+particular machine. So `uv` is asked what it would do, without doing it.
+Measured on the container: moving from the installed nightly to 0.27.1 replaces
+fifteen packages and takes **eight of them backwards**, because the nightly had
+pulled newer kernel libraries than the stable release pins. No release note
+anywhere says that, and it is the thing most likely to break the card.
+
+**llama.cpp has two release lines, and which one to follow is configuration.**
+It tags almost every commit to master as `b10448` — 7,160 of them in the
+checkout, about seven a day. On 17 August 2026 it also began `v0.1.0` and up,
+in upstream's own words "stable, slower release cadence, recommended for
+downstream distribution and casual users", with notes worth reading. The
+default is stable. The two cannot be compared by their numbers — `b10448` and
+`v0.2.0` are not on one scale — so "is there anything newer?" is asked of git:
+is that tag already in this history? Exact, the same question on both lines,
+and still right when somebody switches between them.
 
 ## Two decisions worth knowing
 

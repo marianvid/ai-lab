@@ -61,6 +61,11 @@ export const api = {
   builds: () => request('GET', '/api/builds'),
   checkBuild: (engine) => request('POST', `/api/builds/${encodeURIComponent(engine)}/check`),
   updateBuild: (engine) => request('POST', `/api/builds/${encodeURIComponent(engine)}/update`),
+  // What an update would bring. A GET because it changes nothing — it
+  // reads a checkout, asks upstream what it wrote, and asks the package
+  // manager what it would do.
+  buildChanges: (engine) =>
+    request('GET', `/api/builds/${encodeURIComponent(engine)}/changes`),
   // Only what this machine can run is listed, and there is no way to ask for
   // the rest. The search answer carries how many were filtered out.
   search: (q) => request('GET', `/api/hf/search?q=${encodeURIComponent(q)}`),

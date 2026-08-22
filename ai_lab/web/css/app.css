@@ -419,3 +419,37 @@ body:has(.logpane) main { padding-bottom: 44vh; }
 
 /* What a search came back with, in the space where the results would be. */
 .outcome { margin: 0.75rem 0 0; }
+
+/* Reading an update before taking it. Wider than a question dialog, because
+   this one is meant to be read rather than answered. */
+dialog.review { max-width: min(56rem, 92vw); width: 56rem; }
+dialog.review .versions { font-size: 1.05rem; margin: 0.2rem 0 1rem; }
+dialog.review h4 {
+  margin: 1.4rem 0 0.5rem; font-size: 0.95rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+dialog.review .tally { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.6rem; }
+dialog.review ul.changes {
+  margin: 0; padding: 0; list-style: none;
+  max-height: 22rem; overflow-y: auto;
+}
+dialog.review ul.changes li {
+  display: flex; gap: 0.6rem; padding: 0.18rem 0;
+  font-size: 0.86rem; line-height: 1.35;
+}
+dialog.review ul.changes .area {
+  flex: none; width: 8.5rem; text-align: right; font-size: 0.78rem;
+}
+dialog.review table.moves { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+dialog.review table.moves td { padding: 0.15rem 0.5rem 0.15rem 0; }
+/* A package replaced by an older one. The single most important thing on this
+   screen and the one no release note anywhere will tell you. */
+dialog.review tr.backwards td { color: var(--warn); }
+dialog.review pre.notes {
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 26rem; overflow-y: auto;
+  font-size: 0.82rem; line-height: 1.45;
+}
+dialog.review .fold { margin: 0.6rem 0; }
+dialog.review .fold > summary { cursor: pointer; font-size: 0.9rem; }
+dialog.review .small { font-size: 0.85rem; }

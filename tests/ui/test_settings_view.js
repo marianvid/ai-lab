@@ -226,15 +226,34 @@ describe('the Settings page', () => {
                  'buttons for something that cannot run here');
   });
 
-  it('offers an update when one is available, and not otherwise', async () => {
+  it('names the version to be read about when one is waiting', async () => {
     const base = responses()['/api/settings'];
     const withUpdate = {
       ...base,
       engines: [{ ...base.engines[0],
-        source: { ...base.engines[0].source, latest: 'b10434', update_available: true } }],
+        source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }],
     };
     const { view } = await renderPage({ '/api/settings': withUpdate });
     assert.ok([...view.querySelectorAll('button')]
-      .some((item) => item.textContent.includes('Update to b10434')));
+      .some((item) => item.textContent.includes('Review v0.2.0')));
+  });
+
+  it('never updates straight from this page', async () => {
+    // The whole point: an update is a decision. Nothing on the engine row may
+    // start one — it opens what would change, and the real button is at the
+    // foot of that.
+    const base = responses()['/api/settings'];
+    const withUpdate = {
+      ...base,
+      engines: [{ ...base.engines[0],
+        source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }],
+    };
+    const { view, calls } = await renderPage({ '/api/settings': withUpdate });
+    const review = [...view.querySelectorAll('button')]
+      .find((item) => item.textContent.includes('Review'));
+    review.click();
+    await settle();
+    assert.equal(calls.some((call) => call.path.includes('/update')), false,
+                 'reading what would change must not start it');
   });
 });
