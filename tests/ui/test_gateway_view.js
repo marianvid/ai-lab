@@ -120,12 +120,23 @@ describe('the Gateway page', () => {
 
   it('reports a rate rather than a total that only grows', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /Requests a minute\s*12/);
+    assert.match(view.textContent, /Requests per minute\s*12/);
   });
 
   it('reports the time to the first token', async () => {
     const { view } = await renderPage();
     assert.match(view.textContent, /Time to first token\s*0.42 s/);
+  });
+
+  it('splits a client\'s wait into the half each side is responsible for', async () => {
+    // Queue and loading is the manager's doing; time to first token is the
+    // model's. Which of the two is larger says where to look when a workflow
+    // feels slow.
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Queue and loading\s*1.4 s/);
+    const queue = [...view.querySelectorAll('.row')]
+      .find((node) => node.textContent.includes('Queue and loading'));
+    assert.match(queue.getAttribute('title'), /Nothing of the answer/);
   });
 
   it('states the share of working time spent loading', async () => {

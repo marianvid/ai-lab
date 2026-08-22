@@ -202,15 +202,20 @@ function traffic(stats) {
     : share >= 20 ? 'a fair share of the time goes on loading'
     : 'mostly answering';
   return section('Traffic', [
-    line('Requests a minute', String(stats.requests_per_minute),
+    line('Requests per minute', String(stats.requests_per_minute),
          'In the last sixty seconds. Zero when nothing is happening.'),
+    line('Queue and loading', `${stats.average_wait_s} s`,
+         'From a request arriving to the engine seeing it: the queue in front '
+         + 'of it, and a model change if one was needed. Nothing of the '
+         + 'answer. This half is the manager\u2019s doing.'),
     line('Time to first token', `${stats.average_first_token_s} s`,
-         'Averaged over requests that asked for streaming. Without streaming '
-         + 'an engine sends nothing until the answer is finished, so its first '
-         + 'byte is the whole generation and the two do not average together.'),
-    line('Waiting for the card', `${stats.average_wait_s} s`,
-         'From a request arriving to it being let through: the queue in front '
-         + 'of it, and a model change if one was needed.'),
+         'From the engine seeing the request to the first token coming back — '
+         + 'reading the prompt, mostly. This half is the model\u2019s doing. '
+         + 'Averaged over requests that asked for streaming: without it an '
+         + 'engine sends nothing until the answer is finished, so its first '
+         + 'byte is the whole generation and the two do not average together. '
+         + 'The two lines above add up to how long a client waits to see '
+         + 'anything.'),
     line('Switches', String(stats.switches)),
     line('Average switch', `${stats.average_switch_s} s`),
     line('Time spent switching', `${share}%`,
