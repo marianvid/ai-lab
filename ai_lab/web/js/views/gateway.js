@@ -46,15 +46,37 @@ function line(label, value, title) {
 // from the server's idea of itself: the manager may be reached by name, by
 // address, or through a tunnel, and the answer has to be the address that
 // actually worked to get here.
-function address() {
-  const base = `${window.location.protocol}//${window.location.host}/v1`;
+function address(stats) {
+  const base = `${window.location.protocol}//${window.location.host}`;
+  const all = stats.shapes.reduce((most, row) =>
+    Math.max(most, row.models.length), 0);
+
+  // Two shapes of request are in circulation, and listing only the address
+  // would be half the answer — the wrong half for anybody whose tool speaks
+  // the other one. Grouped by which models answer each, because that is the
+  // part that differs: every engine answers the usual shape, and only some
+  // answer Anthropic's.
+  const shapes = stats.shapes.map((row) => {
+    const everyone = row.models.length === all;
+    return element('div', { class: 'row', title: everyone
+      ? 'Every configured model answers this'
+      : `Only these answer it: ${row.models.join(', ')}` }, [
+      element('code', { text: row.path }),
+      element('span', { class: 'muted', text: everyone
+        ? 'every model'
+        : `${row.models.length} of ${all}: ${row.models.join(', ')}` }),
+    ]);
+  });
+
   return section('Where to point an agent', [
-    line('Base URL', base),
+    line('Base URL', `${base}/v1`),
     line('API key', 'not checked — any value will do'),
     element('p', { class: 'muted',
                    text: 'Name any configured model in the request. If it is '
                          + 'not the one on the card, it is loaded first and '
                          + 'that one request simply takes longer.' }),
+    element('h4', { text: 'What can be sent here' }),
+    ...shapes,
   ]);
 }
 
@@ -201,9 +223,10 @@ export async function render(container) {
     return;
   }
 
+  container.classList.add('columns');
   container.replaceChildren(...[
-    address(), state(stats), traffic(stats), limits(stats, () => render(container)),
-    recent(stats),
+    address(stats), state(stats), traffic(stats),
+    limits(stats, () => render(container)), recent(stats),
   ]);
 
   // Stop as soon as the tab is left: `container` is emptied and refilled by

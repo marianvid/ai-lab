@@ -1058,3 +1058,31 @@ class LiveSettingsTests(unittest.TestCase):
         before = gateway.between_bytes_s
         gateway.apply_settings({"first_byte_s": 200})
         self.assertEqual(gateway.between_bytes_s, before)
+
+
+class ShapesOfferedTests(unittest.TestCase):
+    """What the page tells a client it may send, and to which models."""
+
+    def test_the_usual_shape_is_answered_by_everything(self):
+        gateway = quick(mixed_engines())
+        rows = {row["path"]: row["models"] for row in gateway.stats()["shapes"]}
+        self.assertEqual(rows["/v1/chat/completions"], ["coder", "fast"])
+
+    def test_the_other_shape_names_only_the_engines_that_read_it(self):
+        gateway = quick(mixed_engines())
+        rows = {row["path"]: row["models"] for row in gateway.stats()["shapes"]}
+        self.assertEqual(rows["/v1/messages"], ["fast"])
+
+    def test_it_costs_only_the_configuration(self):
+        # The page asks for this every few seconds. Asking the supervisor what
+        # every instance is doing would undo the reason the page is cheap.
+        operations = mixed_engines()
+        reads = {"n": 0}
+        original = operations.instances
+
+        def counted():
+            reads["n"] += 1
+            return original()
+        operations.instances = counted
+        quick(operations).stats()
+        self.assertEqual(reads["n"], 0)

@@ -29,6 +29,13 @@ const STATS = {
   average_switch_s: 31.2,
   total_switch_s: 62.4,
   last_error: '',
+  shapes: [
+    { path: '/v1/chat/completions', models: ['coder', 'fast'] },
+    { path: '/v1/completions', models: ['coder', 'fast'] },
+    { path: '/v1/embeddings', models: ['coder', 'fast'] },
+    { path: '/v1/messages', models: ['fast'] },
+    { path: '/v1/messages/count_tokens', models: ['fast'] },
+  ],
   recent: [
     { at: 1, loaded: 'coder', unloaded: ['reviewer'], took_s: 31.2, load_ms: 28100 },
   ],
@@ -217,5 +224,42 @@ describe('the limits, on the page that shows what they cost', () => {
   it('says they are limits of safety, not settings to tune', async () => {
     const { view } = await renderPage();
     assert.match(view.textContent, /safety, not of patience/);
+  });
+});
+
+describe('what can be sent to the front door', () => {
+  // Two shapes of request are in circulation. Listing only the address is half
+  // the answer, and the wrong half for anybody whose tool speaks the other.
+
+  it('lists the usual shape', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /\/v1\/chat\/completions/);
+  });
+
+  it('lists the Anthropic shape too', async () => {
+    // vLLM serves it; llama.cpp does not. A client written against Anthropic's
+    // own library sends this and nothing else.
+    const { view } = await renderPage();
+    assert.match(view.textContent, /\/v1\/messages/);
+  });
+
+  it('says a shape every model answers is answered by every model', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /every model/);
+  });
+
+  it('names the models when only some answer a shape', async () => {
+    // Otherwise you send it, get refused, and have to guess which to try.
+    const { view } = await renderPage();
+    const row = [...view.querySelectorAll('.row')]
+      .find((node) => node.textContent.includes('/v1/messages'));
+    assert.match(row.textContent, /1 of 2: fast/);
+  });
+
+  it('lays the page out in columns', async () => {
+    // Its sections are short and unrelated, so stacking them put the last one
+    // below the fold for no reason.
+    const { view } = await renderPage();
+    assert.ok(view.classList.contains('columns'));
   });
 });

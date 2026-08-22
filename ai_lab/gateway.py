@@ -685,6 +685,10 @@ class Gateway:
             "max_waiting": self.scheduler.max_waiting,
             "first_byte_s": self.first_byte_s,
             "between_bytes_s": self.between_bytes_s,
+            # Which shapes of request each model answers. Configuration only
+            # — an entry's engine and what that engine serves — so the page can
+            # say it without the expensive question.
+            "shapes": self._shapes_offered(),
             "requests": counters.requests,
             "switches": counters.switches,
             "average_wait_s": round(counters.waited_s / counters.requests, 2)
@@ -695,6 +699,27 @@ class Gateway:
             "last_error": counters.last_error,
             "recent": list(reversed(counters.history[-10:])),
         }
+
+
+    def _shapes_offered(self) -> list[dict]:
+        """The kinds of request that can be sent here, and to which models.
+
+        Two are in circulation. Nearly every client speaks the OpenAI one and
+        every engine answers it. A client written against Anthropic's own
+        library speaks the other, and only some engines do — so listing the
+        base address alone would be half the answer, and the wrong half for
+        anybody whose tool speaks the second.
+        """
+        answers: dict[str, list[str]] = {}
+        for entry in self.operations.configured():
+            try:
+                paths = self.operations.engines.get(entry["engine"]).api_paths()
+            except Exception:
+                continue
+            for path in paths:
+                answers.setdefault(path, []).append(entry["id"])
+        return [{"path": path, "models": sorted(models)}
+                for path, models in sorted(answers.items())]
 
 
 def _waiting_summary(waiting: list[dict]) -> list[dict]:

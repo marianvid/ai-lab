@@ -334,3 +334,17 @@ a.action:hover { border-color: var(--accent); color: var(--accent); }
 }
 /* Room to scroll past the panel, so the last row is not stuck underneath it. */
 body:has(.logpane) main { padding-bottom: 44vh; }
+
+/* The Gateway page in two columns where there is room for two.
+
+   Its sections are short and unrelated — where to point an agent, what is
+   happening now, what it has cost, the limits — so stacking them made a long
+   page of small blocks with the last one below the fold. Each stays whole:
+   a section is never split down the middle of itself. */
+.columns {
+  display: grid; gap: 0 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
+  align-items: start;
+}
+.columns > .section { break-inside: avoid; }
+.columns code { font-size: 0.8rem; }
