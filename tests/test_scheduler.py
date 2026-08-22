@@ -376,3 +376,75 @@ def _swallow(function, *args, **kwargs):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OverflowTests(unittest.TestCase):
+    """More waiting for a shape than the shape has places.
+
+    They belong to the round that is running, so they are let in as places
+    free. Sending them to the back of the queue put them behind whatever
+    arrived while the model was loading — including a request for another
+    model, which then got served in the middle of their round, and the round
+    finished after two more swaps.
+    """
+
+    def test_the_ones_that_did_not_fit_go_next_not_last(self):
+        card = Card(places={"a": 1, "b": 2, "c": 1})
+        s = scheduler(card)
+        s.enter("a")
+        for _ in range(4):
+            run(_hold, s, "b", 0.15)
+        time.sleep(0.05)
+        run(_hold, s, "c", 0.05)                # newer than all four
+        time.sleep(0.05)
+        s.leave()
+        time.sleep(1.2)
+        self.assertEqual(card.switches, ["a", "b", "c"],
+                         "it swapped away mid-round and back again")
+
+    def test_they_are_let_in_as_places_free(self):
+        card = Card(places=2)
+        s = scheduler(card)
+        s.enter("a")
+        for _ in range(5):
+            run(lambda: _swallow(s.enter, "b"))
+        time.sleep(0.05)
+        s.leave()
+        time.sleep(0.1)
+        self.assertEqual(s.state()["in_flight"], 2)
+        self.assertEqual(len(s.state()["waiting"]), 3)
+        s.leave()
+        time.sleep(0.1)
+        self.assertEqual(len(s.state()["waiting"]), 2, "nobody took the free place")
+
+    def test_they_keep_the_order_they_arrived_in(self):
+        card = Card(places=1)
+        s = scheduler(card)
+        s.enter("a")
+        served = []
+        for index in range(3):
+            run(_record, s, "b", served, index)
+            time.sleep(0.02)
+        time.sleep(0.05)
+        s.leave()
+        for _ in range(4):
+            time.sleep(0.15)
+            s.leave()
+        self.assertEqual(served, [0, 1, 2])
+
+
+def _hold(s, shape, seconds):
+    try:
+        s.enter(shape)
+    except Exception:
+        return
+    time.sleep(seconds)
+    s.leave()
+
+
+def _record(s, shape, served, index):
+    try:
+        s.enter(shape)
+    except Exception:
+        return
+    served.append(index)

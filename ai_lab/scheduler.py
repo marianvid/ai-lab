@@ -313,14 +313,26 @@ class Scheduler:
             self._current = shape
             self._loaded = True
             room = self._places(shape)
+            overflow = []
             for entry in photograph:
                 if self._gone(entry):
                     continue
                 if self._in_flight >= room:
-                    self._queue.append(entry)   # more than fit: next round
+                    overflow.append(entry)
                     continue
                 self._in_flight += 1
                 ready.append(entry)
+            # More were waiting for this shape than fit. They belong to the
+            # round that is now running, so they go back at the *front* and are
+            # let in as places free.
+            #
+            # At the back they would sit behind whatever arrived while the
+            # model was loading — including a request for another model, which
+            # would then be served in the middle of their round. Twelve
+            # requests to a model with eight places, plus one for another
+            # model, cost two extra swaps that way: measured as a -> b -> c ->
+            # b where a -> b -> c was the whole of the work.
+            self._queue[:0] = overflow
         return ready
 
     @staticmethod
