@@ -2,6 +2,11 @@
 
 const KEY = 'ai-lab-theme';
 const ORDER = ['light', 'dark'];
+// The sun and the moon, which need no translating and no reading. Shown for
+// the theme you are *in*, with the tooltip saying what pressing it does —
+// otherwise a single symbol has to answer two questions at once and half the
+// people read it the other way round.
+const ICON = { light: '\u2600', dark: '\u263E' };
 const LABEL = { light: 'Light', dark: 'Dark' };
 
 function systemPrefersDark() {
@@ -26,7 +31,13 @@ export function currentTheme() {
 }
 
 export function installTheme(button) {
-  const draw = () => { button.textContent = LABEL[stored()]; };
+  const draw = () => {
+    const now = stored();
+    const next = now === 'dark' ? 'light' : 'dark';
+    button.textContent = ICON[now];
+    button.title = `Switch to ${LABEL[next].toLowerCase()}`;
+    button.setAttribute('aria-label', button.title);
+  };
 
   button.addEventListener('click', () => {
     const next = stored() === 'dark' ? 'light' : 'dark';

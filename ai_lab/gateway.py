@@ -752,10 +752,16 @@ class Gateway:
     def _card_reading(self) -> dict:
         """Memory, load and temperature, as the accelerator reports them.
 
-        Memory is the binding constraint on a machine like this, and the other
-        two arrive in the same answer. On unified memory there is no separate
-        pool and no temperature to read, so those come back empty rather than
-        as a number meaning something else.
+        Memory is the binding constraint on a machine like this, and the
+        temperature arrives in the same answer. Utilisation does too and is not
+        reported: it is an instantaneous sample, so a five-second page lands
+        between requests more often than not and shows nought per cent on a
+        machine that is working steadily. A figure that is usually wrong is
+        worse than none.
+
+        On unified memory there is no separate pool and no temperature to read,
+        so those come back empty rather than as a number meaning something
+        else.
         """
         try:
             snapshot = self.operations.host.accelerator()
@@ -766,7 +772,6 @@ class Gateway:
             "used_mb": round(snapshot.memory_used_mb),
             "total_mb": round(snapshot.memory_total_mb),
             "kind": snapshot.memory_kind,
-            "busy_percent": snapshot.utilization_percent,
             "temperature_c": snapshot.temperature_c,
             # The machine's own memory, where there is a separate pool to
             # report. A model split between card and system memory lives here.

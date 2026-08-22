@@ -41,7 +41,7 @@ const STATS = {
     { path: '/v1/messages/count_tokens', models: ['fast'], engines: ['vLLM'] },
   ],
   card: { used_mb: 3546, total_mb: 32623, kind: 'dedicated',
-          busy_percent: 41, temperature_c: 32,
+          temperature_c: 32,
           ram_used_mb: 8200, ram_total_mb: 64000 },
   queue_runs: [],
   recent: [],
@@ -386,17 +386,20 @@ describe('what the card says about itself', () => {
   it('shows how much of it is used', async () => {
     // The binding constraint on a machine that holds one model at a time.
     const { view } = await renderPage();
-    assert.match(view.textContent, /Card memory\s*3546 \/ 32623 MB/);
-  });
-
-  it('shows whether it is working or only holding memory', async () => {
-    const { view } = await renderPage();
-    assert.match(view.textContent, /Card busy\s*41%/);
+    assert.match(view.textContent, /GPU mem\s*3546 \/ 32623 MB/);
   });
 
   it('shows the temperature', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /32 °C/);
+    assert.match(view.textContent, /GPU temp\s*32 °C/);
+  });
+
+  it('does not report utilisation', async () => {
+    // An instantaneous sample, so a five-second page lands between requests
+    // more often than not and reads nought per cent on a machine that is
+    // working steadily.
+    const { view } = await renderPage();
+    assert.equal(view.textContent.includes('busy'), false);
   });
 
   it('says nothing about load or heat where there is nothing to read', async () => {
@@ -404,19 +407,18 @@ describe('what the card says about itself', () => {
     // something else.
     const { view } = await renderPage({
       card: { used_mb: 64200, total_mb: 131072, kind: 'unified',
-              busy_percent: null, temperature_c: null,
+              temperature_c: null,
               ram_used_mb: 0, ram_total_mb: 0 },
     });
     assert.match(view.textContent, /64200 \/ 131072 MB/);
-    assert.equal(view.textContent.includes('Card busy'), false);
     assert.equal(view.textContent.includes('°C'), false);
-    assert.equal(view.textContent.includes('System memory'), false,
+    assert.equal(view.textContent.includes('System mem'), false,
                  'unified memory is one pool, reported twice');
   });
 
   it('says nothing at all when there is no accelerator', async () => {
     const { view } = await renderPage({ card: {} });
-    assert.equal(view.textContent.includes('Card memory'), false);
+    assert.equal(view.textContent.includes('GPU mem'), false);
   });
 });
 
@@ -425,6 +427,6 @@ describe('the machine behind the card', () => {
     // Where a model is split between the card and here, this is the half that
     // does not show on the card reading.
     const { view } = await renderPage();
-    assert.match(view.textContent, /System memory\s*8200 \/ 64000 MB/);
+    assert.match(view.textContent, /System mem\s*8200 \/ 64000 MB/);
   });
 });

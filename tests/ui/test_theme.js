@@ -31,7 +31,25 @@ describe('the theme control', () => {
     // So the first click changes the page rather than confirming it.
     const { root, button } = await load();
     assert.ok(['light', 'dark'].includes(root.getAttribute('data-theme')));
-    assert.ok(['Light', 'Dark'].includes(button.textContent));
+    assert.ok(['\u2600', '\u263E'].includes(button.textContent));
+  });
+
+  it('shows the sun or the moon for the theme it is in', async () => {
+    const { root, button } = await load();
+    const symbol = { light: '\u2600', dark: '\u263E' };
+    assert.equal(button.textContent, symbol[root.getAttribute('data-theme')]);
+    button.click();
+    assert.equal(button.textContent, symbol[root.getAttribute('data-theme')]);
+  });
+
+  it('says what pressing it will do, since one symbol cannot', async () => {
+    // Shown for the theme you are in; the tooltip is the other half. Without
+    // it a single symbol has to answer two questions and half the people read
+    // it the other way round.
+    const { root, button } = await load();
+    const other = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    assert.equal(button.title, `Switch to ${other}`);
+    assert.equal(button.getAttribute('aria-label'), button.title);
   });
 
   it('switches between the two', async () => {
