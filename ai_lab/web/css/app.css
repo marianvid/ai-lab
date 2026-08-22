@@ -67,7 +67,10 @@ nav button {
 }
 nav button.active { color: var(--text); border-bottom-color: var(--accent); }
 
-main { padding: 1.25rem; max-width: 1100px; }
+/* Centred rather than pinned to the left: on a wide screen the content sat in
+   the left third with the rest empty, and every page reads better with the
+   space split between the two sides. */
+main { padding: 1.25rem; max-width: 1100px; margin: 0 auto; }
 footer { padding: 0.6rem 1.25rem; font-size: 0.85rem; min-height: 2rem; }
 
 h2 { font-size: 1.05rem; margin: 0 0 0.75rem; }
@@ -337,37 +340,26 @@ body:has(.logpane) main { padding-bottom: 44vh; }
 
 /* The Gateway page, laid out rather than stacked.
 
-   Its sections are short and unrelated, and they are not equally important.
-   Where to point an agent is what somebody opens this page for the first time
-   to read, so it is wide and first. What is happening now and what it has cost
-   are glances, so they sit narrow beside it. The limits and the recent
-   switches are the bottom half, side by side.
+   Activity is the tallest and stands alone on the left. The address and the
+   limits are short, so they stack beside it and the two columns come out level.
+   The queue runs the width underneath, because it grows downwards and there is
+   nothing to put beside it.
 
-   One column when the window is too narrow for three, in the same order. */
+   One column when the window is too narrow for two, in the same order. */
 .gateway-grid {
   display: grid; gap: 0 1.5rem;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   grid-template-areas:
-    "address address side"
-    "limits  recent  recent";
+    "activity address"
+    "activity limits"
+    "queue    queue";
   align-items: start;
 }
-.gateway-grid > .at-address { grid-area: address; }
-.gateway-grid > .at-side    { grid-area: side; }
-.gateway-grid > .at-limits  { grid-area: limits; }
-.gateway-grid > .at-recent  { grid-area: recent; }
+.gateway-grid > .at-activity { grid-area: activity; }
+.gateway-grid > .at-address  { grid-area: address; }
+.gateway-grid > .at-limits   { grid-area: limits; }
+.gateway-grid > .at-queue    { grid-area: queue; }
 
-/* The bottom two share a height: the taller decides, and the list of recent
-   switches scrolls inside itself rather than dragging the page down. */
-.gateway-grid > .at-limits,
-.gateway-grid > .at-recent { align-self: stretch; display: flex; }
-.gateway-grid > .at-limits > .section,
-.gateway-grid > .at-recent > .section { flex: 1; display: flex; flex-direction: column; }
-.gateway-grid > .at-recent > .section > .card { overflow-y: auto; }
-/* The two share a height. Without a floor the shorter one decides, and a
-   single recent switch left the panel beside a much taller Limits. */
-.gateway-grid > .at-limits > .section > .card,
-.gateway-grid > .at-recent > .section > .card { flex: 1; }
 .gateway-grid .swap {
   white-space: pre; overflow: hidden; text-overflow: ellipsis;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem;
@@ -376,10 +368,9 @@ body:has(.logpane) main { padding-bottom: 44vh; }
 .gateway-grid .row.now { border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
 .gateway-grid .row.now > span:first-child { font-weight: 600; }
 
-
 @media (max-width: 60rem) {
   .gateway-grid {
     grid-template-columns: 1fr;
-    grid-template-areas: "address" "side" "limits" "recent";
+    grid-template-areas: "activity" "address" "limits" "queue";
   }
 }

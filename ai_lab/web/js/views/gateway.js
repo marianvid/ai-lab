@@ -83,8 +83,6 @@ function address(stats) {
 
   return section('Server address', [
     plain('Base URL', `${base}/v1`),
-    plain('API key', 'none'),
-    element('h4', { text: 'Endpoints' }),
     ...shapes,
   ]);
 }
@@ -245,10 +243,10 @@ export async function render(container) {
   // class put on that one stays behind when another tab is opened, and the
   // Models and Library pages inherited a layout meant for this one.
   container.replaceChildren(element('div', { class: 'gateway-grid' }, [
+    element('div', { class: 'at-activity' }, activity(stats)),
     element('div', { class: 'at-address' }, address(stats)),
-    element('div', { class: 'at-side' }, activity(stats)),
     element('div', { class: 'at-limits' }, limits(stats, () => render(container))),
-    element('div', { class: 'at-recent' }, coming(stats)),
+    element('div', { class: 'at-queue' }, coming(stats)),
   ]));
 
   // window.setInterval rather than the bare global, so closing the page

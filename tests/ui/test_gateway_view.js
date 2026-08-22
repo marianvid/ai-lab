@@ -286,12 +286,9 @@ describe('what can be sent to the front door', () => {
     assert.match(row.getAttribute('title'), /1 of 2: fast/);
   });
 
-  it('answers the key question with one word', async () => {
-    // It said what is not checked, which is not what somebody needs to type.
+  it('says nothing about a key, because there is nothing to say', async () => {
     const { view } = await renderPage();
-    const row = [...view.querySelectorAll('.row')]
-      .find((node) => node.textContent.includes('API key'));
-    assert.equal(row.textContent.replace('API key', '').trim(), 'none');
+    assert.equal(view.textContent.includes('API key'), false);
   });
 
   it('lays the page out, and in its own element', async () => {
@@ -305,7 +302,7 @@ describe('what can be sent to the front door', () => {
 
   it('gives each section its place in the grid', async () => {
     const { view } = await renderPage();
-    for (const place of ['at-address', 'at-side', 'at-limits', 'at-recent']) {
+    for (const place of ['at-activity', 'at-address', 'at-limits', 'at-queue']) {
       assert.ok(view.querySelector(`.${place}`), `nothing at ${place}`);
     }
   });
