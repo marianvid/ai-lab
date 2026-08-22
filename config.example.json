@@ -12,10 +12,12 @@
       }
     },
     "vllm": {
-      "binary": "/opt/ai/vllm/.venv/bin/vllm",
+      "binary": "/opt/ai/vllm/current/bin/vllm",
       "source": {
         "releases": "vllm-project/vllm",
-        "package": "vllm"
+        "package": "vllm",
+        "root": "/opt/ai/vllm",
+        "uv": "/usr/local/bin/uv"
       }
     }
   },

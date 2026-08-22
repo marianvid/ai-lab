@@ -21,6 +21,7 @@ from .events import EventBus
 from .gateway import (BETWEEN_BYTES_S, FIRST_BYTE_S, MAX_WAITING,
                       Gateway)
 from .hosts import current_host
+from .installs import Installs
 from .lastloaded import LastLoaded
 from .operations import Operations
 from .runtime import Runtime
@@ -38,6 +39,9 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     host = current_host(engine_settings)
     engines = Registry(engine_settings)
     builds = Builds(engine_settings, bus)
+    # Engines that arrive as packages rather than as source. A new
+    # version is installed beside the one that works, never over it.
+    installs = Installs(engine_settings, bus)
     # Keeps the version figures current without anyone pressing anything.
     builds.watch()
     # What each model's files say it can do, read once and kept beside the
@@ -64,6 +68,7 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
         huggingface=HuggingFaceClient(),
         host=host,
         builds=builds,
+        installs=installs,
         bus=bus,
         # What was on the card when the manager last stopped. The host says
         # where a machine keeps such things.

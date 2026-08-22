@@ -66,6 +66,16 @@ export const api = {
   // manager what it would do.
   buildChanges: (engine) =>
     request('GET', `/api/builds/${encodeURIComponent(engine)}/changes`),
+  // Engines that arrive as packages. A new version is installed beside the one
+  // in use, so these choose between folders rather than replacing anything.
+  allInstalls: () => request('GET', '/api/installs'),
+  installs: (engine) => request('GET', `/api/installs/${encodeURIComponent(engine)}`),
+  installEngine: (engine, version) =>
+    request('POST', `/api/installs/${encodeURIComponent(engine)}`, { version: version || '' }),
+  activateInstall: (engine, name) =>
+    request('POST', `/api/installs/${encodeURIComponent(engine)}/${encodeURIComponent(name)}/activate`),
+  removeInstall: (engine, name) =>
+    request('DELETE', `/api/installs/${encodeURIComponent(engine)}/${encodeURIComponent(name)}`),
   // Only what this machine can run is listed, and there is no way to ask for
   // the rest. The search answer carries how many were filtered out.
   search: (q) => request('GET', `/api/hf/search?q=${encodeURIComponent(q)}`),

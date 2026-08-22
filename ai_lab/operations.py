@@ -43,6 +43,7 @@ class Operations:
                  settings: Settings, downloads: DownloadManager,
                  huggingface: HuggingFaceClient, host: Host,
                  engines=None, builds: Builds | None = None,
+                 installs: Installs | None = None,
                  bus=None, last_loaded=None) -> None:
         # `engines` is the engine registry. It is passed in rather than
         # imported for two reasons: the binary paths come from configuration,
@@ -51,6 +52,9 @@ class Operations:
         from .engines.registry import Registry
         self.engines = engines if engines is not None else Registry()
         self.builds = builds
+        # Engines installed as packages rather than compiled. Optional:
+        # a machine with none, and a test that does not care, pass nothing.
+        self.installs = installs
         self.bus = bus
         self.store = store
         self.catalog = catalog
@@ -499,6 +503,57 @@ class Operations:
                          formats=frozenset(formats), pictures=pictures,
                          tools=tools)
 
+    # -- engines that arrive as packages -----------------------------------
+
+    def install_status(self, engine_id: str) -> dict:
+        return self._installs().get(engine_id).status()
+
+    def installs_available(self) -> list[dict]:
+        return self.installs.all() if self.installs else []
+
+    def _installs(self) -> Installs:
+        if self.installs is None:
+            raise KeyError("No engine on this machine is installed as packages")
+        return self.installs
+
+    def install_engine(self, engine_id: str, version: str = "") -> dict:
+        """Install a new version beside the one in use.
+
+        Refused while anything is running, for the same reason recompiling is:
+        the engine ends up being launched from somewhere else, and a model
+        already on the card would keep running the old one while the page said
+        otherwise. Better to be plain about it than to be subtly wrong.
+
+        The download itself is safe at any time — nothing existing is written
+        to — but the swap at the end is not worth splitting into a second
+        button nobody would remember to press.
+        """
+        self._nothing_running("The engine is about to be launched from "
+                              "somewhere else.")
+        return self._installs().get(engine_id).install(version)
+
+    def activate_install(self, engine_id: str, name: str) -> dict:
+        """Go back to, or forward to, an installed version."""
+        self._nothing_running("The engine is about to be launched from "
+                              "somewhere else.")
+        return self._installs().get(engine_id).activate(name)
+
+    def remove_install(self, engine_id: str, name: str) -> dict:
+        """Delete an installed version that is not in use.
+
+        Never automatic. The previous version is the way back from an update
+        that turned out badly, and deciding it is no longer needed is a
+        judgement about whether the new one has proved itself — which is not a
+        judgement a timer can make.
+        """
+        return self._installs().get(engine_id).remove(name)
+
+    def _nothing_running(self, why: str) -> None:
+        running = [item["id"] for item in self.instances() if item["running"]]
+        if running:
+            raise ValueError("Unload the running instances first: "
+                             + ", ".join(running) + ". " + why)
+
     def update_engine(self, engine_id: str) -> dict:
         """Pull and recompile an engine from source.
 
@@ -507,11 +562,8 @@ class Operations:
         a confusing message about a busy file. Better to say plainly that the
         models need unloading first.
         """
-        running = [item["id"] for item in self.instances() if item["running"]]
-        if running:
-            raise ValueError(
-                "Unload the running instances first: " + ", ".join(running)
-                + ". The engine binary cannot be replaced while it is executing.")
+        self._nothing_running("The engine binary cannot be replaced while it "
+                              "is executing.")
         return self.builds.get(engine_id).update()
 
     # -- choosing where models live ----------------------------------------

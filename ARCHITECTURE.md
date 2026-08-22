@@ -32,6 +32,7 @@ there is exactly one place to look.
 | `settings.py` | Assembling the settings screen from configuration and host | Writing to the accelerator |
 | `builds.py` | Reporting an engine's source version, checking upstream, moving to a tag and recompiling | Running engines, or choosing compile flags |
 | `changes/` | What an update would bring, read before anything is pressed: commits waiting, notes written upstream, packages that would be replaced | Doing the update — it only reads |
+| `installs.py` | The installed versions of an engine that arrives as packages: adding one beside the others, choosing between them, dropping one | Compiling anything, or deciding when an old version stops being needed |
 | `operations.py` | Joining the services into whole actions | Anything a single service could do alone |
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
@@ -305,6 +306,43 @@ default is stable. The two cannot be compared by their numbers — `b10448` and
 `v0.2.0` are not on one scale — so "is there anything newer?" is asked of git:
 is that tag already in this history? Exact, the same question on both lines,
 and still right when somebody switches between them.
+
+### Why `installs.py` exists
+
+vLLM is not compiled here — it is 382 packages and 7.7 GB in a virtual
+environment, a folder holding its own Python and everything that version needs.
+Two of them sit side by side without touching each other, and that is the whole
+design: **a new version goes in a new folder, and what works is never written
+over.**
+
+That is not caution for its own sake. The vLLM installed on the container when
+this was written could not have been reinstalled: its wheel had left the local
+cache, and the index it came from — a nightly with a git hash in its name — is
+recorded nowhere on the machine. An update in place would have been
+irreversible, and if the new one had not supported this card there would have
+been nothing to go back to.
+
+So: build the new one, check that it actually imports, and only then point the
+engine at it. The engine is launched through a fixed path — a link called
+`current` — so switching versions is repointing that link, done by writing a
+new link beside it and renaming it over the top. A link deleted and recreated
+has a moment where it points at nothing, and anything starting in that moment
+fails for a reason nobody would guess.
+
+Two folders is the steady state, about 16 GB. It does not grow on its own and
+**nothing is ever tidied automatically**: the previous version is the way back,
+and deciding it has stopped being needed is a judgement about whether the new
+one has proved itself. A timer cannot make that judgement.
+
+One thing that cannot be moved: the environment that predates this scheme. A
+virtual environment's launcher scripts carry the absolute path they were built
+at in their first line, so `/opt/ai/vllm/.venv/bin/vllm` starts
+`/opt/ai/vllm/.venv/bin/python` **by name** — rename the folder and it starts
+nothing. It is therefore left exactly where it is and understood by its
+contents rather than by its name. Everything installed since is created at its
+final path and has no such problem. A copy taken as a precaution before this
+existed had a first line pointing back at the original and would not have
+worked without it; that is measured, not supposed.
 
 ## Two decisions worth knowing
 

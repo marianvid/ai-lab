@@ -6,6 +6,7 @@ import { showNotice } from '../confirm.js';
 import { chooseFolder } from '../browse.js';
 import { whileWorking } from '../working.js';
 import { reviewUpdate } from './whatchanges.js';
+import { versions } from './versions.js';
 import { onLog } from '../events.js';
 import { bytes, element, seconds } from '../format.js';
 
@@ -113,6 +114,9 @@ function repositories(list, refresh) {
                  list.map((item) => repositoryRow(item, refresh)));
 }
 
+// The installed folders of each package engine, from the last fetch.
+const byEngine = new Map();
+
 function engineState(engine) {
   const source = engine.source;
   if (!engine.available) {
@@ -130,13 +134,48 @@ function engineState(engine) {
   return element('span', { class: 'pill on', text: 'available' });
 }
 
+// What pressing the real Update button does, which depends on how this engine
+// arrives. Null when neither applies, so the review shows what would change
+// without offering a button it cannot honour.
+function take(engine, buildable, installable, refresh) {
+  if (installable) {
+    return async () => {
+      try {
+        await api.installEngine(engine.id, '');
+        logs.set(engine.id, []);
+        refresh();
+      } catch (error) {
+        await showNotice({ title: `Could not install ${engine.name}`,
+                           body: error.message });
+      }
+    };
+  }
+  if (buildable) {
+    return async () => {
+      try {
+        await api.updateBuild(engine.id);
+        logs.set(engine.id, []);
+        refresh();
+      } catch (error) {
+        await showNotice({ title: `Could not build ${engine.name}`,
+                           body: error.message });
+      }
+    };
+  }
+  return null;
+}
+
 function sourceControls(engine, source, refresh) {
   // An engine built here has a checkout to check and to rebuild. One installed
   // as packages — vLLM — has neither, and used to get no controls at all: no
   // way to see what a newer version would bring, because there was no button
   // to hang it on. Reading what would change needs no checkout, so it is
   // offered either way; only the two that act on a checkout are hidden.
+  // Two ways an engine gets a new version, and an engine has exactly one of
+  // them: a checkout is rebuilt in place, packages are installed into a new
+  // folder beside the old one.
   const buildable = Boolean(source && source.exists);
+  const installable = byEngine.has(engine.id);
 
   const check = buildable ? element('button', {
     class: 'action', text: 'Check for updates',
@@ -163,16 +202,7 @@ function sourceControls(engine, source, refresh) {
       ? `Review ${source.latest}` : 'What would change',
     title: 'Read what this update brings before taking it',
     onclick: (event) => whileWorking(event.target, 'Reading…', () =>
-      reviewUpdate(engine, !buildable ? null : async () => {
-        try {
-          await api.updateBuild(engine.id);
-          logs.set(engine.id, []);
-          refresh();
-        } catch (error) {
-          await showNotice({ title: `Could not build ${engine.name}`,
-                             body: error.message });
-        }
-      })),
+      reviewUpdate(engine, take(engine, buildable, installable, refresh))),
   });
 
   return element('div', { class: 'inline' }, [check, review].filter(Boolean));
@@ -203,6 +233,8 @@ function engineCard(engine, refresh) {
     ].filter(Boolean)),
   ];
 
+  const installed = byEngine.get(engine.id);
+  if (installed) rows.push(versions(installed, engine, refresh));
   if (source && source.note) rows.push(element('div', { class: 'warn', text: source.note }));
   if (source && source.error) rows.push(element('div', { class: 'error', text: source.error }));
   if (stored.length || (source && source.state === 'running')) {
@@ -224,7 +256,15 @@ function engines(list, refresh) {
 export async function render(container) {
   subscribeToBuildLog();
   const refresh = () => render(container);
-  const settings = await api.settings();
+  // The installed folders of every package engine, fetched alongside so the
+  // engine rows can show them. A machine with none answers with an empty list
+  // rather than an error, so this never decides whether the page draws.
+  const [settings, installed] = await Promise.all([
+    api.settings(),
+    api.allInstalls().catch(() => []),
+  ]);
+  byEngine.clear();
+  (installed || []).forEach((item) => byEngine.set(item.engine, item));
   // Two columns: what you change on the left, what you can only read on the
   // right. The accelerator is a report, so it sits out of the way of the
   // things that have buttons.

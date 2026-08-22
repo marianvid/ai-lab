@@ -9,6 +9,19 @@ def register(router, operations) -> None:
     # What an update would bring, read before anything is pressed. A GET
     # because it changes nothing: it reads a checkout, asks upstream what it
     # wrote, and asks the package manager what it would do.
+    # Engines that arrive as packages. A new version is installed beside the
+    # one in use, so these read and choose between folders rather than
+    # replacing anything.
+    router.add("GET", "/api/installs", lambda **_: operations.installs_available())
+    router.add("GET", "/api/installs/{engine}",
+               lambda engine, **_: operations.install_status(engine))
+    router.add("POST", "/api/installs/{engine}",
+               lambda engine, body=None, **_: operations.install_engine(
+                   engine, (body or {}).get("version", "")))
+    router.add("POST", "/api/installs/{engine}/{name}/activate",
+               lambda engine, name, **_: operations.activate_install(engine, name))
+    router.add("DELETE", "/api/installs/{engine}/{name}",
+               lambda engine, name, **_: operations.remove_install(engine, name))
     router.add("GET", "/api/builds/{engine}/changes",
                lambda engine, **_: operations.what_would_change(engine))
     router.add("POST", "/api/builds/{engine}/check",

@@ -453,3 +453,13 @@ dialog.review pre.notes {
 dialog.review .fold { margin: 0.6rem 0; }
 dialog.review .fold > summary { cursor: pointer; font-size: 0.9rem; }
 dialog.review .small { font-size: 0.85rem; }
+
+/* The installed versions of a package engine. The one in use is marked, the
+   others are the way back from an update that went wrong. */
+.versions .stack { display: flex; flex-direction: column; gap: 0.3rem; }
+.row.version {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.35rem 0.5rem; border-radius: 6px;
+}
+.row.version.active { background: var(--raised, rgba(127, 127, 127, 0.08)); }
+.versions h4 { display: flex; align-items: center; gap: 0.5rem; }
