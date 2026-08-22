@@ -716,6 +716,7 @@ class Gateway:
             # complaint.
             "waiting": len(waiting),
             "waiting_for": _waiting_summary(waiting),
+            "queue_runs": _runs(waiting),
             "longest_wait_s": max((item["waiting_s"] for item in waiting),
                                   default=0.0),
             "max_waiting": self.scheduler.max_waiting,
@@ -790,6 +791,28 @@ class Gateway:
         return [{"path": path, "models": sorted(models),
                   "engines": sorted(engines_for[path])}
                 for path, models in sorted(answers.items())]
+
+
+def _runs(waiting: list[dict]) -> list[dict]:
+    """The queue as the sequence of runs it will be served in.
+
+    The queue is served in order and requests next to each other wanting the
+    same model go in together, so it is not a list of requests — it is a list
+    of turns, each one a model and how many. Grouping them the same way the
+    scheduler does makes the page show the schedule rather than a number.
+    """
+    runs: list[dict] = []
+    for item in waiting:
+        shape = item["shape"]
+        name = getattr(shape, "instance_id", str(shape))
+        if runs and runs[-1]["instance_id"] == name:
+            runs[-1]["requests"] += 1
+            runs[-1]["longest_wait_s"] = max(runs[-1]["longest_wait_s"],
+                                             item["waiting_s"])
+            continue
+        runs.append({"instance_id": name, "requests": 1,
+                     "longest_wait_s": item["waiting_s"]})
+    return runs
 
 
 def _waiting_summary(waiting: list[dict]) -> list[dict]:

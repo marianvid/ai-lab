@@ -1117,3 +1117,45 @@ class ShapesOfferedTests(unittest.TestCase):
         operations.instances = counted
         quick(operations).stats()
         self.assertEqual(reads["n"], 0)
+
+
+class QueueRunsTests(unittest.TestCase):
+    """The queue reported as the order it will be served in.
+
+    It is served in order and requests next to each other wanting the same
+    model go in together, so it is a list of turns rather than a list of
+    requests. Grouped the same way the scheduler groups them, the page shows
+    the model changes that are about to happen.
+    """
+
+    def queued(self, *shapes):
+        operations = busy_models(coder=True)
+        gateway = quick(operations)
+        held = gateway.acquire("coder")
+        for shape in shapes:
+            threading.Thread(target=lambda s=shape: _ignore(gateway.acquire, s),
+                             daemon=True).start()
+            time.sleep(0.03)
+        time.sleep(0.05)
+        runs = gateway.stats()["queue_runs"]
+        held.release()
+        return [(run["instance_id"], run["requests"]) for run in runs]
+
+    def test_requests_next_to_each_other_are_one_turn(self):
+        self.assertEqual(self.queued("reviewer", "reviewer", "reviewer"),
+                         [("reviewer", 3)])
+
+    def test_a_different_model_starts_a_new_turn(self):
+        self.assertEqual(self.queued("reviewer", "reviewer", "coder"),
+                         [("reviewer", 2), ("coder", 1)])
+
+    def test_the_same_model_after_another_is_a_separate_turn(self):
+        # Which is the ordering rule made visible: those two reviewers are not
+        # served with the first two, because a request for coder arrived
+        # between them.
+        self.assertEqual(self.queued("reviewer", "coder", "reviewer"),
+                         [("reviewer", 1), ("coder", 1), ("reviewer", 1)])
+
+    def test_an_empty_queue_has_no_turns(self):
+        gateway = quick(busy_models(coder=True))
+        self.assertEqual(gateway.stats()["queue_runs"], [])

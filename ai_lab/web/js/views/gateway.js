@@ -71,42 +71,39 @@ function address(stats) {
     ]);
   });
 
-  return section('Where to point an agent', [
+  return section('Server address', [
     line('Base URL', `${base}/v1`),
     line('API key', 'none'),
-    element('p', { class: 'muted',
-                   text: 'Name any configured model in the request. If it is '
-                         + 'not the one on the card, it is loaded first.' }),
-    element('h4', { text: 'What can be sent here' }),
+    element('h4', { text: 'Endpoints' }),
     ...shapes,
   ]);
 }
 
-function state(stats) {
-  const answering = stats.in_flight
-    ? `${stats.in_flight} of ${stats.places} places in use`
-    : stats.switching ? 'loading' : 'idle';
-  const queue = stats.waiting
-    ? `${stats.waiting} waiting, longest ${stats.longest_wait_s} s`
-    : 'nobody waiting';
-  // One word for the whole thing, before the detail underneath it.
+function activity(stats) {
   const status = stats.switching ? 'loading a model'
     : stats.in_flight && stats.waiting ? 'working, with a queue'
     : stats.in_flight ? 'working'
     : stats.waiting ? 'waiting to swap'
     : 'idle';
-  return section('Right now', [
+  return section('Activity', [
     line('Status', status),
-    line('On the card', stats.current || 'nothing loaded'),
-    line('Answering', answering,
-         'Requests to the model on the card run together, up to the number '
-         + 'the engine was started to serve. Requests for another model wait.'),
-    line('Queue', queue,
-         'Waiting for a model that is not loaded. The oldest decides which is '
-         + 'loaded next.'),
-    ...stats.waiting_for.map((row) => line(
-      `  wanting ${row.instance_id}`,
-      `${row.waiting}, longest ${row.longest_wait_s} s`)),
+    line('Current model', stats.current || 'nothing loaded'),
+    line('Processing', `${stats.in_flight} from ${stats.places}`,
+         'Requests running together on the model that is loaded, against the '
+         + 'number the engine was started to serve.'),
+    line('Queue size', String(stats.waiting),
+         'Requests waiting for a model that is not loaded.'),
+    line('Requests per minute', String(stats.requests_per_minute),
+         'In the last sixty seconds.'),
+    line('Time to first token', `${stats.average_first_token_s} s`,
+         'Averaged over requests that asked for streaming. Without it an '
+         + 'engine sends nothing until the answer is finished, so its first '
+         + 'byte is the whole generation.'),
+    line('Switches', String(stats.switches)),
+    line('Average switch', `${stats.average_switch_s} s`),
+    line('Time spent switching', `${stats.switching_share}%`,
+         'Of the time this was working — answering or loading — how much went '
+         + 'on loading.'),
     stats.last_error
       ? element('p', { class: 'error', text: `Last error: ${stats.last_error}` })
       : null,
@@ -119,19 +116,19 @@ function state(stats) {
 // to change them.
 function limits(stats, redraw) {
   const fields = [
-    ['first_byte_s', 'Wait for the first token', stats.first_byte_s, 's',
+    ['first_byte_s', 'Max TTFT', stats.first_byte_s, 's',
      'How long to wait for an engine to start answering. It covers reading the '
      + 'prompt — and the whole answer for a request that did not ask for '
      + 'streaming, since such an engine sends nothing at all until it has '
      + 'finished writing. A large prompt on a slow machine is the case to size '
      + 'this for.'],
-    ['between_bytes_s', 'Wait between tokens', stats.between_bytes_s, 's',
+    ['between_bytes_s', 'Max idle time', stats.between_bytes_s, 's',
      'How long a silence in the middle of an answer means the engine has '
      + 'stopped rather than slowed. At the slowest generation measured here, '
      + '17 tokens a second, the gap between them is 59 milliseconds. It only '
      + 'applies to a request that asked for streaming: without it the answer '
      + 'arrives in one piece and there are no gaps to measure.'],
-    ['max_waiting', 'Requests held in the queue', stats.max_waiting, '',
+    ['max_waiting', 'Max queue size', stats.max_waiting, '',
      'How many may wait for a model at once. Beyond it a request is refused '
      + 'rather than queued, because each one waiting occupies a thread. A '
      + 'workflow that hits this is asking for more at once than one card can '
@@ -186,53 +183,37 @@ function limits(stats, redraw) {
   ]);
 }
 
-// Six figures, and not one of them only goes up. A lifetime total of requests
-// grows while you watch it and means the same at 40 as at 40,000; a rate, an
-// average and a share stay comparable to themselves.
-function traffic(stats) {
-  return section('Traffic', [
-    line('Requests per minute', String(stats.requests_per_minute),
-         'In the last sixty seconds. Zero when nothing is happening.'),
-    line('Queue size', String(stats.waiting),
-         'Requests waiting for a model that is not loaded.'),
-    line('Time to first token', `${stats.average_first_token_s} s`,
-         'Averaged over requests that asked for streaming. Without it an '
-         + 'engine sends nothing until the answer is finished, so its first '
-         + 'byte is the whole generation.'),
-    line('Switches', String(stats.switches)),
-    line('Average switch', `${stats.average_switch_s} s`),
-    line('Time spent switching', `${stats.switching_share}%`,
-         'Of the time this was working — answering or loading — how much went '
-         + 'on loading.'),
-  ]);
-}
 
-// What was swapped for what, and how long it took. Written as the move it was
-// — one model out, another in — with the time against the right edge so the
-// column of them can be read down without reading the names.
-function recent(stats) {
-  if (!stats.recent || !stats.recent.length) {
-    return section('Recent switches', [
-      element('p', { class: 'muted', text: 'No switches yet.' }),
-    ]);
-  }
-  return section('Recent switches', stats.recent.map((entry) => {
-    const out = entry.unloaded && entry.unloaded.length
-      ? entry.unloaded.join(', ') : 'nothing';
-    return element('div', { class: 'row tight' }, [
-      element('span', { class: 'swap', text: `${out} → ${entry.loaded}` }),
-      element('span', { class: 'muted', text: `${entry.took_s} s`,
-                        title: `of which the load itself took `
-                               + `${seconds(entry.load_ms)}` }),
-    ]);
-  }));
-}
-
-// Stop refreshing, whatever the page is doing.
+// The queue, as the order it will actually be served in.
 //
-// The timer stops itself when it finds the container holding somebody else's
-// work, but that is on its next tick — up to five seconds later. Anything that
-// wants the page gone *now* says so rather than waiting for it to notice.
+// It is served in order and requests next to each other wanting the same model
+// go in together, so it is not a list of requests — it is a list of turns. Read
+// down it and you have the schedule of model changes that is about to happen,
+// which is the thing worth knowing before it does.
+function coming(stats) {
+  const runs = stats.queue_runs || [];
+  const rows = [];
+  if (stats.current || stats.in_flight) {
+    rows.push(element('div', { class: 'row tight now' }, [
+      element('span', { text: stats.current || 'nothing loaded' }),
+      element('span', { class: 'muted', text: stats.in_flight
+        ? `${stats.in_flight} running` : 'idle' }),
+    ]));
+  }
+  runs.forEach((run, index) => {
+    rows.push(element('div', { class: 'row tight',
+                               title: `longest has waited ${run.longest_wait_s} s` }, [
+      element('span', { class: 'swap',
+                        text: `${index === 0 ? '→ ' : '   '}${run.instance_id}` }),
+      element('span', { class: 'muted', text: `${run.requests}` }),
+    ]));
+  });
+  if (!runs.length) {
+    rows.push(element('p', { class: 'muted', text: 'Nothing waiting.' }));
+  }
+  return section('Queue', rows);
+}
+
 export function stopRefreshing() {
   if (timer) { window.clearInterval(timer); timer = null; }
 }
@@ -255,9 +236,9 @@ export async function render(container) {
   // Models and Library pages inherited a layout meant for this one.
   container.replaceChildren(element('div', { class: 'gateway-grid' }, [
     element('div', { class: 'at-address' }, address(stats)),
-    element('div', { class: 'at-side' }, [state(stats), traffic(stats)]),
+    element('div', { class: 'at-side' }, activity(stats)),
     element('div', { class: 'at-limits' }, limits(stats, () => render(container))),
-    element('div', { class: 'at-recent' }, recent(stats)),
+    element('div', { class: 'at-recent' }, coming(stats)),
   ]));
 
   // window.setInterval rather than the bare global, so closing the page

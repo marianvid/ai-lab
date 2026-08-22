@@ -40,9 +40,8 @@ const STATS = {
     { path: '/v1/messages', models: ['fast'], engines: ['vLLM'] },
     { path: '/v1/messages/count_tokens', models: ['fast'], engines: ['vLLM'] },
   ],
-  recent: [
-    { at: 1, loaded: 'coder', unloaded: ['reviewer'], took_s: 31.2, load_ms: 28100 },
-  ],
+  queue_runs: [],
+  recent: [],
 };
 
 async function renderPage(overrides = {}) {
@@ -80,7 +79,15 @@ describe('the Gateway page', () => {
   it('says the card is idle when nothing is running on it', async () => {
     const { view } = await renderPage();
     assert.match(view.textContent, /idle/);
-    assert.match(view.textContent, /nobody waiting/);
+  });
+
+  it('does not repeat the status in the lines below it', async () => {
+    // Answering said "idle" and Waiting said "nobody waiting", both under a
+    // Status that had just said idle. They are counts; Status is the state.
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Processing\s*0 from 8/);
+    assert.match(view.textContent, /Queue size\s*0/);
+    assert.equal(view.textContent.includes('nobody waiting'), false);
   });
 
   it('counts the answers in progress against the places there are', async () => {
@@ -88,29 +95,15 @@ describe('the Gateway page', () => {
     // flight, and how many could be, is the figure that says whether the
     // concurrency you configured is being used.
     const { view } = await renderPage({ in_flight: 3, places: 8, busy: true });
-    assert.match(view.textContent, /3 of 8 places in use/);
+    assert.match(view.textContent, /Processing\s*3 from 8/);
   });
 
-  it('says how many are waiting and how long the longest has', async () => {
+  it('says how many are waiting, and for what', async () => {
     const { view } = await renderPage({
       waiting: 4, longest_wait_s: 12.5, busy: true,
       waiting_for: [{ instance_id: 'reviewer', waiting: 4, longest_wait_s: 12.5 }],
     });
-    assert.match(view.textContent, /4 waiting, longest 12.5 s/);
-  });
-
-  it('says which models the queue is waiting for', async () => {
-    // Two models fighting over one card is a different fault from too little
-    // concurrency, and the fix is different too.
-    const { view } = await renderPage({
-      waiting: 5, longest_wait_s: 9,
-      waiting_for: [
-        { instance_id: 'reviewer', waiting: 3, longest_wait_s: 9 },
-        { instance_id: 'coder', waiting: 2, longest_wait_s: 2 },
-      ],
-    });
-    assert.match(view.textContent, /wanting reviewer/);
-    assert.match(view.textContent, /wanting coder/);
+    assert.match(view.textContent, /Queue size\s*4/);
   });
 
   it('says a model is loading rather than answering', async () => {
@@ -138,19 +131,36 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /18.5%/);
   });
 
-  it('writes a switch as the move it was, with the time on the right', async () => {
-    const { view } = await renderPage();
-    const row = [...view.querySelectorAll('.row')]
-      .find((node) => node.textContent.includes('→'));
-    assert.match(row.textContent, /reviewer → coder/);
-    assert.match(row.textContent, /31.2 s/);
+  it('shows the queue as the order it will be served in', async () => {
+    // Not a list of requests: a list of turns. Read down it and you have the
+    // model changes that are about to happen.
+    const { view } = await renderPage({
+      waiting: 6,
+      queue_runs: [
+        { instance_id: 'reviewer', requests: 3, longest_wait_s: 9 },
+        { instance_id: 'coder', requests: 2, longest_wait_s: 4 },
+        { instance_id: 'glm-flash', requests: 1, longest_wait_s: 1 },
+      ],
+    });
+    const text = view.textContent;
+    assert.ok(text.indexOf('reviewer') < text.indexOf('glm-flash'),
+              'the turns came out in the wrong order');
+    assert.match(text, /reviewer/);
+    assert.match(text, /coder/);
   });
 
-  it('says what was unloaded even when it was nothing', async () => {
-    const { view } = await renderPage({
-      recent: [{ at: 1, loaded: 'coder', unloaded: [], took_s: 4.1, load_ms: 3851 }],
-    });
-    assert.match(view.textContent, /nothing → coder/);
+  it('shows what is loaded above what is waiting for it', async () => {
+    const { view } = await renderPage({ in_flight: 2, waiting: 1,
+      queue_runs: [{ instance_id: 'reviewer', requests: 1, longest_wait_s: 2 }] });
+    const now = view.querySelector('.row.now');
+    assert.ok(now, 'the loaded model was not shown');
+    assert.match(now.textContent, /coder/);
+    assert.match(now.textContent, /2 running/);
+  });
+
+  it('says so plainly when nothing is waiting', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Nothing waiting/);
   });
 
   it('shows the last error rather than hiding a failure behind good averages', async () => {
@@ -180,18 +190,18 @@ describe('the limits, on the page that shows what they cost', () => {
 
   it('shows what each limit is set to', async () => {
     const { view } = await renderPage();
-    assert.equal(field(view, 'first token').querySelector('input').value, '120');
-    assert.equal(field(view, 'between tokens').querySelector('input').value, '30');
-    assert.equal(field(view, 'Requests held').querySelector('input').value, '150');
+    assert.equal(field(view, 'Max TTFT').querySelector('input').value, '120');
+    assert.equal(field(view, 'Max idle time').querySelector('input').value, '30');
+    assert.equal(field(view, 'Max queue size').querySelector('input').value, '150');
   });
 
   it('explains each one where hovering finds it', async () => {
     // They trade against each other and against the machine. A number with no
     // explanation is a number nobody dares change.
     const { view } = await renderPage();
-    assert.match(field(view, 'first token').getAttribute('title'), /streaming/);
-    assert.match(field(view, 'between tokens').getAttribute('title'), /17 tokens/);
-    assert.match(field(view, 'Requests held').getAttribute('title'), /thread/);
+    assert.match(field(view, 'Max TTFT').getAttribute('title'), /streaming/);
+    assert.match(field(view, 'Max idle time').getAttribute('title'), /17 tokens/);
+    assert.match(field(view, 'Max queue size').getAttribute('title'), /thread/);
   });
 
   it('sends every limit when one is saved', async () => {
@@ -200,7 +210,7 @@ describe('the limits, on the page that shows what they cost', () => {
     const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
     await render(context.view);
     await settle();
-    type(field(context.view, 'between tokens').querySelector('input'), '45');
+    type(field(context.view, 'Max idle time').querySelector('input'), '45');
     [...context.view.querySelectorAll('button')]
       .find((node) => node.textContent.trim() === 'Save').click();
     await settle();
@@ -224,7 +234,7 @@ describe('the limits, on the page that shows what they cost', () => {
     const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
     await render(context.view);
     await settle();
-    type(field(context.view, 'between tokens').querySelector('input'), '45');
+    type(field(context.view, 'Max idle time').querySelector('input'), '45');
     [...context.view.querySelectorAll('button')]
       .find((node) => node.textContent.trim() === 'Save').click();
     await settle();
@@ -324,13 +334,13 @@ describe('saving a limit', () => {
 
   it('wakes when a value is changed', async () => {
     const { view } = await renderPage();
-    type(field(view, 'between tokens').querySelector('input'), '45');
+    type(field(view, 'Max idle time').querySelector('input'), '45');
     assert.equal(saveButton(view).disabled, false);
   });
 
   it('sleeps again when the value is typed back', async () => {
     const { view } = await renderPage();
-    const input = field(view, 'between tokens').querySelector('input');
+    const input = field(view, 'Max idle time').querySelector('input');
     type(input, '45');
     type(input, '30');
     assert.equal(saveButton(view).disabled, true);

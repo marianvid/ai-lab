@@ -368,7 +368,13 @@ body:has(.logpane) main { padding-bottom: 44vh; }
    single recent switch left the panel beside a much taller Limits. */
 .gateway-grid > .at-limits > .section > .card,
 .gateway-grid > .at-recent > .section > .card { flex: 1; }
-.gateway-grid .swap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gateway-grid .swap {
+  white-space: pre; overflow: hidden; text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem;
+}
+/* The model that is loaded, above the ones waiting for their turn. */
+.gateway-grid .row.now { border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+.gateway-grid .row.now > span:first-child { font-weight: 600; }
 
 .gateway-grid code { font-size: 0.8rem; }
 
