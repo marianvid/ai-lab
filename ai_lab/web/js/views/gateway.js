@@ -73,7 +73,7 @@ function address(stats) {
 
   return section('Where to point an agent', [
     line('Base URL', `${base}/v1`),
-    line('API key', 'none — any value will do, and none is fine'),
+    line('API key', 'none'),
     element('p', { class: 'muted',
                    text: 'Name any configured model in the request. If it is '
                          + 'not the one on the card, it is loaded first and '

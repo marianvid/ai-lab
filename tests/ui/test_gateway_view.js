@@ -265,9 +265,12 @@ describe('what can be sent to the front door', () => {
     assert.match(row.getAttribute('title'), /1 of 2: fast/);
   });
 
-  it('says no key is needed rather than describing what is not checked', async () => {
+  it('answers the key question with one word', async () => {
+    // It said what is not checked, which is not what somebody needs to type.
     const { view } = await renderPage();
-    assert.match(view.textContent, /none/);
+    const row = [...view.querySelectorAll('.row')]
+      .find((node) => node.textContent.includes('API key'));
+    assert.equal(row.textContent.replace('API key', '').trim(), 'none');
   });
 
   it('lays the page out, and in its own element', async () => {
