@@ -76,8 +76,7 @@ function address(stats) {
     line('API key', 'none'),
     element('p', { class: 'muted',
                    text: 'Name any configured model in the request. If it is '
-                         + 'not the one on the card, it is loaded first and '
-                         + 'that one request simply takes longer.' }),
+                         + 'not the one on the card, it is loaded first.' }),
     element('h4', { text: 'What can be sent here' }),
     ...shapes,
   ]);
