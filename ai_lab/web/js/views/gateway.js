@@ -183,11 +183,6 @@ function limits(stats, redraw) {
   return section('Limits', [
     ...rows,
     element('div', { class: 'row' }, [element('span', {}), save]),
-    element('p', { class: 'muted',
-                   text: 'These stop a wedged engine holding the card. Normal '
-                         + 'work never reaches them. A change applies to the '
-                         + 'next request; nothing already running or waiting '
-                         + 'is thrown away.' }),
   ]);
 }
 

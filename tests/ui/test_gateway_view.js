@@ -235,10 +235,12 @@ describe('the limits, on the page that shows what they cost', () => {
     assert.match(told, /must be between/);
   });
 
-  it('says what the limits are for and what changing one does', async () => {
+  it('says nothing under the fields that the fields do not say', async () => {
+    // What each is for is in its tooltip, where somebody deciding about that
+    // one setting looks. A paragraph under all three is read once and then
+    // never again.
     const { view } = await renderPage();
-    assert.match(view.textContent, /wedged engine/);
-    assert.match(view.textContent, /nothing already running or waiting is thrown away/);
+    assert.equal(view.textContent.includes('wedged engine'), false);
   });
 });
 
