@@ -58,15 +58,16 @@ function paintFromState(bar, instance) {
 function subscribe() {
   if (subscribed) return;
   subscribed = true;
+  // The bar and nothing else. These events arrive for every load, including
+  // ones an agent caused, and announcing them at the foot of the page meant
+  // being told about work you did not start — in a message naming the entry
+  // and the file on disk, two names from two places, one of which is on
+  // another page. What you pressed yourself is reported by the thing you
+  // pressed.
   onProgress((event) => {
     progress.set(event.instance_id, event);
     const bar = document.querySelector(`[data-bar="${CSS.escape(event.instance_id)}"]`);
     if (bar) paint(bar, event);
-    if (['ready', 'memory_released', 'failed'].includes(event.phase)) {
-      setStatus(`${event.instance_id}: ${event.message || event.phase}`
-                + ` (${seconds(event.elapsed_ms)})`,
-                event.phase === 'failed' ? 'error' : 'ok');
-    }
   });
 }
 
@@ -350,7 +351,7 @@ function card(instance, models, engines) {
   return element('div', { class: 'card instance' }, [
     head,
     expanded
-      ? element('div', {}, [
+      ? element('div', { class: 'settings-open' }, [
           element('label', { class: 'field' }, [
             element('span', { text: 'Label' }), nameField,
           ]),

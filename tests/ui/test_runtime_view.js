@@ -770,3 +770,20 @@ describe('one page does not lay out another', () => {
     // from inside jsdom rather than from anything under test.
   });
 });
+
+describe('settings opened under a row', () => {
+  it('is separated from the row it belongs to', async () => {
+    // Without a line the first field sits directly under the name and reads
+    // as part of it.
+    const { view } = await renderPage();
+    button(view, 'Settings').click();
+    await settle();
+    assert.ok(view.querySelector('.settings-open'),
+              'the settings block is not marked off from the row');
+  });
+
+  it('is not there when the settings are closed', async () => {
+    const { view } = await renderPage();
+    assert.equal(view.querySelector('.settings-open'), null);
+  });
+});

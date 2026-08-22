@@ -156,6 +156,16 @@ input, select {
   background: var(--bg); font-size: 0.7rem; letter-spacing: 0.02em;
 }
 
+/* Settings, opened under the row they belong to. A line across the card
+   separates what the row says from what is being edited: without it the first
+   field sits directly under the name and reads as part of it. It spans the
+   card's full width, ignoring the side padding, like the progress hairline
+   below. */
+.settings-open {
+  border-top: 1px solid var(--border);
+  margin: 0.5rem -0.75rem 0; padding: 0.75rem 0.75rem 0;
+}
+
 /* The hairline. It spans the card, ignoring the card's own side padding, so it
    reads as an underline of the whole row and not as a widget inside it. */
 .bar.thin {
