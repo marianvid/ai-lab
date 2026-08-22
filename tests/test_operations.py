@@ -365,7 +365,8 @@ class DeleteModelTests(unittest.TestCase):
         """Deleting under a configured entry leaves one that can never start."""
         with self.assertRaises(ValueError) as caught:
             self.operations.delete_model("gguf/qwen/qwen")
-        self.assertIn("Coding", str(caught.exception))
+        self.assertIn("qwen", str(caught.exception),
+                      "it must name the entry standing in the way")
         self.assertTrue((self.root / "gguf" / "qwen" / "qwen.gguf").exists())
 
     def test_it_can_be_deleted_once_the_entry_is_gone(self):
@@ -914,3 +915,62 @@ class GatewaySettingsTests(unittest.TestCase):
     def test_the_queue_length_stays_a_whole_number(self):
         self.operations.update_gateway({"max_waiting": 42.7})
         self.assertEqual(self.operations.gateway_settings()["max_waiting"], 42)
+
+
+class NamingAnEntryTests(unittest.TestCase):
+    """The name is given, checked, and is the only name the entry has.
+
+    It used to be made from a label by lowercasing it and replacing everything
+    else with hyphens, so the name a request had to carry was decided by a
+    sentence somebody wrote for reading — and that sentence was what the page
+    showed while the derived name was what worked.
+    """
+
+    def setUp(self):
+        self.operations, self.host = operations_with_instances(2)
+
+    def add(self, identifier):
+        return self.operations.create_instance({
+            "id": identifier, "engine": "llamacpp",
+            "model_id": "gguf/model-0/model-0", "port": 8200, "params": {},
+        })
+
+    def test_a_plain_name_is_taken_as_given(self):
+        self.assertEqual(self.add("gemma-31b-nvfp4")["id"], "gemma-31b-nvfp4")
+
+    def test_a_name_already_taken_is_refused_and_says_so(self):
+        with self.assertRaises(ValueError) as caught:
+            self.add("model-0")
+        message = str(caught.exception)
+        self.assertIn("model-0", message)
+        self.assertIn("already", message)
+
+    def test_spaces_are_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            self.add("Coding fastest")
+        self.assertIn("no spaces", str(caught.exception))
+
+    def test_capitals_and_punctuation_are_refused(self):
+        for bad in ("Coding", "coding(fast)", "coding_fast", "coding.fast", ""):
+            with self.assertRaises(ValueError):
+                self.add(bad)
+
+    def test_it_may_not_begin_with_a_hyphen(self):
+        with self.assertRaises(ValueError):
+            self.add("-coding")
+
+    def test_digits_and_hyphens_are_fine(self):
+        self.assertEqual(self.add("qwen3-35b-2")["id"], "qwen3-35b-2")
+
+    def test_the_name_cannot_be_changed_afterwards(self):
+        # A request carries it, so changing it breaks whatever is sending it.
+        # Renaming is deleting and adding, which the page already offers.
+        # Refused rather than ignored: a change that is quietly dropped looks
+        # like one that was made.
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_instance("model-0", {"name": "something else"})
+        self.assertIn("name", str(caught.exception))
+        self.assertEqual(self.operations.instance("model-0")["id"], "model-0")
+
+    def test_an_entry_has_no_second_name_at_all(self):
+        self.assertNotIn("name", self.operations.instance("model-0"))

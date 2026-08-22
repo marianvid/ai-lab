@@ -165,6 +165,23 @@ leaves it nowhere to go.
 Refusing early matters: the alternative is a forty-second load followed by a
 404 from the engine about a path the client never chose.
 
+**An entry has one name, and it is typed rather than derived.** There used to
+be two: an id that requests carried, and a label a person read. The label was
+what the page showed and the id was what worked, so the name to send appeared
+nowhere in the interface and had to be guessed or read out of the
+configuration file. Worse, the gateway answered to four names for one entry —
+id, label, model path, and the file at the end of it — and the first match won.
+
+Now the id is the whole of it. It is given when the entry is made, checked for
+being unique and for holding only lower-case letters, digits and hyphens, and
+cannot be changed afterwards: a request carries it, so renaming would break
+whatever is already sending it. Renaming is deleting and adding, which the page
+already offers.
+
+The rules are shown where the name is typed rather than in the message that
+refuses it, and a configuration written before this loads unchanged with the
+label dropped.
+
 **A request can ask for the model started a particular way.** Some settings go
 in a request; others decide how the process starts and cannot. Context size is
 the one that matters — a model is told at startup how much it will hold, and an

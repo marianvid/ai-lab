@@ -284,7 +284,6 @@ class Runtime:
             process = self.host.status(instance.id)
         return {
             "id": instance.id,
-            "name": instance.name,
             "engine": instance.engine,
             "model_id": instance.model_id,
             "port": instance.port,

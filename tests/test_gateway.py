@@ -134,7 +134,7 @@ class FakeOperations:
         """
         self.cheap_reads += 1
         return [{key: entry[key] for key in
-                 ("id", "name", "engine", "model_id", "port", "params")}
+                 ("id", "engine", "model_id", "port", "params")}
                 for entry in self._entries.values()]
 
     def instance(self, instance_id):
@@ -147,7 +147,7 @@ class FakeOperations:
         self.cheap_reads += 1
         entry = self._entries[instance_id]
         return {key: entry[key] for key in
-                ("id", "name", "engine", "model_id", "port", "params")}
+                ("id", "engine", "model_id", "port", "params")}
 
     def effective_params(self, instance_id, settings):
         entry = self._entries[instance_id]
@@ -162,7 +162,9 @@ class FakeOperations:
 
 
 def entry(identifier, name, model_id, port, running=False, engine="llamacpp"):
-    return {"id": identifier, "name": name, "model_id": model_id, "port": port,
+    """`name` is kept as an argument and thrown away: the entries here read
+    better for having it written down, and the application no longer has one."""
+    return {"id": identifier, "model_id": model_id, "port": port,
             "engine": engine, "running": running, "ready": running,
             "params": {"context_size": 32768, "parallel": 1},
             "active_params": {},
@@ -229,9 +231,10 @@ class NamingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in rows], ["coder", "reviewer"])
         self.assertFalse(any(row["loaded"] for row in rows))
 
-    def test_the_catalogue_carries_the_label_for_reading(self):
-        rows = {row["id"]: row for row in self.gateway.catalogue()}
-        self.assertEqual(rows["coder"]["name"], "Coding")
+    def test_the_catalogue_carries_no_second_name(self):
+        # There is one name and it is the id. A label beside it became a second
+        # way of saying the same thing, kept in step by hand.
+        self.assertNotIn("name", self.gateway.catalogue()[0])
 
 
 class LoadingTests(unittest.TestCase):

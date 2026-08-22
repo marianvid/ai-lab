@@ -10,7 +10,7 @@ from tests.support import FakeEngine, FakeHost
 
 
 def instance(identifier="qwen", port=8080):
-    return Instance(id=identifier, name="Coding", engine="fake",
+    return Instance(id=identifier, engine="fake",
                     model_id="repo/qwen", port=port)
 
 

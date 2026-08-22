@@ -118,17 +118,13 @@ input, select {
    name is what gives way, because the name and the engine are the two things
    you scan for. */
 .row.instance > .ident { min-width: 0; flex: 1; gap: 0.5rem; }
-/* The name a request has to carry. Monospaced and quiet: it is not for
-   reading down the page, it is for copying when you write a workflow. */
-.sendname {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.78rem; color: var(--muted);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 
+/* The model an entry points at: smaller and italic beside the entry's own
+   name, because it is what the entry runs rather than what it is called. */
 .row.instance > .ident > .model {
   flex: 1 1 auto; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-style: italic; font-size: 0.82rem;
 }
 
 /* Format and engine sit in the right-hand group, before the buttons. The model

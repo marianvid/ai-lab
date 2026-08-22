@@ -23,11 +23,11 @@ FIRST_PORT = 8080
 
 # What an edit to an existing model is allowed to touch. Anything else is
 # refused rather than ignored.
-CHANGEABLE = frozenset({"params", "name", "model_id", "port"})
+CHANGEABLE = frozenset({"params", "model_id", "port"})
 
 from .builds import Builds
 from .catalog import Catalog
-from .config import ConfigStore, Instance
+from .config import INSTANCE_ID, ConfigStore, Instance
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.base import validate
 from .hosts.base import Host
@@ -110,7 +110,7 @@ class Operations:
         rows = []
         for item in config.instances:
             engine = self.engines.get(item.engine)
-            rows.append({"id": item.id, "name": item.name, "engine": item.engine,
+            rows.append({"id": item.id, "engine": item.engine,
                          "model_id": item.model_id, "port": item.port,
                          "params": self._effective(engine, item.params)})
         return rows
@@ -141,7 +141,7 @@ class Operations:
         """One configured entry, without asking what it is doing. See `configured`."""
         item = self.store.load().instance(instance_id)     # raises if unknown
         engine = self.engines.get(item.engine)
-        return {"id": item.id, "name": item.name, "engine": item.engine,
+        return {"id": item.id, "engine": item.engine,
                 "model_id": item.model_id, "port": item.port,
                 "params": self._effective(engine, item.params)}
 
@@ -285,16 +285,32 @@ class Operations:
         }
 
     def create_instance(self, payload: dict) -> dict:
+        """Add an entry. The id is given rather than worked out.
+
+        It used to be made from a label by lowercasing it and turning
+        everything else into hyphens, which meant the name a request had to
+        carry was decided by a sentence somebody wrote for reading. Now it is
+        typed, checked, and is the only name the entry has.
+        """
         engine = self.engines.get(payload["engine"])
         params = validate(engine.params(), payload.get("params", {}))
+        identifier = str(payload.get("id", "")).strip()
+        if not INSTANCE_ID.match(identifier):
+            raise ValueError(
+                "A name may hold lower-case letters, digits and hyphens, and "
+                "must start with a letter or a digit. It is what a request "
+                f"carries, so it has no spaces in it. {identifier!r} does not "
+                "fit.")
         instance = Instance(
-            id=payload["id"], name=payload.get("name") or payload["id"],
-            engine=payload["engine"], model_id=payload["model_id"],
+            id=identifier, engine=payload["engine"],
+            model_id=payload["model_id"],
             port=int(payload["port"]), params=params,
         )
         with self.store.mutate() as config:
             if any(item.id == instance.id for item in config.instances):
-                raise ValueError(f"Instance {instance.id} already exists")
+                raise ValueError(
+                    f"There is already a model called {instance.id}. The name "
+                    f"is what a request asks for, so two cannot share one.")
             if any(item.port == instance.port for item in config.instances):
                 raise ValueError(f"Port {instance.port} is already in use")
             config.instances.append(instance)
@@ -320,8 +336,6 @@ class Operations:
             engine = self.engines.get(instance.engine)
             if "params" in changes:
                 instance.params = validate(engine.params(), changes["params"])
-            if "name" in changes:
-                instance.name = str(changes["name"])
             if "model_id" in changes:
                 instance.model_id = str(changes["model_id"])
             if "port" in changes:
@@ -535,7 +549,7 @@ class Operations:
         """
         config = self.store.load()
         model = self.catalog.find(config.repositories, model_id)
-        users = [item.name for item in config.instances if item.model_id == model_id]
+        users = [item.id for item in config.instances if item.model_id == model_id]
         if users:
             raise ValueError(
                 "Remove the entry from the Models tab first: "

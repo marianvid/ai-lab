@@ -10,7 +10,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { installDom, button, settle } from './support/dom.js';
 
 const INSTANCE = {
-  id: 'qwen-coder', name: 'Coding', engine: 'llamacpp',
+  id: 'qwen-coder', engine: 'llamacpp',
   model_id: 'gguf/qwen/qwen', port: 8080,
   params: { context_size: 32768, parallel: 1, temperature: 0.8 },
   running: true, enabled: true, pid: 4541, ready: true, web_ui: true,
@@ -110,21 +110,14 @@ describe('the Models page', () => {
     assert.equal(view.querySelector('.pill.format').textContent, 'gguf');
   });
 
-  it('lets the label be edited, and sends it when the model is loaded', async () => {
-    const { view, calls } = await renderPage({
-      '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
-    });
+  it('does not offer to rename an entry', async () => {
+    // The name is what requests carry, so changing it would break whatever is
+    // already sending it. Renaming is deleting and adding, which the page
+    // already offers.
+    const { view } = await renderPage();
     button(view, 'Settings').click();
     await settle();
-    const field = [...view.querySelectorAll('input')]
-      .find((input) => input.value === 'Coding');
-    assert.ok(field, 'the label cannot be edited');
-    field.value = 'Coding, renamed';
-    button(view, 'Load').click();
-    await settle();
-    const saved = calls.find((call) => call.method === 'PATCH');
-    assert.ok(saved, 'nothing was saved before loading');
-    assert.equal(JSON.parse(saved.body).name, 'Coding, renamed');
+    assert.equal(view.textContent.includes('Label'), false);
   });
 
   it('reads sensibly when the label has been cleared', async () => {
@@ -614,7 +607,7 @@ describe('reading what an engine is saying', () => {
     const view = await withLogs();
     button(view, 'Log').click();
     await settle();
-    assert.match(pane().textContent, /Coding/);
+    assert.match(pane().textContent, /qwen-coder/);
   });
 
   it('closes again when the same button is pressed', async () => {
@@ -789,27 +782,66 @@ describe('settings opened under a row', () => {
 });
 
 describe('the name a request has to carry', () => {
-  it('is on the row, beside the label', async () => {
-    // It used to be nowhere on the page. Somebody wanting to call a model had
-    // to guess it or read the configuration file.
+  it('is the name on the row', async () => {
+    // One name: a request carries it and a person reads it. There used to be a
+    // label as well, and it became a second way of saying the same thing.
     const { view } = await renderPage();
-    const sent = view.querySelector('.sendname');
-    assert.ok(sent, 'the name to send is not shown');
-    assert.equal(sent.textContent, 'qwen-coder');
+    const row = view.querySelector('.row.instance');
+    assert.match(row.querySelector('strong').textContent, /qwen-coder/);
   });
 
   it('says what it is for', async () => {
     const { view } = await renderPage();
-    assert.match(view.querySelector('.sendname').getAttribute('title'),
+    assert.match(view.querySelector('.row.instance strong').getAttribute('title'),
                  /send as "model"/);
   });
 
-  it('leaves the model file to the tooltip', async () => {
-    // The row is the label and the name to send; which file is behind it is a
-    // detail wanted occasionally.
+  it('shows the model beside it, smaller', async () => {
     const { view } = await renderPage();
-    const row = view.querySelector('.row.instance');
-    assert.equal(row.textContent.includes('qwen · '), false);
-    assert.match(row.getAttribute('title'), /qwen/);
+    assert.match(view.querySelector('.row.instance .model').textContent, /qwen/);
+  });
+});
+
+describe('adding a model', () => {
+  async function openAdd() {
+    const { view } = await renderPage({
+      '/api/instances/new': { port: 8081, engines: [ENGINE], models: [MODEL] },
+    });
+    button(view, '+ Add model').click();
+    await settle();
+    return view;
+  }
+
+  it('shows the rules where the name is typed', async () => {
+    // Not in a message after it is refused. This is the only name the entry
+    // has, and it cannot be changed later.
+    const view = await openAdd();
+    const field = [...view.querySelectorAll('label.field')]
+      .find((node) => node.textContent.includes('Name'));
+    assert.match(field.textContent, /lower-case letters, digits and hyphens/);
+    assert.match(field.textContent, /sent as "model"/);
+    assert.match(field.textContent, /cannot be changed later/);
+  });
+
+  it('sends what was typed, unchanged', async () => {
+    // It used to lowercase a label and turn everything else into hyphens, so
+    // the name a request carried was decided by a sentence written for
+    // reading.
+    const context = installDom(responses({
+      '/api/instances/new': { port: 8081, engines: [ENGINE], models: [MODEL] },
+      'POST /api/instances': { id: 'gemma-31b-nvfp4' },
+    }));
+    const { render } = await import(`../../ai_lab/web/js/views/runtime.js?${Math.random()}`);
+    await render(context.view);
+    await settle();
+    button(context.view, '+ Add model').click();
+    await settle();
+    const field = [...context.view.querySelectorAll('label.field')]
+      .find((node) => node.textContent.includes('Name'));
+    field.querySelector('input').value = 'gemma-31b-nvfp4';
+    button(context.view, 'Add').click();
+    await settle();
+    const posted = context.calls.find((call) => call.method === 'POST');
+    assert.equal(JSON.parse(posted.body).id, 'gemma-31b-nvfp4');
   });
 });

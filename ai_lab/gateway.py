@@ -298,7 +298,6 @@ class Gateway:
         """
         return [{
             "id": instance["id"],
-            "name": instance["name"],
             "model_id": instance["model_id"],
             "engine": instance["engine"],
             "port": instance["port"],

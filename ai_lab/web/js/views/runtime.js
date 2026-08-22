@@ -138,17 +138,17 @@ async function run(label, work) {
 
 async function removeInstance(instance) {
   const confirmed = await confirmDestructive({
-    title: `Remove ${instance.name}?`,
+    title: `Remove ${instance.id}?`,
     body: 'This removes only the configured entry from Models. '
           + 'The downloaded model files remain in Library.',
     confirmLabel: 'Remove',
   });
   if (!confirmed) return;
-  setStatus(`Removing ${instance.name}…`);
+  setStatus(`Removing ${instance.id}…`);
   try {
     await api.deleteInstance(instance.id);
     open.delete(instance.id);
-    setStatus(`Removed ${instance.name}. Its files are still in Library.`, 'ok');
+    setStatus(`Removed ${instance.id}. Its files are still in Library.`, 'ok');
   } catch (error) {
     setStatus(error.message, 'error');
   }
@@ -201,6 +201,13 @@ function runningDifferently(instance) {
     + ' — not saved, so it returns to the settings above when reloaded';
 }
 
+// Which model this entry runs. Smaller and quieter than the name, because it
+// is what the entry points at rather than what the entry is called.
+function modelName(instance, models) {
+  const model = models.find((item) => item.id === instance.model_id);
+  return model ? model.name : instance.model_id;
+}
+
 function formatOf(instance, models) {
   const model = models.find((item) => item.id === instance.model_id);
   return model ? model.format : '';
@@ -212,18 +219,11 @@ function card(instance, models, engines) {
   const expanded = open.has(instance.id);
   const form = expanded ? settingsForm(specs, instance.params || {}) : null;
 
-  // The label is the only part of an entry a person writes themselves, so it is
-  // editable like any other setting rather than fixed at creation. Leaving it
-  // empty is allowed and means "no label": the row then reads as the engine and
-  // the model, which is all some entries ever needed.
-  const nameField = expanded
-    ? element('input', {
-        value: instance.name || '', size: 24, placeholder: 'No label',
-        title: 'What this entry is called. Empty is fine.',
-      })
-    : null;
+  // The name is not editable. It is what requests carry, so changing it would
+  // break whatever is already sending it — and renaming is the same act as
+  // deleting the entry and adding one with the new name, which the page
+  // already offers.
   const edits = () => ({
-    name: nameField.value.trim(),
     model_id: chooser.value,
     params: form.read(),
   });
@@ -251,19 +251,19 @@ function card(instance, models, engines) {
                   : 'Open Settings to change something first')
       : 'Nothing is running — use Load',
     ...(instance.running && expanded ? {} : { disabled: 'disabled' }),
-    onclick: () => run(`Reloading ${instance.name || instance.id}`, (force) =>
+    onclick: () => run(`Reloading ${instance.id}`, (force) =>
       api.apply(instance.id, edits(), force)),
   });
 
   const primary = instance.running
     ? element('button', {
         class: 'action', text: 'Unload',
-        onclick: () => run(`Unloading ${instance.name || instance.id}`,
+        onclick: () => run(`Unloading ${instance.id}`,
                            (force) => api.unload(instance.id, force)),
       })
     : element('button', {
         class: 'action', text: 'Load',
-        onclick: () => run(`Loading ${instance.name || instance.id}`, async (force) => {
+        onclick: () => run(`Loading ${instance.id}`, async (force) => {
           if (expanded) await api.update(instance.id, edits());
           return api.load(instance.id, force);
         }),
@@ -323,14 +323,15 @@ function card(instance, models, engines) {
   }, [
     // Left: what you named it, and what it runs. This is what you read down the
     // page to find a row.
-    // The label to read by, and the name to send. The second used to be
-    // nowhere on the page, and it is what goes in a request — so somebody
-    // wanting to call a model had to guess it or read the configuration file.
+    // The name, and the model behind it. One name, which a request carries and
+    // a person reads — there used to be a label as well, and it became a
+    // second way of saying the same thing that had to be kept in step with the
+    // first.
     element('div', { class: 'inline ident' }, [
-      instance.name ? element('strong', { text: instance.name }) : null,
-      element('span', { class: 'sendname', text: instance.id,
-                        title: 'The name to send as "model" in a request' }),
-    ].filter(Boolean)),
+      element('strong', { text: instance.id,
+                          title: 'The name to send as "model" in a request' }),
+      element('span', { class: 'muted model', text: modelName(instance, models) }),
+    ]),
     // Right: what will actually run it, then the things you press. Format and
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay
     // together, at the end, out of the middle of the name.
@@ -349,9 +350,6 @@ function card(instance, models, engines) {
     head,
     expanded
       ? element('div', { class: 'settings-open' }, [
-          element('label', { class: 'field' }, [
-            element('span', { text: 'Label' }), nameField,
-          ]),
           element('label', { class: 'field' }, [
             element('span', { text: 'Model' }), chooser,
           ]),
@@ -419,7 +417,10 @@ function addCard(form) {
       value: model.id,
       text: `${model.name} · ${model.format} · ${bytes(model.size_bytes)}`,
     })));
-  const name = element('input', { placeholder: 'Name, e.g. Coding', size: 28 });
+  const name = element('input', {
+    placeholder: 'e.g. gemma-31b-nvfp4', size: 28,
+    pattern: '[a-z0-9][a-z0-9-]*',
+  });
   const port = element('input', { type: 'number', value: String(form.port), size: 8 });
 
   const engineFor = (modelId) => {
@@ -438,7 +439,19 @@ function addCard(form) {
   return element('div', { class: 'card' }, [
     element('h3', { text: 'Add a model' }),
     element('label', { class: 'field' }, [element('span', { text: 'Model' }), chooser]),
-    element('label', { class: 'field' }, [element('span', { text: 'Name' }), name]),
+    // The rules where the name is typed, not in a message after it is refused.
+    // This is the only name the entry has: a request carries it and a person
+    // reads it, so it cannot hold spaces and it cannot be changed later.
+    element('label', { class: 'field' }, [
+      element('span', {}, [
+        element('span', { text: 'Name' }),
+        element('small', { class: 'muted',
+                           text: 'lower-case letters, digits and hyphens · '
+                                 + 'sent as "model" in a request · cannot be '
+                                 + 'changed later' }),
+      ]),
+      name,
+    ]),
     element('label', { class: 'field' }, [
       element('span', {}, [
         element('span', { text: 'Port' }),
@@ -455,11 +468,9 @@ function addCard(form) {
         element('button', {
           class: 'action', text: 'Add',
           onclick: async () => {
-            const model = usable.find((item) => item.id === chooser.value);
-            const label = name.value.trim() || model.name;
-            await run(`Adding ${label}`, () => api.createInstance({
-              id: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-              name: label,
+            const chosen = name.value.trim();
+            await run(`Adding ${chosen || 'a model'}`, () => api.createInstance({
+              id: chosen,
               engine: engineFor(chooser.value).id,
               model_id: chooser.value,
               port: parseInt(port.value, 10),

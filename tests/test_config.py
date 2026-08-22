@@ -40,7 +40,7 @@ class ConfigStoreTests(unittest.TestCase):
         store = ConfigStore(self.path)
         original = Config(
             repositories=[Repository(id="a", name="A", path="/a", format="gguf")],
-            instances=[Instance(id="i", name="I", engine="llamacpp",
+            instances=[Instance(id="i", engine="llamacpp",
                                 model_id="a/m", port=9000, params={"x": 1})],
         )
         store.save(original)
@@ -50,7 +50,7 @@ class ConfigStoreTests(unittest.TestCase):
         store = ConfigStore(self.path)
         store.save(Config())
         with store.mutate() as config:
-            config.instances.append(Instance(id="new", name="New", engine="llamacpp",
+            config.instances.append(Instance(id="new", engine="llamacpp",
                                              model_id="a/m", port=8080))
         self.assertEqual(len(store.load().instances), 1)
 

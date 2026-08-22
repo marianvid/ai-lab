@@ -48,7 +48,7 @@ async function openLogs(instance) {
   open = instance.id;
   if (!panel) build();
   panel.querySelector('.log-title').textContent =
-    `${instance.name || instance.id} — engine output`;
+    `${instance.id} — engine output`;
   output.textContent = 'Reading…';
   await refresh();
   if (timer) window.clearInterval(timer);

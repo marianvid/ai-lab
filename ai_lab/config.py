@@ -26,6 +26,7 @@ place instead of scattering it across services.
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -50,12 +51,27 @@ class Repository:
     writable: bool = True
 
 
+# What an id may be made of. Letters, digits and hyphens, which is what fits in
+# a URL, in a request body and in an environment variable without quoting — and
+# what stays the same wherever it is written down.
+INSTANCE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
 @dataclass(slots=True)
 class Instance:
-    """One configured engine slot. Not necessarily running."""
+    """One configured engine slot. Not necessarily running.
+
+    The id is the only name it has. There used to be a label beside it — a
+    descriptive sentence for reading — and it turned into a second way of
+    naming the same thing, which had to be kept in step with the first and was
+    the one people saw while the other was the one that worked.
+
+    So the id carries both jobs: it is what a request names, and it is what a
+    person reads. That is why it is typed rather than derived, and why it is
+    the only thing here that has to be unique.
+    """
 
     id: str
-    name: str
     engine: str
     model_id: str
     port: int
@@ -110,7 +126,12 @@ class ConfigStore:
             host=raw.get("host", "0.0.0.0"),
             port=int(raw.get("port", 8090)),
             repositories=[Repository(**item) for item in raw.get("repositories", [])],
-            instances=[Instance(**item) for item in raw.get("instances", [])],
+            # `name` is dropped rather than rejected: a configuration written
+            # before the label was removed still loads, and loses only the
+            # label.
+            instances=[Instance(**{key: value for key, value in item.items()
+                                   if key != "name"})
+                       for item in raw.get("instances", [])],
             engines=raw.get("engines", {}),
             gateway=raw.get("gateway", {}),
         )
