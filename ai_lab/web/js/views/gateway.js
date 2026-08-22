@@ -119,7 +119,12 @@ function activity(stats) {
     : 'idle';
   return section('Activity', [
     line('Status', status),
-    line('Current model', stats.current || 'nothing loaded'),
+    line('Current model',
+         stats.current
+           ? `${stats.current}${stats.current_engine ? ` · ${stats.current_engine}` : ''}`
+           : 'nothing loaded',
+         'The name to send in a request, and the engine that will answer it. '
+         + 'The engine decides which request shapes work.'),
     line('Processing', `${stats.in_flight} from ${stats.places}`,
          'Requests running together on the model that is loaded, against the '
          + 'number the engine was started to serve.'),

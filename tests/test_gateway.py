@@ -185,44 +185,53 @@ def quick(operations):
 
 
 class NamingTests(unittest.TestCase):
+    """One name, and it is the entry's id.
+
+    It used to answer to four — the id, the label a person gave it, the model's
+    path, and the file at the end of that path — and the first match won. Two
+    entries pointing at one model with different settings is not a strange
+    thing to want; it is what settings in a request are for. Both would have
+    answered to the file's name, one would have won silently, and the request
+    would have been served by the wrong entry.
+    """
+
     def setUp(self):
         self.gateway = quick(two_models())
 
-    def test_a_model_answers_to_its_entry_id(self):
+    def test_a_model_answers_to_its_id(self):
         self.assertEqual(self.gateway.resolve("coder")["id"], "coder")
 
-    def test_a_model_answers_to_the_label_a_person_gave_it(self):
-        self.assertEqual(self.gateway.resolve("Coding")["id"], "coder")
+    def test_the_id_is_matched_regardless_of_case(self):
+        self.assertEqual(self.gateway.resolve("CODER")["id"], "coder")
+        self.assertEqual(self.gateway.resolve("  coder ")["id"], "coder")
 
-    def test_a_model_answers_to_the_name_its_engine_reports(self):
-        # A client that read /v1/models on the engine itself has this name and
-        # nothing else, so refusing it would be refusing the obvious.
-        self.assertEqual(self.gateway.resolve("Qwen3.6-35B")["id"], "coder")
+    def test_the_label_is_for_reading_and_is_not_a_name_to_send(self):
+        with self.assertRaises(NotConfigured):
+            self.gateway.resolve("Coding")
 
-    def test_names_are_matched_regardless_of_case(self):
-        self.assertEqual(self.gateway.resolve("cODiNg")["id"], "coder")
+    def test_the_model_file_is_not_a_name_to_send(self):
+        # The one that would have collided.
+        with self.assertRaises(NotConfigured):
+            self.gateway.resolve("Qwen3.6-35B")
+        with self.assertRaises(NotConfigured):
+            self.gateway.resolve("gguf/qwen/Qwen3.6-35B")
 
-    def test_an_unknown_name_reads_as_a_sentence(self):
-        # It is a KeyError so the web layer answers 404 on its own, and a
-        # KeyError renders its argument with repr() — which would deliver this
-        # whole sentence wrapped in quotes to somebody debugging an agent.
-        with self.assertRaises(NotConfigured) as caught:
-            self.gateway.resolve("nope")
-        self.assertFalse(str(caught.exception).startswith(("'", '"')),
-                         f"quoted: {str(caught.exception)!r}")
-
-    def test_an_unknown_name_says_what_is_known(self):
+    def test_an_unknown_name_says_which_ones_are_known(self):
         with self.assertRaises(NotConfigured) as caught:
             self.gateway.resolve("gpt-4")
         message = str(caught.exception)
-        self.assertIn("gpt-4", message)
-        self.assertIn("Coding", message)
+        self.assertIn("coder", message)
+        self.assertIn("reviewer", message)
+        self.assertNotIn("Coding", message, "it offered a name that will not work")
 
     def test_the_catalogue_lists_models_that_are_not_loaded(self):
-        # The whole point is that a client may ask for one of these.
         rows = self.gateway.catalogue()
-        self.assertEqual(len(rows), 2)
+        self.assertEqual([row["id"] for row in rows], ["coder", "reviewer"])
         self.assertFalse(any(row["loaded"] for row in rows))
+
+    def test_the_catalogue_carries_the_label_for_reading(self):
+        rows = {row["id"]: row for row in self.gateway.catalogue()}
+        self.assertEqual(rows["coder"]["name"], "Coding")
 
 
 class LoadingTests(unittest.TestCase):

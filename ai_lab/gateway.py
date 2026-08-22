@@ -304,7 +304,7 @@ class Gateway:
             "port": instance["port"],
             "loaded": bool(instance["running"]),
             "ready": bool(instance["ready"]),
-            "aliases": self._aliases(instance),
+
             # Which shapes of request this one answers. A client that speaks
             # only one of them can tell from the listing which models are open
             # to it, instead of finding out by being refused.
@@ -327,40 +327,30 @@ class Gateway:
         model_id = instance.get("model_id") or ""
         return model_id.rsplit("/", 1)[-1]
 
-    @staticmethod
-    def _aliases(instance: dict) -> list[str]:
-        """The names one entry answers to.
-
-        Its id, the label a person gave it, the model path, and the last segment
-        of that path — which is the name the engine reports for itself, so it is
-        what a client that read `/v1/models` from the engine will send.
-        """
-        model_id = instance.get("model_id") or ""
-        candidates = [instance["id"], instance.get("name") or "", model_id,
-                      model_id.rsplit("/", 1)[-1]]
-        seen, unique = set(), []
-        for name in candidates:
-            key = name.strip().lower()
-            if key and key not in seen:
-                seen.add(key)
-                unique.append(name.strip())
-        return unique
-
     def resolve(self, wanted: str, instances: list[dict] | None = None) -> dict:
-        """The entry serving this name, or NotConfigured naming what is known.
+        """The entry with this id, or NotConfigured naming what is known.
 
-        Takes an optional list already read, because reading it is not cheap:
-        it asks the supervisor about every configured instance and probes each
-        one that is up. See `acquire`, which reads it once and passes it on.
+        The id and nothing else. It used to answer to four names — the id, the
+        label a person gave it, the model's path, and the file at the end of
+        that path — and the first match won.
+
+        That is a collision waiting to be found. Two entries pointing at one
+        model with different settings is not a strange thing to want; it is
+        exactly what the settings in a request are for. Both would have
+        answered to the file's name, one of them would have won silently, and
+        the request would have been served by the wrong one.
+
+        So there is one name. It is stable, it survives renaming the label, it
+        has no spaces in it, and it fits the single `model` field the request
+        shapes give us. The label is for reading; this is for sending.
         """
         key = (wanted or "").strip().lower()
         if instances is None:
-            instances = self.operations.instances()
+            instances = self.operations.configured()
         for instance in instances:
-            if any(alias.lower() == key for alias in self._aliases(instance)):
+            if instance["id"].strip().lower() == key:
                 return instance
-        known = sorted({alias for instance in instances
-                        for alias in self._aliases(instance)})
+        known = sorted(instance["id"] for instance in instances)
         raise NotConfigured(
             f"No configured model answers to {wanted!r}. Known: {', '.join(known)}")
 
@@ -711,6 +701,10 @@ class Gateway:
         waiting = state["waiting"]
         return {
             "current": current.instance_id if current else None,
+            # The engine beside the name. One tells you what to send, the other
+            # tells you what will answer, and the second decides which request
+            # shapes work.
+            "current_engine": self._engine_name_of(current),
             "current_settings": current.as_dict() if current else {},
             "busy": bool(state["in_flight"] or waiting or state["switching"]),
             "holder": self.busy(),
@@ -754,6 +748,15 @@ class Gateway:
             "recent": list(reversed(counters.history[-10:])),
         }
 
+
+    def _engine_name_of(self, shape) -> str:
+        if shape is None:
+            return ""
+        try:
+            entry = self.operations.instance(shape.instance_id)
+            return self.operations.engines.get(entry["engine"]).display_name
+        except Exception:
+            return ""
 
     def _card_reading(self) -> dict:
         """Memory, load and temperature, as the accelerator reports them.

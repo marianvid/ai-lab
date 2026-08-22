@@ -11,6 +11,7 @@ import { installDom, settle } from './support/dom.js';
 
 const STATS = {
   current: 'coder',
+  current_engine: 'vLLM',
   current_settings: { context_size: 32768 },
   busy: false,
   holder: null,
@@ -72,9 +73,11 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /http:\/\/localhost:8090\/v1/);
   });
 
-  it('says which model is on the card', async () => {
+  it('says which model is on the card, and what will answer', async () => {
+    // The name to send, and the engine — which decides what request shapes
+    // work on it.
     const { view } = await renderPage();
-    assert.match(view.textContent, /coder/);
+    assert.match(view.textContent, /Current model\s*coder · vLLM/);
   });
 
   it('says the card is idle when nothing is running on it', async () => {

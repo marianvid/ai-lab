@@ -157,13 +157,6 @@ async function removeInstance(instance) {
 
 // -- one row ----------------------------------------------------------------
 
-// The one thing on the line besides the name and the engine: which model this
-// entry runs. Everything else about it is in the tooltip.
-function modelLabel(instance, models) {
-  const model = models.find((item) => item.id === instance.model_id);
-  return model ? model.name : instance.model_id;
-}
-
 // Everything that used to be printed under the name. It is still worth having
 // — it is just not worth three lines of screen for every entry, every time.
 // Hovering asks for it; the line no longer insists on it.
@@ -330,9 +323,13 @@ function card(instance, models, engines) {
   }, [
     // Left: what you named it, and what it runs. This is what you read down the
     // page to find a row.
+    // The label to read by, and the name to send. The second used to be
+    // nowhere on the page, and it is what goes in a request — so somebody
+    // wanting to call a model had to guess it or read the configuration file.
     element('div', { class: 'inline ident' }, [
       instance.name ? element('strong', { text: instance.name }) : null,
-      element('span', { class: 'muted model', text: modelLabel(instance, models) }),
+      element('span', { class: 'sendname', text: instance.id,
+                        title: 'The name to send as "model" in a request' }),
     ].filter(Boolean)),
     // Right: what will actually run it, then the things you press. Format and
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay

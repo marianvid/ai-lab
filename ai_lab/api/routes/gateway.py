@@ -57,8 +57,8 @@ def _catalogue(gateway: Gateway) -> dict:
             # Not part of the OpenAI shape, and harmless to a client that
             # ignores unknown fields. A person reading this by hand wants to
             # know which of these are up.
-            "ai_lab": {"loaded": row["loaded"], "ready": row["ready"],
-                       "port": row["port"], "aliases": row["aliases"],
+            "ai_lab": {"label": row["name"], "loaded": row["loaded"],
+                       "ready": row["ready"], "port": row["port"],
                        "shapes": row["shapes"]},
         })
     return {"object": "list", "data": data}

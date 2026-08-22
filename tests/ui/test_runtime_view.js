@@ -787,3 +787,29 @@ describe('settings opened under a row', () => {
     assert.equal(view.querySelector('.settings-open'), null);
   });
 });
+
+describe('the name a request has to carry', () => {
+  it('is on the row, beside the label', async () => {
+    // It used to be nowhere on the page. Somebody wanting to call a model had
+    // to guess it or read the configuration file.
+    const { view } = await renderPage();
+    const sent = view.querySelector('.sendname');
+    assert.ok(sent, 'the name to send is not shown');
+    assert.equal(sent.textContent, 'qwen-coder');
+  });
+
+  it('says what it is for', async () => {
+    const { view } = await renderPage();
+    assert.match(view.querySelector('.sendname').getAttribute('title'),
+                 /send as "model"/);
+  });
+
+  it('leaves the model file to the tooltip', async () => {
+    // The row is the label and the name to send; which file is behind it is a
+    // detail wanted occasionally.
+    const { view } = await renderPage();
+    const row = view.querySelector('.row.instance');
+    assert.equal(row.textContent.includes('qwen · '), false);
+    assert.match(row.getAttribute('title'), /qwen/);
+  });
+});
