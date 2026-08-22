@@ -168,6 +168,12 @@ describe('the limits, on the page that shows what they cost', () => {
   // Editable here rather than on Settings: they are about the gateway, and
   // they sit beside the figures you would read before deciding to change them.
 
+  // Setting .value does not tell the page anything; a person typing does.
+  function type(input, value) {
+    input.value = value;
+    input.dispatchEvent(new input.ownerDocument.defaultView.Event('input'));
+  }
+
   function field(view, label) {
     const found = [...view.querySelectorAll('label.field')]
       .find((node) => node.textContent.includes(label));
@@ -177,8 +183,8 @@ describe('the limits, on the page that shows what they cost', () => {
 
   it('shows what each limit is set to', async () => {
     const { view } = await renderPage();
-    assert.equal(field(view, 'first byte').querySelector('input').value, '120');
-    assert.equal(field(view, 'between bytes').querySelector('input').value, '30');
+    assert.equal(field(view, 'first token').querySelector('input').value, '120');
+    assert.equal(field(view, 'between tokens').querySelector('input').value, '30');
     assert.equal(field(view, 'Requests held').querySelector('input').value, '150');
   });
 
@@ -186,8 +192,8 @@ describe('the limits, on the page that shows what they cost', () => {
     // They trade against each other and against the machine. A number with no
     // explanation is a number nobody dares change.
     const { view } = await renderPage();
-    assert.match(field(view, 'first byte').getAttribute('title'), /streaming/);
-    assert.match(field(view, 'between bytes').getAttribute('title'), /17 tokens/);
+    assert.match(field(view, 'first token').getAttribute('title'), /streaming/);
+    assert.match(field(view, 'between tokens').getAttribute('title'), /17 tokens/);
     assert.match(field(view, 'Requests held').getAttribute('title'), /thread/);
   });
 
@@ -197,10 +203,12 @@ describe('the limits, on the page that shows what they cost', () => {
     const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
     await render(context.view);
     await settle();
-    field(context.view, 'between bytes').querySelector('input').value = '45';
+    type(field(context.view, 'between tokens').querySelector('input'), '45');
     [...context.view.querySelectorAll('button')]
       .find((node) => node.textContent.trim() === 'Save').click();
     await settle();
+    const { stopRefreshing } = await import('../../ai_lab/web/js/views/gateway.js');
+    stopRefreshing();
     context.window.close();
     const sent = context.calls.find((call) => call.method === 'PATCH');
     assert.ok(sent, 'nothing was saved');
@@ -219,9 +227,12 @@ describe('the limits, on the page that shows what they cost', () => {
     const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
     await render(context.view);
     await settle();
+    type(field(context.view, 'between tokens').querySelector('input'), '45');
     [...context.view.querySelectorAll('button')]
       .find((node) => node.textContent.trim() === 'Save').click();
     await settle();
+    const { stopRefreshing } = await import('../../ai_lab/web/js/views/gateway.js');
+    stopRefreshing();
     const told = context.document.getElementById('status').textContent;
     context.window.close();          // after reading it: closing empties it
     assert.match(told, /must be between/);
@@ -287,5 +298,76 @@ describe('what can be sent to the front door', () => {
     for (const place of ['at-address', 'at-side', 'at-limits', 'at-recent']) {
       assert.ok(view.querySelector(`.${place}`), `nothing at ${place}`);
     }
+  });
+});
+
+describe('saving a limit', () => {
+  function field(view, label) {
+    return [...view.querySelectorAll('label.field')]
+      .find((node) => node.textContent.includes(label));
+  }
+  function saveButton(view) {
+    return [...view.querySelectorAll('button')]
+      .find((node) => node.textContent.trim() === 'Save');
+  }
+  function type(input, value) {
+    input.value = value;
+    input.dispatchEvent(new input.ownerDocument.defaultView.Event('input'));
+  }
+
+  it('offers nothing to save until something differs', async () => {
+    // A button that is always ready invites a press that does nothing, and
+    // then you cannot tell whether the last press took.
+    const { view } = await renderPage();
+    assert.equal(saveButton(view).disabled, true);
+  });
+
+  it('wakes when a value is changed', async () => {
+    const { view } = await renderPage();
+    type(field(view, 'between tokens').querySelector('input'), '45');
+    assert.equal(saveButton(view).disabled, false);
+  });
+
+  it('sleeps again when the value is typed back', async () => {
+    const { view } = await renderPage();
+    const input = field(view, 'between tokens').querySelector('input');
+    type(input, '45');
+    type(input, '30');
+    assert.equal(saveButton(view).disabled, true);
+  });
+});
+
+describe('what is happening, in one word', () => {
+  it('says idle when nothing is running or waiting', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Status\s*idle/);
+  });
+
+  it('says working when answers are in progress', async () => {
+    const { view } = await renderPage({ in_flight: 3, places: 8, busy: true });
+    assert.match(view.textContent, /working/);
+  });
+
+  it('says so when there is a queue behind the work', async () => {
+    // Different from working: something is being held up, and by what is on
+    // the line below.
+    const { view } = await renderPage({
+      in_flight: 3, places: 8, waiting: 2, busy: true,
+      waiting_for: [{ instance_id: 'reviewer', waiting: 2, longest_wait_s: 4 }],
+    });
+    assert.match(view.textContent, /working, with a queue/);
+  });
+
+  it('says a model is loading while it loads', async () => {
+    const { view } = await renderPage({ switching: true, busy: true });
+    assert.match(view.textContent, /loading a model/);
+  });
+
+  it('says it is waiting to swap when the card is empty but somebody wants it', async () => {
+    const { view } = await renderPage({
+      in_flight: 0, waiting: 1, busy: true,
+      waiting_for: [{ instance_id: 'reviewer', waiting: 1, longest_wait_s: 1 }],
+    });
+    assert.match(view.textContent, /waiting to swap/);
   });
 });

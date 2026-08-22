@@ -89,7 +89,14 @@ function state(stats) {
   const queue = stats.waiting
     ? `${stats.waiting} waiting, longest ${stats.longest_wait_s} s`
     : 'nobody waiting';
+  // One word for the whole thing, before the detail underneath it.
+  const status = stats.switching ? 'loading a model'
+    : stats.in_flight && stats.waiting ? 'working, with a queue'
+    : stats.in_flight ? 'working'
+    : stats.waiting ? 'waiting to swap'
+    : 'idle';
   return section('Right now', [
+    line('Status', status),
     line('On the card', stats.current || 'nothing loaded'),
     line('Answering', answering,
          'Requests to the model on the card run together, up to the number '
@@ -112,15 +119,18 @@ function state(stats) {
 // to change them.
 function limits(stats, redraw) {
   const fields = [
-    ['first_byte_s', 'Wait for the first byte', stats.first_byte_s, 's',
-     'How long to wait for an engine to start answering. It covers reading '
-     + 'the prompt — and the whole answer for a request that did not ask for '
-     + 'streaming, since such an engine sends nothing until it has finished. '
-     + 'A large prompt on a slow machine is the case to size this for.'],
-    ['between_bytes_s', 'Wait between bytes', stats.between_bytes_s, 's',
+    ['first_byte_s', 'Wait for the first token', stats.first_byte_s, 's',
+     'How long to wait for an engine to start answering. It covers reading the '
+     + 'prompt — and the whole answer for a request that did not ask for '
+     + 'streaming, since such an engine sends nothing at all until it has '
+     + 'finished writing. A large prompt on a slow machine is the case to size '
+     + 'this for.'],
+    ['between_bytes_s', 'Wait between tokens', stats.between_bytes_s, 's',
      'How long a silence in the middle of an answer means the engine has '
      + 'stopped rather than slowed. At the slowest generation measured here, '
-     + '17 tokens a second, the gap between them is 59 milliseconds.'],
+     + '17 tokens a second, the gap between them is 59 milliseconds. It only '
+     + 'applies to a request that asked for streaming: without it the answer '
+     + 'arrives in one piece and there are no gaps to measure.'],
     ['max_waiting', 'Requests held in the queue', stats.max_waiting, '',
      'How many may wait for a model at once. Beyond it a request is refused '
      + 'rather than queued, because each one waiting occupies a thread. A '
@@ -140,11 +150,21 @@ function limits(stats, redraw) {
     ]);
   });
 
+  // Nothing to save until something is different. A button that is always
+  // ready invites a press that does nothing, and then you cannot tell whether
+  // the last press took.
+  const asShown = () => {
+    const now = {};
+    inputs.forEach((input, key) => { now[key] = Number(input.value); });
+    return now;
+  };
+  const unchanged = () => fields.every(([key, , value]) =>
+    Number(asShown()[key]) === Number(value));
+
   const save = element('button', {
-    class: 'action', text: 'Save',
+    class: 'action', text: 'Save', disabled: 'disabled',
     onclick: async () => {
-      const changes = {};
-      inputs.forEach((input, key) => { changes[key] = Number(input.value); });
+      const changes = asShown();
       save.disabled = true;
       try {
         await api.updateGateway(changes);
@@ -152,9 +172,12 @@ function limits(stats, redraw) {
       } catch (error) {
         setStatus(error.message, 'error');
       }
-      save.disabled = false;
       redraw();
     },
+  });
+
+  inputs.forEach((input) => {
+    input.addEventListener('input', () => { save.disabled = unchanged(); });
   });
 
   return section('Limits', [
@@ -179,12 +202,13 @@ function traffic(stats) {
   return section('Traffic', [
     line('Requests', String(stats.requests)),
     line('Switches', `${stats.switches} (${share}% of requests)`),
-    line('Verdict', verdict),
+
     line('Average wait before answering', `${stats.average_wait_s} s`,
          'From the request arriving to the model being ready for it: the '
          + 'queue in front of it, plus a switch if one was needed.'),
     line('Average switch', `${stats.average_switch_s} s`),
     line('Total spent switching', `${stats.total_switch_s} s`),
+    element('p', { class: 'muted', text: verdict }),
   ]);
 }
 
