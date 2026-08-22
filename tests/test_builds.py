@@ -15,9 +15,23 @@ class VersionTests(unittest.TestCase):
         self.assertLess(Version("b10331").number, Version("b10433").number)
         self.assertLess(Version("b9999").number, Version("b10000").number)
 
-    def test_an_unreadable_tag_is_zero_rather_than_an_error(self):
-        self.assertEqual(Version("").number, 0)
-        self.assertEqual(Version("unknown").number, 0)
+    def test_a_stable_version_compares_part_by_part(self):
+        """v0.1.10 is newer than v0.1.2, which string comparison gets wrong."""
+        self.assertLess(Version("v0.1.2").number, Version("v0.1.10").number)
+        self.assertLess(Version("v0.1.9").number, Version("v0.2.0").number)
+
+    def test_an_unreadable_tag_has_nothing_to_compare_rather_than_erroring(self):
+        self.assertEqual(Version("").number, ())
+        self.assertEqual(Version("unknown").number, ())
+
+    def test_a_tag_says_which_line_it_is_on(self):
+        # The two lines are different things: b tags are made on nearly every
+        # commit to master, v tags are chosen releases. Telling them apart is
+        # what stops the numbers being compared across them.
+        self.assertEqual(Version("b10448").line, "nightly")
+        self.assertEqual(Version("v0.2.0").line, "stable")
+        self.assertEqual(Version("").line, "")
+        self.assertEqual(Version("master").line, "")
 
 
 class SourceBuildTests(unittest.TestCase):
@@ -42,26 +56,67 @@ class SourceBuildTests(unittest.TestCase):
         self.assertEqual(version.tag, "b10331")
         self.assertEqual(version.commit, "7ba604f1c")
 
-    def test_the_newest_remote_tag_wins(self):
-        listing = "\n".join([
-            "aaa\trefs/tags/b10331",
-            "bbb\trefs/tags/b10433",
-            "ccc\trefs/tags/b9999",
-            "ddd\trefs/tags/master-something",
-        ])
+    def test_the_newest_tag_on_the_followed_line_wins(self):
+        # check() fetches, lists the tags on its line, then reads the installed
+        # version. git already sorts them, so the first match is the newest.
         with patch.object(SourceBuild, "_git",
-                          side_effect=[listing, "b10331\n", "7ba604f1c\n"]):
+                          side_effect=["", "v0.2.0\nv0.1.10\nv0.1.2\n",
+                                       "v0.1.2\n", "7ba604f1c\n"]), \
+             patch.object(SourceBuild, "_is_ahead", return_value=True):
             status = self.build.check()
-        self.assertEqual(status["latest"], "b10433")
+        self.assertEqual(status["latest"], "v0.2.0")
+        self.assertEqual(status["line"], "stable")
         self.assertTrue(status["update_available"])
 
-    def test_no_update_offered_when_already_current(self):
+    def test_the_nightly_line_is_followed_when_that_is_what_was_asked_for(self):
+        build = SourceBuild("llamacpp", str(self.path), self.bus, line="nightly")
         with patch.object(SourceBuild, "_git",
-                          side_effect=["aaa\trefs/tags/b10331", "b10331\n", "7ba604f1c\n"]):
+                          side_effect=["", "b10587\nb10448\n",
+                                       "b10448\n", "abc\n"]) as git, \
+             patch.object(SourceBuild, "_is_ahead", return_value=True):
+            status = build.check()
+        self.assertEqual(status["latest"], "b10587")
+        self.assertEqual(status["line"], "nightly")
+        # It asked for b tags, not v tags.
+        listing = [call for call in git.call_args_list
+                   if "for-each-ref" in call.args][0]
+        self.assertIn("refs/tags/b*", listing.args)
+
+    def test_an_unrecognised_line_falls_back_rather_than_breaking(self):
+        build = SourceBuild("llamacpp", str(self.path), self.bus, line="whatever")
+        self.assertEqual(build.line, "stable")
+
+    def test_tags_from_the_other_line_are_ignored(self):
+        # `git for-each-ref refs/tags/v*` would also match a tag called
+        # "vendor-something". Only a real version is taken.
+        with patch.object(SourceBuild, "_git",
+                          side_effect=["", "vendor-thing\nv0.1.2\n",
+                                       "v0.1.2\n", "abc\n"]), \
+             patch.object(SourceBuild, "_is_ahead", return_value=False):
+            status = self.build.check()
+        self.assertEqual(status["latest"], "v0.1.2")
+
+    def test_no_update_offered_when_the_tag_is_already_in_this_history(self):
+        # The exact question, and the one that works across both lines:
+        # somebody on b10448 moving to v0.2.0 is going to a *smaller* number
+        # and a newer thing, so the numbers cannot decide this.
+        with patch.object(SourceBuild, "_git",
+                          side_effect=["", "v0.2.0\n", "v0.2.0\n", "abc\n"]), \
+             patch.object(SourceBuild, "_is_ahead", return_value=False):
             status = self.build.check()
         self.assertFalse(status["update_available"])
 
-    def test_a_remote_without_build_tags_is_an_error_not_a_silent_zero(self):
+    def test_moving_from_a_nightly_to_a_stable_tag_is_offered(self):
+        with patch.object(SourceBuild, "_git",
+                          side_effect=["", "v0.2.0\n", "b10448\n", "abc\n"]), \
+             patch.object(SourceBuild, "_is_ahead", return_value=True):
+            status = self.build.check()
+        self.assertEqual(status["installed"], "b10448")
+        self.assertEqual(status["latest"], "v0.2.0")
+        self.assertTrue(status["update_available"],
+                        "a smaller number on the other line is still an update")
+
+    def test_a_remote_without_tags_on_that_line_is_an_error_not_a_silent_zero(self):
         with patch.object(SourceBuild, "_git", return_value=""):
             with self.assertRaises(ValueError):
                 self.build.check()
@@ -76,12 +131,14 @@ class SourceBuildTests(unittest.TestCase):
             build._say("out", f"ran {command[0]}", 0)
 
         with patch.object(SourceBuild, "_stream", fake_stream), \
-             patch.object(SourceBuild, "_git", side_effect=["b10433\n", "abc1234\n"] * 4):
+             patch.object(SourceBuild, "_git", side_effect=["v0.2.0\n"] * 40):
             self.build.update()
             self.build._thread.join(timeout=5)
 
         self.assertEqual(self.build.status()["state"], "done")
         self.assertEqual([item[0] for item in commands], ["git", "git", "cmake"])
+        checkout = [item for item in commands if item[:2] == ["git", "checkout"]]
+        self.assertTrue(checkout, "an update must move to a named tag")
         published = []
         stream = subscription.events(timeout=0.01)
         while (event := next(stream)) is not None:
@@ -95,7 +152,7 @@ class SourceBuildTests(unittest.TestCase):
         commands = []
         with patch.object(SourceBuild, "_stream",
                           lambda self, command, elapsed, timeout: commands.append(command)), \
-             patch.object(SourceBuild, "_git", side_effect=["b1\n", "a\n"] * 4):
+             patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
             self.build.update()
             self.build._thread.join(timeout=5)
         cmake = [item for item in commands if item[0] == "cmake"][0]
@@ -107,7 +164,7 @@ class SourceBuildTests(unittest.TestCase):
             raise RuntimeError("cmake exited 2")
 
         with patch.object(SourceBuild, "_stream", explode), \
-             patch.object(SourceBuild, "_git", side_effect=["b1\n", "a\n"] * 4):
+             patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
             self.build.update()
             self.build._thread.join(timeout=5)
         status = self.build.status()
@@ -117,7 +174,7 @@ class SourceBuildTests(unittest.TestCase):
     def test_two_builds_cannot_run_at_once(self):
         with patch.object(SourceBuild, "_stream",
                           lambda *a, **k: __import__("time").sleep(0.3)), \
-             patch.object(SourceBuild, "_git", side_effect=["b1\n", "a\n"] * 4):
+             patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
             self.build.update()
             with self.assertRaises(ValueError):
                 self.build.update()
@@ -171,11 +228,14 @@ class UnknownVersionTests(unittest.TestCase):
         self.build = SourceBuild("llamacpp", str(self.path), EventBus())
 
     def test_no_update_is_offered_when_the_local_version_is_unknown(self):
-        listing = "aaa\trefs/tags/b10433"
-        with patch.object(SourceBuild, "_git", side_effect=[listing, ValueError("no tags")]):
+        # A shallow clone has no tags, so there is nothing to compare against
+        # and nothing sensible to move from. Offering an update there would be
+        # offering to replace an unknown with an unknown.
+        with patch.object(SourceBuild, "_git",
+                          side_effect=["", "v0.2.0\n", ValueError("no tags")]):
             status = self.build.check()
         self.assertEqual(status["installed"], "")
-        self.assertEqual(status["latest"], "b10433")
+        self.assertEqual(status["latest"], "v0.2.0")
         self.assertFalse(status["update_available"])
 
     def test_the_reason_is_explained_rather_than_left_blank(self):

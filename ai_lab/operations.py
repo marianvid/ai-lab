@@ -26,13 +26,15 @@ FIRST_PORT = 8080
 CHANGEABLE = frozenset({"params", "model_id", "port"})
 
 from .builds import Builds
+from .capabilities import IMAGES, TOOLS
 from .catalog import Catalog
+from .changes import Reader, counted
 from .config import INSTANCE_ID, ConfigStore, Instance
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.base import validate
 from .hosts.base import Host
 from .runtime import Operation, Runtime
-from .types import ChangeEvent, LogEvent
+from .types import ChangeEvent, Interests, LogEvent
 from .settings import Settings
 
 
@@ -417,6 +419,85 @@ class Operations:
 
     def check_for_update(self, engine_id: str) -> dict:
         return self.builds.get(engine_id).check()
+
+    # -- reading an update before taking it --------------------------------
+
+    def what_would_change(self, engine_id: str) -> dict:
+        """Everything that can be found out about updating this engine.
+
+        An update should be a decision rather than a hope, so this is what the
+        page shows before offering the button: what is installed, what it would
+        become, which changes matter *here*, what the people upstream wrote
+        about it, and — for an engine installed as packages — exactly which
+        packages would be replaced and which of them would go backwards.
+
+        Nothing is changed by asking. Every source is read separately, so one
+        being unreachable costs only that section.
+        """
+        settings = self.store.load().engines.get(engine_id) or {}
+        engine = self.engines.get(engine_id)
+        reader = Reader(engine_id, settings.get("source"),
+                        binary=settings.get("binary", ""))
+        installed, latest = "", ""
+        try:
+            build = self.builds.get(engine_id)
+            status = build.status()
+            installed = status.get("installed") or ""
+            latest = status.get("latest") or ""
+        except KeyError:
+            pass                       # not built from source; notes still apply
+        # For an engine installed as packages there is no build to ask, so the
+        # versions come from the environment and from what the package manager
+        # says it would do. Asked before the notes are fetched, because the
+        # notes are chosen by which versions lie between the two.
+        moves, trouble = reader.moves()
+        if not installed or not latest:
+            from_packages = reader.versions(moves)
+            installed = installed or from_packages[0]
+            latest = latest or from_packages[1]
+        found = reader.read(installed, latest, self.interests())
+        return {
+            "engine": engine_id,
+            "engine_name": getattr(engine, "name", engine_id),
+            "installed": found.installed,
+            "latest": found.latest,
+            "yours": [asdict(item) for item in found.yours],
+            "others": [asdict(item) for item in found.others],
+            "by_area": counted(found.yours),
+            "other_areas": counted(found.others),
+            "notes": found.notes,
+            "packages": [move.json() for move in moves],
+            "unreadable": " ".join(part for part in
+                                   (found.unreadable, trouble) if part),
+        }
+
+    def interests(self) -> Interests:
+        """What this machine uses, so an update can be read against it.
+
+        Worked out, never written down. The card decides which hardware
+        changes are worth reading — the Mac wants Metal and the container wants
+        CUDA, and neither is told which it is. The configured entries decide
+        the rest: somebody running only text models does not need a hundred
+        lines about the vision code.
+        """
+        config = self.store.load()
+        models = {item.id: item for item in self.catalog.scan(config.repositories)}
+        formats, pictures, tools = set(), False, False
+        for entry in config.instances:
+            model = models.get(entry.model_id)
+            if model is None:
+                continue
+            formats.add(model.format.value)
+            able = model.capabilities
+            # An entry that switches pictures off is not using them, however
+            # capable its weights are.
+            if IMAGES in able and not entry.params.get("language_model_only"):
+                pictures = True
+            if TOOLS in able:
+                tools = True
+        return Interests(accelerator_kind=self.host.capabilities().accelerator_kind,
+                         formats=frozenset(formats), pictures=pictures,
+                         tools=tools)
 
     def update_engine(self, engine_id: str) -> dict:
         """Pull and recompile an engine from source.

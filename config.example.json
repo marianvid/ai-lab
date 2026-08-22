@@ -6,7 +6,16 @@
     "llamacpp": {
       "binary": "/opt/ai/llama.cpp/build/bin/llama-server",
       "source": {
-        "path": "/opt/ai/llama.cpp"
+        "path": "/opt/ai/llama.cpp",
+        "line": "stable",
+        "releases": "ggml-org/llama.cpp"
+      }
+    },
+    "vllm": {
+      "binary": "/opt/ai/vllm/.venv/bin/vllm",
+      "source": {
+        "releases": "vllm-project/vllm",
+        "package": "vllm"
       }
     }
   },

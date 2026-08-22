@@ -6,6 +6,11 @@ from __future__ import annotations
 def register(router, operations) -> None:
     router.add("GET", "/api/settings", lambda **_: operations.settings_view())
     router.add("GET", "/api/builds", lambda **_: operations.build_status())
+    # What an update would bring, read before anything is pressed. A GET
+    # because it changes nothing: it reads a checkout, asks upstream what it
+    # wrote, and asks the package manager what it would do.
+    router.add("GET", "/api/builds/{engine}/changes",
+               lambda engine, **_: operations.what_would_change(engine))
     router.add("POST", "/api/builds/{engine}/check",
                lambda engine, **_: operations.check_for_update(engine))
     router.add("POST", "/api/builds/{engine}/update",

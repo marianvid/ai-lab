@@ -190,3 +190,65 @@ class RuntimeEvent:
     memory_total_mb: float
     accelerator_used_mb: float = 0.0   # every model on the card, for context
     message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Change:
+    """One thing that would change if an engine were updated.
+
+    Deliberately not tied to where it came from. llama.cpp is a git checkout,
+    so a change there is a commit; vLLM is installed as a package, so a change
+    there is a paragraph from a release note. Both arrive here as the same
+    three fields, and the interface draws them the same way.
+
+    `area` is the part of the engine it touches — "CUDA", "server", "new
+    models" — used to sort what this machine cares about from what belongs to
+    somebody else's platform. `reference` is whatever identifies it upstream:
+    a commit hash, a pull request number, a version.
+    """
+
+    area: str
+    title: str
+    reference: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Interests:
+    """What this machine actually uses, so an update can be read against it.
+
+    Every field is worked out from the machine and from what is configured on
+    it, never written down by hand. The Mac cares about Metal and the container
+    cares about CUDA, and neither should be told which it is.
+
+    `pictures` is true when some configured entry points at a model whose
+    weights can read them. Somebody running only text models does not need to
+    read a hundred lines about the vision code.
+    """
+
+    accelerator_kind: str         # "cuda", "metal" or "none"
+    formats: frozenset[str] = frozenset()      # "gguf", "nvfp4", …
+    pictures: bool = False
+    tools: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Changes:
+    """What an update would bring, sorted into what matters here and what does not.
+
+    `yours` and `others` together are everything found: nothing is thrown away,
+    because a summary that quietly drops things is one nobody can trust. The
+    interface shows `yours` and keeps `others` behind a count.
+
+    `notes` is prose written by the people who made the release, when there is
+    any. It is better than any list of commits and is shown above them.
+
+    `unreadable` says why this is incomplete rather than pretending it is not —
+    no network, a checkout that git cannot read, a version with no release.
+    """
+
+    installed: str
+    latest: str
+    yours: tuple[Change, ...] = ()
+    others: tuple[Change, ...] = ()
+    notes: str = ""
+    unreadable: str = ""
