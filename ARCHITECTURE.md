@@ -40,11 +40,12 @@ there is exactly one place to look.
 | `api/` | HTTP routing, JSON, the event stream | Any decision about models, engines or formats |
 | `web/` | The browser interface | — |
 
-Four supporting files carry no policy of their own:
+Five supporting files carry no policy of their own:
 
 | File | Purpose |
 |---|---|
 | `types.py` | Shared data structures. No I/O of any kind. |
+| `config.py` | Reading and writing `config.json`, and the rules a stored value must satisfy. No decisions about what to do with it. |
 | `naming.py` | Rules about model file names — what a shard is, what a companion is. Pure text. |
 | `events.py` | Publishing progress to subscribers. |
 | `wiring.py` | Constructing objects and connecting them. No logic. |
@@ -343,6 +344,32 @@ contents rather than by its name. Everything installed since is created at its
 final path and has no such problem. A copy taken as a precaution before this
 existed had a first line pointing back at the original and would not have
 worked without it; that is measured, not supposed.
+
+### How the interface answers for itself
+
+Three rules, and they replaced a line at the foot of every page that said what
+had just happened.
+
+- **A success says nothing.** The page already shows it: the value is sitting
+  in its field, the bar has filled, the row has changed state. A sentence
+  repeating that is noise.
+- **Work in progress shows on the control that was pressed** — disabled, and
+  saying so. That is where the eye already is, it cannot be missed, and it
+  disappears by itself. See `web/js/working.js`.
+- **A failure takes the page**, with a modal. The explanation is the useful
+  part — an engine that refuses a context says which one would have fitted —
+  and it is worth interrupting for. See `web/js/confirm.js`.
+
+The line that went away was below the fold, had no border and no background,
+was wiped by the next action, and said things the page had already shown. Two
+of the things it carried were worth keeping, and both moved somewhere better
+than a footer: how long a load took now sits on the row it belongs to, where it
+is still there a minute later, and what a search came back with is said where
+the results would be.
+
+A test holds this: no status module, nothing importing one, no `<footer>` in
+the page. It is the easy thing to reach for and it comes back one message at a
+time.
 
 ## Two decisions worth knowing
 

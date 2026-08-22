@@ -28,20 +28,38 @@ Read `ARCHITECTURE.md` before changing anything.
 
 ## What it looks like
 
-One line per configured model: what you called it, which model it runs, and —
-at the right, against the buttons — the weight format and the engine that will
-serve it. Port, context, temperature, state and the timings of the last load
-live in the tooltip, because they are wanted occasionally and were costing three
-lines of screen every time.
+One line per configured model: the name you gave it, the model it runs, and —
+at the right, against the buttons — what the model can do, the weight format
+and the engine that will serve it. How long the last load took sits on the row
+too, because a load runs from four seconds to a minute and by the time you look
+back a message elsewhere would be gone. Port, context, temperature, state and
+the breakdown of that load by phase live in the tooltip, because they are
+wanted occasionally and were costing three lines of screen every time.
 
 ![The model list](docs/screenshots/models.png)
 
-Settings reports the engines and the accelerator. llama.cpp is built from
-source here, so its build number is shown and a newer one can be fetched and
-compiled from this page. vLLM is a package rather than a source build, which is
-why it has no version beside it and no update button.
+**The two small pictures say what the model can do**: a wrench for calling
+tools, a photograph for reading pictures. Neither is configured anywhere —
+both are read from the model's own files, once, and remembered. A directory of
+weights must carry both a vision section *and* a token to put a picture in
+before it claims pictures, because a text model's config can name a vision
+tower it never uses. For GGUF it is the chat template inside the weights file,
+plus the `mmproj-` file beside it that llama.cpp is handed to see with — so the
+same model downloaded without that file honestly shows no picture icon.
+
+The weights decide what a model *can* do; a setting can only take something
+away. vLLM's "Text only" loads a model that can see without the part that sees,
+so the picture icon goes when it is set — and the wrench stays, because that
+setting has nothing to do with the chat template.
+
+Settings reports the engines, their versions and the accelerator. Both engines
+can be updated from this page, and neither updates without being read first —
+see **Updating an engine** below.
 
 ![Settings](docs/screenshots/settings.png)
+
+> The screenshots are from an earlier state of the interface and do not show
+> the capability icons or the version list.
 
 ## One address for an agent
 
@@ -189,6 +207,99 @@ wanted 12 GiB of cache and had 10.78 — and said so, naming 117,776 as the
 largest that would. 96k fits, loads in 70 seconds, and leaves the card at
 29.6 GB of 32.6.
 
+## Updating an engine
+
+**Nothing updates without being read first.** The engine row has no button
+that takes an update; it has one that shows what the update would bring, and
+the real button is at the foot of that.
+
+What it shows depends on how that engine arrives.
+
+**llama.cpp is a git checkout**, so its changes are commits — already on disk
+after a fetch, no service to be rate-limited by, and a great many of them. 138
+were waiting on the container in one measurement, of which 26 were for Vulkan,
+SYCL, Metal, OpenCL and ROCm, none of which exist there; 23 were build scripts
+and 10 were its own web page. So they are sorted against what this machine
+actually uses: 62 mattered, 76 did not. Nothing is thrown away — what does not
+apply is counted and can be opened, because a summary that quietly drops things
+is one nobody can trust.
+
+Nothing about *this* machine is written down by hand. The accelerator decides
+which hardware changes are worth reading, so the Mac wants Metal and the
+container wants CUDA and neither is told which it is. The configured entries
+decide the rest: the vision code only counts as yours if some entry points at a
+model that can read pictures.
+
+**llama.cpp has two release lines and you choose which to follow.** It tags
+almost every commit to master as `b10448` — 7,160 of them in the checkout,
+about seven a day. On 17 August 2026 it also began `v0.1.0` and up, in
+upstream's own words *"stable, slower release cadence, recommended for
+downstream distribution and casual users"*, with notes worth reading. Stable is
+the default; `source.line` in `config.json` switches to `nightly`.
+
+The two cannot be compared by their numbers — `b10448` and `v0.2.0` are not on
+one scale — so "is there anything newer?" is asked of git instead: is that tag
+already in this checkout's history? Exact, the same question on both lines, and
+still right when you switch between them. An update moves to a named tag rather
+than pulling whatever master has reached, so what got compiled has a name.
+
+**vLLM arrives as ready-built packages.** Nothing is compiled and nothing is
+recompiled indirectly. What there is instead is release notes written by
+people, shown as they were written — sifting those by guessing at prefixes
+would damage the one thing written for a reader.
+
+But notes describe a *version* and say nothing about what happens to your
+machine, so the package manager is asked what it would do, without doing it.
+Measured on the container, moving from the installed nightly to 0.27.1:
+
+| | |
+|---|---|
+| packages replaced | 15 |
+| of those, **going backwards** | 8 |
+| torch and the 2.9 GB of CUDA libraries | unchanged |
+
+The eight backwards are `flashinfer`, `nvidia-cutlass-dsl` and its four
+companion packages, `humming-kernels` and `quack-kernels` — because the
+installed nightly had pulled newer kernel libraries than the stable release
+pins. No release note anywhere says that, and it is the thing most likely to
+break inference on the card.
+
+### Installing beside what works, never over it
+
+A new vLLM goes in a **new folder**, is checked that it actually imports, and
+only then does the engine start using it. The previous one is untouched, so
+going back is one press.
+
+That is not caution for its own sake. The vLLM installed on the container could
+not have been reinstalled: its wheel had left the local cache and the index it
+came from — a nightly with a git hash in its name — is recorded nowhere on the
+machine. An update in place would have been irreversible.
+
+The engine is launched through a fixed path, a link called `current`, so
+switching versions is repointing that link. It is done by writing a new link
+beside it and renaming it over the top, in one step: a link deleted and then
+recreated has a moment where it points at nothing, and anything starting in
+that moment fails for a reason nobody would guess.
+
+Settings lists the folders, marks the one in use, and offers the others as a
+way back or as space to reclaim. **Nothing is ever tidied automatically** — the
+previous version *is* the way back, and deciding it has stopped being needed is
+a judgement about whether the new one has proved itself, which no timer can
+make. Two folders is the steady state, about 16 GB.
+
+One thing that cannot be moved: an environment created before this scheme
+existed. A virtual environment's launcher scripts carry in their first line the
+absolute path they were built at, so `/opt/ai/vllm/.venv/bin/vllm` starts
+`/opt/ai/vllm/.venv/bin/python` **by name** — rename the folder and it starts
+nothing. It is left where it is and recognised by its contents instead of by
+its name. Everything installed since is created at its final path and has no
+such problem.
+
+Both kinds of update are refused while a model is loaded, and say which
+entries to unload. The engine is about to be launched from somewhere else, and
+a model already on the card would keep running the old one while the page said
+otherwise.
+
 ## Structure
 
 ```text
@@ -203,7 +314,10 @@ ai_lab/lastloaded.py    What was on the card, so a restart can put it back
 ai_lab/catalog.py       Finding models on disk, grouping shards into sets
 ai_lab/runtime.py       Load, unload and swap, with measured timings
 ai_lab/settings.py      The settings view
+ai_lab/capabilities.py  What a model can do, read from its own files and remembered
+ai_lab/changes/         What an update would bring, read before anything is pressed
 ai_lab/builds.py        Engine source versions, and updating them from git
+ai_lab/installs.py      Engines that arrive as packages: versions side by side
 ai_lab/operations.py    Joining the services into whole actions
 ai_lab/config.py        Reading and writing config.json
 ai_lab/naming.py        Rules about model file names
