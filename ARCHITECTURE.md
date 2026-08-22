@@ -32,6 +32,7 @@ there is exactly one place to look.
 | `builds.py` | Reporting an engine's source version, checking upstream, pulling and recompiling | Running engines, or choosing compile flags |
 | `operations.py` | Joining the services into whole actions | Anything a single service could do alone |
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
+| `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
 | `lastloaded.py` | One fact on disk: which model was on the card and how it was started | Deciding anything — it remembers and is read |
 | `api/` | HTTP routing, JSON, the event stream | Any decision about models, engines or formats |
 | `web/` | The browser interface | — |
@@ -74,16 +75,58 @@ no HTTP: it decides which entry serves a name and makes sure that entry is the
 one on the card. Forwarding the request and streaming the answer back are the
 web layer's job.
 
-**One model on the card, one request at a time.** That is the design, not a
-limitation being worked around. The models are chosen in advance and known to
-fit; an agent workflow is a sequence, so there is nothing to gain from
-overlapping requests and a great deal to lose from two arriving during a swap.
-The consequence is worth stating plainly: **two agents on this machine do not
-run in parallel.** The second waits for the first.
+**One model on the card. Many requests to it.** The card holds one model —
+that is the machine. Requests *to that model* run together, up to the number
+the engine was started to serve, because that is what the engines are built
+for: vLLM interleaves them in one pass, measured at up to seventeen times the
+throughput as concurrency rises against about 1.4 for llama.cpp. Making them
+take turns threw that away.
 
-The rule has no exceptions. A request that needs no switch still unloads
-anything else it finds running — a manager restart can leave two units up, and
-a stray engine holds memory the loaded model wanted for context.
+The number is the engine's own, per entry — slots for llama.cpp, sequences for
+vLLM — and `Engine.concurrency` is where it is asked for. Guessing from a
+setting name would mean this layer keeping a list of names it has to be told
+about.
+
+It used to be one request at a time, and the reasoning written here was that an
+agent workflow is a sequence. That stopped being true the moment subagents
+fanned out over one model, which is the commonest shape there is. The premise
+changed; the conclusion had to.
+
+**Requests for a different model queue, and the rules are in `scheduler.py`.**
+Two of them are easy to get wrong and impossible to notice afterwards:
+
+- The moment anybody waits for another model, the door closes for the model on
+  the card. Without it a busy model never goes idle, the switch never happens,
+  and the other request waits for ever. Under continuous load that is not
+  unlikely, it is certain.
+- What arrives while a model is loading waits for the next round, even if it
+  wants the model being loaded. Without it the model just loaded starves the
+  one that was waiting — the same fault with the names swapped.
+
+**The oldest waiting request decides what is loaded next**, strictly, with
+nothing traded for fewer loads. The fifty requests for one model may be waiting
+on the answer to the one request for another, and serving them first would be
+optimising a workflow into a standstill.
+
+Which gives the one thing to design workflows around: **a request must not
+wait, inside itself, on another request to this gateway.** Fill every place
+with things that cannot finish and nothing finishes. Fairness does not save you
+from that; nothing does.
+
+**A model plus the settings it was started with is one shape.** Two requests
+for the same entry wanting different context sizes are not requests for the
+same thing — one of them needs a reload — so the settings are part of what is
+being asked for rather than a note attached to it.
+
+**A client that gave up is dropped when its turn comes**, before anything is
+unloaded. Reproduced on the machine before this existed: a client asked for
+another model and hung up at once, and the manager took a working model off the
+card to load twenty-one gigabytes for nobody. Checking after the load reproduces
+it exactly, so the check is part of taking the photograph.
+
+**The lock is never held while a model loads.** That takes up to a minute, and
+everything would stop for it — including the page asking what is going on,
+which is exactly when somebody wants to know.
 
 **A switch empties the card and waits before it loads.** The driver returns
 video memory a moment after a process exits, and starting a model on top of
@@ -134,14 +177,22 @@ after the request in front has had its last byte, so a request wanting
 different settings queues like any other. That is the difference between this
 and the buttons below, which do not queue and therefore need `guard`.
 
-**The buttons on the page are the other way in.** Agent traffic is safe from
-itself because every request takes the card in turn. Load, Unload and Apply
-reach the engines directly and know nothing about who is mid-answer, so they
-call `Gateway.guard` first. It refuses while the card is held, names the model
-holding it, and the page offers to go ahead anyway — a wedged model has to be
-stoppable, but that should be a decision rather than an accident. The refusal
-travels as `409` with a `busy` object, because a page cannot act on a message
-it would have to match on the words of.
+**The buttons on the page are the other way in.** Requests here are safe from
+each other because they queue. Load, Unload and Apply reach the engines
+directly and know nothing about it, so they call `Gateway.guard` first. It
+refuses while anything is running or waiting and says what it found — one
+answer being written is a different thing from forty requests waiting for a
+model, and the difference decides whether to go ahead.
+
+Going ahead means a clean slate: everything in flight dies, everyone waiting is
+turned away, the card is empty. Half-forced is worse than either, because the
+queue behind a stopped engine describes a world that will not exist a second
+later. The routes also tell the gateway when a button moves a model at all,
+since the scheduler would otherwise admit a request onto a card holding
+something else.
+
+The refusal travels as `409` with a `busy` object, because a page cannot act on
+a message it would have to match on the words of.
 
 ### Why `naming.py` exists
 
@@ -250,6 +301,26 @@ machine can easily hold two builds of llama.cpp — one packaged, one compiled
 with the flags you wanted — and PATH order is nobody's decision. This is why the configuration nests engine settings under `params`
 rather than listing every engine's fields side by side, and why adding an
 engine touches neither the schema nor the front end.
+
+**How long to wait for an engine: two limits, both of safety.** In normal work
+nothing comes near them.
+
+*To the first byte* covers connecting and reading the prompt — and, for a
+request that did not ask for streaming, the whole answer, because such an
+engine sends nothing until it has finished. *Between bytes* catches an engine
+that starts answering and stops.
+
+One number cannot do both jobs. At the slowest generation measured on either
+machine, 17 tokens a second, the gap between tokens is 59 milliseconds, while a
+large prompt on that same machine can take minutes before the first byte. Four
+orders of magnitude apart. There used to be one limit, of an hour, which was
+absurd for one job and useless for the other.
+
+They and the queue length are configured rather than sent with a request: they
+belong to the machine, and the right numbers on a card that reads 8,400 tokens
+of prompt in under a second are not the right numbers on a Mac running a 70 GB
+model at 17 tokens a second. They are edited on the Gateway page, beside the
+figures somebody would read before deciding to change them.
 
 ## Measuring a load
 

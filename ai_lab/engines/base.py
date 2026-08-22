@@ -136,6 +136,17 @@ class Engine(Protocol):
         """
         ...
 
+    def concurrency(self, params: dict) -> int:
+        """How many requests this engine serves at once, with these settings.
+
+        Every engine has the idea and none of them spell it the same way:
+        llama.cpp counts slots, vLLM counts sequences. The number decides how
+        many requests may share the card without one waiting for another, and
+        asking the engine is the only way to get it without the manager keeping
+        a list of setting names it would have to be told about.
+        """
+        ...
+
     def api_paths(self) -> tuple[str, ...]:
         """The request shapes this engine answers.
 

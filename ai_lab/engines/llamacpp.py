@@ -229,6 +229,16 @@ class LlamaCppEngine:
     def ready(self, port: int) -> bool:
         return http_ok(port, "/health")
 
+    def concurrency(self, params: dict) -> int:
+        """Slots. One by default, and one is a real answer here.
+
+        llama.cpp divides the context between slots rather than sharing it, so
+        four slots means a quarter of the context each. Raising it is a trade,
+        not free — which is why it is a setting rather than a number this
+        decides.
+        """
+        return max(1, int(validate(PARAMS, params)["parallel"]))
+
     def api_paths(self) -> tuple[str, ...]:
         """The OpenAI shape, and only that one.
 

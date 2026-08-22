@@ -870,3 +870,47 @@ class RestoringTests(unittest.TestCase):
 def _failed(instance_id):
     from ai_lab.runtime import Operation
     return Operation(instance_id=instance_id, kind="load", ok=False, error="no")
+
+
+class GatewaySettingsTests(unittest.TestCase):
+    """How long the front door waits, and how many requests it holds."""
+
+    def setUp(self):
+        self.operations, self.host = operations_with_instances(1)
+
+    def test_nothing_is_set_to_begin_with(self):
+        # Absent means the built-in default applies. Writing the defaults into
+        # every configuration would make them look chosen.
+        self.assertEqual(self.operations.gateway_settings(), {})
+
+    def test_a_change_is_saved_and_read_back(self):
+        self.operations.update_gateway({"first_byte_s": 300})
+        self.assertEqual(self.operations.gateway_settings()["first_byte_s"], 300.0)
+
+    def test_changes_do_not_erase_each_other(self):
+        self.operations.update_gateway({"first_byte_s": 300})
+        self.operations.update_gateway({"max_waiting": 40})
+        saved = self.operations.gateway_settings()
+        self.assertEqual(saved["first_byte_s"], 300.0)
+        self.assertEqual(saved["max_waiting"], 40)
+
+    def test_a_setting_that_does_not_exist_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_gateway({"patience": 10})
+        self.assertIn("patience", str(caught.exception))
+
+    def test_a_number_out_of_range_is_refused_while_it_is_typed(self):
+        # Rather than discovered when a request hangs, or when nothing queues.
+        with self.assertRaises(ValueError):
+            self.operations.update_gateway({"between_bytes_s": 0})
+        with self.assertRaises(ValueError):
+            self.operations.update_gateway({"max_waiting": 0})
+
+    def test_something_that_is_not_a_number_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_gateway({"first_byte_s": "a while"})
+        self.assertIn("must be a number", str(caught.exception))
+
+    def test_the_queue_length_stays_a_whole_number(self):
+        self.operations.update_gateway({"max_waiting": 42.7})
+        self.assertEqual(self.operations.gateway_settings()["max_waiting"], 42)

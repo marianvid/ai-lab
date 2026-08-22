@@ -16,28 +16,49 @@ from __future__ import annotations
 
 def register(router, operations, gateway=None) -> None:
     def guard(action: str, instance_id: str, body: dict) -> dict:
-        """Refuse to interrupt an answer in progress, and strip the override.
+        """Refuse to interrupt work in progress, and strip the override.
 
         `force` is an instruction to this layer, not a setting to be saved, so
         it never reaches `operations` — `apply` would otherwise store it beside
         the engine's own settings.
+
+        Forcing means a clean slate rather than a half-forced one: the engine
+        is about to be stopped under whoever was using it, so the queue behind
+        it is describing a world that will not exist a second from now. Every
+        waiting request is turned away instead of being left to wake up into
+        it.
         """
         rest = {key: value for key, value in body.items() if key != "force"}
-        if gateway is not None and not body.get("force"):
+        if gateway is None:
+            return rest
+        if body.get("force"):
+            gateway.reset(f"{instance_id} was stopped by hand")
+        else:
             gateway.guard(action, instance_id)
         return rest
 
+    def done(result):
+        """Tell the gateway the card is not what it was.
+
+        These routes move models without going through the queue, so the thing
+        that decides who goes next has to be told, or it admits a request onto
+        a card holding something else.
+        """
+        if gateway is not None:
+            gateway.card_changed()
+        return result
+
     def load(id, body=None, **_):
         guard("load", id, body or {})
-        return operations.load(id).json()
+        return done(operations.load(id).json())
 
     def unload(id, body=None, **_):
         guard("unload", id, body or {})
-        return operations.unload(id).json()
+        return done(operations.unload(id).json())
 
     def apply(id, body=None, **_):
         changes = guard("apply & reload", id, body or {})
-        return operations.apply_and_reload(id, changes)
+        return done(operations.apply_and_reload(id, changes))
 
     router.add("GET", "/api/instances", lambda **_: operations.instances())
     router.add("GET", "/api/instances/{id}/logs",

@@ -67,17 +67,29 @@ API key is checked; any value will do. `GET /v1/models` lists every configured
 entry, loaded or not, which is the point: a client is meant to be able to ask
 for one of them.
 
-Two rules, both deliberate:
+**One model on the card. Many requests to it.**
 
-**One model on the card, with no exceptions.** A request that needs no switch
-still unloads anything else it finds running.
+The card holds one model — that is the machine. Requests *to that model* run
+together, up to the number the engine was started to serve: `parallel` for
+llama.cpp, `max_sequences` for vLLM. That is what the engines are built for,
+and it is the commonest shape agent traffic has — several subagents fanning out
+over one model.
 
-**One request at a time.** Every request takes the card in turn and holds it
-until the last byte of its answer has been written, streamed answers included,
-so a swap can never pull a model out from under one. The consequence is worth
-stating plainly: **two agents on this machine do not run in parallel.** The
-second waits for the first. Running them at the same time needs a second
-machine.
+Measured here on an RTX PRO 4500 with Qwen3-Coder-30B at eight places: eight
+requests at once took 1.2 s against 3.1 s one after another.
+
+**Requests for a different model wait, oldest first.** When the card empties,
+the oldest waiting request decides what is loaded next, and everything waiting
+for that same model goes in with it. Strictly by age, with nothing traded for
+fewer loads — the fifty requests for one model may be waiting on the answer to
+the one request for another.
+
+Two consequences worth designing around:
+
+- A model plus the settings it was started with is one thing. Two requests for
+  the same model wanting different context sizes cannot share a card.
+- A request must not wait, inside itself, on another request to this gateway.
+  Fill every place with things that cannot finish and nothing finishes.
 
 The Gateway page reports what this is costing. The number to read is switches
 as a share of requests: a workflow changing model on most of its steps spends

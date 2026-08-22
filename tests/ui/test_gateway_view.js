@@ -11,8 +11,18 @@ import { installDom, settle } from './support/dom.js';
 
 const STATS = {
   current: 'coder',
+  current_settings: { context_size: 32768 },
   busy: false,
   holder: null,
+  in_flight: 0,
+  places: 8,
+  switching: false,
+  waiting: 0,
+  waiting_for: [],
+  longest_wait_s: 0.0,
+  max_waiting: 150,
+  first_byte_s: 120.0,
+  between_bytes_s: 30.0,
   requests: 20,
   switches: 2,
   average_wait_s: 1.4,
@@ -53,25 +63,45 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /coder/);
   });
 
-  it('says the card is free when nothing holds it', async () => {
+  it('says the card is idle when nothing is running on it', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /free/);
+    assert.match(view.textContent, /idle/);
+    assert.match(view.textContent, /nobody waiting/);
   });
 
-  it('names the model that is working, not just that something is', async () => {
-    // "Busy" alone cannot tell you whether the thing you are about to stop is
-    // the thing that is working.
-    const { view } = await renderPage({
-      busy: true, holder: { instance_id: 'reviewer', answering: true },
-    });
-    assert.match(view.textContent, /reviewer is answering a request/);
+  it('counts the answers in progress against the places there are', async () => {
+    // Requests to the model on the card run together now. How many are in
+    // flight, and how many could be, is the figure that says whether the
+    // concurrency you configured is being used.
+    const { view } = await renderPage({ in_flight: 3, places: 8, busy: true });
+    assert.match(view.textContent, /3 of 8 places in use/);
   });
 
-  it('distinguishes a model that is loading from one that is answering', async () => {
+  it('says how many are waiting and how long the longest has', async () => {
     const { view } = await renderPage({
-      busy: true, holder: { instance_id: 'reviewer', answering: false },
+      waiting: 4, longest_wait_s: 12.5, busy: true,
+      waiting_for: [{ instance_id: 'reviewer', waiting: 4, longest_wait_s: 12.5 }],
     });
-    assert.match(view.textContent, /reviewer is loading/);
+    assert.match(view.textContent, /4 waiting, longest 12.5 s/);
+  });
+
+  it('says which models the queue is waiting for', async () => {
+    // Two models fighting over one card is a different fault from too little
+    // concurrency, and the fix is different too.
+    const { view } = await renderPage({
+      waiting: 5, longest_wait_s: 9,
+      waiting_for: [
+        { instance_id: 'reviewer', waiting: 3, longest_wait_s: 9 },
+        { instance_id: 'coder', waiting: 2, longest_wait_s: 2 },
+      ],
+    });
+    assert.match(view.textContent, /wanting reviewer/);
+    assert.match(view.textContent, /wanting coder/);
+  });
+
+  it('says a model is loading rather than answering', async () => {
+    const { view } = await renderPage({ switching: true, busy: true });
+    assert.match(view.textContent, /loading/);
   });
 
   it('states switching as a share of requests rather than leaving the division', async () => {
@@ -118,5 +148,74 @@ describe('the Gateway page', () => {
       last_error: 'The card still holds 9000 MB 60 seconds after everything was unloaded',
     });
     assert.match(view.textContent, /still holds 9000 MB/);
+  });
+});
+
+describe('the limits, on the page that shows what they cost', () => {
+  // Editable here rather than on Settings: they are about the gateway, and
+  // they sit beside the figures you would read before deciding to change them.
+
+  function field(view, label) {
+    const found = [...view.querySelectorAll('label.field')]
+      .find((node) => node.textContent.includes(label));
+    if (!found) throw new Error(`no field for "${label}"`);
+    return found;
+  }
+
+  it('shows what each limit is set to', async () => {
+    const { view } = await renderPage();
+    assert.equal(field(view, 'first byte').querySelector('input').value, '120');
+    assert.equal(field(view, 'between bytes').querySelector('input').value, '30');
+    assert.equal(field(view, 'Requests held').querySelector('input').value, '150');
+  });
+
+  it('explains each one where hovering finds it', async () => {
+    // They trade against each other and against the machine. A number with no
+    // explanation is a number nobody dares change.
+    const { view } = await renderPage();
+    assert.match(field(view, 'first byte').getAttribute('title'), /streaming/);
+    assert.match(field(view, 'between bytes').getAttribute('title'), /17 tokens/);
+    assert.match(field(view, 'Requests held').getAttribute('title'), /thread/);
+  });
+
+  it('sends every limit when one is saved', async () => {
+    const context = installDom({ '/api/gateway': STATS,
+                                 'PATCH /api/gateway': STATS });
+    const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    await render(context.view);
+    await settle();
+    field(context.view, 'between bytes').querySelector('input').value = '45';
+    [...context.view.querySelectorAll('button')]
+      .find((node) => node.textContent.trim() === 'Save').click();
+    await settle();
+    context.window.close();
+    const sent = context.calls.find((call) => call.method === 'PATCH');
+    assert.ok(sent, 'nothing was saved');
+    assert.deepEqual(JSON.parse(sent.body),
+                     { first_byte_s: 120, between_bytes_s: 45, max_waiting: 150 });
+  });
+
+  it('says so when the server refuses a number', async () => {
+    const context = installDom({
+      '/api/gateway': STATS,
+      'PATCH /api/gateway': { __status: 400,
+                              error: 'between_bytes_s must be between 1.0 and 3600.0' },
+    });
+    const { attachStatus } = await import('../../ai_lab/web/js/status.js');
+    attachStatus(context.document.getElementById('status'));
+    const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    await render(context.view);
+    await settle();
+    [...context.view.querySelectorAll('button')]
+      .find((node) => node.textContent.trim() === 'Save').click();
+    await settle();
+    const told = context.document.getElementById('status').textContent;
+    context.window.close();          // after reading it: closing empties it
+    assert.match(told, /must be between/);
+  });
+
+  it('says they are limits of safety, not settings to tune', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /safety, not of patience/);
   });
 });

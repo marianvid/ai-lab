@@ -119,6 +119,20 @@ class Operations:
             rows.append(row)
         return rows
 
+    def instance(self, instance_id: str) -> dict:
+        """One configured entry, without asking what any of them are doing.
+
+        `instances` asks the supervisor about every entry and probes each one
+        that is up — 152 ms on the container with eleven configured. This
+        answers questions that are pure configuration, and the gateway asks one
+        of those on every request.
+        """
+        item = self.store.load().instance(instance_id)     # raises if unknown
+        engine = self.engines.get(item.engine)
+        return {"id": item.id, "name": item.name, "engine": item.engine,
+                "model_id": item.model_id, "port": item.port,
+                "params": self._effective(engine, item.params)}
+
     @staticmethod
     def _effective(engine, stored: dict) -> dict:
         try:
@@ -330,6 +344,43 @@ class Operations:
         self._changed("instances")
 
     # -- keeping the engines up to date ------------------------------------
+
+    # -- the front door's own settings -------------------------------------
+
+    GATEWAY_SETTINGS = {
+        "first_byte_s": (1.0, 3600.0),
+        "between_bytes_s": (1.0, 3600.0),
+        "max_waiting": (1, 10000),
+    }
+
+    def gateway_settings(self) -> dict:
+        return dict(self.store.load().gateway)
+
+    def update_gateway(self, changes: dict) -> dict:
+        """Change how long the front door waits and how many it holds.
+
+        Checked here rather than in the gateway, for the same reason every
+        other setting is checked outside the thing it configures: a number that
+        cannot work should be refused while it is being typed, not discovered
+        when a request hangs.
+        """
+        unknown = set(changes) - set(self.GATEWAY_SETTINGS)
+        if unknown:
+            raise ValueError(f"Unknown settings: {', '.join(sorted(unknown))}")
+        cleaned = {}
+        for key, value in changes.items():
+            low, high = self.GATEWAY_SETTINGS[key]
+            try:
+                number = int(value) if isinstance(low, int) else float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"{key} must be a number") from None
+            if not low <= number <= high:
+                raise ValueError(f"{key} must be between {low} and {high}")
+            cleaned[key] = number
+        with self.store.mutate() as config:
+            config.gateway = {**config.gateway, **cleaned}
+        self._changed("settings")
+        return self.gateway_settings()
 
     def build_status(self) -> list[dict]:
         return self.builds.all() if self.builds else []

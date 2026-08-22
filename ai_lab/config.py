@@ -75,6 +75,12 @@ class Config:
     # llama.cpp — a packaged one and your own — and PATH silently picks
     # whichever comes first, which may not be the one you tuned.
     engines: dict = field(default_factory=dict)
+    # The front door's own settings: how long to wait for an engine, and how
+    # many requests to hold. They belong to the machine rather than to a
+    # request — the right numbers on a card that reads 8,400 tokens of prompt
+    # in under a second are not the right numbers on a Mac running a 70 GB
+    # model at 17 tokens a second — so they are configured, not sent.
+    gateway: dict = field(default_factory=dict)
 
     def repository(self, repository_id: str) -> Repository:
         found = next((item for item in self.repositories if item.id == repository_id), None)
@@ -106,6 +112,7 @@ class ConfigStore:
             repositories=[Repository(**item) for item in raw.get("repositories", [])],
             instances=[Instance(**item) for item in raw.get("instances", [])],
             engines=raw.get("engines", {}),
+            gateway=raw.get("gateway", {}),
         )
 
     def save(self, config: Config) -> None:

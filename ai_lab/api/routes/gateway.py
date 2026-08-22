@@ -30,6 +30,14 @@ FORWARDED = OPENAI_PATHS + ANTHROPIC_PATHS
 def register(router, operations, gateway: Gateway) -> None:
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway))
     router.add("GET", "/api/gateway", lambda **_: gateway.stats())
+
+    def settings(body=None, **_):
+        """Change the front door's own limits, and use them at once."""
+        saved = operations.update_gateway(body or {})
+        gateway.apply_settings(saved)
+        return gateway.stats()
+
+    router.add("PATCH", "/api/gateway", settings)
     for path in FORWARDED:
         router.add("POST", path, _forwarder(gateway, path))
 
@@ -63,7 +71,7 @@ SETTINGS_FIELD = "ai_lab"
 
 
 def _forwarder(gateway: Gateway, path: str):
-    def handle(body=None, **_):
+    def handle(body=None, alive=None, **_):
         payload = body or {}
         wanted = payload.get("model")
         if not wanted:
@@ -82,7 +90,8 @@ def _forwarder(gateway: Gateway, path: str):
         # a swap cannot pull the model out from under a stream in progress.
         # `path` goes with it: an entry whose engine does not answer this shape
         # is refused before anything is loaded, not after.
-        lease = gateway.acquire(wanted, shape=path, settings=settings)
+        lease = gateway.acquire(wanted, shape=path, settings=settings,
+                                still_wanted=alive)
 
         # The engine knows its own model by a different name than the entry
         # does, and rejects a name it does not recognise. Ask by the name it
@@ -94,9 +103,11 @@ def _forwarder(gateway: Gateway, path: str):
 
         url = f"http://127.0.0.1:{lease.port}{path}"
         try:
-            return forward(url, outgoing, on_close=gateway.release)
+            return forward(url, outgoing, on_close=lease.release,
+                           first_byte_s=gateway.first_byte_s,
+                           between_bytes_s=gateway.between_bytes_s)
         except Exception:
-            gateway.release()
+            lease.release()
             raise
     return handle
 

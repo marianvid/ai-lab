@@ -9,37 +9,49 @@ This removes that. A request names a model; if it is already loaded the request
 goes through, and if it is not, the card is emptied and that model is loaded
 first. The agent waits longer for that one request and sees nothing else.
 
-## One model at a time, and requests one at a time
+## One model on the card. Many requests to it.
 
-That is the design, not a limitation being worked around.
+The card holds one model. That is the machine, not a decision.
 
-The models here are chosen in advance and known to fit. The card holds one of
-them at a time, and an agent workflow is a sequence — read, then write, then
-check — so there is nothing to gain from overlapping requests and a great deal
-to lose from two of them arriving during a swap. Every request takes the card in
-turn, and holds it until its answer has been fully written.
+Requests to the model that is on it are a different matter, and they run
+together — up to the number the engine was started to serve. vLLM interleaves
+them in the same pass, which is where its throughput comes from: measured on
+this machine at up to seventeen times as concurrency rises, against about 1.4
+for llama.cpp. Making them take turns threw that away.
 
-The consequence is worth stating plainly: **two agents on this machine do not
-run in parallel.** The second waits for the first. Running them at the same time
-needs a second machine.
+The number is the engine's own, per entry: slots for llama.cpp, sequences for
+vLLM. Ask the engine, do not guess from a setting name.
 
-One model means one, with no exceptions. A request that needs no switch still
-unloads anything else it finds running. A second engine can be up for reasons
-unrelated to this request — a manager restart, or somebody pressing Load on the
-page — and left alone it holds memory the loaded model wanted for context.
+Requests wanting a different model wait, and the queueing rules are in
+`scheduler.py` — including the two that are easy to get wrong and impossible to
+notice: a busy model must stop admitting the moment somebody waits for another,
+and a model just loaded must not admit arrivals ahead of who was already
+waiting. Without either, one model starves the other for ever.
+
+**The oldest waiting request decides what is loaded next.** Strictly, with no
+trade for fewer loads — because the fifty requests for one model may be waiting
+on the answer to the one request for another.
+
+Which leads to the one thing to design workflows around: **a request must not
+wait, inside itself, on another request to this same gateway.** Fill every
+place with things that cannot finish and nothing finishes.
+
+A model plus the settings it was started with is one "shape". Two requests for
+the same model wanting different context sizes are not requests for the same
+thing: one of them needs a reload.
 
 ## The buttons on the page are the other way in
 
-The gateway's traffic is safe from itself: every request takes the card in turn.
-The Load and Unload buttons are not part of that. They reach the engines
-directly and know nothing about who is mid-answer, so pressing Unload during a
-long answer would kill it in the middle of a sentence.
+Requests here are safe from each other: they queue. The Load and Unload buttons
+are not part of that. They reach the engines directly and know nothing about
+who is mid-answer, so pressing Unload during a long answer would kill it in the
+middle of a sentence.
 
-`guard` is what the routes behind those buttons call first. It refuses while the
-card is held and says who holds it, so the page can offer to go ahead anyway.
-That choice stays with the person looking at the screen — a model wedged in a
-bad state has to be stoppable — but it is now a decision rather than an
-accident.
+`guard` is what the routes behind those buttons call first. It refuses while
+anything is running or waiting, and says what it found, so the page can offer
+to go ahead anyway. Going ahead means a clean slate: everything in flight dies,
+everyone waiting is turned away, the card is empty. Half-forced is worse than
+either.
 
 ## Emptying the card properly
 
@@ -52,6 +64,27 @@ So a switch unloads everything running, waits for the card to actually go quiet,
 and only then loads. If it does not go quiet, the switch fails and says so,
 rather than loading into a mess.
 
+## How long to wait for an engine
+
+Two limits, and they are limits of safety rather than of patience: in normal
+work nothing comes near them.
+
+**To the first byte** covers connecting and reading the prompt — and, for a
+request that did not ask for streaming, the whole answer, because such an
+engine sends nothing until it has finished. Measured here: 8,400 tokens of
+prompt read in 0.78 s on the card. On a model split between card and system
+memory, or on Apple silicon, it is far slower — that is what this number is
+sized for.
+
+**Between bytes** catches an engine that starts answering and stops. At the
+slowest generation measured on either machine, 17 tokens a second, the gap
+between them is 59 milliseconds. Anything of the order of seconds means
+something is wrong, not slow.
+
+One number cannot do both jobs: their sane values are four orders of magnitude
+apart. The single hour-long timeout this replaced was absurd for one and
+useless for the other.
+
 There is no HTTP in this file. It decides which entry serves a name and makes
 sure it is the one on the card; forwarding the request is the web layer's job.
 """
@@ -63,6 +96,7 @@ import time
 from dataclasses import dataclass, field
 
 from .operations import Operations
+from .scheduler import Abandoned, Scheduler
 
 
 class NotConfigured(KeyError):
@@ -115,14 +149,27 @@ QUIET_MB = 512.0
 QUIET_TIMEOUT_S = 60.0
 QUIET_POLL_S = 0.5
 
+# How long to wait for an engine, and how many requests to hold. All three are
+# defaults: the real values live in the configuration, because the right
+# numbers differ between a card that reads 8,400 tokens of prompt in under a
+# second and a Mac running a 70 GB model at 17 tokens a second.
+FIRST_BYTE_S = 120.0
+BETWEEN_BYTES_S = 30.0
+MAX_WAITING = 150
+
 
 @dataclass(slots=True)
 class Lease:
-    """The card, held for the length of one request.
+    """A place on the card, held for the length of one request.
 
-    Taken before the request is forwarded and released after the last byte of
-    the answer, including a streamed answer that takes a minute. Nothing else
-    touches the card in between.
+    Taken before the request is forwarded and given back after the last byte of
+    the answer, including a streamed answer that takes a minute.
+
+    Each lease knows whether it has been given back, because several are held
+    at once now. A request that fails while being forwarded hands its place
+    back twice — once from the code that noticed, once from the reader's
+    cleanup — and without this the second would be taking a place from somebody
+    else.
     """
 
     gateway: "Gateway"
@@ -135,12 +182,40 @@ class Lease:
     # afterwards meant reading every instance's state a second time, which is
     # the expensive question, for an answer that is pure configuration.
     model_name: str = ""
+    _given_back: bool = False
+
+    def release(self) -> None:
+        if self._given_back:
+            return
+        self._given_back = True
+        self.gateway.finished()
 
     def __enter__(self) -> "Lease":
         return self
 
     def __exit__(self, *_exception) -> None:
-        self.gateway.release()
+        self.release()
+
+
+@dataclass(frozen=True, slots=True)
+class Shape:
+    """A model, and the settings it has to be started with.
+
+    Two requests for the same entry wanting different context sizes are not
+    requests for the same thing — one of them needs a reload — so the settings
+    are part of what is being asked for, not a note attached to it. Frozen and
+    hashable, so equality is the whole test.
+    """
+
+    instance_id: str
+    settings: tuple = ()                # (key, value) pairs, sorted
+
+    @classmethod
+    def of(cls, instance_id: str, settings: dict | None) -> "Shape":
+        return cls(instance_id, tuple(sorted((settings or {}).items())))
+
+    def as_dict(self) -> dict:
+        return dict(self.settings)
 
 
 @dataclass(slots=True)
@@ -154,32 +229,36 @@ class _Counters:
 
 
 class Gateway:
-    """Routes by model name and puts that model on the card if it is not there."""
+    """Routes by model name and puts that model on the card if it is not there.
+
+    The queueing itself is `scheduler.Scheduler`, which knows nothing about
+    models: it is handed a way to put a shape on the card and a way to ask how
+    many requests that shape serves at once. Everything about names, engines
+    and settings is here; everything about who goes next is there.
+    """
 
     HISTORY = 50
 
     def __init__(self, operations: Operations,
                  quiet_mb: float = QUIET_MB,
                  quiet_timeout_s: float = QUIET_TIMEOUT_S,
-                 poll_s: float = QUIET_POLL_S) -> None:
+                 poll_s: float = QUIET_POLL_S,
+                 first_byte_s: float = FIRST_BYTE_S,
+                 between_bytes_s: float = BETWEEN_BYTES_S,
+                 max_waiting: int = MAX_WAITING) -> None:
         self.operations = operations
         self.quiet_mb = quiet_mb
         self.quiet_timeout_s = quiet_timeout_s
         self.poll_s = poll_s
-        # One card, one request at a time. A plain lock says exactly that; a
-        # reader-writer arrangement would only be pretending there is a case
-        # where two requests should overlap.
-        self._card = threading.Lock()
-        # Guards the flag below. A request can be reported as finished from two
-        # places at once — the forwarding code hands the card back when the
-        # answer ends, and again if the connection broke on the way out.
-        self._bookkeeping = threading.Lock()
-        self._held = False
-        # Who has the card, from the moment it is taken. Not the same question
-        # as what is loaded: during a switch there is a holder and nothing on
-        # the card at all. What is loaded is read from the instances instead of
-        # remembered — see `_loaded`.
-        self._holder: str | None = None
+        self.first_byte_s = first_byte_s
+        self.between_bytes_s = between_bytes_s
+        self.scheduler = Scheduler(self._put_on_card, self._places,
+                                   max_waiting=max_waiting)
+        # Whether anything outside may have changed what is on the card. Set at
+        # startup and whenever a button on the page loads or unloads something.
+        # The next switch sweeps: one expensive read after an outside change
+        # rather than one on every request.
+        self._resweep = True
         self.counters = _Counters()
 
     # -- what a client can ask for -----------------------------------------
@@ -258,95 +337,175 @@ class Gateway:
         raise NotConfigured(
             f"No configured model answers to {wanted!r}. Known: {', '.join(known)}")
 
-    # -- taking the card ----------------------------------------------------
+    # -- taking a place on the card -----------------------------------------
 
     def acquire(self, wanted: str, shape: str | None = None,
-                settings: dict | None = None) -> Lease:
-        """Take the card with the named model on it.
+                settings: dict | None = None,
+                still_wanted=None) -> Lease:
+        """Take a place on the card, with the named model on it.
 
-        Waits for the request in front, then switches models if this one is not
-        already loaded. Returns once the model is answering.
+        Returns once the model is answering and this request may go through.
+        It may return at once — the model is loaded and there is room — or after
+        waiting for a place, or after waiting for a switch and the load.
 
         `shape` is the kind of request about to be forwarded. Checked before
-        anything is loaded: an entry whose engine does not answer that shape is
+        anything is queued: an entry whose engine does not answer that shape is
         refused straight away rather than after a forty-second load.
 
-        `settings` asks for the model with something other than what the entry
-        is configured with — a bigger context, usually. It is checked before
-        queueing, so a setting the engine does not have is refused at once. If
-        the model is already running with them, nothing happens. If it is
-        running with something else, it is reloaded.
+        `settings` asks for the model started with something other than what the
+        entry is configured with. Checked before queueing too, so a setting the
+        engine does not have comes back at once. It is part of what is being
+        asked for: two requests wanting different context sizes cannot share a
+        card, whatever the model.
 
-        That reload never interrupts anything, and not because it checks: the
-        card is taken first, and it is only handed over when the request in
-        front has had its last byte. A request asking for different settings
-        waits its turn like any other. The buttons on the page are the ones
-        that need `guard`, because they do not queue.
+        `still_wanted()` says whether the client is still there. Asked when this
+        request reaches the head of the queue and before anything is unloaded.
+        A client that gave up must not cost a swap — reproduced on the machine
+        before this existed: one hung up at once and the manager took a working
+        model off the card to load twenty-one gigabytes for nobody.
         """
         started = time.perf_counter()
-        # Read once and pass it down. Asking what the instances are doing means
-        # a call to the supervisor for each one and a readiness probe for each
-        # one that is up: measured on the container with eleven instances, about
-        # 125 ms and 28 processes per read. Asking three times for one request —
-        # to resolve the name, to see whether it is ready, to look for strays —
-        # put half a second in front of an engine that answers in 17 ms.
-        #
-        # Nothing else can change it in between: the reads that matter happen
-        # under the card lock, and the gateway is what moves models.
         instances = self.operations.instances()
         instance = self.resolve(wanted, instances)
         if shape is not None:
             self._refuse_wrong_shape(instance, shape, instances)
         instance_id, port = instance["id"], instance["port"]
-        # Checked before the queue: a misspelled setting should come back
-        # immediately, not after waiting behind somebody else's answer.
-        asked_for = (self.operations.effective_params(instance_id, settings)
-                     if settings else None)
+        # Always the full settings, never only what was asked for. A request
+        # naming no settings and one naming exactly the configured ones are
+        # asking for the same thing, and comparing partial dictionaries would
+        # make them different — a reload for nothing, on every other request.
+        asked_for = self.operations.effective_params(instance_id, settings or {})
+        self._adopt_what_is_there(instances)
 
-        self._card.acquire()
-        self._holder = instance_id
         try:
-            # Read again now the card is ours. The snapshot above was taken
-            # before the queue, and the request in front may have changed which
-            # model is loaded while this one waited.
-            instances = self.operations.instances()
-            if not self._is_ready(instance_id, instances):
-                self._switch_to(instance_id, asked_for)
-            elif asked_for is not None and self._running_differs(instance_id,
-                                                                 asked_for,
-                                                                 instances):
-                # Up, but not the way this request wants it. Reloading is the
-                # only way: these are settings the process is started with.
-                self._switch_to(instance_id, asked_for)
-            else:
-                # It is already up, so there is nothing to load. There may
-                # still be something else up beside it, and one model on the
-                # card is the rule with no exceptions — so anything else goes.
-                self._evict_strays(instance_id, instances)
-            self._held = True
-            self.counters.requests += 1
-            self.counters.waited_s += time.perf_counter() - started
-            return Lease(self, instance_id, port, self._engine_name(instance))
+            self.scheduler.enter(Shape.of(instance_id, asked_for),
+                                 still_wanted=still_wanted)
         except Exception as error:
-            self.counters.last_error = str(error)
-            self._holder = None
-            self._card.release()
+            if not isinstance(error, Abandoned):
+                self.counters.last_error = str(error)
             raise
+        self.counters.requests += 1
+        self.counters.waited_s += time.perf_counter() - started
+        return Lease(self, instance_id, port, self._engine_name(instance))
 
-    def release(self) -> None:
-        """Give the card back to whoever is waiting.
+    def finished(self) -> None:
+        """Give a place back, and let in whoever can go next."""
+        self.scheduler.leave()
 
-        Safe to call twice for the same request: the second call does nothing.
-        Without that, a request that failed while being forwarded would hand
-        back the card twice, and the second time it would be taking it away
-        from the request that had already started.
+    def _adopt_what_is_there(self, instances: list[dict]) -> None:
+        """Tell the scheduler what is already on the card, once.
+
+        Only after something outside may have changed it — a manager that has
+        just started, or a button on the page. Otherwise the scheduler is the
+        authority and reading again would only be a chance to disagree with
+        itself.
+
+        Exactly one model, and answering: anything else is left as unknown, and
+        the next request switches, which unloads whatever is there. Two engines
+        up is not a card to adopt, it is a card to clear.
         """
-        with self._bookkeeping:
-            if not self._held:
-                return
-            self._held = False
-            self._holder = None
-            self._card.release()
+        if not self._resweep:
+            return
+        self._resweep = False
+        running = [item for item in instances if item["running"] and item["ready"]]
+        if len(running) != 1 or any(item["running"] for item in instances
+                                    if item["id"] != running[0]["id"]):
+            return
+        found = running[0]
+        self.scheduler.adopt(Shape.of(
+            found["id"], {**found.get("params", {}),
+                          **found.get("active_params", {})}))
+
+    # -- what the scheduler asks of us --------------------------------------
+
+    def _places(self, shape: "Shape | None") -> int:
+        """How many requests this shape serves at once. The engine's own number.
+
+        One when it cannot be worked out — a shape naming an entry that has
+        been deleted, say. Guessing high there would let requests through to a
+        model that cannot take them.
+        """
+        if shape is None:
+            return 1
+        try:
+            instance = self.operations.instance(shape.instance_id)
+            engine = self.operations.engines.get(instance["engine"])
+            return max(1, engine.concurrency({**instance["params"],
+                                              **shape.as_dict()}))
+        except Exception:
+            return 1
+
+    def _put_on_card(self, shape: "Shape") -> None:
+        """Empty the card, wait for it to go quiet, then load.
+
+        Everything running is unloaded, not only what was last asked for: a
+        manager restart or a machine boot can leave more than one engine up,
+        and loading into whatever is left is how a curated model that is known
+        to fit fails to fit.
+        """
+        started = time.perf_counter()
+        unloaded = self._clear()
+        self._resweep = False
+        self._wait_until_quiet()
+
+        operation = self.operations.load(shape.instance_id, shape.as_dict() or None)
+        if not operation.ok:
+            raise CouldNotLoad(
+                operation.error or f"{shape.instance_id} would not start")
+
+        took = time.perf_counter() - started
+        self.counters.switches += 1
+        self.counters.switch_s += took
+        self.counters.history.append({
+            "at": time.time(), "loaded": shape.instance_id, "unloaded": unloaded,
+            "took_s": round(took, 1), "load_ms": operation.total_ms,
+        })
+        del self.counters.history[:-self.HISTORY]
+
+    def _clear(self) -> list[str]:
+        """Unload every running engine. Returns what was stopped."""
+        stopped = []
+        for instance in self.operations.instances():
+            if instance["running"]:
+                self.operations.unload(instance["id"])
+                stopped.append(instance["id"])
+        return stopped
+
+    # -- what the buttons on the page have to tell us -----------------------
+
+    def apply_settings(self, settings: dict) -> None:
+        """Take new limits without a restart.
+
+        The queue length is the scheduler's; the two waits are used by the web
+        layer when it forwards, and it reads them from here each time, so a
+        change reaches the next request rather than the next restart.
+        """
+        if "first_byte_s" in settings:
+            self.first_byte_s = float(settings["first_byte_s"])
+        if "between_bytes_s" in settings:
+            self.between_bytes_s = float(settings["between_bytes_s"])
+        if "max_waiting" in settings:
+            self.scheduler.max_waiting = int(settings["max_waiting"])
+
+    def card_changed(self) -> None:
+        """Something outside loaded or unloaded a model.
+
+        The scheduler believes what it put there. A button on the page can put
+        something else, and the next request would then be admitted onto a card
+        that no longer holds what it thinks.
+        """
+        self.scheduler.forget_current()
+        self._resweep = True
+
+    def reset(self, reason: str) -> int:
+        """Throw everything away. What a forced stop means.
+
+        Everything in flight is already dying — whoever forced it killed the
+        engine. Everyone waiting is turned away rather than left queueing for a
+        state that no longer exists. Returns how many were turned away.
+        """
+        self._resweep = True
+        return self.scheduler.reset(reason)
 
     # -- which shapes an entry answers --------------------------------------
 
@@ -379,117 +538,55 @@ class Gateway:
     # -- what the buttons on the page have to respect -----------------------
 
     def busy(self) -> dict | None:
-        """What is holding the card, or None if nothing is.
+        """What is on the card and what it is doing, or None if it is idle.
 
-        `answering` is false while a model is still being loaded: the card is
-        taken, but no answer is being written yet. Both count as busy — the
-        load is being done for a request that is already waiting.
+        Idle means nothing running and nobody waiting. A queue with nothing in
+        flight still counts as busy: a switch is about to happen, and stopping
+        a model in that moment is as disruptive as stopping one mid-answer.
         """
-        if not self._card.locked():
+        state = self.scheduler.state()
+        if not state["in_flight"] and not state["waiting"] and not state["switching"]:
             return None
-        return {"instance_id": self._holder or "", "answering": self._held}
+        current = state["current"]
+        return {
+            "instance_id": current.instance_id if current else "",
+            "answering": bool(state["in_flight"]),
+            "in_flight": state["in_flight"],
+            "places": state["places"],
+            "waiting": len(state["waiting"]),
+            "switching": state["switching"],
+        }
 
     def guard(self, action: str, instance_id: str) -> None:
-        """Refuse an action that would interrupt a request in progress.
+        """Refuse an action that would interrupt work in progress.
 
-        The gateway's own traffic is safe from itself — every request takes the
-        card in turn. This is for the other way in: the Load and Unload buttons
-        on the page reach the engines directly and know nothing about leases.
-        Without this, pressing Unload during a long answer kills it mid
-        sentence, and the agent sees a connection that simply stopped.
+        Requests here are safe from each other: they queue. This is for the
+        other way in — the Load and Unload buttons reach the engines directly
+        and know nothing about leases or queues. Without this, pressing Unload
+        during a long answer kills it mid sentence, and the agent sees a
+        connection that simply stopped.
+
+        It names what it found, because "busy" is not enough to decide with:
+        one answer being written is a different thing from forty requests
+        waiting for a model to load.
         """
         holder = self.busy()
         if holder is None:
             return
         who = holder["instance_id"] or "a model"
-        doing = "is answering a request" if holder["answering"] else "is being loaded"
+        parts = []
+        if holder["in_flight"]:
+            answers = holder["in_flight"]
+            parts.append(f"{who} is answering "
+                         f"{answers} request{'' if answers == 1 else 's'}")
+        elif holder["switching"]:
+            parts.append(f"{who} is being loaded")
+        if holder["waiting"]:
+            waiting = holder["waiting"]
+            parts.append(f"{waiting} more {'is' if waiting == 1 else 'are'} waiting")
         raise CardBusy(
-            f"{who} {doing} right now. Going ahead with '{action}' on "
-            f"{instance_id} would cut that off.", holder)
-
-    # -- switching ----------------------------------------------------------
-
-    def _running_differs(self, instance_id: str, asked_for: dict,
-                         instances: list[dict]) -> bool:
-        """Whether the running model was started with something else.
-
-        Compared against what it is *running* with, not what it is configured
-        with: an earlier request may have already reloaded it with exactly
-        these settings, and reloading again for the same answer would cost
-        forty seconds for nothing.
-        """
-        for instance in instances:
-            if instance["id"] != instance_id:
-                continue
-            running = {**instance.get("params", {}),
-                       **instance.get("active_params", {})}
-            return any(running.get(key) != value
-                       for key, value in asked_for.items())
-        return False
-
-    def _switch_to(self, instance_id: str, settings: dict | None = None) -> None:
-        """Empty the card, wait for it to go quiet, then load.
-
-        Everything running is unloaded, not only the entry that was last asked
-        for: a manager restart or a machine boot can leave more than one engine
-        up, and loading into whatever is left is how a curated model that is
-        known to fit fails to fit.
-        """
-        started = time.perf_counter()
-        unloaded = self._clear()
-        self._wait_until_quiet()
-
-        operation = self.operations.load(instance_id, settings)
-        if not operation.ok:
-            raise CouldNotLoad(operation.error or f"{instance_id} would not start")
-
-        took = time.perf_counter() - started
-        self.counters.switches += 1
-        self.counters.switch_s += took
-        self.counters.history.append({
-            "at": time.time(), "loaded": instance_id, "unloaded": unloaded,
-            "took_s": round(took, 1), "load_ms": operation.total_ms,
-        })
-        del self.counters.history[:-self.HISTORY]
-
-    def _clear(self, keep: str | None = None,
-               instances: list[dict] | None = None) -> list[str]:
-        """Unload every running engine. Returns what was stopped.
-
-        `keep` spares one entry, for the case where the model asked for is
-        already up and only its company has to go. `instances` is an already
-        read list, since the caller usually has one.
-        """
-        stopped = []
-        for instance in (self.operations.instances() if instances is None
-                         else instances):
-            if instance["running"] and instance["id"] != keep:
-                self.operations.unload(instance["id"])
-                stopped.append(instance["id"])
-        return stopped
-
-    def _evict_strays(self, instance_id: str, instances: list[dict]) -> None:
-        """Unload anything running beside the model that was asked for.
-
-        One model on the card is the rule, and it holds even when the request
-        needs no switch. A second engine can be up for reasons that have
-        nothing to do with this request — a manager restart that found two
-        units enabled, or somebody pressing Load on the page — and left alone
-        it sits there holding memory the loaded model could have used for
-        context.
-
-        No wait for the card to go quiet afterwards: nothing is about to be
-        loaded, and the model that stays is holding memory on purpose, so
-        there is no quiet to wait for.
-        """
-        evicted = self._clear(keep=instance_id, instances=instances)
-        if not evicted:
-            return
-        self.counters.history.append({
-            "at": time.time(), "loaded": instance_id, "unloaded": evicted,
-            "took_s": 0.0, "load_ms": 0, "tidied": True,
-        })
-        del self.counters.history[:-self.HISTORY]
+            f"{' and '.join(parts) or 'The card is in use'}. Going ahead with "
+            f"'{action}' on {instance_id} cuts all of that off.", holder)
 
     def _wait_until_quiet(self) -> None:
         """Wait for the driver to hand the memory back.
@@ -532,33 +629,43 @@ class Gateway:
                 return instance["id"]
         return None
 
-    def _is_ready(self, instance_id: str, instances: list[dict] | None = None) -> bool:
-        for instance in (self.operations.instances() if instances is None
-                         else instances):
-            if instance["id"] == instance_id:
-                return bool(instance["ready"])
-        return False
-
     # -- what the interface shows ------------------------------------------
 
     def stats(self) -> dict:
-        """Enough to see thrashing without reading a log.
+        """Enough to see what is happening without reading a log.
 
-        A switch count close to the request count means the workflow changes
-        model on almost every step. Each switch is an unload, a wait and a load,
-        so that is the difference between a workflow that runs and one that
-        spends its time loading.
+        Two numbers matter and they answer different questions.
+
+        **Switches as a share of requests** says whether the workflow is
+        working or loading. Close to one means it changes model on almost every
+        step, and each change is an unload, a wait and a load.
+
+        **Waiting** says whether requests are stuck behind each other. That is
+        a different fault with a different fix: too little concurrency, or two
+        models fighting over one card.
         """
         counters = self.counters
+        state = self.scheduler.state()
+        current = state["current"]
+        waiting = state["waiting"]
         return {
-            "current": self._loaded(),
-            # True from the moment a request takes the card, which includes
-            # the switch it may have to do first. `_held` is only about who
-            # owes the card back, and is still false while a model loads.
-            "busy": self._card.locked(),
-            # Who has it, for the page: "busy" alone cannot say whether the
-            # thing you are about to stop is the thing that is working.
+            "current": current.instance_id if current else None,
+            "current_settings": current.as_dict() if current else {},
+            "busy": bool(state["in_flight"] or waiting or state["switching"]),
             "holder": self.busy(),
+            "in_flight": state["in_flight"],
+            "places": state["places"],
+            "switching": state["switching"],
+            # What is waiting, and for how long. A request that has been in the
+            # queue for a minute is a fact worth seeing before it becomes a
+            # complaint.
+            "waiting": len(waiting),
+            "waiting_for": _waiting_summary(waiting),
+            "longest_wait_s": max((item["waiting_s"] for item in waiting),
+                                  default=0.0),
+            "max_waiting": self.scheduler.max_waiting,
+            "first_byte_s": self.first_byte_s,
+            "between_bytes_s": self.between_bytes_s,
             "requests": counters.requests,
             "switches": counters.switches,
             "average_wait_s": round(counters.waited_s / counters.requests, 2)
@@ -569,3 +676,21 @@ class Gateway:
             "last_error": counters.last_error,
             "recent": list(reversed(counters.history[-10:])),
         }
+
+
+def _waiting_summary(waiting: list[dict]) -> list[dict]:
+    """How many are waiting for each model, oldest first.
+
+    By model rather than by shape: somebody reading the page wants to know
+    which models are contended, and two context sizes of one model read as one
+    queue to them.
+    """
+    grouped: dict[str, dict] = {}
+    for item in waiting:
+        shape = item["shape"]
+        name = getattr(shape, "instance_id", str(shape))
+        row = grouped.setdefault(name, {"instance_id": name, "waiting": 0,
+                                        "longest_wait_s": 0.0})
+        row["waiting"] += 1
+        row["longest_wait_s"] = max(row["longest_wait_s"], item["waiting_s"])
+    return sorted(grouped.values(), key=lambda row: -row["longest_wait_s"])

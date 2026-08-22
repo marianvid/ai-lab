@@ -68,6 +68,14 @@ class FakeEngine:
     def params(self):
         return FAKE_PARAMS
 
+    def concurrency(self, params):
+        """The real engines each spell this differently; the fake uses one name.
+
+        What matters here is that the number comes from the engine rather than
+        from the gateway guessing at a setting name.
+        """
+        return max(1, int(validate(FAKE_PARAMS, params)["parallel"]))
+
 
 class FakeRegistry:
     """The two engines as they really differ: only one speaks both shapes."""
@@ -91,6 +99,7 @@ class FakeOperations:
         self.engines = FakeRegistry()
         self._entries = {e["id"]: dict(e) for e in entries}
         self.loads = []
+        self.cheap_reads = 0
         self.load_settings = []
         self.unloads = []
         self.load_delay_s = 0.0
@@ -112,6 +121,18 @@ class FakeOperations:
             if entry["params"].get(key) != value}
         entry.update(running=True, ready=True, active_params=active)
         return Operation(instance_id=instance_id, kind="load", ok=True, total_ms=1200)
+
+    def instance(self, instance_id):
+        """One entry, configuration only — no supervisor, no probe.
+
+        The real one reads the configuration file; this reads the same
+        dictionary the fake keeps. Counted separately from `instances`, because
+        the whole point of it is that it is the cheap question.
+        """
+        self.cheap_reads += 1
+        entry = self._entries[instance_id]
+        return {key: entry[key] for key in
+                ("id", "name", "engine", "model_id", "port", "params")}
 
     def effective_params(self, instance_id, settings):
         entry = self._entries[instance_id]
@@ -369,13 +390,13 @@ class ReportingTests(unittest.TestCase):
                 pass
         self.assertEqual(gateway.stats()["switches"], 0)
 
-    def test_what_is_on_the_card_survives_an_unload_it_was_not_told_about(self):
-        """Found on the real machine, not here.
+    def test_what_is_on_the_card_is_forgotten_when_it_is_taken_off(self):
+        """The page can stop a model, and then the card is not what it was.
 
-        A person forced past a busy card from the page, which stops a model
-        without going through the gateway — by design. The gateway went on
-        naming that model as the one on the card, so the page showed a model
-        that was no longer loaded, next to an accelerator reading empty.
+        This used to be answered by reading the world on every call, which cost
+        the expensive question each time the page refreshed. The routes behind
+        those buttons say so instead, which is cheaper and cannot be stale for
+        anything this manager did itself.
         """
         operations = two_models()
         gateway = quick(operations)
@@ -384,8 +405,8 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(gateway.stats()["current"], "coder")
 
         operations.unload("coder")              # straight past the gateway
-        self.assertIsNone(gateway.stats()["current"],
-                          "it reported a model that had been stopped behind its back")
+        gateway.card_changed()                  # which the routes report
+        self.assertIsNone(gateway.stats()["current"])
 
     def test_the_current_model_is_reported(self):
         gateway = quick(two_models(coder=True))
@@ -401,17 +422,17 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(recent[0]["loaded"], "reviewer")
         self.assertEqual(recent[0]["unloaded"], ["coder"])
 
-    def test_handing_the_card_back_twice_does_not_free_the_next_request(self):
-        # The forwarding code releases when the answer ends, and again if the
-        # connection broke on the way out. The second one must do nothing.
-        gateway = quick(two_models(coder=True))
+    def test_handing_a_place_back_twice_does_not_free_somebody_else_s(self):
+        # A request that fails while being forwarded gives its place back
+        # twice: once from the code that noticed, once from the reader's
+        # cleanup. Each lease keeps its own answer to "have I given it back",
+        # because several are held at once now and one flag could not.
+        operations = two_models(coder=True)
+        gateway = quick(operations)
         lease = gateway.acquire("coder")
-        gateway.release()
-        gateway.release()
-        second = gateway.acquire("coder")
-        self.assertTrue(gateway.stats()["busy"])
-        second.__exit__()
-        self.assertFalse(gateway.stats()["busy"])
+        lease.release()
+        lease.release()
+        self.assertEqual(gateway.stats()["in_flight"], 0)
 
     def test_the_card_reads_busy_while_a_model_is_still_loading(self):
         # Loading is when someone is most likely to look at this, and reporting
@@ -447,46 +468,35 @@ if __name__ == "__main__":
 class OneModelOnlyTests(unittest.TestCase):
     """One model on the card, with no exceptions.
 
-    The rule is easy to state and easy to break in one particular way: a
-    request that needs no switch used to leave the card exactly as it found it,
-    strays and all.
+    A card found with two engines up is not a card to adopt, it is a card to
+    clear. The gateway only takes up what it finds when it finds exactly one
+    model answering; anything else is left unknown, and the next request
+    switches — which unloads everything before it loads.
     """
 
-    def test_a_stray_is_unloaded_even_when_no_switch_is_needed(self):
-        # Both are up — a manager restart found two units enabled, or somebody
-        # pressed Load twice. The request asks for one of them, so nothing has
-        # to be loaded; the other still has to go.
+    def test_a_stray_is_unloaded(self):
+        # Both are up: a manager restart found two units enabled, or somebody
+        # pressed Load twice. The request asks for one of them.
         operations = two_models(coder=True, reviewer=True)
         gateway = quick(operations)
 
         with gateway.acquire("coder") as lease:
             self.assertEqual(lease.port, 8080)
 
-        self.assertEqual(operations.unloads, ["reviewer"])
-        self.assertEqual(operations.loads, [],
-                         "the model asked for was already up; nothing to load")
+        self.assertIn("reviewer", operations.unloads)
         running = [e["id"] for e in operations.instances() if e["running"]]
         self.assertEqual(running, ["coder"])
 
-    def test_tidying_up_does_not_reload_the_model_that_was_already_there(self):
-        # The cheap mistake is to treat "something else is running" as a switch
-        # and put the wanted model through an unload and a load for nothing.
-        operations = two_models(coder=True, reviewer=True)
+    def test_a_card_with_one_model_answering_is_taken_up_as_it_is(self):
+        # The ordinary case on Linux: systemd keeps the engines across a
+        # manager restart. Reloading would be a minute of work to arrive where
+        # it already was, and would take the card from whoever was using it.
+        operations = two_models(coder=True)
         gateway = quick(operations)
         with gateway.acquire("coder"):
             pass
-        self.assertNotIn("coder", operations.unloads)
-
-    def test_a_tidy_up_is_recorded_as_what_it_was(self):
-        operations = two_models(coder=True, reviewer=True)
-        gateway = quick(operations)
-        with gateway.acquire("coder"):
-            pass
-        entry = gateway.stats()["recent"][0]
-        self.assertTrue(entry["tidied"])
-        self.assertEqual(entry["unloaded"], ["reviewer"])
-        self.assertEqual(gateway.stats()["switches"], 0,
-                         "nothing was switched, so nothing should be counted")
+        self.assertEqual(operations.loads, [])
+        self.assertEqual(operations.unloads, [])
 
     def test_a_clean_card_is_left_alone(self):
         operations = two_models(coder=True)
@@ -495,6 +505,20 @@ class OneModelOnlyTests(unittest.TestCase):
             pass
         self.assertEqual(operations.unloads, [])
         self.assertEqual(gateway.stats()["recent"], [])
+
+    def test_the_card_is_read_once_and_then_believed(self):
+        # After the first look, the scheduler is the authority. Reading again
+        # on every request is the expensive question, and the answer is one it
+        # already knows.
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        operations._entries["reviewer"].update(running=True, ready=True)
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(operations.unloads, [],
+                         "it went looking again when it had been told")
 
 
 class BusyGuardTests(unittest.TestCase):
@@ -594,15 +618,25 @@ class OverheadTests(unittest.TestCase):
         operations.instances = counted
         return operations
 
-    def test_a_request_to_a_loaded_model_asks_twice(self):
-        # Once to resolve the name before queueing, once after the card is
-        # taken — the request in front may have changed what is loaded while
-        # this one waited, so the second read cannot be skipped.
+    def test_a_request_to_a_loaded_model_asks_once(self):
+        # It was three, then two, now one. The second read existed because the
+        # card was taken with a plain lock and the world might have changed
+        # while this request waited. The scheduler knows what it put there, so
+        # there is nothing to check again.
         operations = self.counting(coder=True)
         gateway = quick(operations)
         with gateway.acquire("coder"):
             pass
-        self.assertEqual(operations.reads, 2)
+        self.assertEqual(operations.reads, 1)
+
+    def test_a_second_request_to_the_same_model_asks_once_more(self):
+        operations = self.counting(coder=True)
+        gateway = quick(operations)
+        with gateway.acquire("coder"):
+            pass
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(operations.reads, 2, "one read per request, no more")
 
     def test_the_engine_name_costs_no_extra_read(self):
         # It is pure configuration, and the lease carries it. Asking for it
@@ -612,15 +646,17 @@ class OverheadTests(unittest.TestCase):
         gateway = quick(operations)
         with gateway.acquire("coder") as lease:
             self.assertEqual(lease.model_name, "Qwen3.6-35B")
-        self.assertEqual(operations.reads, 2)
+        self.assertEqual(operations.reads, 1)
 
-    def test_tidying_up_costs_no_extra_read(self):
-        operations = self.counting(coder=True, reviewer=True)
+    def test_how_many_places_a_shape_has_is_a_cheap_question(self):
+        # Asked on every admission. It is configuration — how many slots the
+        # engine was started with — so it must not cost the expensive read.
+        operations = self.counting(coder=True)
         gateway = quick(operations)
         with gateway.acquire("coder"):
             pass
-        self.assertEqual(operations.reads, 2)
-        self.assertEqual(operations.unloads, ["reviewer"])
+        self.assertEqual(operations.reads, 1)
+        self.assertGreater(operations.cheap_reads, 0)
 
 
 def mixed_engines(**running):
@@ -803,8 +839,201 @@ class StartupSettingsTests(unittest.TestCase):
         self.assertIsNone(gateway.busy())
 
     def test_no_settings_means_the_entry_is_used_as_configured(self):
+        # The full configured settings, not an empty answer. A request naming
+        # none and one naming exactly the configured values are asking for the
+        # same thing, and they have to compare equal or every other request
+        # reloads for nothing.
         operations = two_models()
         gateway = quick(operations)
         with gateway.acquire("coder"):
             pass
-        self.assertEqual(operations.load_settings, [None])
+        self.assertEqual(operations.load_settings,
+                         [{"context_size": 32768, "parallel": 1}])
+
+
+def busy_models(**running):
+    """Two entries whose engines serve several requests at once."""
+    operations = two_models(**running)
+    for entry in operations._entries.values():
+        entry["params"] = {"context_size": 32768, "parallel": 4}
+    return operations
+
+
+class TogetherTests(unittest.TestCase):
+    """Requests to the model on the card do not take turns.
+
+    They used to, and the comment in this file said an agent workflow was a
+    sequence so nothing was lost. That stopped being true the moment subagents
+    fanned out over one model — the commonest shape there is — and vLLM's whole
+    advantage is that it interleaves requests rather than queueing them.
+    """
+
+    def test_two_requests_to_the_loaded_model_run_at_once(self):
+        gateway = quick(busy_models(coder=True))
+        first = gateway.acquire("coder")
+        second = gateway.acquire("coder")
+        self.assertEqual(gateway.stats()["in_flight"], 2)
+        first.release()
+        second.release()
+
+    def test_the_number_of_places_is_the_engine_s_own(self):
+        gateway = quick(busy_models(coder=True))
+        self.assertEqual(gateway.stats()["places"], 0, "nothing loaded yet")
+        with gateway.acquire("coder"):
+            self.assertEqual(gateway.stats()["places"], 4)
+
+    def test_one_slot_still_means_one_at_a_time(self):
+        # The GGUF entries are configured that way, and llama.cpp divides the
+        # context between slots rather than sharing it. Respecting the number
+        # is the point: it was chosen.
+        operations = two_models(coder=True)          # parallel: 1
+        gateway = quick(operations)
+        first = gateway.acquire("coder")
+        blocked = threading.Thread(
+            target=lambda: gateway.acquire("coder").release(), daemon=True)
+        blocked.start()
+        time.sleep(0.05)
+        self.assertEqual(gateway.stats()["in_flight"], 1)
+        self.assertEqual(gateway.stats()["waiting"], 1)
+        first.release()
+        blocked.join(timeout=2)
+
+    def test_a_request_for_another_model_waits_and_closes_the_door(self):
+        operations = busy_models(coder=True)
+        gateway = quick(operations)
+        held = gateway.acquire("coder")
+        waiting = threading.Thread(
+            target=lambda: gateway.acquire("reviewer").release(), daemon=True)
+        waiting.start()
+        time.sleep(0.05)
+        self.assertEqual(gateway.stats()["waiting"], 1)
+        # Now one for the loaded model, which would have walked in a moment ago.
+        later = threading.Thread(
+            target=lambda: gateway.acquire("coder").release(), daemon=True)
+        later.start()
+        time.sleep(0.05)
+        self.assertEqual(gateway.stats()["waiting"], 2)
+        held.release()
+        waiting.join(timeout=3)
+        later.join(timeout=3)
+        self.assertIn("reviewer", operations.loads)
+
+    def test_the_page_can_see_who_is_waiting_and_for_what(self):
+        operations = busy_models(coder=True)
+        gateway = quick(operations)
+        held = gateway.acquire("coder")
+        for _ in range(2):
+            threading.Thread(
+                target=lambda: _ignore(gateway.acquire, "reviewer"),
+                daemon=True).start()
+        time.sleep(0.05)
+        summary = gateway.stats()["waiting_for"]
+        self.assertEqual([row["instance_id"] for row in summary], ["reviewer"])
+        self.assertEqual(summary[0]["waiting"], 2)
+        held.release()
+
+    def test_the_settings_asked_for_split_a_model_into_two_shapes(self):
+        # Two requests for one entry wanting different context sizes are not
+        # requests for the same thing: one of them needs a reload.
+        operations = busy_models(coder=True)
+        gateway = quick(operations)
+        held = gateway.acquire("coder", settings={"context_size": 65536})
+        other = threading.Thread(
+            target=lambda: _ignore(gateway.acquire, "coder"), daemon=True)
+        other.start()
+        time.sleep(0.05)
+        self.assertEqual(gateway.stats()["waiting"], 1,
+                         "it shared a card with a different context size")
+        held.release()
+
+
+class BusyMessageTests(unittest.TestCase):
+    """What the page is told before it interrupts anything."""
+
+    def test_it_counts_the_answers_in_progress(self):
+        gateway = quick(busy_models(coder=True))
+        gateway.acquire("coder")
+        gateway.acquire("coder")
+        with self.assertRaises(CardBusy) as caught:
+            gateway.guard("unload", "coder")
+        self.assertIn("2 requests", str(caught.exception))
+
+    def test_it_counts_the_ones_waiting_too(self):
+        # One answer being written is a different thing from forty requests
+        # waiting for a model, and the difference decides whether to go ahead.
+        gateway = quick(two_models(coder=True))          # one place
+        gateway.acquire("coder")
+        for _ in range(3):
+            threading.Thread(target=lambda: _ignore(gateway.acquire, "reviewer"),
+                             daemon=True).start()
+        time.sleep(0.05)
+        with self.assertRaises(CardBusy) as caught:
+            gateway.guard("unload", "coder")
+        self.assertIn("3 more are waiting", str(caught.exception))
+
+    def test_an_idle_card_is_not_busy(self):
+        gateway = quick(busy_models(coder=True))
+        with gateway.acquire("coder"):
+            pass
+        self.assertIsNone(gateway.busy())
+        gateway.guard("unload", "coder")             # does not raise
+
+
+class ForcedResetTests(unittest.TestCase):
+    """A forced stop leaves a clean slate, not a partly true one."""
+
+    def test_everyone_waiting_is_turned_away(self):
+        gateway = quick(two_models(coder=True))
+        held = gateway.acquire("coder")
+        refused = []
+        for _ in range(3):
+            threading.Thread(
+                target=lambda: refused.append(_ignore(gateway.acquire, "reviewer")),
+                daemon=True).start()
+        time.sleep(0.05)
+        self.assertEqual(gateway.reset("stopped by hand"), 3)
+        time.sleep(0.05)
+        self.assertEqual(len(refused), 3)
+        held.release()
+
+    def test_nothing_is_running_or_waiting_afterwards(self):
+        gateway = quick(busy_models(coder=True))
+        gateway.acquire("coder")
+        gateway.acquire("coder")
+        gateway.reset("stopped by hand")
+        stats = gateway.stats()
+        self.assertEqual(stats["in_flight"], 0)
+        self.assertEqual(stats["waiting"], 0)
+        self.assertIsNone(stats["current"])
+
+
+def _ignore(function, *args, **kwargs):
+    try:
+        lease = function(*args, **kwargs)
+        lease.release()
+        return None
+    except Exception as error:
+        return error
+
+
+class LiveSettingsTests(unittest.TestCase):
+    """Changing a limit reaches the next request, not the next restart."""
+
+    def test_the_waits_are_read_from_the_gateway_each_time(self):
+        gateway = quick(two_models())
+        gateway.apply_settings({"first_byte_s": 300, "between_bytes_s": 45})
+        self.assertEqual(gateway.first_byte_s, 300.0)
+        self.assertEqual(gateway.between_bytes_s, 45.0)
+        self.assertEqual(gateway.stats()["first_byte_s"], 300.0)
+
+    def test_the_queue_length_reaches_the_scheduler(self):
+        gateway = quick(two_models())
+        gateway.apply_settings({"max_waiting": 7})
+        self.assertEqual(gateway.scheduler.max_waiting, 7)
+        self.assertEqual(gateway.stats()["max_waiting"], 7)
+
+    def test_settings_left_out_are_left_alone(self):
+        gateway = quick(two_models())
+        before = gateway.between_bytes_s
+        gateway.apply_settings({"first_byte_s": 200})
+        self.assertEqual(gateway.between_bytes_s, before)

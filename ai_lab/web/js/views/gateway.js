@@ -15,6 +15,7 @@
 
 import { api } from '../api.js';
 import { element, seconds } from '../format.js';
+import { setStatus } from '../status.js';
 
 // Slower than it looks like it should be, on purpose. Reading these numbers
 // means asking systemd about every configured instance and probing each one
@@ -58,21 +59,87 @@ function address() {
 }
 
 function state(stats) {
-  const holder = stats.holder;
-  const busy = holder
-    ? (holder.answering
-        ? `${holder.instance_id} is answering a request`
-        : `${holder.instance_id} is loading`)
-    : 'free';
+  const answering = stats.in_flight
+    ? `${stats.in_flight} of ${stats.places} places in use`
+    : stats.switching ? 'loading' : 'idle';
+  const queue = stats.waiting
+    ? `${stats.waiting} waiting, longest ${stats.longest_wait_s} s`
+    : 'nobody waiting';
   return section('Right now', [
     line('On the card', stats.current || 'nothing loaded'),
-    line('State', busy,
-         'The card is taken for the whole of one request, including a '
-         + 'streamed answer that takes a minute.'),
+    line('Answering', answering,
+         'Requests to the model on the card run together, up to the number '
+         + 'the engine was started to serve. Requests for another model wait.'),
+    line('Queue', queue,
+         'Waiting for a model that is not loaded. The oldest decides which is '
+         + 'loaded next.'),
+    ...stats.waiting_for.map((row) => line(
+      `  wanting ${row.instance_id}`,
+      `${row.waiting}, longest ${row.longest_wait_s} s`)),
     stats.last_error
       ? element('p', { class: 'error', text: `Last error: ${stats.last_error}` })
       : null,
   ].filter(Boolean));
+}
+
+// The three numbers that decide how patient the front door is, and how much it
+// will hold. Editable here rather than on the Settings page: they are about
+// the gateway, and they sit beside the figures you would read before deciding
+// to change them.
+function limits(stats, redraw) {
+  const fields = [
+    ['first_byte_s', 'Wait for the first byte', stats.first_byte_s, 's',
+     'How long to wait for an engine to start answering. It covers reading '
+     + 'the prompt — and the whole answer for a request that did not ask for '
+     + 'streaming, since such an engine sends nothing until it has finished. '
+     + 'A large prompt on a slow machine is the case to size this for.'],
+    ['between_bytes_s', 'Wait between bytes', stats.between_bytes_s, 's',
+     'How long a silence in the middle of an answer means the engine has '
+     + 'stopped rather than slowed. At the slowest generation measured here, '
+     + '17 tokens a second, the gap between them is 59 milliseconds.'],
+    ['max_waiting', 'Requests held in the queue', stats.max_waiting, '',
+     'How many may wait for a model at once. Beyond it a request is refused '
+     + 'rather than queued, because each one waiting occupies a thread. A '
+     + 'workflow that hits this is asking for more at once than one card can '
+     + 'answer.'],
+  ];
+
+  const inputs = new Map();
+  const rows = fields.map(([key, label, value, unit, help]) => {
+    const input = element('input', {
+      type: 'number', value: String(value), min: '1', size: 8,
+    });
+    inputs.set(key, input);
+    return element('label', { class: 'field explained', title: help }, [
+      element('span', {}, element('span', { text: unit ? `${label} (${unit})` : label })),
+      input,
+    ]);
+  });
+
+  const save = element('button', {
+    class: 'action', text: 'Save',
+    onclick: async () => {
+      const changes = {};
+      inputs.forEach((input, key) => { changes[key] = Number(input.value); });
+      save.disabled = true;
+      try {
+        await api.updateGateway(changes);
+        setStatus('Gateway limits saved', 'ok');
+      } catch (error) {
+        setStatus(error.message, 'error');
+      }
+      save.disabled = false;
+      redraw();
+    },
+  });
+
+  return section('Limits', [
+    ...rows,
+    element('div', { class: 'row' }, [element('span', {}), save]),
+    element('p', { class: 'muted',
+                   text: 'Limits of safety, not of patience: in normal work '
+                         + 'nothing comes near them. They take effect at once.' }),
+  ]);
 }
 
 // The ratio is the number worth reading, so it is stated rather than left for
@@ -135,7 +202,8 @@ export async function render(container) {
   }
 
   container.replaceChildren(...[
-    address(), state(stats), traffic(stats), recent(stats),
+    address(), state(stats), traffic(stats), limits(stats, () => render(container)),
+    recent(stats),
   ]);
 
   // Stop as soon as the tab is left: `container` is emptied and refilled by

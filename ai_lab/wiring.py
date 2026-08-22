@@ -17,7 +17,8 @@ from .config import ConfigStore
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
-from .gateway import Gateway
+from .gateway import (BETWEEN_BYTES_S, FIRST_BYTE_S, MAX_WAITING,
+                      Gateway)
 from .hosts import current_host
 from .lastloaded import LastLoaded
 from .operations import Operations
@@ -54,5 +55,13 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
         last_loaded=LastLoaded(host.state_dir()),
     )
     # Routes a request by model name and loads that model if it is not running,
-    # so an agent workflow can name several models and reach one card.
-    return operations, bus, store, Gateway(operations)
+    # so an agent workflow can name several models and reach one card. Its own
+    # settings — how long to wait for an engine, how many requests to hold —
+    # come from the configuration, because the right numbers differ between the
+    # two machines this runs on.
+    front_door = store.load().gateway
+    return operations, bus, store, Gateway(
+        operations,
+        first_byte_s=float(front_door.get("first_byte_s", FIRST_BYTE_S)),
+        between_bytes_s=float(front_door.get("between_bytes_s", BETWEEN_BYTES_S)),
+        max_waiting=int(front_door.get("max_waiting", MAX_WAITING)))

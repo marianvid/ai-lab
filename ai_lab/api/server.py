@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import select
+import socket
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -101,7 +103,8 @@ class Handler(BaseHTTPRequestHandler):
         handler, captured = matched
         try:
             query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
-            result = handler(query=query, body=self._body(), **captured)
+            result = handler(query=query, body=self._body(),
+                             alive=self._client_alive, **captured)
             if isinstance(result, Passthrough):
                 self._passthrough(result)
             else:
@@ -109,6 +112,29 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:
             self._error(error)
         return True
+
+    def _client_alive(self) -> bool:
+        """Whether the other end is still there, without reading anything.
+
+        A request can sit in a queue for a long time waiting for a model, and a
+        client that gave up in the meantime should not be served — least of all
+        by unloading the model that was working to load one for nobody.
+
+        Peeking rather than reading: the body has already been taken, so
+        anything readable now is either the end of the connection or a client
+        speaking out of turn. Both mean this request is not worth a swap. Never
+        raises — a socket in a state this cannot read is treated as present,
+        because refusing to serve somebody who is there is worse than serving
+        somebody who is not.
+        """
+        try:
+            sock = self.connection
+            ready, _, _ = select.select([sock], [], [], 0)
+            if not ready:
+                return True
+            return bool(sock.recv(1, socket.MSG_PEEK))
+        except Exception:
+            return True
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)

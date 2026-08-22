@@ -23,7 +23,20 @@ from typing import Iterator
 KEEP = ("content-type", "cache-control")
 
 CHUNK = 8192
-TIMEOUT_S = 3600          # a long answer to a long prompt is still one request
+
+# How long to wait for an engine. Both are limits of safety rather than of
+# patience: in normal work nothing comes near them. The values are the
+# gateway's, because they belong to the machine — a card that reads 8,400
+# tokens of prompt in under a second and a Mac running a 70 GB model at 17
+# tokens a second want very different numbers.
+#
+# There used to be one, of an hour, and it meant two different things depending
+# on whether the client asked for streaming. Without streaming the engine sends
+# nothing until it has finished, so the limit covered the whole answer; with
+# streaming it covered the gap between chunks. One number for two jobs whose
+# sane values are four orders of magnitude apart.
+FIRST_BYTE_S = 120.0
+BETWEEN_BYTES_S = 30.0
 
 
 @dataclass(slots=True)
@@ -34,19 +47,28 @@ class Passthrough:
     headers: dict[str, str]
 
 
-def forward(url: str, payload: dict, on_close=None) -> Passthrough:
+def forward(url: str, payload: dict, on_close=None,
+            first_byte_s: float = FIRST_BYTE_S,
+            between_bytes_s: float = BETWEEN_BYTES_S) -> Passthrough:
     """POST a JSON body to an engine and hand back its answer as it arrives.
 
     `on_close` runs when the body has been fully read or the connection has
     broken. That is where the caller releases its lease — it must happen after
     the last byte, not when this function returns, because the answer is still
     being read then.
+
+    The two limits are separate because they catch different faults. Nothing at
+    all means the engine never started answering; a gap in the middle means it
+    started and stopped. At the slowest generation measured on either machine,
+    17 tokens a second, the gap between them is 59 milliseconds — so seconds of
+    silence mid-answer is a fault, while a minute before the first byte can be
+    an ordinary large prompt on a slow machine.
     """
     request = urllib.request.Request(
         url, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
     try:
-        response = urllib.request.urlopen(request, timeout=TIMEOUT_S)
+        response = urllib.request.urlopen(request, timeout=first_byte_s)
     except urllib.error.HTTPError as error:
         # The engine refused it. Pass its own words through rather than
         # inventing a message: the client asked the engine a question and
@@ -63,6 +85,12 @@ def forward(url: str, payload: dict, on_close=None) -> Passthrough:
         if on_close:
             on_close()
         raise
+
+    # The answer has begun, so the tighter limit applies from here. Reached
+    # through the socket underneath because that is where a read timeout lives;
+    # if it cannot be reached, the first-byte limit keeps applying to every
+    # read, which is looser than intended but still bounded.
+    _tighten(response, between_bytes_s)
 
     def read() -> Iterator[bytes]:
         try:
@@ -83,3 +111,16 @@ def forward(url: str, payload: dict, on_close=None) -> Passthrough:
         content_type=response.headers.get("Content-Type", "application/json"),
         chunks=read(),
         headers=headers)
+
+
+def _tighten(response, seconds: float) -> None:
+    """Apply the between-bytes limit to the rest of this answer."""
+    for owner in (getattr(response, "fp", None), response):
+        raw = getattr(owner, "raw", owner)
+        sock = getattr(raw, "_sock", None)
+        if sock is not None:
+            try:
+                sock.settimeout(seconds)
+                return
+            except Exception:
+                return

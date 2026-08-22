@@ -226,6 +226,8 @@ class BusyCardTests(unittest.TestCase):
         def __init__(self):
             self.holder = {"instance_id": "coder", "answering": True}
             self.guarded = []
+            self.resets = []
+            self.told = 0
 
         def guard(self, action, instance_id):
             self.guarded.append((action, instance_id))
@@ -233,6 +235,14 @@ class BusyCardTests(unittest.TestCase):
                 return
             raise CardBusy(f"coder is answering a request; {action} on "
                            f"{instance_id} would cut it off", self.holder)
+
+        def reset(self, reason):
+            self.resets.append(reason)
+            self.holder = None
+            return 0
+
+        def card_changed(self):
+            self.told += 1
 
     @classmethod
     def setUpClass(cls):
@@ -255,6 +265,8 @@ class BusyCardTests(unittest.TestCase):
         self.gateway.holder = {"instance_id": "coder", "answering": True}
         self.operations.calls.clear()
         self.gateway.guarded.clear()
+        self.gateway.resets.clear()
+        self.gateway.told = 0
 
     call = ServerTests.call
 
@@ -274,6 +286,28 @@ class BusyCardTests(unittest.TestCase):
         status, _ = self.call("POST", "/api/instances/qwen/load", {"force": True})
         self.assertEqual(status, 200)
         self.assertIn(("load", "qwen"), self.operations.calls)
+
+    def test_forcing_clears_the_queue_rather_than_half_forcing(self):
+        # The engine is about to be stopped under whoever was using it, so the
+        # queue behind it describes a world that will not exist a second from
+        # now. Waking a request into that is worse than turning it away.
+        self.call("POST", "/api/instances/qwen/unload", {"force": True})
+        self.assertEqual(len(self.gateway.resets), 1)
+        self.assertIn("qwen", self.gateway.resets[0])
+        self.assertEqual(self.gateway.guarded, [],
+                         "it asked permission for something it was forcing")
+
+    def test_the_gateway_is_told_when_a_button_moves_a_model(self):
+        # These routes move models without going through the queue. The thing
+        # that decides who goes next has to be told, or it admits a request
+        # onto a card holding something else.
+        self.gateway.holder = None
+        self.call("POST", "/api/instances/qwen/load")
+        self.assertEqual(self.gateway.told, 1)
+
+    def test_it_is_not_told_when_the_action_was_refused(self):
+        self.call("POST", "/api/instances/qwen/load")       # busy: refused
+        self.assertEqual(self.gateway.told, 0)
 
     def test_force_is_not_saved_as_a_setting(self):
         # `apply` writes the body into the instance's configuration. The
@@ -308,12 +342,12 @@ class SettingsFieldTests(unittest.TestCase):
         def __init__(self):
             self.asked = []
 
-        def acquire(self, wanted, shape=None, settings=None):
-            self.asked.append((wanted, shape, settings))
-            return SettingsFieldTests.Lease(self)
+        first_byte_s = 5.0
+        between_bytes_s = 1.0
 
-        def release(self):
-            pass
+        def acquire(self, wanted, shape=None, settings=None, still_wanted=None):
+            self.asked.append((wanted, shape, settings, still_wanted))
+            return SettingsFieldTests.Lease(self)
 
         def stats(self):
             return {}
@@ -328,12 +362,15 @@ class SettingsFieldTests(unittest.TestCase):
             self.port = 9
             self.model_name = "qwen-real"
 
+        def release(self):
+            pass
+
     def test_the_field_is_read_and_removed(self):
         from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder
         gateway = self.Gateway()
         forwarded = {}
 
-        def fake_forward(url, payload, on_close=None):
+        def fake_forward(url, payload, on_close=None, **_):
             forwarded.update(payload)
             if on_close:
                 on_close()
