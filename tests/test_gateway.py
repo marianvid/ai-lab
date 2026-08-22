@@ -385,14 +385,45 @@ class SequenceTests(unittest.TestCase):
 
 class ReportingTests(unittest.TestCase):
     def test_switches_are_counted_so_thrashing_can_be_seen(self):
-        operations = two_models(coder=True)
+        operations = two_models()
         gateway = quick(operations)
-        for name in ("reviewer", "coder", "reviewer"):
-            with gateway.acquire(name):
+        for wanted in ("coder", "reviewer", "coder"):
+            with gateway.acquire(wanted):
                 pass
         stats = gateway.stats()
-        self.assertEqual(stats["requests"], 3)
         self.assertEqual(stats["switches"], 3)
+        self.assertGreaterEqual(stats["requests_per_minute"], 3)
+
+    def test_a_lifetime_total_of_requests_is_not_reported(self):
+        # It grows while you watch it and means the same at 40 as at 40,000.
+        # A rate stays comparable to itself.
+        gateway = quick(two_models(coder=True))
+        with gateway.acquire("coder"):
+            pass
+        self.assertNotIn("requests", gateway.stats())
+
+    def test_the_share_of_working_time_spent_loading(self):
+        # Against the wall clock, a machine idle overnight reports a
+        # flattering number for a workflow that spends its life swapping. This
+        # is of the time it was working — answering or loading.
+        gateway = quick(two_models())
+        with gateway.acquire("coder"):
+            pass
+        share = gateway.stats()["switching_share"]
+        self.assertGreater(share, 0.0)
+        self.assertLessEqual(share, 100.0)
+
+    def test_nothing_working_is_reported_as_no_share_rather_than_a_crash(self):
+        self.assertEqual(quick(two_models()).stats()["switching_share"], 0.0)
+
+    def test_time_to_the_first_token_is_averaged(self):
+        gateway = quick(two_models(coder=True))
+        gateway.first_token(0.4)
+        gateway.first_token(0.6)
+        self.assertEqual(gateway.stats()["average_first_token_s"], 0.5)
+
+    def test_no_streamed_request_yet_reports_nothing_rather_than_dividing(self):
+        self.assertEqual(quick(two_models()).stats()["average_first_token_s"], 0.0)
 
     def test_a_run_with_no_switching_reports_none(self):
         gateway = quick(two_models(coder=True))

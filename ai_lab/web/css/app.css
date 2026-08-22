@@ -364,6 +364,11 @@ body:has(.logpane) main { padding-bottom: 44vh; }
 .gateway-grid > .at-limits > .section,
 .gateway-grid > .at-recent > .section { flex: 1; display: flex; flex-direction: column; }
 .gateway-grid > .at-recent > .section > .card { overflow-y: auto; }
+/* The two share a height. Without a floor the shorter one decides, and a
+   single recent switch left the panel beside a much taller Limits. */
+.gateway-grid > .at-limits > .section > .card,
+.gateway-grid > .at-recent > .section > .card { flex: 1; }
+.gateway-grid .swap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .gateway-grid code { font-size: 0.8rem; }
 

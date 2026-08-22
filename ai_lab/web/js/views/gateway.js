@@ -184,34 +184,47 @@ function limits(stats, redraw) {
     ...rows,
     element('div', { class: 'row' }, [element('span', {}), save]),
     element('p', { class: 'muted',
-                   text: 'Limits of safety, not of patience: in normal work '
-                         + 'nothing comes near them. They take effect at once.' }),
+                   text: 'These stop a wedged engine holding the card. Normal '
+                         + 'work never reaches them. A change applies to the '
+                         + 'next request; nothing already running or waiting '
+                         + 'is thrown away.' }),
   ]);
 }
 
-// The ratio is the number worth reading, so it is stated rather than left for
-// the reader to divide two figures in their head.
+// Six figures, and not one of them only goes up. A lifetime total of requests
+// grows while you watch it and means the same at 40 as at 40,000; a rate, an
+// average and a share stay comparable to themselves.
 function traffic(stats) {
-  const share = stats.requests
-    ? Math.round((stats.switches / stats.requests) * 100) : 0;
-  const verdict = !stats.requests ? 'nothing yet'
-    : share >= 60 ? 'changing model on most requests — reorder the workflow so '
-                    + 'steps sharing a model run together'
-    : share >= 25 ? 'changing model fairly often'
-    : 'mostly staying on one model';
+  const share = stats.switching_share;
+  const verdict = !stats.switches ? 'nothing loaded yet'
+    : share >= 50 ? 'more time loading models than answering — reorder the '
+                    + 'workflow so steps sharing a model run together'
+    : share >= 20 ? 'a fair share of the time goes on loading'
+    : 'mostly answering';
   return section('Traffic', [
-    line('Requests', String(stats.requests)),
-    line('Switches', `${stats.switches} (${share}% of requests)`),
-
-    line('Average wait before answering', `${stats.average_wait_s} s`,
-         'From the request arriving to the model being ready for it: the '
-         + 'queue in front of it, plus a switch if one was needed.'),
+    line('Requests a minute', String(stats.requests_per_minute),
+         'In the last sixty seconds. Zero when nothing is happening.'),
+    line('Time to first token', `${stats.average_first_token_s} s`,
+         'Averaged over requests that asked for streaming. Without streaming '
+         + 'an engine sends nothing until the answer is finished, so its first '
+         + 'byte is the whole generation and the two do not average together.'),
+    line('Waiting for the card', `${stats.average_wait_s} s`,
+         'From a request arriving to it being let through: the queue in front '
+         + 'of it, and a model change if one was needed.'),
+    line('Switches', String(stats.switches)),
     line('Average switch', `${stats.average_switch_s} s`),
-    line('Total spent switching', `${stats.total_switch_s} s`),
+    line('Time spent switching', `${share}%`,
+         'Of the time this was working — answering or loading — how much went '
+         + 'on loading. Measured against the working time rather than the '
+         + 'clock, so a machine that sits idle overnight does not flatter a '
+         + 'workflow that spends its life swapping.'),
     element('p', { class: 'muted', text: verdict }),
   ]);
 }
 
+// What was swapped for what, and how long it took. Written as the move it was
+// — one model out, another in — with the time against the right edge so the
+// column of them can be read down without reading the names.
 function recent(stats) {
   if (!stats.recent || !stats.recent.length) {
     return section('Recent switches', [
@@ -221,17 +234,11 @@ function recent(stats) {
   return section('Recent switches', stats.recent.map((entry) => {
     const out = entry.unloaded && entry.unloaded.length
       ? entry.unloaded.join(', ') : 'nothing';
-    // A tidy-up is not a switch: the model asked for was already up, and
-    // something else was unloaded from beside it. Saying "loaded X" there
-    // would claim a load that never happened.
-    const what = entry.tidied
-      ? `${out} unloaded from beside ${entry.loaded}`
-      : `${entry.loaded} in, ${out} out`;
-    return element('div', { class: 'row' }, [
-      element('span', { text: what }),
-      element('span', { class: 'muted',
-                        text: entry.tidied ? 'tidy-up'
-                              : `${entry.took_s} s · load ${seconds(entry.load_ms)}` }),
+    return element('div', { class: 'row tight' }, [
+      element('span', { class: 'swap', text: `${out} → ${entry.loaded}` }),
+      element('span', { class: 'muted', text: `${entry.took_s} s`,
+                        title: `of which the load itself took `
+                               + `${seconds(entry.load_ms)}` }),
     ]);
   }));
 }

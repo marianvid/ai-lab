@@ -23,11 +23,12 @@ const STATS = {
   max_waiting: 150,
   first_byte_s: 120.0,
   between_bytes_s: 30.0,
-  requests: 20,
+  requests_per_minute: 12,
+  average_first_token_s: 0.42,
   switches: 2,
   average_wait_s: 1.4,
   average_switch_s: 31.2,
-  total_switch_s: 62.4,
+  switching_share: 18.5,
   last_error: '',
   shapes: [
     { path: '/v1/chat/completions', models: ['coder', 'fast'],
@@ -117,43 +118,53 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /loading/);
   });
 
-  it('states switching as a share of requests rather than leaving the division', async () => {
+  it('reports a rate rather than a total that only grows', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /10%/);
+    assert.match(view.textContent, /Requests a minute\s*12/);
   });
 
-  it('says plainly when the workflow is thrashing', async () => {
-    // The whole point of the page. A count of switches means nothing without
-    // the count of requests beside it, and even then it wants saying.
-    const { view } = await renderPage({ requests: 10, switches: 9 });
+  it('reports the time to the first token', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Time to first token\s*0.42 s/);
+  });
+
+  it('states the share of working time spent loading', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /18.5%/);
+  });
+
+  it('says plainly when more time goes on loading than answering', async () => {
+    const { view } = await renderPage({ switching_share: 71 });
     assert.match(view.textContent, /reorder the workflow/);
   });
 
   it('does not accuse a well-behaved workflow of thrashing', async () => {
-    const { view } = await renderPage({ requests: 100, switches: 2 });
-    assert.match(view.textContent, /mostly staying on one model/);
+    const { view } = await renderPage({ switching_share: 3 });
+    assert.match(view.textContent, /mostly answering/);
   });
 
-  it('does not divide by zero before any traffic', async () => {
-    const { view } = await renderPage({ requests: 0, switches: 0, recent: [] });
-    assert.equal(view.textContent.includes('NaN'), false, view.textContent);
-    assert.match(view.textContent, /nothing yet/);
-  });
-
-  it('says what was unloaded for what', async () => {
-    const { view } = await renderPage();
-    assert.match(view.textContent, /coder in, reviewer out/);
-  });
-
-  it('does not report a tidy-up as a load that happened', async () => {
-    // The model asked for was already up and something else was unloaded from
-    // beside it. Calling that "coder in" would claim a load that never ran.
+  it('says nothing has been loaded yet before any switch', async () => {
     const { view } = await renderPage({
-      recent: [{ at: 1, loaded: 'coder', unloaded: ['reviewer'],
-                 took_s: 0, load_ms: 0, tidied: true }],
+      switches: 0, switching_share: 0, average_switch_s: 0,
+      requests_per_minute: 0, average_first_token_s: 0, recent: [],
     });
-    assert.match(view.textContent, /reviewer unloaded from beside coder/);
-    assert.equal(view.textContent.includes('coder in,'), false);
+    assert.equal(view.textContent.includes('NaN'), false, view.textContent);
+    assert.match(view.textContent, /nothing loaded yet/);
+  });
+
+  it('writes a switch as the move it was, with the time on the right', async () => {
+    const { view } = await renderPage();
+    const row = [...view.querySelectorAll('.row')]
+      .find((node) => node.textContent.includes('→'));
+    assert.match(row.textContent, /reviewer → coder/);
+    assert.match(row.textContent, /31.2 s/);
+  });
+
+  it('says what was unloaded even when it was nothing', async () => {
+    const { view } = await renderPage({
+      recent: [{ at: 1, loaded: 'coder', unloaded: [], took_s: 4.1, load_ms: 3851 }],
+    });
+    assert.match(view.textContent, /nothing → coder/);
   });
 
   it('shows the last error rather than hiding a failure behind good averages', async () => {
@@ -238,9 +249,10 @@ describe('the limits, on the page that shows what they cost', () => {
     assert.match(told, /must be between/);
   });
 
-  it('says they are limits of safety, not settings to tune', async () => {
+  it('says what the limits are for and what changing one does', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /safety, not of patience/);
+    assert.match(view.textContent, /wedged engine/);
+    assert.match(view.textContent, /nothing already running or waiting is thrown away/);
   });
 });
 

@@ -95,6 +95,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from .operations import Operations
@@ -184,13 +185,16 @@ class Lease:
     # afterwards meant reading every instance's state a second time, which is
     # the expensive question, for an answer that is pure configuration.
     model_name: str = ""
+    # When the place was taken, so giving it back can say how long it was held.
+    started: float = 0.0
     _given_back: bool = False
 
     def release(self) -> None:
         if self._given_back:
             return
         self._given_back = True
-        self.gateway.finished()
+        self.gateway.finished(time.perf_counter() - self.started
+                              if self.started else 0.0)
 
     def __enter__(self) -> "Lease":
         return self
@@ -222,10 +226,31 @@ class Shape:
 
 @dataclass(slots=True)
 class _Counters:
+    """What the page reports, and nothing that only ever goes up.
+
+    A lifetime total of requests says nothing: it grows while you watch it and
+    means the same at 40 as at 40,000. What is worth showing is a rate, an
+    average, and a share — figures that stay comparable to themselves.
+    """
+
     requests: int = 0
     switches: int = 0
     waited_s: float = 0.0
     switch_s: float = 0.0
+    # Time spent actually answering, summed. The denominator for "how much of
+    # the working time went on loading models" — the wall clock is no use
+    # there, because a machine that sits idle overnight would report a
+    # flattering number for a workflow that spends its life swapping.
+    served_s: float = 0.0
+    # When each request arrived, for a rate rather than a total. Pruned to the
+    # last minute whenever it is read.
+    arrivals: deque = field(default_factory=lambda: deque(maxlen=4096))
+    # Time to the first token, over requests that asked for streaming. Only
+    # those: without streaming an engine sends nothing until the answer is
+    # finished, so its "first byte" is the whole generation and averaging the
+    # two together measures neither.
+    first_token_s: float = 0.0
+    first_tokens: int = 0
     last_error: str = ""
     history: list[dict] = field(default_factory=list)
 
@@ -396,7 +421,9 @@ class Gateway:
         try:
             self.counters.requests += 1
             self.counters.waited_s += time.perf_counter() - started
-            return Lease(self, instance_id, port, self._engine_name(instance))
+            self.counters.arrivals.append(time.time())
+            return Lease(self, instance_id, port, self._engine_name(instance),
+                         started=time.perf_counter())
         except BaseException:
             # The place has been taken. Anything that goes wrong between there
             # and handing it to the caller has to give it back, or the card
@@ -404,9 +431,18 @@ class Gateway:
             self.scheduler.leave()
             raise
 
-    def finished(self) -> None:
+    def finished(self, held_s: float = 0.0) -> None:
         """Give a place back, and let in whoever can go next."""
+        self.counters.served_s += held_s
         self.scheduler.leave()
+
+    def first_token(self, seconds: float) -> None:
+        """How long that request waited for its first token.
+
+        Reported only for requests that asked for streaming — see `_Counters`.
+        """
+        self.counters.first_token_s += seconds
+        self.counters.first_tokens += 1
 
     def _adopt_what_is_there(self) -> None:
         """Tell the scheduler what is already on the card, once.
@@ -689,17 +725,42 @@ class Gateway:
             # — an entry's engine and what that engine serves — so the page can
             # say it without the expensive question.
             "shapes": self._shapes_offered(),
-            "requests": counters.requests,
+            "requests_per_minute": self._rate(),
+            "average_first_token_s": round(
+                counters.first_token_s / counters.first_tokens, 2)
+                if counters.first_tokens else 0.0,
             "switches": counters.switches,
-            "average_wait_s": round(counters.waited_s / counters.requests, 2)
-                              if counters.requests else 0.0,
             "average_switch_s": round(counters.switch_s / counters.switches, 1)
                                 if counters.switches else 0.0,
-            "total_switch_s": round(counters.switch_s, 1),
+            # Of the time this was working — answering or loading — how much
+            # went on loading. Against the wall clock instead, a machine that
+            # sits idle overnight reports a flattering number for a workflow
+            # that spends its life swapping.
+            "switching_share": self._switching_share(),
+            "average_wait_s": round(counters.waited_s / counters.requests, 2)
+                              if counters.requests else 0.0,
             "last_error": counters.last_error,
             "recent": list(reversed(counters.history[-10:])),
         }
 
+
+    def _rate(self) -> float:
+        """Requests in the last minute. Zero when nothing is happening.
+
+        A rate rather than a total: a lifetime count grows while you watch it
+        and means the same at 40 as at 40,000.
+        """
+        arrivals = self.counters.arrivals
+        cutoff = time.time() - 60.0
+        while arrivals and arrivals[0] < cutoff:
+            arrivals.popleft()
+        return len(arrivals)
+
+    def _switching_share(self) -> float:
+        """What share of the working time went on loading models, as a percent."""
+        counters = self.counters
+        working = counters.switch_s + counters.served_s
+        return round(100.0 * counters.switch_s / working, 1) if working else 0.0
 
     def _shapes_offered(self) -> list[dict]:
         """The kinds of request that can be sent here, and to which models.

@@ -12,6 +12,7 @@ writes it out and still makes no decisions.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -49,7 +50,8 @@ class Passthrough:
 
 def forward(url: str, payload: dict, on_close=None,
             first_byte_s: float = FIRST_BYTE_S,
-            between_bytes_s: float = BETWEEN_BYTES_S) -> Passthrough:
+            between_bytes_s: float = BETWEEN_BYTES_S,
+            on_first_chunk=None) -> Passthrough:
     """POST a JSON body to an engine and hand back its answer as it arrives.
 
     `on_close` runs when the body has been fully read or the connection has
@@ -67,6 +69,7 @@ def forward(url: str, payload: dict, on_close=None,
     request = urllib.request.Request(
         url, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
+    sent_at = time.perf_counter()
     try:
         response = urllib.request.urlopen(request, timeout=first_byte_s)
     except urllib.error.HTTPError as error:
@@ -93,11 +96,20 @@ def forward(url: str, payload: dict, on_close=None,
     _tighten(response, between_bytes_s)
 
     def read() -> Iterator[bytes]:
+        first = True
         try:
             while True:
                 chunk = response.read(CHUNK)
                 if not chunk:
                     return
+                if first:
+                    first = False
+                    if on_first_chunk:
+                        # How long the engine took to say anything. Timed here
+                        # rather than counted anywhere, because this is the only
+                        # place that sees the moment it arrives — and it never
+                        # looks at what is in it.
+                        on_first_chunk(time.perf_counter() - sent_at)
                 yield chunk
         finally:
             response.close()

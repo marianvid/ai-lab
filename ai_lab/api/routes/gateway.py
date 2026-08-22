@@ -107,9 +107,15 @@ def _forwarder(gateway: Gateway, path: str):
             outgoing["model"] = lease.model_name or wanted
 
             url = f"http://127.0.0.1:{lease.port}{path}"
+            # Time to the first token, but only when streaming was asked for.
+            # Without it an engine sends nothing until the answer is finished,
+            # so its first byte is the whole generation and the two averaged
+            # together measure neither.
+            timed = gateway.first_token if payload.get("stream") else None
             return forward(url, outgoing, on_close=lease.release,
                            first_byte_s=gateway.first_byte_s,
-                           between_bytes_s=gateway.between_bytes_s)
+                           between_bytes_s=gateway.between_bytes_s,
+                           on_first_chunk=timed)
         except BaseException:
             lease.release()
             raise
