@@ -699,6 +699,12 @@ class Gateway:
         a different fault with a different fix: too little concurrency, or two
         models fighting over one card.
         """
+        # The page is as good a reason to look as a request is. Without this
+        # a manager that has just started reports an empty card until somebody
+        # sends something — which is exactly when a person is watching it.
+        # `_adopt_what_is_there` clears the flag, so this costs the expensive
+        # read once after a restart rather than on every refresh.
+        self._adopt_what_is_there()
         counters = self.counters
         state = self.scheduler.state()
         current = state["current"]

@@ -933,7 +933,7 @@ class TogetherTests(unittest.TestCase):
         second.release()
 
     def test_the_number_of_places_is_the_engine_s_own(self):
-        gateway = quick(busy_models(coder=True))
+        gateway = quick(busy_models())          # nothing running
         self.assertEqual(gateway.stats()["places"], 0, "nothing loaded yet")
         with gateway.acquire("coder"):
             self.assertEqual(gateway.stats()["places"], 4)
@@ -1053,10 +1053,13 @@ class ForcedResetTests(unittest.TestCase):
         held.release()
 
     def test_nothing_is_running_or_waiting_afterwards(self):
-        gateway = quick(busy_models(coder=True))
+        operations = busy_models(coder=True)
+        gateway = quick(operations)
         gateway.acquire("coder")
         gateway.acquire("coder")
         gateway.reset("stopped by hand")
+        # Whoever forced it also stopped the engine, which is what forcing is.
+        operations._entries["coder"].update(running=False, ready=False)
         stats = gateway.stats()
         self.assertEqual(stats["in_flight"], 0)
         self.assertEqual(stats["waiting"], 0)
@@ -1183,3 +1186,57 @@ class CardReadingTests(unittest.TestCase):
             raise RuntimeError("nvidia-smi is not here")
         operations.host.accelerator = refuse
         self.assertEqual(quick(operations).stats()["card"], {})
+
+
+class WhatThePageSeesTests(unittest.TestCase):
+    """The page must not report an empty card that has a model on it.
+
+    Found on the machine: after a deployment the manager restarts, systemd
+    keeps the engine running, and the gateway does not look at the card until
+    a request arrives — so the page said "nothing loaded" for as long as
+    nobody sent anything, which is exactly when somebody is watching it.
+    """
+
+    def test_it_reports_a_model_nobody_has_asked_for_yet(self):
+        gateway = quick(two_models(coder=True))
+        self.assertEqual(gateway.stats()["current"], "coder")
+
+    def test_looking_costs_the_expensive_read_once(self):
+        operations = two_models(coder=True)
+        reads = {"n": 0}
+        original = operations.instances
+
+        def counted():
+            reads["n"] += 1
+            return original()
+        operations.instances = counted
+        gateway = quick(operations)
+        # The fake accelerator asks what is running to decide what to report,
+        # which the real one does not. Counting its reads would count the
+        # fake's habits rather than the gateway's.
+        operations.host.accelerator = lambda pid=None: _no_card()
+        gateway.stats()
+        gateway.stats()
+        gateway.stats()
+        self.assertEqual(reads["n"], 1, "it looked again on every refresh")
+
+    def test_it_looks_again_after_a_button_moves_a_model(self):
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        self.assertEqual(gateway.stats()["current"], "coder")
+        operations.unload("coder")
+        operations._entries["reviewer"].update(running=True, ready=True)
+        gateway.card_changed()
+        self.assertEqual(gateway.stats()["current"], "reviewer")
+
+    def test_two_models_up_is_not_a_card_to_report(self):
+        # It is a card to clear, and the next request clears it.
+        gateway = quick(two_models(coder=True, reviewer=True))
+        self.assertIsNone(gateway.stats()["current"])
+
+
+def _no_card():
+    from ai_lab.types import AcceleratorSnapshot
+    return AcceleratorSnapshot(available=True, name="Fake", kind="cuda",
+                               memory_kind="dedicated",
+                               memory_used_mb=2.0, memory_total_mb=32000.0)
