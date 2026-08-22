@@ -135,6 +135,10 @@ class Scheduler:
         self._current: object = None
         self._loaded = False
         self._switching = False
+        # Bumped by `reset`. A load already under way finishes after it — the
+        # engine is starting and cannot be called back — and its result must
+        # not be published into a world that has been thrown away since.
+        self._epoch = 0
 
     # -- what a request does ------------------------------------------------
 
@@ -194,6 +198,7 @@ class Scheduler:
         anything. Returns how many were turned away.
         """
         with self._lock:
+            self._epoch += 1
             turned_away = self._queue
             self._queue = []
             self._in_flight = 0
@@ -256,13 +261,13 @@ class Scheduler:
             _release(ready)
             if job is None:
                 return
-            shape, photograph = job
+            shape, photograph, epoch = job
             failure = None
             try:
                 self._switch(shape)
             except BaseException as error:      # reported to everyone waiting
                 failure = error
-            _release(self._settle(shape, photograph, failure))
+            _release(self._settle(shape, photograph, failure, epoch))
 
     def _plan(self) -> tuple[list[_Waiting], tuple | None]:
         """Decide what can happen now. Called holding the lock.
@@ -315,15 +320,28 @@ class Scheduler:
             self._switching = True
             self._loaded = False
             self._current = None
-            return ready, (shape, photograph)
+            return ready, (shape, photograph, self._epoch)
         return ready, None
 
     def _settle(self, shape, photograph: list[_Waiting],
-                failure: BaseException | None) -> list[_Waiting]:
-        """Publish what the load did, and admit who fits."""
+                failure: BaseException | None, epoch: int) -> list[_Waiting]:
+        """Publish what the load did, and admit who fits.
+
+        Unless everything was thrown away while it ran. A forced stop empties
+        the card and turns away everyone waiting; a load that started before it
+        cannot be called back, so its result is discarded instead. The card is
+        left unknown rather than claimed — whatever is on it now, the next
+        request unloads before it loads.
+        """
         ready: list[_Waiting] = []
         with self._lock:
             self._switching = False
+            if epoch != self._epoch:
+                for entry in photograph:
+                    entry.failure = failure or Abandoned(
+                        "everything was stopped while this model was loading")
+                    entry.admitted.set()
+                return ready
             if failure is not None:
                 for entry in photograph:
                     entry.failure = failure

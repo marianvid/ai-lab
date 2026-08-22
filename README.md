@@ -198,6 +198,7 @@ ai_lab/downloads/       Hugging Face browsing and whole-set transfers
 ai_lab/api/             HTTP routing and the progress event stream
 ai_lab/web/             Browser interface, native ES modules, no build step
 ai_lab/gateway.py       One address for an agent: routing by model name, and swapping
+ai_lab/scheduler.py     Who gets the card next: the queue, the places, the swap
 ai_lab/lastloaded.py    What was on the card, so a restart can put it back
 ai_lab/catalog.py       Finding models on disk, grouping shards into sets
 ai_lab/runtime.py       Load, unload and swap, with measured timings

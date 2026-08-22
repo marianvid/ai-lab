@@ -503,3 +503,65 @@ class InOrderTests(unittest.TestCase):
                          "it swept up the two behind the request for c")
         self.assertEqual([w["shape"] for w in s.state()["waiting"]],
                          ["c", "b", "b"])
+
+
+class ResetDuringALoadTests(unittest.TestCase):
+    """A forced stop while a model is loading.
+
+    The load cannot be called back — the engine is already starting — so its
+    result is discarded instead. Before this, it finished after the reset and
+    published itself: the scheduler believed a model was loaded, and a request
+    that had been told it was turned away ran anyway.
+    """
+
+    def scheduler_that_loads_slowly(self):
+        card = Card(places=4, load_s=0.4)
+        return scheduler(card), card
+
+    def test_the_waiting_request_is_turned_away_not_admitted(self):
+        s, card = self.scheduler_that_loads_slowly()
+        s.enter("a"); s.leave()
+        outcome = []
+
+        def waits():
+            try:
+                s.enter("b")
+                outcome.append("admitted")
+            except Abandoned:
+                outcome.append("turned away")
+
+        run(waits)
+        time.sleep(0.1)                         # the load has begun
+        s.reset("stopped by hand")
+        time.sleep(0.8)
+        self.assertEqual(outcome, ["turned away"])
+
+    def test_the_card_is_left_unknown_rather_than_claimed(self):
+        # Whatever is on it now, the next request unloads before it loads.
+        s, card = self.scheduler_that_loads_slowly()
+        s.enter("a"); s.leave()
+        run(lambda: _swallow(s.enter, "b"))
+        time.sleep(0.1)
+        s.reset("stopped by hand")
+        time.sleep(0.8)
+        state = s.state()
+        self.assertIsNone(state["current"])
+        self.assertEqual(state["in_flight"], 0)
+
+    def test_the_next_request_loads_again(self):
+        s, card = self.scheduler_that_loads_slowly()
+        s.enter("a"); s.leave()
+        run(lambda: _swallow(s.enter, "b"))
+        time.sleep(0.1)
+        s.reset("stopped by hand")
+        time.sleep(0.8)
+        before = len(card.switches)
+        s.enter("b")
+        self.assertEqual(len(card.switches), before + 1)
+
+    def test_a_reset_after_the_load_finished_is_the_ordinary_case(self):
+        # No epoch trickery when nothing was in flight.
+        s, card = self.scheduler_that_loads_slowly()
+        s.enter("a")
+        s.reset("stopped by hand")
+        self.assertIsNone(s.state()["current"])

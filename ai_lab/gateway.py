@@ -383,12 +383,21 @@ class Gateway:
             self.scheduler.enter(Shape.of(instance_id, asked_for),
                                  still_wanted=still_wanted)
         except Exception as error:
+            # A client that gave up is not a fault of this machine, so it does
+            # not become the error the page shows.
             if not isinstance(error, Abandoned):
                 self.counters.last_error = str(error)
             raise
-        self.counters.requests += 1
-        self.counters.waited_s += time.perf_counter() - started
-        return Lease(self, instance_id, port, self._engine_name(instance))
+        try:
+            self.counters.requests += 1
+            self.counters.waited_s += time.perf_counter() - started
+            return Lease(self, instance_id, port, self._engine_name(instance))
+        except BaseException:
+            # The place has been taken. Anything that goes wrong between there
+            # and handing it to the caller has to give it back, or the card
+            # loses a place with nobody using it.
+            self.scheduler.leave()
+            raise
 
     def finished(self) -> None:
         """Give a place back, and let in whoever can go next."""

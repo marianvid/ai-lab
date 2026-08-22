@@ -93,20 +93,24 @@ def _forwarder(gateway: Gateway, path: str):
         lease = gateway.acquire(wanted, shape=path, settings=settings,
                                 still_wanted=alive)
 
-        # The engine knows its own model by a different name than the entry
-        # does, and rejects a name it does not recognise. Ask by the name it
-        # reports rather than passing ours through. The lease carries it, so
-        # this costs nothing.
-        outgoing = dict(payload)
-        outgoing.pop(SETTINGS_FIELD, None)
-        outgoing["model"] = lease.model_name or wanted
-
-        url = f"http://127.0.0.1:{lease.port}{path}"
+        # Everything from here gives the place back if it fails. It is a few
+        # lines that look incapable of failing, which is exactly the shape of
+        # thing that leaks a place on the card and is never found: nothing
+        # breaks visibly, the card simply has one fewer place for ever.
         try:
+            # The engine knows its own model by a different name than the entry
+            # does, and rejects a name it does not recognise. Ask by the name it
+            # reports rather than passing ours through. The lease carries it, so
+            # this costs nothing.
+            outgoing = dict(payload)
+            outgoing.pop(SETTINGS_FIELD, None)
+            outgoing["model"] = lease.model_name or wanted
+
+            url = f"http://127.0.0.1:{lease.port}{path}"
             return forward(url, outgoing, on_close=lease.release,
                            first_byte_s=gateway.first_byte_s,
                            between_bytes_s=gateway.between_bytes_s)
-        except Exception:
+        except BaseException:
             lease.release()
             raise
     return handle
