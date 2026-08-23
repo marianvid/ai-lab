@@ -72,6 +72,21 @@ class Pool:
         return max(0.0, self.total_mb - self.used_mb)
 
     @property
+    def for_models_mb(self) -> float:
+        """How much of this pool models are allowed, whatever is running.
+
+        The pool less the reserve. It moves only when somebody changes the
+        reserve, which is why it belongs on a settings screen: it saves the
+        reader a subtraction without putting a figure there that changes while
+        they are looking at it.
+
+        Deliberately not called "available" — that word is taken by the live
+        one below, and two figures under one name is how a page ends up
+        disagreeing with itself.
+        """
+        return max(0.0, self.total_mb - self.reserve_mb)
+
+    @property
     def available_mb(self) -> float:
         """How much a model could take right now.
 
@@ -79,11 +94,9 @@ class Pool:
         it is what an admission decision asks and what the gateway page
         watches.
 
-        Not the same as how big this pool is. The settings screen shows
-        `total_mb` and the reserve on separate lines and lets the reader take
-        one off the other, which is why there is no third figure here for the
-        difference: it would be a number matching neither the hardware nor
-        anything printed beside it.
+        Not `for_models_mb`, which is a property of the setting rather than
+        of what is happening. Confusing the two would either refuse a model
+        that fits or accept one that does not.
         """
         return max(0.0, self.free_mb - self.reserve_mb)
 
@@ -94,6 +107,7 @@ class Pool:
                 "used_by_models_mb": round(self.used_by_models_mb),
                 "reserve_mb": round(self.reserve_mb),
                 "free_mb": round(self.free_mb),
+                "for_models_mb": round(self.for_models_mb),
                 "available_mb": round(self.available_mb)}
 
 

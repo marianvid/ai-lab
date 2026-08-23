@@ -34,16 +34,16 @@ const KINDS = {
   },
   machine: {
     label: 'RAM',
-    help: 'All of this machine’s own memory. Where the part of a model that '
-        + 'does not fit on the card goes, and where everything an engine keeps '
-        + 'outside the card lives. Models are offered it less the reserve '
-        + 'below.',
+    help: 'What models are offered, against all of it. The difference is the '
+        + 'reserve below. Where the part of a model that does not fit on the '
+        + 'card goes, and where everything an engine keeps outside the card '
+        + 'lives.',
   },
   unified: {
     label: 'Unified memory',
-    help: 'All of it. Apple silicon shares one pool between the chip and the '
-        + 'rest of the machine, so this is both. Models are offered it less '
-        + 'the reserve below.',
+    help: 'What models are offered, against all of it. The difference is the '
+        + 'reserve below. Apple silicon shares one pool between the chip and '
+        + 'the rest of the machine, so this is both.',
   },
 };
 
@@ -77,11 +77,20 @@ export function machine(settings, refresh) {
 function poolRow(pool, first) {
   const kind = KINDS[pool.kind === 'unified' ? 'unified' : pool.name]
     || { label: pool.name, help: '' };
-  // What this machine has, whole. The reserve is a line of its own
-  // directly below, so subtracting it here as well would show a number
-  // that matches neither the hardware nor anything printed beside it.
-  return row(kind.label, `${Math.round(pool.total_mb)} MB`, kind.help,
-             first ? 'memory' : '');
+  // A pool with something held back shows both figures, so the subtraction is
+  // not left to the reader: 40960 / 49152, with the 8192 that separates them
+  // on its own line below. Neither number moves except when that line is
+  // saved.
+  //
+  // A pool with nothing held back shows one figure, because 32623 / 32623 is
+  // two ways of saying the same thing and reads like a fault. Keyed on the
+  // reserve rather than on which pool it is, so a card that one day holds
+  // something back gets the pair without this having to be told.
+  const total = Math.round(pool.total_mb);
+  const value = pool.reserve_mb > 0
+    ? `${Math.round(pool.for_models_mb)} / ${total} MB`
+    : `${total} MB`;
+  return row(kind.label, value, kind.help, first ? 'memory' : '');
 }
 
 

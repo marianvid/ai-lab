@@ -144,6 +144,21 @@ class TwoDifferentQuestions(unittest.TestCase):
             FakeHost(card=card(total=32623, used=28946),
                      machine=(5157.0, 49152.0)), reserve_mb=8192)
 
+    def test_what_models_are_allowed_moves_only_with_the_setting(self):
+        # The settings screen shows this against the total, so the reader is
+        # not left doing a subtraction. It must not move when a model loads.
+        machine = self.budget.pool(budget.MACHINE)
+        self.assertEqual(machine.for_models_mb, 49152 - 8192)
+        card = self.budget.pool(budget.CARD)
+        self.assertEqual(card.for_models_mb, 32623,
+                         "a pool with no reserve offers all of itself")
+
+    def test_a_reserve_larger_than_the_machine_offers_nothing(self):
+        # Not a negative amount, which would print as "-4000 / 8000 MB".
+        tiny = budget.of(FakeHost(card=card(), machine=(1000.0, 8000.0)),
+                         reserve_mb=12000)
+        self.assertEqual(tiny.pool(budget.MACHINE).for_models_mb, 0.0)
+
     def test_how_big_a_pool_is_does_not_move_when_a_model_loads(self):
         # The settings screen shows this and it stays put; what a model could
         # take is the other figure and it does not.

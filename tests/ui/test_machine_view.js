@@ -15,25 +15,25 @@ import { installDom, settle } from './support/dom.js';
 // far apart and a test cannot pass by confusing them.
 const LINUX = {
   unified: false, reserve_mb: 8192,
-  capacity_mb: 32623 + 40960, available_mb: 3677 + 35803,
+  available_mb: 3677 + 35803,
   held_by_models_mb: 28946,
   pools: [
     { name: 'card', kind: 'dedicated', total_mb: 32623, used_mb: 28946,
       used_by_models_mb: 28946, reserve_mb: 0, free_mb: 3677,
-      capacity_mb: 32623, available_mb: 3677 },
+      for_models_mb: 32623, available_mb: 3677 },
     { name: 'machine', kind: 'dedicated', total_mb: 49152, used_mb: 5157,
       used_by_models_mb: 0, reserve_mb: 8192, free_mb: 43995,
-      capacity_mb: 40960, available_mb: 35803 },
+      for_models_mb: 40960, available_mb: 35803 },
   ],
 };
 
 const MAC = {
   unified: true, reserve_mb: 16384,
-  capacity_mb: 114688, available_mb: 80088, held_by_models_mb: 21000,
+  available_mb: 80088, held_by_models_mb: 21000,
   pools: [
     { name: 'machine', kind: 'unified', total_mb: 131072, used_mb: 34600,
       used_by_models_mb: 21000, reserve_mb: 16384, free_mb: 96472,
-      capacity_mb: 114688, available_mb: 80088 },
+      for_models_mb: 114688, available_mb: 80088 },
   ],
 };
 
@@ -104,17 +104,33 @@ describe('the machine', () => {
     const { view } = await draw(LINUX);
     const listed = rows(view);
     assert.deepEqual(listed[1], { label: 'VRAM', value: '32623 MB' });
-    assert.deepEqual(listed[2], { label: 'RAM', value: '49152 MB' });
+    assert.deepEqual(listed[2], { label: 'RAM', value: '40960 / 49152 MB' });
   });
 
-  it('shows what this machine has, not what is left after the reserve', async () => {
-    // The reserve is its own line directly below. Subtracting it here as well
-    // would print a number matching neither the hardware nor the line beside
-    // it, and leave nowhere to read the real size of the machine.
+  it('does the subtraction for you where something is held back', async () => {
+    // 49152 less the 8192 on the line below. Every figure is on screen and
+    // they check against each other, so nothing has to be worked out and
+    // nothing has to be believed.
     const { view } = await draw(LINUX);
-    assert.equal(rows(view)[2].value, '49152 MB');
-    assert.equal(view.textContent.includes('40960'), false,
-                 'RAM is showing what is left rather than what there is');
+    assert.equal(rows(view)[2].value, '40960 / 49152 MB');
+  });
+
+  it('shows one figure where nothing is held back', async () => {
+    // 32623 / 32623 is two ways of saying the same thing and reads like a
+    // fault. Decided by whether there is a reserve, not by which pool it is,
+    // so a card that one day holds something back gets the pair by itself.
+    const { view } = await draw(LINUX);
+    assert.equal(rows(view)[1].value, '32623 MB');
+  });
+
+  it('neither figure moves when a model loads', async () => {
+    // This card is what the machine is. 28.9 GB of that card is held right
+    // now, and that belongs on the Gateway page.
+    const { view } = await draw(LINUX);
+    assert.equal(view.textContent.includes('3677'), false,
+                 'showing what is free right now');
+    assert.equal(view.textContent.includes('35803'), false,
+                 'showing what is free right now');
   });
 
   it('lists the card whole, not what is left of it', async () => {
@@ -126,10 +142,9 @@ describe('the machine', () => {
                  'this card is showing what is free rather than what there is');
   });
 
-  it('shows the reserve as its own line, to be taken off in the head', async () => {
-    // The card carries none — nothing but models uses it — so only one of
-    // these two figures has anything taken off it, and saying which in prose
-    // under them would be an explanation nobody rereads.
+  it('puts the reserve last, where it explains the gap above it', async () => {
+    // It is the difference between the two figures on the RAM line, so it
+    // reads as the working rather than as a fact on its own.
     const { view } = await draw(LINUX);
     const listed = rows(view);
     assert.equal(listed[listed.length - 1].label, 'Reserved for the system');
@@ -138,7 +153,8 @@ describe('the machine', () => {
   it('says unified memory once, and calls it that', async () => {
     const { view } = await draw(MAC, { chip: APPLE });
     const listed = rows(view);
-    assert.deepEqual(listed[1], { label: 'Unified memory', value: '131072 MB' });
+    assert.deepEqual(listed[1],
+                     { label: 'Unified memory', value: '114688 / 131072 MB' });
     assert.equal(view.textContent.includes('VRAM'), false,
                  'one pool shown twice doubles the machine');
     assert.equal(listed.length, 3,
@@ -185,7 +201,7 @@ describe('the machine', () => {
     // No pools means the machine could not answer — not that it has no room.
     // A row of zeroes would be a claim, and the wrong one. The chip is still
     // worth saying.
-    const { view } = await draw({ unified: false, pools: [], capacity_mb: 0 });
+    const { view } = await draw({ unified: false, pools: [] });
     assert.match(view.textContent, /NVIDIA RTX PRO 4500/);
     assert.equal(view.querySelector('input[type="number"]'), null);
   });
