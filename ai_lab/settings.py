@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import asdict
+
+from . import budget
 from pathlib import Path
 
 from .config import ConfigStore
@@ -41,9 +43,23 @@ class Settings:
                 "can_configure_accelerator": capabilities.can_configure_accelerator,
             },
             "accelerator": asdict(self.host.accelerator()),
+            # What is actually available for models, pool by pool. The page
+            # reads this rather than doing the arithmetic itself, so the number
+            # on screen is the same one an admission decision would use.
+            "memory": budget.of(self.host, self.reserve_mb(config)).json(),
             "repositories": [self._repository(item) for item in config.repositories],
             "engines": self.engines.describe(capabilities),
         }
+
+    @staticmethod
+    def reserve_mb(config) -> float:
+        """How much to leave for the machine itself."""
+        try:
+            value = float((config.memory or {}).get("reserve_mb",
+                                                    budget.DEFAULT_RESERVE_MB))
+        except (TypeError, ValueError):
+            return budget.DEFAULT_RESERVE_MB
+        return max(0.0, value)
 
     @staticmethod
     def _repository(repository) -> dict:

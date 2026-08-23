@@ -17,6 +17,7 @@ Two consequences worth remembering:
 from __future__ import annotations
 
 import atexit
+import re
 import signal
 import subprocess
 import tempfile
@@ -28,6 +29,12 @@ from .command import run, which
 
 TERMINATE_GRACE_SECONDS = 20
 
+
+# What counts as memory in use, from `vm_stat`. Deliberately not the whole of
+# it: inactive and speculative pages are reclaimed under pressure, so counting
+# them would report a healthy machine as nearly full and refuse a model that
+# would have fitted.
+USED_PAGES = ("Pages active", "Pages wired down", "Pages occupied by compressor")
 
 class DarwinHost:
     """See `base.Host` for what each method promises."""
@@ -101,13 +108,54 @@ class DarwinHost:
             self._close_log(instance_id)
 
     def system_memory(self) -> tuple[float, float]:
-        """Nothing, on purpose.
+        """What the whole machine is using, and how much it has.
 
-        Apple silicon shares one pool between the chip and everything else, so
-        the accelerator reading is already the machine's memory. Reporting it
-        twice under two names would suggest there are two of them.
+        This used to return nothing, on the reasoning that Apple silicon shares
+        one pool so the accelerator reading already covered it. That reasoning
+        was wrong for the question that matters: the accelerator reading is
+        what *our own engines* hold, and says nothing about the browser, the
+        editor and everything else on a machine somebody is also working on.
+        Deciding whether another model fits needs the second number.
+
+        Counted conservatively — used is what cannot be taken away without
+        someone noticing: memory in active use, memory the kernel has pinned,
+        and memory it has already compressed to make room. Inactive and
+        speculative pages are left out of "used" because the kernel will
+        reclaim them under pressure, and counting them would report a machine
+        that is behaving perfectly as nearly full.
+
+        Being wrong optimistically here is the expensive direction: it means
+        starting a model that does not fit, on a machine already holding one
+        that was working.
         """
-        return 0.0, 0.0
+        try:
+            total = float(run(["sysctl", "-n", "hw.memsize"], timeout=5).stdout)
+        except (ValueError, AttributeError, TypeError):
+            return 0.0, 0.0
+        counts = self._pages()
+        if not counts or not total:
+            return 0.0, 0.0
+        used = sum(counts.get(name, 0.0) for name in USED_PAGES)
+        return used, total / (1024 * 1024)
+
+    @staticmethod
+    def _pages() -> dict[str, float]:
+        """`vm_stat` in megabytes. Empty when it cannot be read."""
+        result = run(["vm_stat"], timeout=5)
+        if not result.ok or not result.stdout.strip():
+            return {}
+        lines = result.stdout.splitlines()
+        size = re.search(r"page size of (\d+)", lines[0] if lines else "")
+        if not size:
+            return {}
+        page_mb = int(size.group(1)) / (1024 * 1024)
+        counts = {}
+        for line in lines[1:]:
+            name, _, rest = line.partition(":")
+            digits = re.sub(r"\D", "", rest)
+            if digits:
+                counts[name.strip()] = int(digits) * page_mb
+        return counts
 
     def state_dir(self) -> Path:
         """Beside the logs, under the user's own Library.

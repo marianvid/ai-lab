@@ -12,6 +12,11 @@ def register(router, operations) -> None:
     # Engines that arrive as packages. A new version is installed beside the
     # one in use, so these read and choose between folders rather than
     # replacing anything.
+    # How much of this machine's memory is held back for the machine, and what
+    # that leaves for models. A GET that reads the machine, not the file.
+    router.add("GET", "/api/memory", lambda **_: operations.memory_budget())
+    router.add("PATCH", "/api/memory",
+               lambda body=None, **_: operations.update_memory(body or {}))
     router.add("GET", "/api/installs", lambda **_: operations.installs_available())
     router.add("GET", "/api/installs/{engine}",
                lambda engine, **_: operations.install_status(engine))

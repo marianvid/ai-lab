@@ -97,6 +97,9 @@ class Config:
     # in under a second are not the right numbers on a Mac running a 70 GB
     # model at 17 tokens a second — so they are configured, not sent.
     gateway: dict = field(default_factory=dict)
+    # How much of this machine's memory to leave for the machine. See
+    # `budget.py` for why it is a reserve rather than an allowance.
+    memory: dict = field(default_factory=dict)
 
     def repository(self, repository_id: str) -> Repository:
         found = next((item for item in self.repositories if item.id == repository_id), None)
@@ -134,6 +137,7 @@ class ConfigStore:
                        for item in raw.get("instances", [])],
             engines=raw.get("engines", {}),
             gateway=raw.get("gateway", {}),
+            memory=raw.get("memory", {}),
         )
 
     def save(self, config: Config) -> None:

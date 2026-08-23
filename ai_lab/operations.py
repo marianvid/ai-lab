@@ -26,6 +26,7 @@ FIRST_PORT = 8080
 CHANGEABLE = frozenset({"params", "model_id", "port"})
 
 from .builds import Builds
+from . import budget
 from .capabilities import IMAGES, TOOLS
 from .catalog import Catalog
 from .changes import Reader, counted
@@ -417,6 +418,38 @@ class Operations:
             config.gateway = {**config.gateway, **cleaned}
         self._changed("settings")
         return self.gateway_settings()
+
+    # -- how much of this machine models may use ---------------------------
+
+    def memory_budget(self) -> dict:
+        """What is available for models right now, pool by pool."""
+        return budget.of(self.host, self.settings.reserve_mb(self.store.load())).json()
+
+    def update_memory(self, changes: dict) -> dict:
+        """Change how much of the machine is held back for the machine.
+
+        The upper limit is deliberately generous rather than tied to how much
+        memory this machine has: a container can be given more, and a setting
+        that refused the number somebody wants because of what the machine used
+        to have would be worse than one that lets them hold back too much and
+        see it on the page.
+        """
+        unknown = set(changes) - {"reserve_mb"}
+        if unknown:
+            raise ValueError(f"Unknown settings: {', '.join(sorted(unknown))}")
+        cleaned = {}
+        if "reserve_mb" in changes:
+            try:
+                number = float(changes["reserve_mb"])
+            except (TypeError, ValueError):
+                raise ValueError("reserve_mb must be a number") from None
+            if not 0 <= number <= 1024 * 1024:
+                raise ValueError("reserve_mb must be between 0 and 1048576")
+            cleaned["reserve_mb"] = number
+        with self.store.mutate() as config:
+            config.memory = {**config.memory, **cleaned}
+        self._changed("settings")
+        return self.memory_budget()
 
     def build_status(self) -> list[dict]:
         return self.builds.all() if self.builds else []

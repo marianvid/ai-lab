@@ -68,6 +68,8 @@ export const api = {
     request('GET', `/api/builds/${encodeURIComponent(engine)}/changes`),
   // Engines that arrive as packages. A new version is installed beside the one
   // in use, so these choose between folders rather than replacing anything.
+  memoryBudget: () => request('GET', '/api/memory'),
+  updateMemory: (changes) => request('PATCH', '/api/memory', changes),
   allInstalls: () => request('GET', '/api/installs'),
   installs: (engine) => request('GET', `/api/installs/${encodeURIComponent(engine)}`),
   installEngine: (engine, version) =>

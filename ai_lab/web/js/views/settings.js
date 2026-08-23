@@ -7,6 +7,7 @@ import { chooseFolder } from '../browse.js';
 import { whileWorking } from '../working.js';
 import { reviewUpdate } from './whatchanges.js';
 import { versions } from './versions.js';
+import { memory } from './memory.js';
 import { onLog } from '../events.js';
 import { bytes, element, seconds } from '../format.js';
 
@@ -275,6 +276,7 @@ export async function render(container) {
     ]),
     element('div', {}, [
       accelerator(settings.accelerator, settings.host),
-    ]),
+      memory(settings.memory, refresh),
+    ].filter(Boolean)),
   ]));
 }

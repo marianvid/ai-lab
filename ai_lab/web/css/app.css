@@ -463,3 +463,12 @@ dialog.review .small { font-size: 0.85rem; }
 }
 .row.version.active { background: var(--raised, rgba(127, 127, 127, 0.08)); }
 .versions h4 { display: flex; align-items: center; gap: 0.5rem; }
+
+/* How much of this machine models may use. The last line is the answer; the
+   ones above it are the working. */
+.card.memory .row { justify-content: space-between; padding: 0.2rem 0; }
+.card.memory .row.total {
+  border-top: 1px solid var(--line, rgba(127, 127, 127, 0.25));
+  margin-top: 0.4rem; padding-top: 0.5rem;
+}
+.card.memory input.number.small { width: 7rem; text-align: right; }
