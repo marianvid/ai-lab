@@ -82,9 +82,9 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /http:\/\/localhost:8090\/v1/);
   });
 
-  it('counts what is loaded, and names them below', async () => {
-    // The heading line is a count. Which ones, and what each is doing, is the
-    // per-model block — two names on one line was a heading that grew.
+  it('counts what is loaded rather than naming them', async () => {
+    // Two names on one line was a heading that grew with the machine. Which
+    // ones is the queue panel's business.
     const { view } = await renderPage({
       loaded: [
         { instance_id: 'coder', engine: 'vLLM', in_flight: 2, places: 8,
@@ -95,12 +95,10 @@ describe('the Gateway page', () => {
       in_flight: 2, busy: true,
     });
     assert.match(view.textContent, /Loaded\s*2/);
-    // Read column by column: the spans sit side by side, so joining their
-    // text would say "coder14 rpm0.31 s".
-    const rows = [...view.querySelectorAll('.row.bymodel')]
-      .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
-    assert.deepEqual(rows, [['coder', '14 rpm', '0.31 s'],
-                            ['reviewer', '3 rpm', '0.08 s']]);
+    const activity = [...view.querySelectorAll('.section')]
+      .find((item) => item.textContent.startsWith('Activity'));
+    assert.equal(activity.textContent.includes('rpm'), false,
+                 'per-model figures are back in Activity');
   });
 
   it('adds the places up, because they are the engines own numbers', async () => {
@@ -116,13 +114,13 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /Processing\s*3 from 9/);
   });
 
-  it('keeps the time to first token per model, never averaged', async () => {
+  it('never averages the time to first token across models', async () => {
     // A 3B and a 35B differ by an order of magnitude, so one average across
-    // both describes neither. With a single model it was right by accident.
+    // both describes neither. With a single model it was right by accident,
+    // and Activity is a column of figures about the machine.
     const { view } = await renderPage();
     assert.equal(view.textContent.includes('Time to first token'), false,
                  'a machine-wide first-token average is back');
-    assert.match(view.querySelector('.row.bymodel').textContent, /0\.42 s/);
   });
 
   it('says nothing per model when nothing is loaded', async () => {

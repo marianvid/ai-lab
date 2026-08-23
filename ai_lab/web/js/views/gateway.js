@@ -136,30 +136,6 @@ function memoryLines(memory, card) {
   return lines;
 }
 
-// One line per loaded model, at the foot of the totals above.
-//
-// Two of these figures only mean something per model. A 3B and a 35B have
-// first-token times an order of magnitude apart, so one average across both
-// describes neither — with a single model on the machine it was right by
-// accident. And the split of the request rate answers "which of these is
-// carrying the traffic", which is what decides which one is worth keeping.
-function perModel(loaded) {
-  if (!loaded.length) return [];
-  return [
-    element('div', { class: 'row heading' },
-            element('span', { class: 'muted', text: 'Per model' })),
-    ...loaded.map((item) => element('div', { class: 'row tight bymodel' }, [
-      element('span', { class: 'grow',
-                        title: item.engine ? `answered by ${item.engine}` : '' },
-              [element('strong', { text: item.instance_id })]),
-      element('span', { class: 'muted', title: 'requests a minute',
-                        text: `${figure(item.requests_per_minute)} rpm` }),
-      element('span', { class: 'muted', title: 'time to first token',
-                        text: `${figure(item.first_token_s)} s` }),
-    ])),
-  ];
-}
-
 function activity(stats) {
   const loaded = stats.loaded || [];
   const status = stats.switching ? 'loading a model'
@@ -186,7 +162,6 @@ function activity(stats) {
          'Of the time this was working — answering or loading — how much went '
          + 'on loading.'),
     ...memoryLines(stats.memory, stats.card),
-    ...perModel(loaded),
     stats.last_error
       ? element('p', { class: 'error', text: `Last error: ${stats.last_error}` })
       : null,
