@@ -605,13 +605,16 @@ class Operations:
 
     # -- choosing where models live ----------------------------------------
 
-    def browse(self, path: str | None = None) -> dict:
-        """List the directories inside one directory, for picking a path.
+    def browse(self, path: str | None = None, programs: bool = False) -> dict:
+        """List what is inside one directory, for picking a path.
 
         A web page cannot open a file dialog on the machine the server runs on,
-        so the server has to offer the listing itself. Only directory names are
-        returned, never file contents: this is for choosing a folder, and the
-        less it can reach the better.
+        so the server has to offer the listing itself.
+
+        Folders always. Files only when `programs` is asked for, and then only
+        ones that can be launched — not shared libraries, which carry the
+        execute bit and cannot. Never file *contents*: this says what is there,
+        and the less it can reach the better.
         """
         start = Path(path).expanduser() if path else self._default_browse_root()
         start = start.resolve()
@@ -621,13 +624,19 @@ class Operations:
         entries = []
         try:
             for item in sorted(start.iterdir()):
-                if item.name.startswith(".") or not item.is_dir():
+                if item.name.startswith("."):
                     continue
-                entries.append({
-                    "name": item.name,
-                    "path": str(item),
-                    "writable": os.access(item, os.W_OK | os.X_OK),
-                })
+                if item.is_dir():
+                    entries.append({
+                        "name": item.name, "path": str(item), "kind": "folder",
+                        "writable": os.access(item, os.W_OK | os.X_OK),
+                    })
+                elif (programs and item.is_file() and os.access(item, os.X_OK)
+                      and not _is_library(item.name)):
+                    entries.append({
+                        "name": item.name, "path": str(item), "kind": "program",
+                        "writable": False,
+                    })
         except PermissionError:
             raise ValueError(f"No permission to read {start}") from None
 
@@ -909,3 +918,14 @@ class Operations:
                 "missing": list(model.missing),
                 "capabilities": sorted(model.capabilities)}
 
+
+
+# A shared library carries the execute bit and cannot be launched. Measured in
+# llama.cpp's build directory on the container: 125 executable files, 33 of
+# them `.so` companions to the launchers beside them.
+LIBRARIES = (".so", ".dylib", ".dll")
+
+
+def _is_library(name: str) -> bool:
+    lowered = name.lower()
+    return any(lowered.endswith(end) or f"{end}." in lowered for end in LIBRARIES)

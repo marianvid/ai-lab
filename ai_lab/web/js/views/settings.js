@@ -3,7 +3,7 @@
 
 import { api } from '../api.js';
 import { showNotice } from '../confirm.js';
-import { chooseFolder } from '../browse.js';
+import { chooseFolder, chooseProgram } from '../browse.js';
 import { whileWorking } from '../working.js';
 import { reviewUpdate } from './whatchanges.js';
 import { versions } from './versions.js';
@@ -76,20 +76,37 @@ function paths(settings, refresh) {
 // actually on the machine — and saved as soon as it is picked, because there
 // is nothing half-typed to confirm.
 function chosen(root, refresh) {
-  return element('div', { class: 'row' }, [
-    element('strong', { text: 'Models root',
-                        title: 'Every weight format is a folder in here.' }),
-    element('span', { class: 'path muted grow', text: root || '—' }),
+  return pathRow('Models root', root, {
+    help: 'Every weight format is a folder in here.',
+    choose: () => chooseFolder(root || null),
+    save: (picked) => api.updateModelsRoot(picked),
+    trouble: 'Could not move the model store',
+    refresh,
+  });
+}
+
+
+// One shape for every path somebody can change: a label, the path, and the
+// button that changes it. The same shape for all of them so the labels line up
+// down the left and the buttons down the right — a column that steps in and
+// out because one label is longer than another is a column that reads as three
+// unrelated things.
+//
+// Saved the moment something is picked. There is nothing half-typed to
+// confirm, so there is no Save to leave switched off and forget.
+function pathRow(label, path, { help, choose, save, trouble, refresh }) {
+  return element('div', { class: 'row path-row' }, [
+    element('strong', { text: label, title: help }),
+    element('span', { class: 'path muted grow', text: path || '—' }),
     element('button', {
       class: 'action', text: 'Browse…',
       onclick: (event) => whileWorking(event.target, 'Choosing…', async () => {
-        const picked = await chooseFolder(root || null);
+        const picked = await choose();
         if (!picked) return;
         try {
-          await api.updateModelsRoot(picked);
+          await save(picked);
         } catch (error) {
-          await showNotice({ title: 'Could not move the model store',
-                             body: error.message });
+          await showNotice({ title: trouble, body: error.message });
         }
         refresh();
       }),
@@ -100,42 +117,32 @@ function chosen(root, refresh) {
 
 // Which program serves an engine.
 //
-// Typed, with a Save, and that is deliberate: this is not expected to change —
-// on a settled machine it never will — so the point is only that it *can* be
-// changed without editing a file over ssh. A folder chooser cannot pick a
-// file, and teaching it to would be a lot of machinery for a field somebody
-// touches once.
+// Not expected to change — on a settled machine it never will — but two builds
+// of llama.cpp on one box is ordinary, and being unable to say which one means
+// editing a file over ssh.
 //
-// Save sleeps until the field differs from what is in force, so pressing it
-// always means something.
+// Picked, not typed, like the models root: a path typed by hand is a path with
+// a typo in it, and the failure arrives later as an engine reporting itself
+// missing. The chooser lists only files that can be launched, so finding a
+// launcher in a build directory is not a hunt through source and licences.
 function program(engine, refresh) {
-  const field = element('input', { class: 'grow path', value: engine.binary || '' });
-  const save = element('button', {
-    class: 'action', text: 'Save', disabled: 'disabled',
-    onclick: (event) => whileWorking(event.target, 'Saving…', async () => {
-      try {
-        await api.updateEngineBinary(engine.id, field.value.trim());
-      } catch (error) {
-        save.disabled = false;
-        await showNotice({ title: `Could not point ${engine.name} there`,
-                           body: error.message });
-        return;
-      }
-      refresh();
-    }),
+  return pathRow(engine.name, engine.binary, {
+    help: 'The program that serves this engine. Takes effect the next time a '
+        + 'model starts; nothing already running is touched.',
+    choose: () => chooseProgram(parentOf(engine.binary)),
+    save: (picked) => api.updateEngineBinary(engine.id, picked),
+    trouble: `Could not point ${engine.name} there`,
+    refresh,
   });
-  field.addEventListener('input', () => {
-    save.disabled = field.value === (engine.binary || '');
-  });
+}
 
-  return element('div', { class: 'row' }, [
-    element('strong', { text: engine.name,
-                        title: 'The program that serves this engine. Takes '
-                             + 'effect the next time a model starts; nothing '
-                             + 'already running is touched.' }),
-    field,
-    save,
-  ]);
+
+// Start the chooser where this engine already is, rather than at the top of
+// the disk.
+function parentOf(path) {
+  if (!path) return null;
+  const cut = path.lastIndexOf('/');
+  return cut > 0 ? path.slice(0, cut) : null;
 }
 
 
@@ -145,7 +152,7 @@ function program(engine, refresh) {
 // saying is when a folder is not there or cannot be written to, because that
 // is what will fail later.
 function readOnly(label, path, warning) {
-  return element('div', { class: 'row tight derived' }, [
+  return element('div', { class: 'row tight derived path-row' }, [
     element('span', { class: 'muted', text: label }),
     element('span', { class: 'path muted grow', text: path || '—' }),
     warning

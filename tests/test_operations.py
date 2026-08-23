@@ -1031,6 +1031,30 @@ class PointingAnEngineSomewhereElse(unittest.TestCase):
             host=host, engines=FakeRegistry(host),
         )
 
+    def test_browsing_shows_only_folders_by_default(self):
+        found = self.operations.browse(str(self.root / "bin"))
+        self.assertEqual([item["name"] for item in found["entries"]], ["sub"])
+
+    def test_asking_for_programs_adds_the_ones_that_can_be_run(self):
+        found = self.operations.browse(str(self.root / "bin"), programs=True)
+        by_name = {item["name"]: item["kind"] for item in found["entries"]}
+        self.assertEqual(by_name, {"sub": "folder", "llama-server": "program"})
+        self.assertNotIn("notes.txt", by_name)
+
+    def test_shared_libraries_are_not_offered_as_programs(self):
+        # They carry the execute bit and cannot be launched. Measured in
+        # llama.cpp's build directory on the container: 125 executable files,
+        # 33 of them `.so` companions to the launchers beside them, and every
+        # one a wrong answer to scroll past.
+        for name in ("libllama.so", "libggml.so.1", "libthing.dylib"):
+            item = self.root / "bin" / name
+            item.write_text("")
+            item.chmod(0o755)
+        found = self.operations.browse(str(self.root / "bin"), programs=True)
+        names = [item["name"] for item in found["entries"]]
+        self.assertIn("llama-server", names)
+        self.assertEqual([n for n in names if ".so" in n or ".dylib" in n], [])
+
     def test_the_program_is_saved(self):
         self.operations.update_engine_binary("llamacpp", str(self.program))
         self.assertEqual(self.store.load().engines["llamacpp"]["binary"],

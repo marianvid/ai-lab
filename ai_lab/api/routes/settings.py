@@ -43,7 +43,9 @@ def register(router, operations) -> None:
     # Picking a folder: a web page cannot open a dialog on the server's
     # machine, so the server lists directories itself.
     router.add("GET", "/api/browse",
-               lambda query=None, **_: operations.browse((query or {}).get("path")))
+               lambda query=None, **_: operations.browse(
+                   (query or {}).get("path"),
+                   programs=(query or {}).get("programs") == "1"))
     router.add("POST", "/api/directories",
                lambda body=None, **_: operations.create_directory((body or {})["path"]))
     router.add("PATCH", "/api/repositories/{id}",
