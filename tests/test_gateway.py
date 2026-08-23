@@ -16,6 +16,7 @@ from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
                                  validate)
 from ai_lab.gateway import (CardBusy, CouldNotLoad, Gateway, NotConfigured,
                             ShapeNotServed)
+from ai_lab.scheduler import WillNotFit
 from ai_lab.runtime import Operation
 from ai_lab.types import AcceleratorSnapshot
 
@@ -1310,3 +1311,57 @@ def _no_card():
     return AcceleratorSnapshot(available=True, name="Fake", kind="cuda",
                                memory_kind="dedicated",
                                memory_used_mb=2.0, memory_total_mb=32000.0)
+
+
+class RefusingWhatCannotFit(unittest.TestCase):
+    """A model too big for the machine, said before anything is disturbed.
+
+    Emptying the machine to load something that was never going to fit is the
+    worst of both: what was working is gone and the load fails anyway.
+    """
+
+    def _gateway(self):
+        operations = two_models(coder=True)
+        gateway = quick(operations)
+        # A machine with no room for anything, so every request is refused for
+        # the same reason and the numbers are the thing under test.
+        gateway._budget_pools = {"card": {"name": "card", "available_mb": 100.0,
+                                          "for_models_mb": 200.0,
+                                          "total_mb": 32000.0}}
+        # The one being asked for is far too big; what is already there is
+        # small, so taking it off frees nothing worth having. Both numbers
+        # matter: an earlier version of this test made every model want 30 GB,
+        # so unloading the loaded one appeared to free 30 GB and the refusal
+        # never happened.
+        gateway._needs_mb = lambda shape: (
+            30000.0 if shape.instance_id == "reviewer" else 50.0)
+        return operations, gateway
+
+    def test_it_is_refused_rather_than_attempted(self):
+        operations, gateway = self._gateway()
+        before = list(operations.loads)
+        with self.assertRaises(WillNotFit):
+            gateway.acquire("reviewer")
+        self.assertEqual(operations.loads, before, "it tried to load it anyway")
+        self.assertEqual(operations.unloads, [],
+                         "it unloaded a working model for nothing")
+
+    def test_the_refusal_carries_numbers_a_client_can_act_on(self):
+        _, gateway = self._gateway()
+        with self.assertRaises(WillNotFit) as caught:
+            gateway.acquire("reviewer")
+        found = caught.exception.detail["ai_lab"]
+        self.assertEqual(found["model"], "reviewer")
+        self.assertEqual(found["needed_mb"], 30000)
+        self.assertEqual(found["available_mb"], 100)
+        self.assertEqual(found["capacity_mb"], 200)
+        self.assertIn("context_size", found["asked"])
+
+    def test_it_says_which_shape_of_error_this_is(self):
+        # So a client behind an OpenAI library can branch on the code instead
+        # of matching words in a sentence.
+        _, gateway = self._gateway()
+        with self.assertRaises(WillNotFit) as caught:
+            gateway.acquire("reviewer")
+        self.assertEqual(caught.exception.kind, "insufficient_memory")
+        self.assertEqual(caught.exception.code, "model_does_not_fit")

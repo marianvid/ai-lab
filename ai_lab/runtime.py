@@ -322,8 +322,9 @@ class Runtime:
 
     def _load(self, instance: Instance, model: ModelSet, engine: Engine,
               operation: Operation, clock: "_Clock") -> None:
-        plan = engine.plan(model, instance.port, instance.params)
-        self._active[instance.id] = dict(instance.params)
+        params = self._split_if_it_will_not_fit(instance, model, engine)
+        plan = engine.plan(model, instance.port, params)
+        self._active[instance.id] = dict(params)
         self._refuse_stranger(instance, engine)
         self._refuse_if_it_cannot_fit(instance, model, plan)
         self._mark(operation, clock, Phase.STARTING, f"Starting {model.name}")
@@ -359,6 +360,47 @@ class Runtime:
         self._pids.pop(instance_id, None)
         self._active.pop(instance_id, None)
         self._mark(operation, clock, Phase.MEMORY_RELEASED, "Memory released")
+
+    def _split_if_it_will_not_fit(self, instance: Instance, model: ModelSet,
+                                  engine: Engine) -> dict:
+        """Let an engine that can split do so, rather than refusing.
+
+        llama.cpp measures the card at startup and puts on as many layers as
+        fit, leaving the rest in system memory. It knows something this cannot:
+        the weights are only the floor, and the cache on top of them varies by
+        architecture — measured at 32k on the container, the gap between file
+        size and card usage ran from -476 MiB to +6,663 across four models. So
+        when the weights alone will not fit, the honest move is to hand the
+        decision to whoever can measure, not to guess a layer count here.
+
+        vLLM has no such setting: it either fits or it does not, and it says so
+        itself in a sentence naming the largest context that would have fitted.
+        Nothing is changed for it.
+
+        Only the default is relaxed. `gpu_layers = -1` means "all on the card"
+        and is what an entry has when nobody chose; a layer count, or automatic
+        already, is somebody's decision and is left exactly as it is.
+
+        The entry's own settings are not touched. What changes is how *this*
+        start is made, and the row says so — the same way it does for a request
+        that asked for a bigger context than the entry is configured with.
+        """
+        params = dict(instance.params)
+        splitting = getattr(engine, "split_setting", None)
+        if not splitting:
+            return params
+        name, only_when, value = splitting
+        if params.get(name) != only_when:
+            # A layer count, or automatic already: somebody chose that.
+            return params
+        snapshot = self.host.accelerator()
+        if snapshot.memory_kind != "dedicated" or not snapshot.memory_total_mb:
+            return params
+        free_mb = snapshot.memory_total_mb - snapshot.memory_used_mb
+        if model.size_bytes / (1024 * 1024) <= free_mb:
+            return params                       # the weights fit; leave it be
+        params[name] = value
+        return params
 
     def _refuse_if_it_cannot_fit(self, instance: Instance, model: ModelSet,
                                  plan) -> None:

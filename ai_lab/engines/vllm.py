@@ -191,6 +191,23 @@ class VllmEngine:
     def ready(self, port: int) -> bool:
         return http_ok(port, "/health")
 
+    def needs_mb(self, model, params: dict, card_total_mb: float) -> float:
+        """A share of the whole card, and it is exactly that.
+
+        vLLM claims `gpu_memory_utilization` of the card at startup and holds
+        it whether the weights fill it or not — measured on the container,
+        gemma-4-26b has 17.5 GB of weights and occupies 28.8 GB at 0.9. So the
+        model does not come into it: the setting is the answer.
+
+        Which is why lowering the fraction is the only way to put two vLLM
+        models on one card, and why a request can send it through `ai_lab`.
+        """
+        try:
+            fraction = float(params.get("gpu_memory_fraction", 0.90))
+        except (TypeError, ValueError):
+            fraction = 0.90
+        return max(0.0, fraction) * max(0.0, card_total_mb)
+
     def concurrency(self, params: dict) -> int:
         """Sequences in flight. Where the throughput comes from.
 

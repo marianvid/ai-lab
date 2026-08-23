@@ -188,9 +188,42 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /18.5%/);
   });
 
-  it('shows the queue as the order it will be served in', async () => {
-    // Not a list of requests: a list of turns. Read down it and you have the
-    // model changes that are about to happen.
+  it('shows what is loaded, what it is doing, and what waits for it', async () => {
+    // Running and waiting say different things: running is whether the model
+    // is busy, waiting is whether there is pressure on it.
+    const { view } = await renderPage({
+      loaded: [
+        { instance_id: 'coder', engine: 'vLLM', in_flight: 2, places: 8,
+          waiting: 3, requests_per_minute: 0, first_token_s: 0 },
+        { instance_id: 'gemma', engine: 'llama.cpp', in_flight: 0, places: 1,
+          waiting: 0, requests_per_minute: 0, first_token_s: 0 },
+      ],
+      in_flight: 2,
+    });
+    const rows = [...view.querySelectorAll('.row.now')]
+      .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
+    assert.deepEqual(rows, [['→ coder', '2 running · 3 waiting'],
+                            ['→ gemma', '0 running · 0 waiting']]);
+  });
+
+  it('adds up what is waiting for models already there', async () => {
+    const { view } = await renderPage({
+      loaded: [
+        { instance_id: 'coder', engine: 'vLLM', in_flight: 8, places: 8,
+          waiting: 3, requests_per_minute: 0, first_token_s: 0 },
+        { instance_id: 'gemma', engine: 'llama.cpp', in_flight: 1, places: 1,
+          waiting: 2, requests_per_minute: 0, first_token_s: 0 },
+      ],
+      in_flight: 9,
+    });
+    const tally = [...view.querySelectorAll('.row.tally')]
+      .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
+    assert.deepEqual(tally[0], ['Waiting for these', '5']);
+  });
+
+  it('names the next model to be loaded, and what is held up behind it', async () => {
+    // Read together they are the cost of the change: this many requests are
+    // stopped until that one is on.
     const { view } = await renderPage({
       waiting: 6,
       queue_runs: [
@@ -199,43 +232,19 @@ describe('the Gateway page', () => {
         { instance_id: 'glm-flash', requests: 1, longest_wait_s: 1 },
       ],
     });
-    const text = view.textContent;
-    assert.ok(text.indexOf('reviewer') < text.indexOf('glm-flash'),
-              'the turns came out in the wrong order');
-    assert.match(text, /reviewer/);
-    assert.match(text, /coder/);
+    const next = view.querySelector('.row.next');
+    assert.match(next.textContent, /reviewer\s*←/);
+    assert.match(next.textContent, /3 waiting/);
+    assert.match(next.title, /longest has waited 9 s/);
+    const tally = [...view.querySelectorAll('.row.tally')]
+      .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
+    assert.deepEqual(tally[1], ['Waiting behind it', '3'],
+                     'the 2 for coder and the 1 for glm-flash');
   });
 
-  it('shows what is loaded above what is waiting for it', async () => {
-    const { view } = await renderPage({
-      loaded: [{ instance_id: 'coder', engine: 'vLLM', settings: {},
-                 in_flight: 2, places: 8 }],
-      in_flight: 2, waiting: 1,
-      queue_runs: [{ instance_id: 'reviewer', requests: 1, longest_wait_s: 2 }] });
-    const now = view.querySelector('.row.now');
-    assert.ok(now, 'the loaded model was not shown');
-    assert.match(now.textContent, /coder/);
-    assert.match(now.textContent, /2 running/);
-  });
-
-  it('gives every loaded model its own row above the queue', async () => {
-    const { view } = await renderPage({
-      loaded: [
-        { instance_id: 'coder', engine: 'vLLM', settings: {}, in_flight: 2, places: 8 },
-        { instance_id: 'reviewer', engine: 'llama.cpp', settings: {}, in_flight: 0, places: 1 },
-      ],
-      in_flight: 2,
-      queue_runs: [{ instance_id: 'writer', requests: 3, longest_wait_s: 9 }],
-    });
-    const now = [...view.querySelectorAll('.row.now')].map((r) => r.textContent);
-    assert.equal(now.length, 2);
-    assert.match(now[0], /coder.*2 running/s);
-    assert.match(now[1], /reviewer.*idle/s);
-  });
-
-  it('says so plainly when nothing is waiting', async () => {
+  it('says so plainly when no change is coming', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /Nothing waiting/);
+    assert.match(view.textContent, /Nothing waiting for a change/);
   });
 
   it('shows the last error rather than hiding a failure behind good averages', async () => {

@@ -508,3 +508,8 @@ details.build-log > .log { margin-top: 0.4rem; }
 /* A row with no button still leaves its column, so the paths beside it start
    and end where the others do. */
 .row.path-row.derived > .path { grid-column: 2; }
+
+/* The queue: what is loaded, then what is held up behind the next change. */
+.row.tight.tally { opacity: 0.8; }
+.row.tight.next { border-top: 1px solid var(--line, rgba(127, 127, 127, 0.25));
+                  margin-top: 0.3rem; padding-top: 0.4rem; }

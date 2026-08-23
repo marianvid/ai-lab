@@ -100,7 +100,7 @@ from dataclasses import dataclass, field
 
 from . import budget
 from .operations import Operations
-from .scheduler import Abandoned, Scheduler
+from .scheduler import Abandoned, Scheduler, WillNotFit
 
 
 class NotConfigured(KeyError):
@@ -236,6 +236,10 @@ class _Counters:
 
     requests: int = 0
     switches: int = 0
+    # How many models were pushed off to make room. The number that hurts:
+    # a load beside what is there costs a load; a load that displaces
+    # something costs that too, and the next request for it.
+    evictions: int = 0
     waited_s: float = 0.0
     switch_s: float = 0.0
     # Time spent actually answering, summed. The denominator for "how much of
@@ -289,7 +293,11 @@ class Gateway:
         self.poll_s = poll_s
         self.first_byte_s = first_byte_s
         self.between_bytes_s = between_bytes_s
+        # What the last card reading said, per pool. Refreshed around every
+        # load, never from inside the scheduler's lock.
+        self._budget_pools: dict = {}
         self.scheduler = Scheduler(self._put_on_card, self._places,
+                                   self._make_room,
                                    max_waiting=max_waiting)
         # Whether anything outside may have changed what is on the card. Set at
         # startup and whenever a button on the page loads or unloads something.
@@ -411,6 +419,15 @@ class Gateway:
         try:
             self.scheduler.enter(Shape.of(instance_id, asked_for),
                                  still_wanted=still_wanted)
+        except WillNotFit as error:
+            # The scheduler knows the ordering and nothing about memory, so the
+            # numbers are attached here. A client that can read them can correct
+            # itself — a smaller context, a smaller share of the card — without
+            # anybody parsing an English sentence.
+            error.detail = {"ai_lab": self._why_it_does_not_fit(
+                instance_id, asked_for)}
+            self.counters.last_error = str(error)
+            raise
         except Exception as error:
             # A client that gave up is not a fault of this machine, so it does
             # not become the error the page shows.
@@ -494,26 +511,155 @@ class Gateway:
         except Exception:
             return 1
 
-    def _put_on_card(self, shape: "Shape") -> None:
-        """Empty the card, wait for it to go quiet, then load.
+    # -- deciding who has to go --------------------------------------------
 
-        Everything running is unloaded, not only what was last asked for: a
-        manager restart or a machine boot can leave more than one engine up,
-        and loading into whatever is left is how a curated model that is known
-        to fit fails to fit.
+    def _make_room(self, shape: "Shape", loaded: list[dict]) -> "list | None":
+        """Which loaded shapes have to come off for this one to fit.
+
+        Empty means it fits beside them. `None` means it never will, whatever
+        is unloaded — said now rather than discovered by emptying the machine
+        and failing anyway.
+
+        **Order matters and it is not about size.** An idle model costs nothing
+        to take off; one still answering costs however long it has left, and
+        everything waits for it. So idle ones go first, longest-unused first
+        within each group, and one that is answering is only touched when the
+        idle ones do not free enough.
+
+        Called while the scheduler holds its lock, so nothing here asks the
+        machine anything: it works from the reading taken at the last load and
+        from what each engine says its settings need. Reading the card here
+        would stop the page that is asking what is going on, which is exactly
+        when somebody wants to know.
+        """
+        needed = self._needs_mb(shape)
+        free = self._free_mb()
+        known = bool(needed and free)
+        if known and needed <= free:
+            return []                           # it fits beside them
+
+        # Ordered by what it costs to take them off, not by what they free. An
+        # idle model costs nothing; one still answering costs whatever it has
+        # left, and everything waits for it. Longest-unused first within each
+        # group, because that is the one nobody has wanted.
+        idle = sorted((item for item in loaded if not item["in_flight"]),
+                      key=lambda item: item["last_used"])
+        busy = sorted((item for item in loaded if item["in_flight"]),
+                      key=lambda item: item["last_used"])
+
+        victims: list = []
+        for item in idle + busy:
+            if item["shape"] == shape:
+                continue
+            victims.append(item["shape"])
+            if not known:
+                continue                        # cannot tell: take them all
+            free += self._needs_mb(item["shape"])
+            if needed <= free:
+                return victims
+
+        # Everything is off and it still does not fit, by our own arithmetic.
+        # Said now rather than found out by emptying the machine and failing.
+        if known and needed > self._capacity_mb():
+            return None
+        # Otherwise: cannot tell how much anything holds, so take it all off
+        # and let the load find out. That is exactly what this did before there
+        # was a budget, and it is the safe answer when the arithmetic is
+        # unavailable — "no opinion" must never read as "yes, they all fit".
+        return victims
+
+    def _why_it_does_not_fit(self, instance_id: str, asked_for: dict) -> dict:
+        """The numbers behind a refusal, for a client to act on.
+
+        Everything here is a fact about this machine right now. Nothing is
+        remembered between requests: what a model took last time is knowledge
+        that belongs to whatever is making the requests, not to this manager.
+        """
+        shape = Shape.of(instance_id, asked_for)
+        pool = (self._budget_pools.get(budget.CARD)
+                or self._budget_pools.get(budget.MACHINE) or {})
+        return {
+            "model": instance_id,
+            "engine": self._engine_name_of(shape),
+            "needed_mb": round(self._needs_mb(shape)),
+            "capacity_mb": round(self._capacity_mb()),
+            "available_mb": round(self._free_mb()),
+            "pool": pool.get("name", ""),
+            "loaded": [item.instance_id for item in self._scheduled_shapes()],
+            "asked": dict(asked_for),
+        }
+
+    def _needs_mb(self, shape: "Shape") -> float:
+        """What this shape's settings ask of the card. Nothing remembered.
+
+        Worked out from the request each time. How much a model took last time
+        is a fact about the past that whoever is making the requests should
+        know; this manager reports what it measures now and asks the engine
+        what these settings mean.
+        """
+        try:
+            instance = self.operations.instance(shape.instance_id)
+            engine = self.operations.engines.get(instance["engine"])
+            model = self.operations.model_for(shape.instance_id)
+            params = {**instance["params"], **shape.as_dict()}
+            return float(engine.needs_mb(model, params, self._card_total_mb()))
+        except Exception:
+            return 0.0
+
+    def _card_total_mb(self) -> float:
+        try:
+            return float(self.operations.host.accelerator().memory_total_mb)
+        except Exception:
+            return 0.0
+
+    def _capacity_mb(self) -> float:
+        """The most a single model could ever have on this machine."""
+        pool = self._budget_pools.get(budget.CARD) or self._budget_pools.get(
+            budget.MACHINE)
+        return float(pool.get("for_models_mb", 0.0)) if pool else 0.0
+
+    def _free_mb(self) -> float:
+        """Room for another model on the card, from the last reading taken."""
+        pool = self._budget_pools.get(budget.CARD) or self._budget_pools.get(
+            budget.MACHINE)
+        return float(pool.get("available_mb", 0.0)) if pool else 0.0
+
+    def _read_the_card(self) -> None:
+        """Take a fresh memory reading. Outside the scheduler's lock, always."""
+        try:
+            found = budget.of(self.operations.host, self.operations.reserve_mb())
+            self._budget_pools = {pool.name: pool.json() for pool in found.pools}
+        except Exception:
+            pass
+
+    def _put_on_card(self, shape: "Shape", victims: tuple = ()) -> None:
+        """Take those off, wait for the card to go quiet, then load this.
+
+        `victims` is what the scheduler decided has to go. Empty means this
+        fits beside what is already there and nothing is disturbed.
+
+        A manager restart or a machine boot can leave engines up that nothing
+        here knows about. Those are cleared too, on the first switch after such
+        a change — see `_resweep` — because loading into whatever is left is
+        how a model that is known to fit fails to fit.
         """
         started = time.perf_counter()
-        unloaded = self._clear()
+        unloaded = self._clear(victims)
         self._resweep = False
-        self._wait_until_quiet()
+        self._wait_until_quiet(unloaded)
+        self._read_the_card()
+        self._refuse_if_still_full(shape)
 
         operation = self.operations.load(shape.instance_id, shape.as_dict() or None)
         if not operation.ok:
             raise CouldNotLoad(
                 operation.error or f"{shape.instance_id} would not start")
 
+        self._read_the_card()
         took = time.perf_counter() - started
         self.counters.switches += 1
+        if unloaded:
+            self.counters.evictions += len(unloaded)
         self.counters.switch_s += took
         self.counters.history.append({
             "at": time.time(), "loaded": shape.instance_id, "unloaded": unloaded,
@@ -521,14 +667,31 @@ class Gateway:
         })
         del self.counters.history[:-self.HISTORY]
 
-    def _clear(self) -> list[str]:
-        """Unload every running engine. Returns what was stopped."""
+    def _clear(self, victims: tuple = ()) -> list[str]:
+        """Unload what was chosen, and anything nothing here knows about.
+
+        The second half is the point of sweeping rather than unloading by name:
+        a manager restart can leave an engine running that the scheduler never
+        adopted, and its memory is real whether or not this knows about it.
+        """
+        wanted = {shape.instance_id for shape in victims}
+        known = {item.instance_id for item in self._scheduled_shapes()}
         stopped = []
         for instance in self.operations.instances():
-            if instance["running"]:
+            if not instance["running"]:
+                continue
+            # The chosen victims, and anything running that the scheduler
+            # does not believe in. A stray is not in the budget arithmetic, so
+            # its memory is unaccounted — and loading into what is left is how
+            # a model that is known to fit fails to.
+            if instance["id"] in wanted or instance["id"] not in known:
                 self.operations.unload(instance["id"])
                 stopped.append(instance["id"])
         return stopped
+
+    def _scheduled_shapes(self) -> list:
+        """What the scheduler believes is loaded."""
+        return [item["shape"] for item in self.scheduler.state()["loaded"]]
 
     # -- what the buttons on the page have to tell us -----------------------
 
@@ -606,12 +769,16 @@ class Gateway:
         state = self.scheduler.state()
         if not state["in_flight"] and not state["waiting"] and not state["switching"]:
             return None
-        current = state["current"]
+        # Which one to name, when several are loaded: the busiest, because
+        # that is the one somebody stopping this would most regret. With one
+        # loaded it is the only answer there is.
+        busiest = max(state["loaded"], key=lambda item: item["in_flight"],
+                      default=None)
         return {
-            "instance_id": current.instance_id if current else "",
+            "instance_id": busiest["shape"].instance_id if busiest else "",
             "answering": bool(state["in_flight"]),
             "in_flight": state["in_flight"],
-            "places": state["places"],
+            "places": busiest["places"] if busiest else 0,
             "waiting": len(state["waiting"]),
             "switching": state["switching"],
         }
@@ -647,29 +814,83 @@ class Gateway:
             f"{' and '.join(parts) or 'The card is in use'}. Going ahead with "
             f"'{action}' on {instance_id} cuts all of that off.", holder)
 
-    def _wait_until_quiet(self) -> None:
-        """Wait for the driver to hand the memory back.
+    def _wait_until_quiet(self, stopped: list) -> None:
+        """Wait for the driver to hand back what those models held.
 
         A process exits before its VRAM is released. Loading in that gap fails
         with a message about the model being too large, which sends whoever
         reads it looking in the wrong place entirely.
+
+        Waited for by name, not by watching the total fall to nothing: with a
+        memory budget, other models stay loaded and their memory is not coming
+        back. What has to be gone is the processes that were stopped, and that
+        is a question with an exact answer.
         """
+        if not stopped:
+            return
         snapshot = self.operations.host.accelerator()
         if snapshot.memory_kind != "dedicated":
             return                      # unified memory: nothing to wait for
         deadline = time.perf_counter() + self.quiet_timeout_s
+        while True:
+            running = {item["id"] for item in self.operations.instances()
+                       if item["running"]}
+            still_up = [name for name in stopped if name in running]
+            if not still_up:
+                self._wait_for_release(deadline, keeping=bool(running))
+                return
+            if time.perf_counter() > deadline:
+                raise CouldNotLoad(
+                    f"{', '.join(still_up)} did not exit within "
+                    f"{self.quiet_timeout_s:.0f} seconds. The card is still "
+                    f"holding what it was using.")
+            time.sleep(self.poll_s)
+
+    def _wait_for_release(self, deadline: float, keeping: bool) -> None:
+        """Wait for the driver to hand back what those processes held.
+
+        A process exits before its memory does, and loading into that gap fails
+        with a message about the model being too large, which sends whoever
+        reads it looking in the wrong place entirely.
+
+        What to wait *for* depends on what is left. With nothing meant to be
+        loaded, the card should reach nothing, and anything else is a fault
+        worth naming — something outside this manager holding it, or an engine
+        that did not release. With other models still loaded, the card
+        legitimately holds their memory and there is no figure to wait for; the
+        question becomes whether there is room, which `_refuse_if_still_full`
+        asks precisely once the reading is fresh.
+        """
+        if keeping:
+            return
         while True:
             used = self.operations.host.accelerator().memory_used_mb
             if used <= self.quiet_mb:
                 return
             if time.perf_counter() > deadline:
                 raise CouldNotLoad(
-                    f"The card still holds {used:.0f} MB {self.quiet_timeout_s:.0f} "
-                    f"seconds after everything was unloaded. Something outside "
-                    f"AI-Lab is using it, or an engine did not exit.")
+                    f"The card still holds {used:.0f} MB "
+                    f"{self.quiet_timeout_s:.0f} seconds after everything was "
+                    f"unloaded. Something outside AI-Lab is using it, or an "
+                    f"engine did not exit.")
             time.sleep(self.poll_s)
 
-    # -- internals ----------------------------------------------------------
+    def _refuse_if_still_full(self, shape: "Shape") -> None:
+        """Say so before starting an engine that cannot fit.
+
+        Asked only when the arithmetic is available. Where it is not, the
+        machine was emptied instead and `_wait_for_release` has already
+        insisted the card reached nothing.
+        """
+        needed = self._needs_mb(shape)
+        free = self._free_mb()
+        if not needed or not free or needed <= free:
+            return
+        raise CouldNotLoad(
+            f"{shape.instance_id} needs about {needed / 1024:.1f} GB and "
+            f"{free / 1024:.1f} GB is free after unloading what could be "
+            f"unloaded. Something outside AI-Lab is holding the card, or an "
+            f"engine did not release its memory.")
 
     def _loaded(self) -> str | None:
         """What is on the card, read rather than remembered.
@@ -711,7 +932,6 @@ class Gateway:
         self._adopt_what_is_there()
         counters = self.counters
         state = self.scheduler.state()
-        current = state["current"]
         waiting = state["waiting"]
         return {
             # A list, always, even while the scheduler still holds exactly one.
@@ -722,18 +942,22 @@ class Gateway:
             # the other tells you what will answer, and the second decides
             # which request shapes work.
             "loaded": [{
-                "instance_id": current.instance_id,
-                "engine": self._engine_name_of(current),
-                "settings": current.as_dict(),
-                "in_flight": state["in_flight"],
-                "places": state["places"],
+                "instance_id": item["shape"].instance_id,
+                "engine": self._engine_name_of(item["shape"]),
+                "settings": item["shape"].as_dict(),
+                "in_flight": item["in_flight"],
+                "places": item["places"],
+                # How many are queued for this one specifically. With several
+                # loaded, a request can be waiting because its own model is
+                # full rather than because a swap is coming.
+                "waiting": item["waiting"],
                 # Per model, because neither figure means anything averaged
                 # across two: a 3B and a 35B differ by an order of magnitude on
                 # the first, and the second answers "which of these is carrying
                 # the traffic", which is what decides what is worth keeping.
-                "requests_per_minute": self._rate_of(current.instance_id),
-                "first_token_s": self._first_token_of(current.instance_id),
-            }] if current else [],
+                "requests_per_minute": self._rate_of(item["shape"].instance_id),
+                "first_token_s": self._first_token_of(item["shape"].instance_id),
+            } for item in state["loaded"]],
             "busy": bool(state["in_flight"] or waiting or state["switching"]),
             "holder": self.busy(),
             "in_flight": state["in_flight"],
@@ -762,6 +986,7 @@ class Gateway:
             "card": self._card_reading(),
             "requests_per_minute": self._rate(),
             "switches": counters.switches,
+            "evictions": counters.evictions,
             # Of the time this was working — answering or loading — how much
             # went on loading. Against the wall clock instead, a machine that
             # sits idle overnight reports a flattering number for a workflow

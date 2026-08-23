@@ -254,34 +254,52 @@ function coming(stats) {
   const runs = stats.queue_runs || [];
   const loaded = stats.loaded || [];
   const rows = [];
-  // What is on the machine now, above what is waiting for it. One row each:
-  // the top of this list is the present and the rest is the schedule.
+
+  // What is on the machine, one row each: what it is answering now and how
+  // many are queued for it. Both, because they say different things — running
+  // is whether it is busy, waiting is whether there is pressure on it.
   loaded.forEach((item) => {
     rows.push(element('div', { class: 'row tight now' }, [
-      element('span', { text: item.instance_id }),
-      element('span', { class: 'muted', text: item.in_flight
-        ? `${item.in_flight} running` : 'idle' }),
+      element('span', { class: 'swap', text: `→ ${item.instance_id}` }),
+      element('span', { class: 'muted', text:
+        `${figure(item.in_flight)} running · ${figure(item.waiting)} waiting` }),
     ]));
   });
-  if (!loaded.length && stats.in_flight) {
-    rows.push(element('div', { class: 'row tight now' }, [
-      element('span', { text: 'nothing loaded' }),
-      element('span', { class: 'muted', text: `${stats.in_flight} running` }),
-    ]));
+  if (!loaded.length) {
+    rows.push(element('div', { class: 'row tight now' },
+                      element('span', { class: 'muted', text: 'nothing loaded' })));
   }
-  runs.forEach((run, index) => {
-    rows.push(element('div', { class: 'row tight',
-                               title: `longest has waited ${run.longest_wait_s} s` }, [
-      element('span', { class: 'swap',
-                        text: `${index === 0 ? '→ ' : '   '}${run.instance_id}` }),
-      element('span', { class: 'muted', text: `${run.requests}` }),
+
+  // Everything queued for a model that is already there. It is waiting for a
+  // place, not for a load.
+  const onLoaded = loaded.reduce((total, item) => total + (Number(item.waiting) || 0), 0);
+  rows.push(element('div', { class: 'row tight tally' }, [
+    element('span', { class: 'muted', text: 'Waiting for these' }),
+    element('span', { class: 'muted', text: figure(onLoaded) }),
+  ]));
+
+  // The next model that has to be loaded, and everything held up behind it.
+  // Read together they are the cost of the change: this many requests are
+  // stopped until that one is on.
+  const next = runs[0];
+  if (next) {
+    const behind = runs.reduce((total, run) => total + (Number(run.requests) || 0), 0)
+      - (Number(next.requests) || 0);
+    rows.push(element('div', { class: 'row tight next',
+                               title: `longest has waited ${next.longest_wait_s} s` }, [
+      element('span', { class: 'swap', text: `${next.instance_id}  ←` }),
+      element('span', { class: 'muted', text: `${figure(next.requests)} waiting` }),
     ]));
-  });
-  if (!runs.length) {
-    rows.push(element('p', { class: 'muted', text: 'Nothing waiting.' }));
+    rows.push(element('div', { class: 'row tight tally' }, [
+      element('span', { class: 'muted', text: 'Waiting behind it' }),
+      element('span', { class: 'muted', text: figure(behind) }),
+    ]));
+  } else {
+    rows.push(element('p', { class: 'muted', text: 'Nothing waiting for a change.' }));
   }
   return section('Queue', rows);
 }
+
 
 export function stopRefreshing() {
   if (timer) { window.clearInterval(timer); timer = null; }

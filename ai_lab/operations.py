@@ -152,6 +152,17 @@ class Operations:
                 "model_id": item.model_id, "port": item.port,
                 "params": self._effective(engine, item.params)}
 
+    def model_for(self, instance_id: str):
+        """The model an entry points at, for asking how big it is.
+
+        Walks the model directories, so it is not on the path of a request that
+        is going straight through — only of one that is about to cause a load,
+        where a few milliseconds against a forty-second load is nothing.
+        """
+        config = self.store.load()
+        instance = config.instance(instance_id)
+        return self.catalog.find(config.repositories, instance.model_id)
+
     @staticmethod
     def _effective(engine, stored: dict) -> dict:
         try:
@@ -226,18 +237,24 @@ class Operations:
         """
         if not self.last_loaded:
             return None
-        remembered = self.last_loaded.read()
+        remembered = self.last_loaded.all()
         if not remembered:
             return None
         config = self.store.load()
         if any(self.host.status(item.id).running for item in config.instances):
             return None
-        try:
-            return self.load(remembered["instance_id"],
-                             remembered["settings"] or None)
-        except Exception as error:                      # reported, not raised
-            self._log(f"Could not restore {remembered['instance_id']}: {error}")
-            return None
+        # In the order they were loaded, stopping at the first that will not
+        # go on. A machine given less memory than it had, or a reserve raised
+        # since, must not be filled past what it can hold just because it once
+        # held it — and the oldest was there first, so it is the one to keep.
+        last = None
+        for item in remembered:
+            try:
+                last = self.load(item["instance_id"], item["settings"] or None)
+            except Exception as error:                  # reported, not raised
+                self._log(f"Could not restore {item['instance_id']}: {error}")
+                break
+        return last
 
     def _log(self, text: str) -> None:
         self.bus.publish(LogEvent(source="restore", stream="err", text=text))

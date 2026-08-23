@@ -3,8 +3,11 @@ import unittest
 
 from ai_lab.config import Instance
 from ai_lab.events import EventBus
+from ai_lab.engines.llamacpp import LlamaCppEngine
+from ai_lab.engines.vllm import VllmEngine
 from ai_lab.runtime import Runtime
-from ai_lab.types import Format, ModelFile, ModelSet, Phase, RuntimeEvent
+from ai_lab.types import (AcceleratorSnapshot, Format, ModelFile, ModelSet, Phase,
+                          ProcessStatus, RuntimeEvent)
 
 from tests.support import FakeEngine, FakeHost
 
@@ -490,3 +493,85 @@ class ChangeNoticeTests(unittest.TestCase):
         host.running.add("qwen")
         Runtime(host, self.bus, sample_interval_s=0).unload("qwen")
         self.assertIn("instances", self.notices())
+
+
+class WhenTheWeightsWillNotFit(unittest.TestCase):
+    """An engine that can split is let split; one that cannot is refused.
+
+    llama.cpp measures the card at startup and puts on as many layers as fit.
+    It knows something nothing outside it can: the weights are only the floor,
+    and the cache on top varies by architecture — measured at 32k on the
+    container, the gap between file size and card usage ran from -476 MiB to
+    +6,663 across four models.
+    """
+
+    class Card:
+        """A card with almost nothing free."""
+
+        def __init__(self, free_mb=1000.0):
+            self.free_mb = free_mb
+            self.started = []
+
+        def accelerator(self, pid=None):
+            return AcceleratorSnapshot(
+                available=True, name="Fake", kind="cuda",
+                memory_kind="dedicated", memory_used_mb=32000.0 - self.free_mb,
+                memory_total_mb=32000.0)
+
+        def start(self, spec):
+            self.started.append(spec)
+
+        def status(self, instance_id):
+            return ProcessStatus(running=True, pid=1)
+
+        def stop(self, instance_id):
+            pass
+
+        def statuses(self, ids):
+            return {name: ProcessStatus(running=True, pid=1) for name in ids}
+
+    def _runtime(self, free_mb=1000.0):
+        card = self.Card(free_mb)
+        return card, Runtime(card, EventBus(), sample_interval_s=0)
+
+    def _instance(self, **params):
+        return Instance(id="big", engine="llamacpp", model_id="gguf/big/big",
+                        port=8080, params={"gpu_layers": -1, **params})
+
+    def _model(self, gigabytes=20):
+        return ModelSet(id="gguf/big/big", name="big", format=Format.GGUF,
+                        entrypoint="/models/gguf/big/big.gguf",
+                        files=(ModelFile(path="big.gguf",
+                                         size_bytes=gigabytes * 1024 ** 3),))
+
+    def test_llama_cpp_is_told_to_split_rather_than_refused(self):
+        card, runtime = self._runtime(free_mb=1000.0)
+        params = runtime._split_if_it_will_not_fit(
+            self._instance(), self._model(), LlamaCppEngine(binary="/bin/true"))
+        self.assertEqual(params["gpu_layers"], -2,
+                         "it refused instead of letting llama.cpp fit it")
+
+    def test_a_model_that_fits_is_left_exactly_as_configured(self):
+        card, runtime = self._runtime(free_mb=30000.0)
+        params = runtime._split_if_it_will_not_fit(
+            self._instance(), self._model(), LlamaCppEngine(binary="/bin/true"))
+        self.assertEqual(params["gpu_layers"], -1,
+                         "it split a model that would have fitted whole")
+
+    def test_a_deliberate_layer_count_is_not_overridden(self):
+        # Somebody who set 20 meant 20.
+        card, runtime = self._runtime(free_mb=1000.0)
+        params = runtime._split_if_it_will_not_fit(
+            self._instance(gpu_layers=20), self._model(),
+            LlamaCppEngine(binary="/bin/true"))
+        self.assertEqual(params["gpu_layers"], 20)
+
+    def test_vllm_is_left_alone_because_it_cannot_split(self):
+        # It either fits or it does not, and it says so itself, naming the
+        # largest context that would have fitted.
+        card, runtime = self._runtime(free_mb=1000.0)
+        instance = Instance(id="big", engine="vllm", model_id="nvfp4/big/big",
+                            port=8080, params={"gpu_memory_fraction": 0.9})
+        params = runtime._split_if_it_will_not_fit(
+            instance, self._model(), VllmEngine(binary="/bin/true"))
+        self.assertEqual(params, {"gpu_memory_fraction": 0.9})

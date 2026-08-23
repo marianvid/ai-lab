@@ -229,6 +229,36 @@ class LlamaCppEngine:
     def ready(self, port: int) -> bool:
         return http_ok(port, "/health")
 
+    # What to change when the weights will not fit, and what it has to say
+    # first. Only the default is relaxed: `-1` means "all on the card" and is
+    # what an entry has when nobody chose, so turning it into "fit what you
+    # can" is completing an unmade decision. Any other value — a layer count,
+    # or automatic already — is somebody's choice and is left alone.
+    split_setting = ("gpu_layers", ALL_ON_CARD, FIT_AUTOMATICALLY)
+
+    def needs_mb(self, model, params: dict, card_total_mb: float) -> float:
+        """The weights. A floor, deliberately, not a prediction.
+
+        What it actually takes is the weights plus a cache sized by the
+        context, and that second part is not worth estimating: measured on the
+        container at 32k, the gap between file size and card usage ran from
+        **-476 MiB to +6,663** across four models. Gemma alternates local and
+        global attention, so the usual formula overstates some layers and
+        understates others, and a figure that looks exact and is not is worse
+        than an honest floor.
+
+        llama.cpp settles the rest itself and does it better, because it
+        measures the card at startup: told to fit automatically it puts on as
+        many layers as there is room for, and told to put everything on the
+        card it refuses and says so. Either way it knows something this cannot.
+
+        Zero when it is going to split, because then any amount of room is
+        workable and holding one back would be inventing a requirement.
+        """
+        if _splits(int(params.get("gpu_layers", ALL_ON_CARD))):
+            return 0.0
+        return max(0.0, getattr(model, "size_bytes", 0) / (1024 * 1024))
+
     def concurrency(self, params: dict) -> int:
         """Slots. One by default, and one is a real answer here.
 

@@ -10,7 +10,7 @@ import threading
 import time
 import unittest
 
-from ai_lab.scheduler import Abandoned, QueueFull, Scheduler
+from ai_lab.scheduler import WillNotFit, Abandoned, QueueFull, Scheduler
 
 
 class Card:
@@ -18,11 +18,16 @@ class Card:
 
     def __init__(self, places=1, load_s=0.0):
         self.switches = []
+        self.taken_off = []
         self.places_for = places
         self.load_s = load_s
         self.refuses = {}                       # shape -> exception to raise
 
-    def switch(self, shape):
+    def switch(self, shape, victims=()):
+        # `victims` is what has to come off first. With no memory budget
+        # configured every loaded shape is a victim of every other, which is
+        # what this file has always tested and still does.
+        self.taken_off.append(tuple(victims))
         if self.load_s:
             time.sleep(self.load_s)
         if shape in self.refuses:
@@ -329,7 +334,7 @@ class ResetTests(unittest.TestCase):
         s.reset("stopped by hand")
         state = s.state()
         self.assertEqual(state["in_flight"], 0)
-        self.assertIsNone(state["current"])
+        self.assertEqual(state["loaded"], [])
         self.assertEqual(state["waiting"], [])
 
     def test_the_next_request_loads_again(self):
@@ -545,7 +550,7 @@ class ResetDuringALoadTests(unittest.TestCase):
         s.reset("stopped by hand")
         time.sleep(0.8)
         state = s.state()
-        self.assertIsNone(state["current"])
+        self.assertEqual(state["loaded"], [])
         self.assertEqual(state["in_flight"], 0)
 
     def test_the_next_request_loads_again(self):
@@ -564,4 +569,132 @@ class ResetDuringALoadTests(unittest.TestCase):
         s, card = self.scheduler_that_loads_slowly()
         s.enter("a")
         s.reset("stopped by hand")
-        self.assertIsNone(s.state()["current"])
+        self.assertEqual(s.state()["loaded"], [])
+
+
+class SeveralAtOnce(unittest.TestCase):
+    """When the machine has room for more than one model.
+
+    Everything about ordering is unchanged and the tests above prove it: they
+    run with no memory budget at all, where every loaded shape is a victim of
+    every other, and that is exactly what this file did before. What follows is
+    what the budget adds.
+    """
+
+    def setUp(self):
+        self.card = Card(places=1)
+        # A budget of two: anything fits beside one other model, and the third
+        # arrival displaces somebody.
+        self.room = {}
+
+    def scheduler_holding(self, many=2):
+        def make_room(shape, loaded):
+            if len(loaded) < many:
+                return []                       # it fits beside them
+            idle = [item for item in loaded if not item["in_flight"]]
+            busy = [item for item in loaded if item["in_flight"]]
+            order = sorted(idle, key=lambda i: i["last_used"]) + \
+                    sorted(busy, key=lambda i: i["last_used"])
+            return [order[0]["shape"]]
+        return scheduler(self.card, make_room=make_room)
+
+    def test_a_second_model_loads_beside_the_first(self):
+        s = self.scheduler_holding()
+        s.enter("a")
+        s.enter("b")
+        self.assertEqual(self.card.switches, ["a", "b"])
+        self.assertEqual(self.card.taken_off, [(), ()],
+                         "loading beside something must take nothing off")
+        loaded = {item["shape"] for item in s.state()["loaded"]}
+        self.assertEqual(loaded, {"a", "b"})
+
+    def test_requests_to_either_go_straight_through(self):
+        s = self.scheduler_holding()
+        s.enter("a")
+        s.leave("a")
+        s.enter("b")
+        s.leave("b")
+        s.enter("a")                            # already there: no reload
+        self.assertEqual(self.card.switches, ["a", "b"])
+
+    def test_a_third_displaces_the_one_nobody_has_wanted(self):
+        s = self.scheduler_holding()
+        s.enter("a")
+        s.leave("a")
+        time.sleep(0.01)
+        s.enter("b")
+        s.leave("b")
+        s.enter("c")
+        self.assertEqual(self.card.switches, ["a", "b", "c"])
+        self.assertEqual(self.card.taken_off[-1], ("a",),
+                         "took off the one used most recently")
+        loaded = {item["shape"] for item in s.state()["loaded"]}
+        self.assertEqual(loaded, {"b", "c"})
+
+    def test_an_idle_model_goes_before_one_that_is_answering(self):
+        # Taking off an idle model costs nothing. Taking off one mid-answer
+        # costs however long it has left, and everything waits for it.
+        s = self.scheduler_holding()
+        s.enter("a")                            # stays busy
+        s.enter("b")
+        s.leave("b")                            # idle, and used most recently
+        s.enter("c")
+        self.assertEqual(self.card.taken_off[-1], ("b",))
+
+    def test_everything_waits_when_the_one_to_go_is_still_answering(self):
+        s = self.scheduler_holding(many=1)      # room for exactly one
+        s.enter("a")                            # holds the only place
+        started = threading.Event()
+        done = threading.Event()
+
+        def wants_b():
+            started.set()
+            s.enter("b")
+            done.set()
+
+        threading.Thread(target=wants_b, daemon=True).start()
+        started.wait(1)
+        time.sleep(0.05)
+        self.assertFalse(done.is_set(), "loaded b while a was still answering")
+        s.leave("a")
+        self.assertTrue(done.wait(2), "b never got in after a finished")
+        self.assertEqual(self.card.taken_off[-1], ("a",))
+
+    def test_nobody_behind_jumps_ahead_of_a_model_change(self):
+        # The rule this whole file exists for, now with two models loaded: a
+        # request for something already there does not overtake one waiting for
+        # a change, even though serving it would cost nothing.
+        s = self.scheduler_holding(many=1)
+        s.enter("a")
+        order = []
+        for shape in ("b", "a"):
+            def wait_for(name=shape):
+                s.enter(name)
+                order.append(name)
+            threading.Thread(target=wait_for, daemon=True).start()
+            time.sleep(0.02)
+        s.leave("a")
+        time.sleep(0.3)
+        self.assertEqual(order[0], "b", "the younger request for a went first")
+
+    def test_a_model_that_can_never_fit_is_refused_rather_than_attempted(self):
+        # Emptying the machine to load something that was never going to fit
+        # is the worst of both: what was working is gone and the load fails.
+        s = scheduler(self.card, make_room=lambda shape, loaded:
+                      None if shape == "huge" else [])
+        s.enter("a")
+        with self.assertRaises(WillNotFit):
+            s.enter("huge")
+        self.assertEqual(self.card.switches, ["a"], "it tried to load it anyway")
+        loaded = {item["shape"] for item in s.state()["loaded"]}
+        self.assertEqual(loaded, {"a"}, "it unloaded something for nothing")
+
+    def test_the_state_counts_what_waits_for_each_model(self):
+        s = self.scheduler_holding(many=1)
+        s.enter("a")
+        for _ in range(2):
+            threading.Thread(target=lambda: s.enter("b"), daemon=True).start()
+        time.sleep(0.1)
+        rows = {item["shape"]: item for item in s.state()["loaded"]}
+        self.assertEqual(rows["a"]["in_flight"], 1)
+        self.assertEqual(s.state()["waiting"].__len__(), 2)

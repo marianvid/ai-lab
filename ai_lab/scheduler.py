@@ -83,6 +83,26 @@ class QueueFull(RuntimeError):
     """More requests are waiting than this manager will hold."""
 
 
+class WillNotFit(RuntimeError):
+    """This model does not fit on this machine, whatever else is unloaded.
+
+    Told to the request rather than discovered by emptying the machine and
+    failing anyway: unloading what was working, to load something that was
+    never going to fit, is the worst of both.
+
+    `detail` is filled in by whoever knows the numbers — this file does not —
+    and reaches the client as fields it can act on rather than a sentence it
+    would have to parse.
+    """
+
+    kind = "insufficient_memory"
+    code = "model_does_not_fit"
+
+    def __init__(self, message: str, detail: dict | None = None) -> None:
+        super().__init__(message)
+        self.detail = detail or {}
+
+
 class Abandoned(RuntimeError):
     """The client went away before its turn came."""
 
@@ -116,24 +136,41 @@ class Scheduler:
     marks the gap so a second thread does not start a second load into it.
     """
 
-    def __init__(self, switch, places, max_waiting: int = 150) -> None:
+    def __init__(self, switch, places, make_room=None,
+                 max_waiting: int = 150) -> None:
         """
-        `switch(shape)` empties the card and puts that shape on it. It may
-        raise, and then everything waiting for that shape is failed with what
-        it raised. What emptying involves is not this file's business.
+        `switch(shape, victims)` takes those shapes off and puts this one on.
+        It may raise, and then everything waiting for that shape is failed with
+        what it raised. What taking off involves is not this file's business.
 
         `places(shape)` says how many requests that shape serves at once.
+
+        `make_room(shape, loaded)` says which of the loaded shapes have to go
+        for this one to fit, in the order they should go. An empty list means
+        it fits beside them; `None` means it never will, whatever is unloaded.
+        `loaded` is one dict per loaded shape — `shape`, `in_flight`,
+        `last_used` — so the decision can prefer an idle one, which costs no
+        waiting, over one still answering, which costs whatever it has left.
+
+        Without it, one shape at a time: everything loaded is a victim of
+        everything else. That is what this did before there was a memory
+        budget, and every existing test of this file still runs that way.
         """
         self._switch = switch
         self._places = places
+        self._make_room = make_room or (lambda shape, loaded:
+                                        [item["shape"] for item in loaded])
         self.max_waiting = max_waiting
 
         self._lock = threading.Lock()
         self._numbers = itertools.count(1)
+        # Shape -> how many requests it is answering. Being in here is what
+        # "loaded" means; there is no second flag to disagree with it.
+        self._loaded: dict = {}
+        # Shape -> when it last had a request admitted, so the choice of what
+        # to unload can prefer whatever nobody has wanted for longest.
+        self._last_used: dict = {}
         self._queue: list[_Waiting] = []
-        self._in_flight = 0
-        self._current: object = None
-        self._loaded = False
         self._switching = False
         # Bumped by `reset`. A load already under way finishes after it — the
         # engine is starting and cannot be called back — and its result must
@@ -150,7 +187,7 @@ class Scheduler:
         """
         with self._lock:
             if self._admits_now(shape):
-                self._in_flight += 1
+                self._take_place(shape)
                 return
             if len(self._queue) >= self.max_waiting:
                 raise QueueFull(
@@ -167,12 +204,27 @@ class Scheduler:
         if entry.failure is not None:
             raise entry.failure
 
-    def leave(self) -> None:
-        """Give back a place, and let in whoever can go next."""
+    def leave(self, shape=None) -> None:
+        """Give back a place, and let in whoever can go next.
+
+        `shape` says which model the request was on. Without it the place is
+        taken from whichever is holding one, which is right while only one is
+        loaded and is why every caller predating the budget still works.
+        """
         with self._lock:
-            if self._in_flight > 0:
-                self._in_flight -= 1
+            if shape is not None and self._loaded.get(shape, 0) > 0:
+                self._loaded[shape] -= 1
+            else:
+                for held in self._loaded:
+                    if self._loaded[held] > 0:
+                        self._loaded[held] -= 1
+                        break
         self._pump()
+
+    def _take_place(self, shape) -> None:
+        """One more request on this shape. Called holding the lock."""
+        self._loaded[shape] = self._loaded.get(shape, 0) + 1
+        self._last_used[shape] = time.time()
 
     # -- what the interface asks --------------------------------------------
 
@@ -182,9 +234,16 @@ class Scheduler:
                         "waiting_s": round(time.time() - entry.arrived, 1)}
                        for entry in self._queue]
             return {
-                "current": self._current if self._loaded else None,
-                "in_flight": self._in_flight,
-                "places": self._places(self._current) if self._loaded else 0,
+                # One entry per loaded shape, with what it is answering and
+                # how many it could. A list because what is on the machine is
+                # a set — one today, more when the budget allows it.
+                "loaded": [{"shape": shape,
+                            "in_flight": count,
+                            "places": self._places(shape),
+                            "waiting": sum(1 for entry in self._queue
+                                           if entry.shape == shape)}
+                           for shape, count in self._loaded.items()],
+                "in_flight": sum(self._loaded.values()),
                 "switching": self._switching,
                 "waiting": waiting,
             }
@@ -201,16 +260,15 @@ class Scheduler:
             self._epoch += 1
             turned_away = self._queue
             self._queue = []
-            self._in_flight = 0
-            self._current = None
-            self._loaded = False
+            self._loaded = {}
+            self._last_used = {}
         for entry in turned_away:
             entry.failure = Abandoned(reason)
             entry.admitted.set()
         return len(turned_away)
 
-    def adopt(self, shape) -> None:
-        """Take up what is already on the card.
+    def adopt(self, *shapes) -> None:
+        """Take up what is already on the machine.
 
         systemd keeps the engines running across a manager restart, which is
         the reason for using it, so a manager coming back finds its model still
@@ -223,20 +281,21 @@ class Scheduler:
         must not overwrite it.
         """
         with self._lock:
-            if self._in_flight or self._queue or self._switching:
+            if any(self._loaded.values()) or self._queue or self._switching:
                 return
-            self._current = shape
-            self._loaded = True
+            now = time.time()
+            self._loaded = {shape: 0 for shape in shapes}
+            self._last_used = {shape: now for shape in shapes}
 
     def forget_current(self) -> None:
-        """Note that the card no longer holds what it did.
+        """Note that the machine no longer holds what it did.
 
-        Called when something outside took the model off. The next request has
-        to load again rather than walk onto an empty card.
+        Called when something outside took a model off. The next request loads
+        again rather than walking onto an empty card.
         """
         with self._lock:
-            self._loaded = False
-            self._current = None
+            self._loaded = {}
+            self._last_used = {}
 
     # -- the decision -------------------------------------------------------
 
@@ -244,9 +303,19 @@ class Scheduler:
         """Straight through, or into the queue. Called holding the lock."""
         return (not self._queue
                 and not self._switching
-                and self._loaded
-                and shape == self._current
-                and self._in_flight < self._places(shape))
+                and shape in self._loaded
+                and self._loaded[shape] < self._places(shape))
+
+    def _loaded_now(self) -> list[dict]:
+        """What is on the machine, for whoever decides what has to go.
+
+        Called holding the lock, and handed out as plain dictionaries so the
+        decision can be taken outside this file — which knows nothing about
+        memory and should not learn.
+        """
+        return [{"shape": shape, "in_flight": count,
+                 "last_used": self._last_used.get(shape, 0.0)}
+                for shape, count in self._loaded.items()]
 
     def _pump(self) -> None:
         """Move things along until nothing more can happen without waiting.
@@ -261,13 +330,13 @@ class Scheduler:
             _release(ready)
             if job is None:
                 return
-            shape, photograph, epoch = job
+            shape, victims, photograph, epoch = job
             failure = None
             try:
-                self._switch(shape)
+                self._switch(shape, victims)
             except BaseException as error:      # reported to everyone waiting
                 failure = error
-            _release(self._settle(shape, photograph, failure, epoch))
+            _release(self._settle(shape, victims, photograph, failure, epoch))
 
     def _plan(self) -> tuple[list[_Waiting], tuple | None]:
         """Decide what can happen now. Called holding the lock.
@@ -280,17 +349,39 @@ class Scheduler:
         ready: list[_Waiting] = []
         while self._queue and not self._switching:
             head = self._queue[0]
-            if self._loaded and head.shape == self._current:
-                if self._in_flight >= self._places(self._current):
+            if head.shape in self._loaded:
+                if self._loaded[head.shape] >= self._places(head.shape):
                     break                       # full: wait for a place
                 self._queue.pop(0)
                 if self._gone(head):
                     continue
-                self._in_flight += 1
+                self._take_place(head.shape)
                 ready.append(head)
                 continue
-            if self._in_flight:
-                break                           # must empty before swapping
+
+            # The head wants something that is not on the machine. Who has to
+            # go for it to fit? Empty means it fits beside what is there and
+            # nothing is taken off.
+            victims = self._make_room(head.shape, self._loaded_now())
+            if victims is None:
+                # It will not fit however much is unloaded. Say so to the whole
+                # run rather than emptying the machine to discover it.
+                self._queue.pop(0)
+                if not self._gone(head):
+                    head.failure = WillNotFit(
+                        "there is not enough memory for this model on this "
+                        "machine, whatever else is unloaded")
+                    head.admitted.set()
+                continue
+            if any(self._loaded.get(shape, 0) for shape in victims):
+                # One of them is still answering. Everything waits until it
+                # finishes — including requests behind this one for models that
+                # are loaded and idle. That is the ordering rule doing its job:
+                # letting them past is how the request at the head never gets
+                # served. And because the door is shut, nothing new joins those
+                # models either, so the wait is bounded by what is already in
+                # flight.
+                break
             # The run at the front of the queue, and only that. Everything
             # from the first request wanting something else stays where it is,
             # however many more of this shape are behind it.
@@ -318,12 +409,10 @@ class Scheduler:
             if not photograph:
                 continue                        # all gone: try the next shape
             self._switching = True
-            self._loaded = False
-            self._current = None
-            return ready, (shape, photograph, self._epoch)
+            return ready, (shape, tuple(victims), photograph, self._epoch)
         return ready, None
 
-    def _settle(self, shape, photograph: list[_Waiting],
+    def _settle(self, shape, victims: tuple, photograph: list[_Waiting],
                 failure: BaseException | None, epoch: int) -> list[_Waiting]:
         """Publish what the load did, and admit who fits.
 
@@ -342,22 +431,28 @@ class Scheduler:
                         "everything was stopped while this model was loading")
                     entry.admitted.set()
                 return ready
+            # Whatever was taken off is off, whether the load that followed
+            # worked or not. Claiming otherwise would send the next request to
+            # a port with nothing behind it.
+            for gone in victims:
+                self._loaded.pop(gone, None)
+                self._last_used.pop(gone, None)
             if failure is not None:
                 for entry in photograph:
                     entry.failure = failure
                     entry.admitted.set()
                 return ready
-            self._current = shape
-            self._loaded = True
+            self._loaded[shape] = 0
+            self._last_used[shape] = time.time()
             room = self._places(shape)
             overflow = []
             for entry in photograph:
                 if self._gone(entry):
                     continue
-                if self._in_flight >= room:
+                if self._loaded[shape] >= room:
                     overflow.append(entry)
                     continue
-                self._in_flight += 1
+                self._take_place(shape)
                 ready.append(entry)
             # More were in the run than fit. They go back at the front, in
             # order, and are let in as places free — they are still the oldest

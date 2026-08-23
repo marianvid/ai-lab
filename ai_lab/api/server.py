@@ -162,10 +162,21 @@ class Handler(BaseHTTPRequestHandler):
         copies what it is given and knows nothing about what is in it.
         """
         status = status_for(error)
-        payload = {"error": _message(error)}
         detail = getattr(error, "detail", None)
+        payload = {"error": _message(error)}
         if isinstance(detail, dict):
             payload.update(detail)
+        # Two audiences, two conventions. The browser reads `error` as a
+        # sentence; a client behind an OpenAI or Anthropic library reads it as
+        # an object with `message`, `type` and `code`, and hands back nothing
+        # useful when it finds a string. Both are given what they expect rather
+        # than one of them being taught the other's shape.
+        if self.path.startswith("/v1/"):
+            payload["error"] = {
+                "message": _message(error),
+                "type": getattr(error, "kind", "invalid_request_error"),
+                "code": getattr(error, "code", None),
+            }
         self._json(payload, status)
 
     def _head(self, status, content_type: str, length: int, cache: bool = False):

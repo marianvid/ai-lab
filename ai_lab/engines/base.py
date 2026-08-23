@@ -154,6 +154,23 @@ class Engine(Protocol):
         """
         ...
 
+    def needs_mb(self, model: ModelSet, params: dict, card_total_mb: float) -> float:
+        """How much of the accelerator this will take, in megabytes.
+
+        Asked before loading, to decide whether there is room and how much to
+        free. Each engine answers for itself because the answer has nothing in
+        common between them: vLLM claims a share of the whole card regardless
+        of the model, llama.cpp takes the weights plus a cache whose size comes
+        from the context.
+
+        Zero means "cannot say" — a caller reads that as no opinion rather than
+        as no memory, and goes ahead. Nothing is remembered between loads;
+        this is worked out from the settings each time, because how much a
+        model needs is a property of the request and knowing it over time is
+        the job of whatever is making the requests.
+        """
+        ...
+
     def api_paths(self) -> tuple[str, ...]:
         """The request shapes this engine answers.
 
