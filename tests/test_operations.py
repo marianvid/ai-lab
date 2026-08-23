@@ -994,3 +994,65 @@ class NamingAnEntryTests(unittest.TestCase):
 
     def test_an_entry_has_no_second_name_at_all(self):
         self.assertNotIn("name", self.operations.instance("model-0"))
+
+
+class PointingAnEngineSomewhereElse(unittest.TestCase):
+    """Which program serves an engine.
+
+    Not expected to change — on a settled machine it never will — but two
+    builds of llama.cpp on one machine is ordinary, and being unable to say
+    which one means editing a file over ssh.
+    """
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.root = Path(self._temporary.name).resolve()
+        self.addCleanup(self._temporary.cleanup)
+        (self.root / "bin").mkdir()
+        self.program = self.root / "bin" / "llama-server"
+        self.program.write_text("#!/bin/sh\n")
+        self.program.chmod(0o755)
+        (self.root / "bin" / "notes.txt").write_text("not a program")
+        (self.root / "bin" / "sub").mkdir()
+
+        self.path = self.root / "config.json"
+        self.path.write_text(json.dumps({
+            "models_root": str(self.root),
+            "engines": {"llamacpp": {"binary": "/bin/true"}},
+            "repositories": [], "instances": [],
+        }))
+        self.store = ConfigStore(self.path)
+        host = FakeHost()
+        self.operations = Operations(
+            store=self.store, catalog=Catalog(),
+            runtime=Runtime(host, EventBus(), sample_interval_s=0),
+            settings=Settings(self.store, host, Registry()),
+            downloads=DownloadManager(), huggingface=offline_huggingface(),
+            host=host, engines=FakeRegistry(host),
+        )
+
+    def test_the_program_is_saved(self):
+        self.operations.update_engine_binary("llamacpp", str(self.program))
+        self.assertEqual(self.store.load().engines["llamacpp"]["binary"],
+                         str(self.program))
+
+    def test_something_that_cannot_be_run_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_engine_binary(
+                "llamacpp", str(self.root / "bin" / "notes.txt"))
+        self.assertIn("cannot be run", str(caught.exception))
+        self.assertEqual(self.store.load().engines["llamacpp"]["binary"], "/bin/true")
+
+    def test_a_folder_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_engine_binary("llamacpp", str(self.root / "bin"))
+        self.assertIn("not a program", str(caught.exception))
+
+    def test_something_that_is_not_there_is_refused_before_saving(self):
+        with self.assertRaises(ValueError):
+            self.operations.update_engine_binary("llamacpp", "/nowhere/at/all")
+        self.assertEqual(self.store.load().engines["llamacpp"]["binary"], "/bin/true")
+
+    def test_an_unknown_engine_is_a_missing_thing(self):
+        with self.assertRaises(KeyError):
+            self.operations.update_engine_binary("nonesuch", str(self.program))

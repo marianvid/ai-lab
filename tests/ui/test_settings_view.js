@@ -61,17 +61,41 @@ describe('the Settings page', () => {
     assert.equal(view.textContent.includes('null'), false, view.textContent);
   });
 
-  it('offers one path to choose, and shows the rest', async () => {
-    // Nothing here is typed. A path typed by hand is a path with a typo in it,
-    // and the failure arrives much later as a screen with no models on it.
+  it('offers exactly the paths that are a choice', async () => {
+    // The model store is chosen from a listing, because it is a folder and a
+    // typo there empties every screen. An engine's program is typed, because a
+    // folder chooser cannot pick a file and this is a field somebody touches
+    // once. The format folders follow from the root and are neither.
     const { view } = await renderPage();
     const section = [...view.querySelectorAll('.section')]
       .find((item) => item.textContent.startsWith('Paths'));
-    assert.equal(section.querySelectorAll('input').length, 0,
-                 'a path is typeable');
+    // The format folders follow from the root, so none of them is a field.
+    assert.equal(section.querySelectorAll('.row.derived input').length, 0);
     const buttons = [...section.querySelectorAll('button')]
       .map((item) => item.textContent.trim());
-    assert.deepEqual(buttons, ['Browse…'], 'one choice, and no Save to forget');
+    assert.deepEqual(buttons, ['Browse…', 'Save'],
+                     'the models root is chosen; an engine program is typed');
+    assert.equal(section.querySelectorAll('.row.derived button').length, 0,
+                 'a folder that follows from the root offered a choice');
+  });
+
+  it('lets an engine be pointed somewhere else, and sleeps until it is', async () => {
+    const { view, calls } = await renderPage();
+    const field = view.querySelector('input.path');
+    assert.equal(field.value, '/opt/ai/llama.cpp/build/bin/llama-server');
+    const save = [...view.querySelectorAll('button')]
+      .find((item) => item.textContent.trim() === 'Save');
+    assert.equal(save.disabled, true);
+
+    field.value = '/usr/local/bin/llama-server';
+    field.dispatchEvent(new window.Event('input', { bubbles: true }));
+    assert.equal(save.disabled, false);
+    save.click();
+    await settle();
+    const saved = calls.find((call) => call.method === 'PATCH');
+    assert.ok(saved, 'nothing was saved');
+    assert.match(saved.path, /\/api\/engines\/llamacpp\/binary/);
+    assert.equal(JSON.parse(saved.body).path, '/usr/local/bin/llama-server');
   });
 
   it('shows each format as a folder under the root', async () => {
@@ -90,7 +114,10 @@ describe('the Settings page', () => {
       .find((card) => card.textContent.includes('llama.cpp · '));
     assert.equal(engine.textContent.includes('/opt/ai/llama.cpp/build/bin'), false,
                  'the program is still on the engine card');
-    assert.match(view.textContent, /\/opt\/ai\/llama\.cpp\/build\/bin\/llama-server/);
+    // It lives in a field now, so its value is not in the page text.
+    const values = [...view.querySelectorAll('input.path')].map((item) => item.value);
+    assert.ok(values.includes('/opt/ai/llama.cpp/build/bin/llama-server'),
+              values.join(' | '));
   });
 
   it('gives no path to an engine that cannot run here', async () => {

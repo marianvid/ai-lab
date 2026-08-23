@@ -65,15 +65,16 @@ function paths(settings, refresh) {
     // path fixes that — and the engine card already says why.
     ...(settings.engines || [])
       .filter((engine) => engine.available && engine.binary)
-      .map((engine) => readOnly(engine.name, engine.binary, '')),
+      .map((engine) => program(engine, refresh)),
   ];
   return section('Paths', rows);
 }
 
 
-// The one path that is chosen rather than followed. Picked from a listing of
-// what is on the machine, and saved as soon as it is picked: there is nothing
-// half-typed to confirm, so there is nothing for a Save button to do.
+// The one path that is chosen rather than typed or followed. A folder, and a
+// typo in it empties every screen, so it is picked from a listing of what is
+// actually on the machine — and saved as soon as it is picked, because there
+// is nothing half-typed to confirm.
 function chosen(root, refresh) {
   return element('div', { class: 'row' }, [
     element('strong', { text: 'Models root',
@@ -93,6 +94,47 @@ function chosen(root, refresh) {
         refresh();
       }),
     }),
+  ]);
+}
+
+
+// Which program serves an engine.
+//
+// Typed, with a Save, and that is deliberate: this is not expected to change —
+// on a settled machine it never will — so the point is only that it *can* be
+// changed without editing a file over ssh. A folder chooser cannot pick a
+// file, and teaching it to would be a lot of machinery for a field somebody
+// touches once.
+//
+// Save sleeps until the field differs from what is in force, so pressing it
+// always means something.
+function program(engine, refresh) {
+  const field = element('input', { class: 'grow path', value: engine.binary || '' });
+  const save = element('button', {
+    class: 'action', text: 'Save', disabled: 'disabled',
+    onclick: (event) => whileWorking(event.target, 'Saving…', async () => {
+      try {
+        await api.updateEngineBinary(engine.id, field.value.trim());
+      } catch (error) {
+        save.disabled = false;
+        await showNotice({ title: `Could not point ${engine.name} there`,
+                           body: error.message });
+        return;
+      }
+      refresh();
+    }),
+  });
+  field.addEventListener('input', () => {
+    save.disabled = field.value === (engine.binary || '');
+  });
+
+  return element('div', { class: 'row' }, [
+    element('strong', { text: engine.name,
+                        title: 'The program that serves this engine. Takes '
+                             + 'effect the next time a model starts; nothing '
+                             + 'already running is touched.' }),
+    field,
+    save,
   ]);
 }
 
