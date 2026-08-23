@@ -464,11 +464,16 @@ dialog.review .small { font-size: 0.85rem; }
 .row.version.active { background: var(--raised, rgba(127, 127, 127, 0.08)); }
 .versions h4 { display: flex; align-items: center; gap: 0.5rem; }
 
-/* How much memory this machine has for models. Figures above, and below them
-   the one thing that is set rather than read. */
-.card.memory .row { justify-content: space-between; padding: 0.2rem 0; }
-.card.memory .row.reserve {
+/* What this machine is, and how much of it models may use. The memory figures
+   are set off from the hardware above them, and the reserve — the one thing
+   here that is set rather than read — from the figures it comes out of. */
+.machine .card .row { justify-content: space-between; padding: 0.2rem 0; }
+.machine .card .row.memory {
   border-top: 1px solid var(--line, rgba(127, 127, 127, 0.25));
   margin-top: 0.4rem; padding-top: 0.5rem;
 }
-.card.memory input.number.small { width: 7rem; text-align: right; }
+.machine .card .row.reserve {
+  border-top: 1px solid var(--line, rgba(127, 127, 127, 0.25));
+  margin-top: 0.4rem; padding-top: 0.5rem;
+}
+.machine .card input.number.small { width: 7rem; text-align: right; }

@@ -1,8 +1,10 @@
-// How much memory this machine has for models, on the Settings page.
+// What this machine is, on the Settings page.
 //
-// A capacity, not a reading: what is free right now belongs on the Gateway
-// page with the rest of what is happening. Mixing the two makes a number that
-// answers neither question, and these tests hold the line.
+// One card: the chip, what starts the engines, and how much memory models may
+// use. Nothing in it moves on its own — how much is used, how warm the card
+// is, how many requests are running are facts about right now, and right now
+// is the Gateway page. Mixing the two makes a figure that answers neither
+// question, and these tests hold that line.
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
@@ -35,10 +37,19 @@ const MAC = {
   ],
 };
 
-async function draw(state, responses = {}) {
+const CHIP = { name: 'NVIDIA RTX PRO 4500 Blackwell', kind: 'cuda',
+               memory_kind: 'dedicated', temperature_c: 32,
+               utilization_percent: 0, memory_used_mb: 28946,
+               memory_total_mb: 32623 };
+const APPLE = { name: 'Apple M3 Max', kind: 'metal', memory_kind: 'unified',
+                temperature_c: null, utilization_percent: null,
+                memory_used_mb: 21000, memory_total_mb: 131072 };
+
+async function draw(memory, { chip = CHIP, host = { supervisor: 'systemd' },
+                              responses = {} } = {}) {
   const context = installDom(responses);
-  const { memory } = await import(`../../ai_lab/web/js/views/memory.js?${Math.random()}`);
-  const node = memory(state, () => {});
+  const { machine } = await import(`../../ai_lab/web/js/views/machine.js?${Math.random()}`);
+  const node = machine({ accelerator: chip, memory, host }, () => {});
   if (node) context.view.append(node);
   await settle();
   return context;
@@ -54,29 +65,63 @@ const rows = (view) => [...view.querySelectorAll('.row')].map((r) => ({
   value: r.children[1].textContent.trim(),
 }));
 
-describe('available memory', () => {
+describe('the machine', () => {
   let dom;
   before(() => { dom = installDom({}); });
   after(() => dom.restore && dom.restore());
   beforeEach(() => { document.body.innerHTML = ''; });
 
-  it('is named for what it answers', async () => {
+  it('is one card about one subject', async () => {
     const { view } = await draw(LINUX);
-    assert.match(view.querySelector('h3').textContent, /Available memory/);
+    assert.equal(view.querySelectorAll('.section').length, 1);
+    assert.equal(view.querySelector('h3').textContent, 'Machine');
+    // The heading goes above the panel, like every other section here.
+    assert.equal(view.querySelector('h3').parentElement.className, 'section machine');
+  });
+
+  it('names the chip and what starts the engines', async () => {
+    const { view } = await draw(LINUX);
+    const listed = rows(view);
+    assert.deepEqual(listed[0],
+                     { label: 'Accelerator', value: 'NVIDIA RTX PRO 4500 Blackwell' });
+    assert.deepEqual(listed[1], { label: 'Engines started by', value: 'systemd' });
+  });
+
+  it('says what the supervisor is rather than what the code calls it', async () => {
+    // "subprocess" is a word from the source, not a thing anybody runs.
+    const { view } = await draw(MAC, { chip: APPLE,
+                                       host: { supervisor: 'subprocess' } });
+    assert.deepEqual(rows(view)[1],
+                     { label: 'Engines started by', value: 'this application' });
+  });
+
+  it('holds nothing that moves on its own', async () => {
+    // Used, temperature and utilisation all belong to right now, and right now
+    // is the Gateway page. A figure read here should still be true an hour
+    // later.
+    const { view } = await draw(LINUX);
+    assert.equal(view.textContent.includes('28946'), false, 'shows what is used');
+    assert.equal(view.textContent.includes('°C'), false, 'shows the temperature');
+    assert.match(view.textContent, /32623/, 'but does show how big the card is');
+  });
+
+  it('says nothing about being read-only, now that it is not', async () => {
+    const { view } = await draw(LINUX);
+    assert.equal(/read-only/i.test(view.textContent), false);
   });
 
   it('lists VRAM and RAM on a machine with a card', async () => {
     const { view } = await draw(LINUX);
     const listed = rows(view);
-    assert.deepEqual(listed[0], { label: 'VRAM', value: '32623 MB' });
-    assert.deepEqual(listed[1], { label: 'RAM', value: '40960 MB' });
+    assert.deepEqual(listed[2], { label: 'VRAM', value: '32623 MB' });
+    assert.deepEqual(listed[3], { label: 'RAM', value: '40960 MB' });
   });
 
   it('lists the card whole, not what is left of it', async () => {
     // 28.9 GB of this card is held by a running model. That is a fact about
     // now and belongs on the Gateway page; this line says how big the card is.
     const { view } = await draw(LINUX);
-    assert.match(rows(view)[0].value, /32623/);
+    assert.match(rows(view)[2].value, /32623/);
     assert.equal(view.textContent.includes('3677'), false,
                  'this card is showing what is free rather than what there is');
   });
@@ -84,17 +129,18 @@ describe('available memory', () => {
   it('takes the reserve out of RAM but not out of VRAM', async () => {
     // Nothing but models uses the card. The machine is shared.
     const { view } = await draw(LINUX);
-    assert.equal(rows(view)[0].value, '32623 MB');    // the whole card
-    assert.equal(rows(view)[1].value, '40960 MB');    // 49152 less 8192
+    assert.equal(rows(view)[2].value, '32623 MB');    // the whole card
+    assert.equal(rows(view)[3].value, '40960 MB');    // 49152 less 8192
   });
 
   it('says unified memory once, and calls it that', async () => {
-    const { view } = await draw(MAC);
+    const { view } = await draw(MAC, { chip: APPLE });
     const listed = rows(view);
-    assert.deepEqual(listed[0], { label: 'Unified memory', value: '114688 MB' });
+    assert.deepEqual(listed[2], { label: 'Unified memory', value: '114688 MB' });
     assert.equal(view.textContent.includes('VRAM'), false,
                  'one pool shown twice doubles the machine');
-    assert.equal(listed.length, 2, 'expected one memory line and the reserve');
+    assert.equal(listed.length, 4,
+                 'expected the chip, the supervisor, one memory line and the reserve');
   });
 
   it('names the reserve for what it protects, not for what it withholds', async () => {
@@ -121,7 +167,8 @@ describe('available memory', () => {
   it('sends the reserve, not the amount left over', async () => {
     // The field is the reserve. Sending what is available instead would go
     // stale the moment this machine is given more memory.
-    const { view, calls } = await draw(MAC, { 'PATCH /api/memory': MAC });
+    const { view, calls } = await draw(MAC, {
+      responses: { 'PATCH /api/memory': MAC } });
     const input = field(view);
     input.value = '24576';
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -132,8 +179,17 @@ describe('available memory', () => {
     assert.deepEqual(JSON.parse(sent.body), { reserve_mb: 24576 });
   });
 
-  it('draws nothing at all when the machine could not be read', async () => {
+  it('leaves the memory lines out when they could not be read', async () => {
+    // No pools means the machine could not answer — not that it has no room.
+    // A row of zeroes would be a claim, and the wrong one. The chip is still
+    // worth saying.
     const { view } = await draw({ unified: false, pools: [], capacity_mb: 0 });
-    assert.equal(view.querySelector('.card.memory'), null);
+    assert.match(view.textContent, /NVIDIA RTX PRO 4500/);
+    assert.equal(view.querySelector('input[type="number"]'), null);
+  });
+
+  it('draws nothing at all when there is nothing to say', async () => {
+    const { view } = await draw({ pools: [] }, { chip: {}, host: {} });
+    assert.equal(view.querySelector('.section.machine'), null);
   });
 });

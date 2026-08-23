@@ -1,4 +1,4 @@
-// Settings: repositories, free space, accelerator and engines.
+// Settings: the machine, its engines, and where models are kept.
 // Everything here is read-only by decision.
 
 import { api } from '../api.js';
@@ -7,7 +7,7 @@ import { chooseFolder } from '../browse.js';
 import { whileWorking } from '../working.js';
 import { reviewUpdate } from './whatchanges.js';
 import { versions } from './versions.js';
-import { memory } from './memory.js';
+import { machine } from './machine.js';
 import { onLog } from '../events.js';
 import { bytes, element, seconds } from '../format.js';
 
@@ -40,28 +40,6 @@ function section(title, children) {
   return element('div', { class: 'section' }, [
     element('h3', { text: title }),
     element('div', { class: 'card' }, children),
-  ]);
-}
-
-function accelerator(snapshot, host) {
-  const rows = [
-    ['Name', snapshot.name || '—'],
-    ['Kind', `${snapshot.kind} · ${snapshot.memory_kind} memory`],
-    ['Memory', snapshot.memory_total_mb
-      ? `${Math.round(snapshot.memory_used_mb)} / ${Math.round(snapshot.memory_total_mb)} MB`
-      : '—'],
-    ['Temperature', snapshot.temperature_c != null ? `${snapshot.temperature_c} °C` : '—'],
-    ['Utilisation', snapshot.utilization_percent != null ? `${snapshot.utilization_percent} %` : '—'],
-    ['Supervisor', host.supervisor],
-  ];
-  return section('Accelerator', [
-    ...rows.map(([label, value]) => element('div', { class: 'row' }, [
-      element('span', { class: 'muted', text: label }),
-      element('span', { text: value }),
-    ])),
-    element('p', { class: 'muted',
-                   text: 'Read-only: accelerator settings are changed '
-                         + 'deliberately elsewhere.' }),
   ]);
 }
 
@@ -266,17 +244,16 @@ export async function render(container) {
   ]);
   byEngine.clear();
   (installed || []).forEach((item) => byEngine.set(item.engine, item));
-  // Two columns: what you change on the left, what you can only read on the
-  // right. The accelerator is a report, so it sits out of the way of the
-  // things that have buttons.
+  // Two columns. On the left the things that are worked on — engines that get
+  // updated, folders that get pointed somewhere else. On the right what this
+  // machine is, which is read far more often than it is changed.
   container.replaceChildren(element('div', { class: 'columns' }, [
     element('div', {}, [
       engines(settings.engines, refresh),
       repositories(settings.repositories, refresh),
     ]),
     element('div', {}, [
-      accelerator(settings.accelerator, settings.host),
-      memory(settings.memory, refresh),
+      machine(settings, refresh),
     ].filter(Boolean)),
   ]));
 }

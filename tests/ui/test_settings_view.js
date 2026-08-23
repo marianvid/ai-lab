@@ -182,10 +182,13 @@ describe('the Settings page', () => {
     assert.match(view.textContent, /read-only/);
   });
 
-  it('reports the accelerator as something it will not change', async () => {
+  it('names the machine, and no longer calls it read-only', async () => {
+    // The accelerator used to be a report and said so. It is now part of the
+    // Machine card, which has a setting in it — how much memory to hold back
+    // — so the sentence was both clutter and untrue.
     const { view } = await renderPage();
     assert.match(view.textContent, /RTX PRO 4500/);
-    assert.match(view.textContent, /Read-only/);
+    assert.equal(/read-only/i.test(view.textContent), false);
   });
 
   it('describes an engine once, not in two places', async () => {
