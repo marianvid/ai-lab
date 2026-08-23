@@ -88,7 +88,7 @@ function address(stats) {
 }
 
 // What the accelerator says about itself. Memory is the binding constraint on
-// a machine that holds one model at a time; the other two arrive in the same
+// the binding constraint on how many models fit; the other two arrive in the same
 // reading, so they cost nothing extra.
 // What the machine has room for, and how warm it is.
 //

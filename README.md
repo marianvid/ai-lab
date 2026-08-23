@@ -1,10 +1,8 @@
 # AI-Lab
 
-> **Work in progress, built for personal use.** This is a home-lab tool that
-> runs on one particular pair of machines, and it is still being changed
-> frequently. It is public because the measurements and the approach may be
-> useful to someone; it is not a product, has no support, and makes no promise
-> of staying still.
+> **Built for personal use.** This is a home-lab tool that runs on one
+> particular pair of machines. It is public because the measurements and the
+> approach may be useful to someone; it is not a product and has no support.
 
 **This was written with an AI agent, and it is meant to be read the same way.**
 Take it as a starting point rather than as something to install. Your machine is
@@ -12,8 +10,6 @@ not this machine: different card, different amount of memory, different models,
 a different idea of what the thing should do. Point your own agent at this
 repository and have it adapt the code to what you have. That is a good deal
 faster than reading it all yourself, and it is how the code got here.
-
-**It is still being built.** Things move; expect the odd rough edge.
 
 Provides a manager for local inference engines. It shows what models are on disk, what
 is loaded on the accelerator right now, and how long a model took to load —
@@ -85,38 +81,91 @@ API key is checked; any value will do. `GET /v1/models` lists every configured
 entry, loaded or not, which is the point: a client is meant to be able to ask
 for one of them.
 
-**One model on the card. Many requests to it.**
+## Running an agent workflow when the models do not all fit
 
-The card holds one model — that is the machine. Requests *to that model* run
-together, up to the number the engine was started to serve: `parallel` for
-llama.cpp, `max_sequences` for vLLM. That is what the engines are built for,
-and it is the commonest shape agent traffic has — several subagents fanning out
-over one model.
+This is the problem the whole thing exists for. An agent workflow uses several
+models and a card holds one or two of them. Something has to give, and the
+question is only whether it gives silently.
 
-Measured here on an RTX PRO 4500 with Qwen3-Coder-30B at eight places: eight
-requests at once took 1.2 s against 3.1 s one after another.
+**As many models as fit stay loaded.** How many is not a decision, it is the
+machine: whatever the memory budget allows — what is free, less what is held
+back for the machine itself, which you set in Settings. Measured on the RTX PRO
+4500, two llama.cpp models sat together and both answered without reloading:
 
-**Requests for a different model wait, and the queue is served in order.**
-Requests next to each other wanting the same model go in together; the run
-stops at the first one wanting something else. Nothing younger is served first,
-even when it wants the model already loaded and would cost nothing — the fifty
-requests for one model may be waiting on the answer to the one request for
-another.
+| | on the card | answered in |
+|---|---|---|
+| `gemma-general` | 3,544 MB | 0.04 s |
+| `gemma26-gguf` | 20,539 MB together | 0.08 s |
 
-The cost is not hidden: requests that alternate between two models swap on
-every one of them.
+Alternating between those two used to cost a load every time — 3 s and 9.6 s.
+Now it costs 40 and 80 milliseconds, because neither leaves.
+
+**Requests to a loaded model run together**, up to the number the engine was
+started to serve: `parallel` for llama.cpp, `max_sequences` for vLLM. Measured
+with Qwen3-Coder-30B at eight places: eight requests at once took 1.2 s against
+3.1 s one after another.
+
+**When the next model does not fit, everything stops until it does.** The queue
+is served in order and the door closes for everybody — including requests for a
+model that is loaded and idle, which would cost nothing. That is deliberate: let
+them past and the request at the head is never served, because there is always
+another cheap one behind it. So the machine frees what it has to, waits for
+those models to finish what they are answering, unloads them, and loads the one
+that was asked for.
+
+Which models go: idle ones first, because taking one off costs no waiting, then
+whichever has gone longest without a request. Nothing is protected, and nothing
+is unloaded until something needs the room.
+
+**A model that will not fit however much is unloaded is refused before
+anything is disturbed**, with the numbers to correct by — see the errors below.
+Unloading what was working to load something that was never going to fit is the
+worst of both.
 
 Two consequences worth designing around:
 
 - A model plus the settings it was started with is one thing. Two requests for
-  the same model wanting different context sizes cannot share a card.
+  the same model wanting different context sizes cannot both be served without
+  a reload.
 - A request must not wait, inside itself, on another request to this gateway.
   Fill every place with things that cannot finish and nothing finishes.
 
-The Gateway page reports what this is costing. The number to read is switches
-as a share of requests: a workflow changing model on most of its steps spends
-its time loading rather than working, and the fix is to reorder the workflow so
-that steps sharing a model run together, not to change a setting here.
+What this costs is on the Gateway page: how many loads happened, how many of
+them pushed another model off, and what share of the working time went on
+loading rather than answering.
+
+### What actually fits, measured
+
+Every model here was loaded on the RTX PRO 4500 (32,623 MiB) and the card read
+afterwards:
+
+| model | engine | on the card |
+|---|---|---|
+| `gemma-4-E4B` | llama.cpp | 3,902 MiB |
+| `gemma-4-26B-A4B` | llama.cpp | 18,184 |
+| `Qwen3.6-35B-A3B` | llama.cpp | 21,880 |
+| `gemma-4-31B` | llama.cpp | 24,614 |
+| `qwopus27b` | vLLM | 27,382 |
+| `glm47flash` | vLLM | 28,350 |
+| `gemma-4-26B-A4B` | vLLM | 28,842 |
+| `coder30b` | vLLM | 29,740 |
+
+**A vLLM model takes a share of the whole card, not what its weights need.**
+`gpu_memory_fraction` is 0.9 by default, and gemma-4-26b has 17.5 GB of weights
+and occupies 28.8 GB — the rest is cache for concurrent requests. So two vLLM
+models at the default never fit together, and lowering the fraction is the only
+thing that changes that.
+
+**llama.cpp takes roughly its weights plus a cache.** How much cache is not
+worth predicting: at a 32k context the gap between file size and card usage ran
+from **−476 MiB to +6,663** across four models, because architectures differ in
+how they attend. So when the weights alone will not fit, llama.cpp is told to
+put on as many layers as it can and leave the rest in system memory — it
+measures the card at startup, which nothing outside it can do. That is slower:
+moving 20 of 80 layers off the card cut prompt reading to a ninth here.
+Generation suffers far less.
+
+## Asking for a model a particular way
 
 Load and Unload on the Models page reach the engines directly, so they ask
 first when the card is mid-answer, and offer to stop it anyway. A wedged model
@@ -141,12 +190,12 @@ Which shapes each entry answers is in `GET /v1/models`, so a client can look
 rather than guess. The engine declares it, so adding a shape — or an engine
 that speaks one — is a line in that engine's file and nothing else changes.
 
-### Asking for the model started a particular way
+### The `ai_lab` field: asking for the model started a particular way
 
 Some settings go in a request — temperature, top-p, how many tokens to write.
-Others decide how the model *process* starts, and cannot: context size is the
-one that matters, because a model has to be told at startup how much it will
-be asked to hold.
+Others decide how the model *process* starts, and cannot: a model has to be
+told at startup how much context it will be asked to hold, and how much of the
+card it may claim.
 
 Sending one of those in the body does nothing. It reaches the engine, which
 does not recognise it and ignores it without a word, and you are left with the
@@ -159,6 +208,43 @@ same truncations and no idea why. So they travel in a field of their own:
   "ai_lab": { "context_size": 65536 }
 }
 ```
+
+**Anything the engine declares as a setting can go in there**, and it is
+checked by the engine's own rules — the same rules the Settings page uses — so
+a name it does not have, or a number out of range, is refused before anything
+loads. The ones worth knowing:
+
+| setting | engine | what it decides |
+|---|---|---|
+| `context_size` | both | how much the model will be asked to hold. The commonest reason to use this field at all |
+| `gpu_memory_fraction` | vLLM | how much of the whole card vLLM claims, 0.10 to 0.98. **This is what decides whether a second model fits beside it** |
+| `max_sequences` | vLLM | how many requests it interleaves in one pass |
+| `parallel` | llama.cpp | slots. llama.cpp divides the context between them rather than sharing it, so four slots means a quarter each |
+| `gpu_layers` | llama.cpp | `-1` all on the card, `-2` fit what you can and leave the rest in system memory, a number to set it yourself |
+| `cache_type_k`, `cache_type_v` | llama.cpp | how the context cache is stored. `q4_0` costs a fraction of `f16` |
+| `tool_calling` | vLLM | which family's tool-call format to expect. Empty means tools are refused |
+
+Two examples of the second row, which is the one that matters for fitting more
+than one model:
+
+```json
+{ "model": "reviewer",
+  "messages": [{"role": "user", "content": "..."}],
+  "ai_lab": { "gpu_memory_fraction": 0.45, "max_sequences": 8 } }
+```
+
+Half the card instead of nine tenths, so something else can sit beside it —
+at the cost of a much smaller cache, and therefore fewer requests at once.
+
+```json
+{ "model": "coder-fast",
+  "messages": [{"role": "user", "content": "..."}],
+  "ai_lab": { "context_size": 98304, "cache_type_k": "q4_0",
+              "cache_type_v": "q4_0" } }
+```
+
+A long context that would not otherwise fit, bought by storing the cache in
+four bits instead of sixteen.
 
 What happens:
 
@@ -178,10 +264,50 @@ about 40 for one on vLLM — so asking for different settings on every step of a
 workflow costs that every time. Asking for the same ones repeatedly costs
 nothing: the second identical request is answered without reloading.
 
-Nothing here interrupts an answer in progress. Every request takes the card in
+Nothing here interrupts an answer in progress. Every request takes its place in
 turn and holds it to the last byte, so a request wanting different settings
 waits like any other. That is why the Load and Unload buttons need a guard and
 this does not — the buttons do not queue.
+
+### When a model cannot be loaded
+
+The refusal is the answer, so it carries what an agent needs to correct itself
+rather than a sentence to parse. Through `/v1/` it arrives in the shape an
+OpenAI client already understands, with the detail beside it:
+
+```json
+{
+  "error": {
+    "message": "there is not enough memory for this model on this machine, whatever else is unloaded",
+    "type": "insufficient_memory",
+    "code": "model_does_not_fit"
+  },
+  "ai_lab": {
+    "model": "gemma31-nvfp4",
+    "engine": "vLLM",
+    "needed_mb": 29361,
+    "available_mb": 3677,
+    "capacity_mb": 32623,
+    "pool": "card",
+    "loaded": ["text-bulk"],
+    "asked": { "context_size": 131072 }
+  }
+}
+```
+
+`needed_mb` against `capacity_mb` says whether it could ever fit here;
+`available_mb` says whether it fits now. An agent that reads them can ask again
+with a smaller context, or a smaller share of the card, without anybody
+guessing.
+
+An engine that refuses for its own reasons passes its own words through
+unchanged — vLLM, told to hold more context than it can, names the largest that
+would have fitted, and that sentence is the most useful thing in the answer.
+
+**Nothing about any of this is remembered between requests.** This manager
+reports what it measures now and works out what a request asks for; knowing
+that a particular model and context fitted last Tuesday is the business of
+whatever is making the requests.
 
 ### Running Claude Code against a model on your own card
 

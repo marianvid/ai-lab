@@ -79,12 +79,24 @@ no HTTP: it decides which entry serves a name and makes sure that entry is the
 one on the card. Forwarding the request and streaming the answer back are the
 web layer's job.
 
-**One model on the card. Many requests to it.** The card holds one model —
-that is the machine. Requests *to that model* run together, up to the number
-the engine was started to serve, because that is what the engines are built
-for: vLLM interleaves them in one pass, measured at up to seventeen times the
-throughput as concurrency rises against about 1.4 for llama.cpp. Making them
-take turns threw that away.
+**As many models as fit. Many requests to each.** How many is not a decision
+here, it is the machine: whatever the memory budget allows — what is free, less
+what is held back for the machine itself. Requests to a loaded model run
+together, up to the number the engine was started to serve, because that is
+what the engines are built for: vLLM interleaves them in one pass, measured at
+up to seventeen times the throughput as concurrency rises against about 1.4 for
+llama.cpp. Making them take turns threw that away.
+
+**How much a model needs is worked out from its settings, and never
+remembered.** vLLM claims a share of the whole card and the setting says which,
+so that is the answer exactly. llama.cpp gets the weights as a floor and
+nothing more — measured at a 32k context, the gap between file size and card
+usage ran from -476 MiB to +6,663 across four models, so a computed cache
+figure would look exact and be wrong. Where the arithmetic is unavailable
+everything comes off: "cannot say" must never read as "yes, they all fit".
+
+What a model took last time is knowledge about the past, and it belongs to
+whatever is making the requests. This manager reports what it measures now.
 
 The number is the engine's own, per entry — slots for llama.cpp, sequences for
 vLLM — and `Engine.concurrency` is where it is asked for. Guessing from a
@@ -95,6 +107,14 @@ It used to be one request at a time, and the reasoning written here was that an
 agent workflow is a sequence. That stopped being true the moment subagents
 fanned out over one model, which is the commonest shape there is. The premise
 changed; the conclusion had to.
+
+**Which model comes off, when one has to, is decided in `gateway.py` and
+never in `scheduler.py`.** The scheduler is handed a function that answers it,
+because a shape there is an opaque key and it knows nothing about megabytes.
+Idle models go first, since taking one off costs no waiting, then whichever has
+gone longest without a request — and everything waits for that one to finish.
+Nothing is protected from being unloaded, and nothing is unloaded until
+something needs the room.
 
 **Requests for a different model queue, and the rules are in `scheduler.py`.**
 Two of them are easy to get wrong and impossible to notice afterwards:
@@ -233,6 +253,34 @@ The catalog applies shard rules to files on disk; the downloader applies the
 same rules to a listing from Hugging Face. They must agree, or a model
 downloads as one thing and appears in the library as another. Since neither may
 import the other, the rules live below both.
+
+### Why `budget.py` exists
+
+How many models fit is a question two screens ask and one decision depends on,
+and they must not answer it separately: two figures that mean the same and are
+worked out twice eventually disagree, and the one on screen is the one nobody
+checks.
+
+Two pools, and they are not the same. **A dedicated card is used whole** —
+nothing else on this machine wants it. **The machine's own memory is shared**
+with the browser, the editor and the operating system, so a part is held back,
+and that reserve is the one setting. Held back as a reserve rather than as an
+allowance because a reserve stays right when the machine changes: a container
+grown from 48 GB to 64 GB should offer models the extra 16.
+
+**On Apple silicon there is one pool.** The chip and everything else draw on
+the same memory, so a card figure and a machine figure would count it twice.
+
+Two different questions, kept apart. `for_models_mb` is the pool less the
+reserve and moves only when the reserve is saved — that is what a settings
+screen shows. `available_mb` is what is free less the reserve and moves as
+models come and go — that is what the gateway watches and what an admission
+decision asks. Confusing them would either refuse a model that fits or accept
+one that does not.
+
+Counted conservatively: refusing a model that would have fitted costs a
+sentence on screen, while starting one that does not costs the model that was
+already working.
 
 ### Why `capabilities.py` exists
 

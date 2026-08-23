@@ -6,15 +6,18 @@ one of them can be on the card. An agent that names a model which is not running
 gets a refused connection, and the workflow stops there.
 
 This removes that. A request names a model; if it is already loaded the request
-goes through, and if it is not, the card is emptied and that model is loaded
-first. The agent waits longer for that one request and sees nothing else.
+goes through, and if it is not, room is made and that model is loaded first.
+The agent waits longer for that one request and sees nothing else.
 
-## One model on the card. Many requests to it.
+## As many models as fit. Many requests to each.
 
-The card holds one model. That is the machine, not a decision.
+How many is not a decision here, it is the machine: whatever the memory budget
+allows, which is what is free less what is held back for the machine itself.
+Measured on the container, a 3.5 GB model and a 17 GB one sit together and both
+answer without reloading; a second vLLM model at its default share of the card
+does not, and never will.
 
-Requests to the model that is on it are a different matter, and they run
-together — up to the number the engine was started to serve. vLLM interleaves
+Requests to a model that is loaded run together — up to the number the engine was started to serve. vLLM interleaves
 them in the same pass, which is where its throughput comes from: measured on
 this machine at up to seventeen times as concurrency rises, against about 1.4
 for llama.cpp. Making them take turns threw that away.
@@ -901,8 +904,10 @@ class Gateway:
         Reading it costs one call the caller is making anyway, and it cannot be
         wrong.
 
-        One name, not a list, because one model on the card is the rule. If two
-        are somehow up, the next request through here unloads the stray.
+        One name, and the first one found. This is used where a single answer
+        is wanted — the page asks the scheduler for the whole set. Anything
+        running that the scheduler does not know about is swept off by the next
+        switch, because its memory is real and unaccounted for.
         """
         for instance in self.operations.instances():
             if instance["running"]:

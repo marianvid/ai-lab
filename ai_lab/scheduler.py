@@ -1,8 +1,15 @@
 """Who gets the card next.
 
-One card holds one model. Several requests may want the same one, and they can
-be served together — that is what the engines are built for. Requests wanting a
-different model have to wait for the card to empty, and then for the load.
+A machine holds as many models as its memory allows. Several requests may want
+the same one and are served together — that is what the engines are built for.
+A request wanting a model that is not loaded has to wait for room to be made,
+and then for the load.
+
+**How much room, and whose memory has to go, is not decided here.** This file
+is handed a function that answers both, because a shape is an opaque key and
+this knows nothing about models or megabytes. Given none, every loaded shape is
+a victim of every other, which is one model at a time — the behaviour this had
+before there was a budget, and what every test in this file still runs.
 
 This file is the policy and nothing else. It knows nothing about models,
 engines, ports or HTTP: a "shape" is an opaque key, and swapping to one is a
