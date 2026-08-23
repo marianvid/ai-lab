@@ -482,3 +482,13 @@ dialog.review .small { font-size: 0.85rem; }
    set. It reads as a consequence of the field above it, not as a field. */
 .row.derived { gap: 0.75rem; align-items: baseline; }
 .row.derived > .muted:first-child { min-width: 10rem; }
+
+/* The update line under an engine: what is waiting, and the way to read about
+   it. Never a button that updates. */
+.row.update { gap: 0.75rem; align-items: baseline; }
+.row.update > .muted:first-child { min-width: 10rem; }
+
+/* What a build said, kept but folded once it is over. */
+details.build-log { margin-top: 0.5rem; }
+details.build-log > summary { cursor: pointer; font-size: 0.85rem; opacity: 0.75; }
+details.build-log > .log { margin-top: 0.4rem; }
