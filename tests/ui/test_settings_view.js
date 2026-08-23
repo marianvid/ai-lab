@@ -61,30 +61,25 @@ describe('the Settings page', () => {
     assert.equal(view.textContent.includes('null'), false, view.textContent);
   });
 
-  it('offers one editable path per real choice', async () => {
-    // A path set up on another machine, or a folder that moved, makes every
-    // other screen useless. Fixing it should not mean editing a file over ssh
-    // — but the model store is one root, not a path per format.
+  it('offers one path to choose, and shows the rest', async () => {
+    // Nothing here is typed. A path typed by hand is a path with a typo in it,
+    // and the failure arrives much later as a screen with no models on it.
     const { view } = await renderPage();
-    const fields = [...view.querySelectorAll('input.path')];
-    const values = fields.map((item) => item.value);
-    assert.deepEqual(values, ['/models', '/opt/ai/llama.cpp/build/bin/llama-server'],
-                     'expected the models root and each engine, and nothing else');
-    fields.forEach((item) => assert.equal(item.disabled, false));
+    const section = [...view.querySelectorAll('.section')]
+      .find((item) => item.textContent.startsWith('Paths'));
+    assert.equal(section.querySelectorAll('input').length, 0,
+                 'a path is typeable');
+    const buttons = [...section.querySelectorAll('button')]
+      .map((item) => item.textContent.trim());
+    assert.deepEqual(buttons, ['Browse…'], 'one choice, and no Save to forget');
   });
 
-  it('keeps every Save asleep until its own field is changed', async () => {
+  it('shows each format as a folder under the root', async () => {
     const { view } = await renderPage();
-    const saves = [...view.querySelectorAll('button')]
-      .filter((item) => item.textContent.trim() === 'Save');
-    assert.ok(saves.length >= 2);
-    saves.forEach((item) => assert.equal(item.disabled, true));
-
-    const field = view.querySelector('input.path');
-    field.value = '/somewhere/else';
-    field.dispatchEvent(new window.Event('input', { bubbles: true }));
-    assert.equal(saves[0].disabled, false);
-    assert.equal(saves[1].disabled, true, 'a Save woke for another field');
+    const rows = [...view.querySelectorAll('.row.derived')]
+      .map((item) => item.textContent.replace(/\s+/g, ' ').trim());
+    assert.ok(rows.some((row) => row.includes('/models/gguf')), rows.join(' | '));
+    assert.ok(rows.some((row) => row.includes('/models/nvfp4')), rows.join(' | '));
   });
 
   it('puts the engine programs with the other paths', async () => {
@@ -95,24 +90,37 @@ describe('the Settings page', () => {
       .find((card) => card.textContent.includes('llama.cpp · '));
     assert.equal(engine.textContent.includes('/opt/ai/llama.cpp/build/bin'), false,
                  'the program is still on the engine card');
-    // It lives in a field now, so its value is not in the page text.
-    const values = [...view.querySelectorAll('input.path')].map((item) => item.value);
-    assert.ok(values.includes('/opt/ai/llama.cpp/build/bin/llama-server'),
-              values.join(' | '));
+    assert.match(view.textContent, /\/opt\/ai\/llama\.cpp\/build\/bin\/llama-server/);
   });
 
-  it('shows each format as a folder in it, and does not let it be set', async () => {
-    // Setting them separately let GGUF sit on one disk and NVFP4 on another,
-    // which nothing else in this application expects.
+  it('gives no path to an engine that cannot run here', async () => {
+    // Pointing it somewhere would not make it work — vLLM on the Mac needs
+    // CUDA — and the engine card already says why.
     const { view } = await renderPage();
-    const derived = [...view.querySelectorAll('.row.derived')];
-    assert.equal(derived.length, 2);
-    assert.match(derived[0].textContent, /\/models\/gguf/);
-    assert.match(derived[1].textContent, /\/models\/nvfp4/);
-    derived.forEach((row) => {
-      assert.equal(row.querySelector('input'), null, 'a folder is editable');
-      assert.equal(row.querySelector('button'), null, 'a folder has a button');
-    });
+    const section = [...view.querySelectorAll('.section')]
+      .find((item) => item.textContent.startsWith('Paths'));
+    assert.equal(section.textContent.includes('vLLM'), false, section.textContent);
+  });
+
+  it('saves the moment a folder is chosen', async () => {
+    const { view, calls } = await renderPage();
+    button(view, 'Browse…').click();
+    await settle();
+    button(document.querySelector('dialog.confirm'), 'Use this folder').click();
+    await settle();
+    const saved = calls.find((call) => call.method === 'PATCH');
+    assert.ok(saved, 'nothing was saved');
+    assert.match(saved.path, /models-root/);
+    assert.equal(JSON.parse(saved.body).path, '/models');
+  });
+
+  it('saves nothing if the chooser is cancelled', async () => {
+    const { view, calls } = await renderPage();
+    button(view, 'Browse…').click();
+    await settle();
+    button(document.querySelector('dialog.confirm'), 'Cancel').click();
+    await settle();
+    assert.equal(calls.filter((call) => call.method === 'PATCH').length, 0);
   });
 
   it('says so when there is no root to work from', async () => {
@@ -141,65 +149,11 @@ describe('the Settings page', () => {
     assert.match(dialog.textContent, /up/, 'no way to go up a level');
   });
 
-  it('saves nothing if the chooser is cancelled', async () => {
-    const { view, calls } = await renderPage();
-    button(view, 'Browse…').click();
-    await settle();
-    button(document.querySelector('dialog.confirm'), 'Cancel').click();
-    await settle();
-    assert.equal(calls.filter((call) => call.method === 'PATCH').length, 0);
-  });
-
-  it('saves the chosen folder', async () => {
-    const { view, calls } = await renderPage();
-    button(view, 'Browse…').click();
-    await settle();
-    button(document.querySelector('dialog.confirm'), 'Use this folder').click();
-    await settle();
-    const saved = calls.find((call) => call.method === 'PATCH');
-    assert.ok(saved, 'nothing was saved');
-    assert.equal(JSON.parse(saved.body).path, '/models');
-    assert.match(saved.path, /models-root/, 'saved as a repository path');
-  });
-
-  it('saves a root typed by hand', async () => {
-    const { view, calls } = await renderPage();
-    const field = [...view.querySelectorAll('input.path')][0];
-    field.value = '/somewhere/else';
-    field.dispatchEvent(new window.Event('input', { bubbles: true }));
-    button(view, 'Save').click();
-    await settle();
-    const saved = calls.find((call) => call.method === 'PATCH');
-    assert.equal(JSON.parse(saved.body).path, '/somewhere/else');
-    assert.match(saved.path, /models-root/);
-  });
-
-  it('saves an engine program to that engine', async () => {
-    const { view, calls } = await renderPage();
-    const field = [...view.querySelectorAll('input.path')][1];
-    field.value = '/usr/local/bin/llama-server';
-    field.dispatchEvent(new window.Event('input', { bubbles: true }));
-    [...view.querySelectorAll('button')]
-      .filter((item) => item.textContent.trim() === 'Save')[1].click();
-    await settle();
-    const saved = calls.find((call) => call.method === 'PATCH');
-    assert.match(saved.path, /\/api\/engines\/llamacpp\/binary/);
-    assert.equal(JSON.parse(saved.body).path, '/usr/local/bin/llama-server');
-  });
-
   it('leaves out what is already known: no format pill, no free space', async () => {
     // The name says which format it is, and free space belongs where a
     // download picks its destination, not on four repeated lines.
     const { view } = await renderPage();
     assert.equal(view.textContent.includes('3.4 TB'), false, 'free space is noise here');
-  });
-
-  it('puts the root and its buttons on one line', async () => {
-    const { view } = await renderPage();
-    const row = [...view.querySelectorAll('.row')]
-      .find((item) => item.querySelector('input.path'));
-    assert.ok(row, 'no root field');
-    assert.equal(row.querySelectorAll('button').length, 2, 'Browse and Save, same line');
   });
 
   it('leads with the engines, since they decide what the rest can do', async () => {
@@ -260,8 +214,9 @@ describe('the Settings page', () => {
     assert.match(left.textContent, /Paths/);
     assert.match(right.textContent, /Machine/);
     // Every path is on the left, with the things that get worked on.
-    assert.equal(right.querySelectorAll('input.path').length, 0);
-    assert.ok(left.querySelectorAll('input.path').length >= 1);
+    // Every path is on the left, with the things that get worked on.
+    assert.match(left.textContent, /\/models\/gguf/);
+    assert.equal(right.textContent.includes('/models'), false);
   });
 
   it('does not repeat the page name, which the tab already shows', async () => {
@@ -304,42 +259,58 @@ describe('the Settings page', () => {
     assert.equal((view.textContent.match(/llama\.cpp/g) || []).length >= 1, true);
   });
 
-  it('fits an engine into two lines', async () => {
-    // What it is and whether it works, then what it could become. Where its
-    // program lives is with the other paths.
+  it('fits an engine on one line when there is nothing to do', async () => {
+    // An engine at its newest version has nothing to say on a second line, so
+    // there is not one.
     const { view } = await renderPage();
     const engine = [...view.querySelectorAll('.card')]
       .find((card) => card.textContent.includes('llama.cpp · '));
     assert.ok(engine, 'no card for the engine');
-    assert.equal(engine.querySelectorAll(':scope > .row').length, 2);
-    assert.match(engine.textContent, /b10398/, 'the version belongs on the first line');
-    assert.match(engine.textContent, /Update version/);
+    assert.equal(engine.querySelectorAll(':scope > .row').length, 1);
+    assert.match(engine.textContent, /b10398/, 'the version belongs beside the name');
+    assert.equal(engine.querySelectorAll('button').length, 0,
+                 'nothing to press when there is no update');
   });
 
-  it('says only whether an engine works, on the line with its name', async () => {
-    // The pill used to turn orange and announce a new version, which put the
-    // news in competition with the state: an engine working perfectly well
-    // looked like something was wrong with it.
-    const base = responses()['/api/settings'];
-    const withUpdate = { ...base, engines: [{ ...base.engines[0],
-      source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }] };
-    const { view } = await renderPage({ '/api/settings': withUpdate });
+  it('says nothing at all about an engine that plainly works', async () => {
+    // A green "available" on a working engine told nobody anything: the
+    // version beside its name already says it runs, and a badge that is always
+    // there is a badge nobody reads.
+    const { view } = await renderPage();
     const engine = [...view.querySelectorAll('.card')]
       .find((card) => card.textContent.includes('llama.cpp · '));
-    const heading = engine.querySelector(':scope > .row');
-    assert.match(heading.textContent, /available/);
-    assert.equal(heading.textContent.includes('v0.2.0'), false,
-                 'the news is on the heading line, competing with the state');
+    assert.equal(engine.textContent.includes('available'), false, engine.textContent);
   });
 
-  it('puts what is waiting on the update line, beside the button', async () => {
+  it('still says when an engine cannot run here', async () => {
+    const { view } = await renderPage();
+    const vllm = [...view.querySelectorAll('.card')]
+      .find((card) => card.textContent.includes('vLLM'));
+    assert.match(vllm.textContent, /Requires an NVIDIA GPU/);
+  });
+
+  it('puts what is waiting and the button on the same line as the name', async () => {
     const base = responses()['/api/settings'];
     const withUpdate = { ...base, engines: [{ ...base.engines[0],
       source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }] };
     const { view } = await renderPage({ '/api/settings': withUpdate });
-    const line = view.querySelector('.row.update');
+    const line = [...view.querySelectorAll('.row.engine')]
+      .find((row) => row.textContent.includes('llama.cpp'));
     assert.match(line.textContent, /v0\.2\.0 available/);
     assert.match(line.querySelector('button').textContent, /Update…/);
+  });
+
+  it('never updates straight from this page', async () => {
+    // An update is a decision. The button opens what would change; the real
+    // Update is at the foot of that.
+    const base = responses()['/api/settings'];
+    const withUpdate = { ...base, engines: [{ ...base.engines[0],
+      source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }] };
+    const { view, calls } = await renderPage({ '/api/settings': withUpdate });
+    [...view.querySelectorAll('.row.engine button')][0].click();
+    await settle();
+    assert.equal(calls.some((call) => call.path.includes('/update')), false,
+                 'reading what would change must not start it');
   });
 
   it('has nothing to press that only asks upstream a question', async () => {
@@ -369,23 +340,4 @@ describe('the Settings page', () => {
                  'buttons for something that cannot run here');
   });
 
-  it('reads the same on both engines, whether or not one is waiting', async () => {
-    // The button says what it does — it opens something — rather than
-    // changing shape depending on whether upstream has been asked yet.
-    const { view } = await renderPage();
-    const buttons = [...view.querySelectorAll('.row.update button')]
-      .map((item) => item.textContent.trim());
-    assert.deepEqual(buttons, ['Update…']);
-  });
-
-  it('never updates straight from this page', async () => {
-    // The whole point: an update is a decision. Nothing on the engine row may
-    // start one — it opens what would change, and the real button is at the
-    // foot of that.
-    const { view, calls } = await renderPage();
-    view.querySelector('.row.update button').click();
-    await settle();
-    assert.equal(calls.some((call) => call.path.includes('/update')), false,
-                 'reading what would change must not start it');
-  });
 });

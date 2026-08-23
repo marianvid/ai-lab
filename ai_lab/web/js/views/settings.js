@@ -46,108 +46,79 @@ function section(title, children) {
 // Every path this installation depends on, in one place.
 //
 // It used to be two: the model folders here, and each engine's program down in
-// its own card. They are the same kind of thing — somewhere on disk that has
-// to be right or a screen stops working — and looking for them in two places
-// was the only reason it took two.
+// its own card. They are the same kind of thing — somewhere on disk that has to
+// be right or a screen stops working — and looking for them in two places was
+// the only reason it took two.
 //
-// **One editable path per real choice.** The model store is one root with a
-// folder per weight format, so there is one field and four consequences; a
-// path per format let GGUF sit on one disk and NVFP4 on another, which nothing
-// else in this application expects. Each engine's program is its own choice,
-// so it gets its own field.
+// **Nothing here is typed.** A path typed by hand is a path with a typo in it,
+// and the failure arrives much later as a screen with no models on it. The one
+// path that is a real choice — where the model store lives — is picked from a
+// listing of what is actually there. The rest follow from it, or are where an
+// engine was installed.
 function paths(settings, refresh) {
   const rows = [
-    editable({
-      label: 'Models root',
-      help: 'Every weight format is a folder in here.',
-      value: settings.models_root || '',
-      browse: true,
-      save: (value) => api.updateModelsRoot(value),
-      trouble: 'Could not move the model store',
-      refresh,
-    }),
-    ...(settings.repositories || []).map(derived),
-    // One row per engine this machine can use, plus any that already has a
-    // program configured. An engine that cannot run here and was never set up
-    // — vLLM on the Mac, which needs CUDA — is not worth a field: pointing it
-    // at something would not make it work, and the engine card already says
-    // why.
+    chosen(settings.models_root, refresh),
+    ...(settings.repositories || []).map((item) =>
+      readOnly(item.name, item.path, trouble(item))),
+    // An engine that cannot run here is not given a path. Pointing it at
+    // something would not make it work — vLLM on the Mac needs CUDA, and no
+    // path fixes that — and the engine card already says why.
     ...(settings.engines || [])
-      .filter((engine) => engine.available || engine.binary)
-      .map((engine) => editable({
-      label: engine.name,
-      help: 'The program that serves this engine. Takes effect the next time a '
-          + 'model starts; nothing already running is touched.',
-      value: engine.binary || '',
-      // The chooser lists folders, and a program is a file, so there is
-      // nothing for it to pick here.
-      browse: false,
-      save: (value) => api.updateEngineBinary(engine.id, value),
-      trouble: `Could not point ${engine.name} somewhere else`,
-      refresh,
-    })),
+      .filter((engine) => engine.available && engine.binary)
+      .map((engine) => readOnly(engine.name, engine.binary, '')),
   ];
   return section('Paths', rows);
 }
 
 
-// A path somebody may change. Save sleeps until the field is actually
-// different from what is in force, so pressing it always means something.
-function editable({ label, help, value, browse, save, trouble, refresh }) {
-  const field = element('input', { class: 'grow path', value });
-  const button = element('button', {
-    class: 'action', text: 'Save', disabled: 'disabled',
-    onclick: (event) => whileWorking(event.target, 'Saving…', () => store(field.value)),
-  });
-  field.addEventListener('input', () => { button.disabled = field.value === value; });
-
-  const store = async (chosen) => {
-    field.value = chosen;
-    try {
-      await save(chosen);
-      refresh();
-    } catch (error) {
-      button.disabled = false;
-      await showNotice({ title: trouble, body: error.message });
-    }
-  };
-
+// The one path that is chosen rather than followed. Picked from a listing of
+// what is on the machine, and saved as soon as it is picked: there is nothing
+// half-typed to confirm, so there is nothing for a Save button to do.
+function chosen(root, refresh) {
   return element('div', { class: 'row' }, [
-    element('strong', { text: label, title: help }),
-    field,
-    browse
-      ? element('button', {
-          class: 'action', text: 'Browse…',
-          onclick: async () => {
-            const picked = await chooseFolder(value || null);
-            if (picked) await store(picked);
-          },
-        })
+    element('strong', { text: 'Models root',
+                        title: 'Every weight format is a folder in here.' }),
+    element('span', { class: 'path muted grow', text: root || '—' }),
+    element('button', {
+      class: 'action', text: 'Browse…',
+      onclick: (event) => whileWorking(event.target, 'Choosing…', async () => {
+        const picked = await chooseFolder(root || null);
+        if (!picked) return;
+        try {
+          await api.updateModelsRoot(picked);
+        } catch (error) {
+          await showNotice({ title: 'Could not move the model store',
+                             body: error.message });
+        }
+        refresh();
+      }),
+    }),
+  ]);
+}
+
+
+// A path that follows from something else. No free space and no format pill:
+// the name says which format it is, and free space belongs where a download
+// chooses its destination rather than on four repeated lines. What is worth
+// saying is when a folder is not there or cannot be written to, because that
+// is what will fail later.
+function readOnly(label, path, warning) {
+  return element('div', { class: 'row tight derived' }, [
+    element('span', { class: 'muted', text: label }),
+    element('span', { class: 'path muted grow', text: path || '—' }),
+    warning
+      ? element('span', { class: 'pill', style: 'color:var(--warn);border-color:var(--warn)',
+                          text: warning })
       : null,
-    button,
   ].filter(Boolean));
 }
 
 
-// A folder that follows from the models root. Read-only on purpose.
-//
-// No free space and no format pill: the name says which format it is, and free
-// space belongs where a download chooses its destination rather than on four
-// repeated lines. What is worth saying is when a folder is not there or cannot
-// be written to, because that is what will fail later.
-function derived(item) {
-  const trouble = !item.path ? 'no models root set'
-    : !item.exists ? 'missing'
-    : !item.writable ? 'read-only'
-    : '';
-  return element('div', { class: 'row tight derived' }, [
-    element('span', { class: 'muted', text: item.name }),
-    element('span', { class: 'path muted grow', text: item.path || '—' }),
-    trouble
-      ? element('span', { class: 'pill', style: 'color:var(--warn);border-color:var(--warn)',
-                          text: trouble })
-      : null,
-  ].filter(Boolean));
+function trouble(item) {
+  if (!item.path) return 'no models root set';
+  if (!item.exists) return 'missing';
+  if (!item.writable) return 'read-only';
+  return '';
 }
 
 
@@ -161,6 +132,12 @@ const byEngine = new Map();
 // something was wrong with it, and both engines could not be read the same
 // way. What there is to update to lives on the line below, beside the button
 // that reads about it.
+// Said only when there is something to say.
+//
+// A green "available" on an engine that is plainly working told nobody
+// anything: the version beside its name already says it runs, and a badge that
+// is always there is a badge nobody reads. What is left are the two states
+// worth interrupting for — it cannot run here, or it is being rebuilt now.
 function engineState(engine) {
   const source = engine.source;
   if (!engine.available) {
@@ -169,8 +146,22 @@ function engineState(engine) {
   if (source && source.state === 'running') {
     return element('span', { class: 'pill', text: 'building…' });
   }
-  return element('span', { class: 'pill on', text: 'available' });
+  return null;
 }
+
+// What this engine could be updated to, and whether that is anything.
+//
+// A checkout is asked with git and a package engine is asked of its index,
+// both on a timer, so this page already knows when it is opened. Empty when
+// upstream could not be reached — an engine nobody could ask about must not
+// look like one with nothing waiting.
+function updateWaiting(engine) {
+  const source = engine.source;
+  if (source && source.update_available) return source.latest || '';
+  const installed = byEngine.get(engine.id);
+  return installed && installed.update_available ? installed.latest || '' : '';
+}
+
 
 // Which version is running, whichever way this engine arrives: a build number
 // read from the checkout, or the version of the environment its packages are
@@ -181,9 +172,7 @@ function installedVersion(engine) {
   const source = engine.source;
   if (source && source.installed) return source.installed;
   const installed = byEngine.get(engine.id);
-  const active = installed && (installed.environments || [])
-    .find((item) => item.active);
-  return active ? active.version : '';
+  return (installed && installed.installed) || '';
 }
 
 
@@ -228,36 +217,33 @@ function take(engine, buildable, installable, refresh) {
 // "Check for updates" used to sit here and is gone. Upstream is asked on a
 // timer anyway, so the button did what was already being done, and its only
 // real effect was to make the page look like it needed pressing.
-function sourceControls(engine, source, refresh) {
+// What is waiting, and the way to read about it. Nothing at all when there is
+// nothing waiting: an engine at the newest version has no update to review, so
+// a button offering to review one would open a page saying "no changes".
+//
+// **This never updates anything.** It opens what the update would bring — what
+// changes, what upstream wrote, which packages would be replaced — and the real
+// Update is at the foot of that. The ellipsis is the promise.
+function updateControls(engine, source, refresh, waiting) {
   // Two ways an engine gets a new version, and an engine has exactly one of
   // them: a checkout is rebuilt in place, packages are installed into a new
   // folder beside the old one.
   const buildable = Boolean(source && source.exists);
   const installable = byEngine.has(engine.id);
-  const waiting = source && source.update_available ? source.latest : '';
 
-  return element('div', { class: 'row update' }, [
-    element('span', { class: 'muted', text: 'Update version' }),
-    element('span', { class: 'grow' }),
-    // What there is to move to, next to the way to read about it. Nothing at
-    // all when there is none to announce — vLLM only finds out by asking, and
-    // asking costs a package resolution, so it is asked when the button is
-    // pressed rather than every time this page is drawn.
-    waiting
-      ? element('span', { class: 'pill',
-                          style: 'color:var(--warn);border-color:var(--warn)',
-                          text: `${waiting} available` })
-      : null,
-    // The ellipsis is the promise: this opens something to read. Nothing on
-    // this page updates an engine directly.
+  return [
+    element('span', { class: 'pill',
+                      style: 'color:var(--warn);border-color:var(--warn)',
+                      text: `${waiting} available` }),
     element('button', {
       class: 'action', text: 'Update…',
-      title: 'Read what this update brings before taking it',
+      title: `Read what ${waiting} brings before taking it`,
       onclick: (event) => whileWorking(event.target, 'Reading…', () =>
         reviewUpdate(engine, take(engine, buildable, installable, refresh))),
     }),
-  ].filter(Boolean));
+  ];
 }
+
 
 
 function engineCard(engine, refresh) {
@@ -265,24 +251,34 @@ function engineCard(engine, refresh) {
   const stored = logs.get(engine.id) || (source && source.log) || [];
   const version = installedVersion(engine);
 
-  // The name and what is running, then whether it can run at all. The weight
-  // formats used to hang off the name — "llama.cpp · b10448 · gguf", "vLLM ·
-  // awq, fp8, gptq, nvfp4, safetensors" — which said something a reader of
-  // this page cannot act on and which the model list says better, by only
-  // offering an entry the formats an engine can read.
+  // One line: the name and what is running, then — pushed to the right — what
+  // is waiting and the way to read about it. There is no second line, because
+  // an engine at its newest version has nothing to say on one.
+  //
+  // The weight formats used to hang off the name — "llama.cpp · b10448 · gguf"
+  // — which said something a reader of this page cannot act on, and which the
+  // model list says better by only offering an entry the formats its engine
+  // can read.
+  const waiting = engine.available ? updateWaiting(engine) : '';
   const rows = [
-    element('div', { class: 'row' }, [
-      element('div', {}, [
+    element('div', { class: 'row engine' }, [
+      element('div', { class: 'grow' }, [
         element('strong', { text: engine.name }),
         version ? element('span', { class: 'muted', text: ` · ${version}` }) : null,
       ].filter(Boolean)),
       engineState(engine),
-    ]),
-    engine.available ? sourceControls(engine, source, refresh) : null,
-  ].filter(Boolean);
+      ...(waiting ? updateControls(engine, source, refresh, waiting) : []),
+    ].filter(Boolean)),
+  ];
 
+  // Only once there is a choice. With a single environment the list repeated
+  // the version already beside the name and offered nothing to press; with two
+  // it is the way back from an update that went badly, and the way to reclaim
+  // the 8 GB the old one holds.
   const installed = byEngine.get(engine.id);
-  if (installed) rows.push(versions(installed, engine, refresh));
+  if (installed && (installed.environments || []).length > 1) {
+    rows.push(versions(installed, engine, refresh));
+  }
   if (source && source.note) rows.push(element('div', { class: 'warn', text: source.note }));
   if (source && source.error) rows.push(element('div', { class: 'error', text: source.error }));
   const building = Boolean(source && source.state === 'running');

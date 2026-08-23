@@ -492,3 +492,6 @@ dialog.review .small { font-size: 0.85rem; }
 details.build-log { margin-top: 0.5rem; }
 details.build-log > summary { cursor: pointer; font-size: 0.85rem; opacity: 0.75; }
 details.build-log > .log { margin-top: 0.4rem; }
+
+/* An engine: what it is on the left, what is waiting on the right. */
+.row.engine { gap: 0.6rem; align-items: center; }

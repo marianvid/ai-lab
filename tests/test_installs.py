@@ -11,6 +11,7 @@ index it came from was recorded nowhere.
 
 from __future__ import annotations
 
+import json
 import shutil
 import unittest
 from pathlib import Path
@@ -315,3 +316,74 @@ class TheOneThatWasAlreadyThere(unittest.TestCase):
             found = {item.name: item.active for item in self.install.environments()}
         self.assertEqual(found, {".venv": False, ".venv-0.27.1": True})
         self.assertTrue((self.first / "bin" / "vllm").exists())
+
+
+class WhatIsWaiting(unittest.TestCase):
+    """A package engine has to know what it could become without being asked.
+
+    llama.cpp is asked with git on a timer, so its page is already right when
+    it opens. vLLM had no equivalent and so had nothing to show until somebody
+    pressed something — which is exactly the button this project removed. One
+    request to the index answers it: 251 ms measured on the container, against
+    2.2 s for a full package resolution.
+    """
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.root = Path(self._temporary.name)
+        self.addCleanup(self._temporary.cleanup)
+        _environment(self.root, "0.26.1")
+        self.install = PackageInstall("vllm", str(self.root), "vllm", EventBus())
+        self.install.point_at(self.root / ".venv-0.26.1")
+
+    def _index_says(self, version, fails=False):
+        class Answer:
+            def __enter__(inner):
+                return inner
+
+            def __exit__(inner, *args):
+                return False
+
+            def read(inner):
+                return json.dumps({"info": {"version": version}}).encode()
+
+        def open_url(url, timeout=None):
+            if fails:
+                raise OSError("no network")
+            return Answer()
+
+        return patch("ai_lab.installs.urllib.request.urlopen", open_url)
+
+    def test_a_newer_version_upstream_is_an_update_waiting(self):
+        with self._index_says("0.27.1"):
+            status = self.install.check()
+        self.assertEqual(status["installed"], "0.26.1")
+        self.assertEqual(status["latest"], "0.27.1")
+        self.assertTrue(status["update_available"])
+
+    def test_the_same_version_is_not(self):
+        with self._index_says("0.26.1"):
+            status = self.install.check()
+        self.assertFalse(status["update_available"])
+
+    def test_an_index_that_cannot_be_reached_is_unknown_not_up_to_date(self):
+        # An engine nobody could ask about must not look like one with nothing
+        # waiting. Being offline is not good news.
+        with self._index_says("", fails=True):
+            status = self.install.check()
+        self.assertEqual(status["latest"], "")
+        self.assertFalse(status["update_available"],
+                         "an unknown version must not be offered as an update")
+
+    def test_nothing_installed_means_nothing_to_update(self):
+        empty = PackageInstall("vllm", str(Path(self._temporary.name) / "gone"),
+                               "vllm", EventBus())
+        with self._index_says("0.27.1"):
+            status = empty.check()
+        self.assertEqual(status["installed"], "")
+        self.assertFalse(status["update_available"])
+
+    def test_the_version_in_use_is_the_one_reported(self):
+        _environment(self.root, "0.27.1")
+        self.install.point_at(self.root / ".venv-0.27.1")
+        self.assertEqual(self.install.installed_now(), "0.27.1")

@@ -42,6 +42,9 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     # Engines that arrive as packages rather than as source. A new
     # version is installed beside the one that works, never over it.
     installs = Installs(engine_settings, bus)
+    # Same reason as the build watcher: the page should already know what
+    # is waiting when it is opened, so there is no button that only asks.
+    installs.watch()
     # Keeps the version figures current without anyone pressing anything.
     builds.watch()
     # What each model's files say it can do, read once and kept beside the

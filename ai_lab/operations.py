@@ -647,31 +647,6 @@ class Operations:
                 return path.parent
         return Path.home()
 
-    def update_engine_binary(self, engine_id: str, path: str) -> dict:
-        """Point an engine at a different program.
-
-        Checked before it is saved: a path that is not there means the engine
-        shows as not installed on every screen afterwards, and the moment to
-        say so is while the person is still looking at the field.
-
-        Takes effect the next time a model starts. Nothing already running is
-        touched — its process was launched from wherever it was launched from,
-        and stopping somebody's model because a path was corrected would be a
-        surprise nobody asked for.
-        """
-        if engine_id not in self.store.load().engines:
-            raise KeyError(f"Unknown engine: {engine_id}")
-        program = Path(str(path)).expanduser()
-        if not program.exists():
-            raise ValueError(f"{program} is not there")
-        if program.is_dir():
-            raise ValueError(f"{program} is a directory, not a program")
-        with self.store.mutate() as config:
-            config.engines[engine_id] = {**config.engines[engine_id],
-                                         "binary": str(program)}
-        self._changed("settings")
-        return {"engine": engine_id, "binary": str(program)}
-
     def update_models_root(self, path: str) -> dict:
         """Point every repository somewhere else, in one move.
 

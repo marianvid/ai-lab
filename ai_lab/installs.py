@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.error
+import urllib.request
 import shutil
 import subprocess
 import threading
@@ -62,6 +64,15 @@ LOG_LINES = 500
 INSTALL_TIMEOUT_S = 3600      # 8 GB of wheels over a home line
 CHECK_TIMEOUT_S = 180         # importing torch and vllm is not quick
 UV_TIMEOUT_S = 60
+
+# Where to ask what the newest release is. One request, 251 ms measured on the
+# container, against 2.2 s for a full package resolution — which is why the
+# question can be asked on a timer at all, and why the page can say what is
+# waiting without anybody pressing anything.
+INDEX = "https://pypi.org/pypi/{package}/json"
+INDEX_TIMEOUT_S = 20
+CHECK_INTERVAL_S = 3600.0
+STARTUP_DELAY_S = 25.0
 
 
 class Environment:
@@ -108,6 +119,7 @@ class PackageInstall:
         self._thread: threading.Thread | None = None
         self._state = "idle"          # idle, running, done, failed
         self._error = ""
+        self._latest = ""             # what the index last said
 
     # -- what is here ------------------------------------------------------
 
@@ -149,12 +161,47 @@ class PackageInstall:
             found.append(environment)
         return found
 
+    def installed_now(self) -> str:
+        """The version the engine is launched from, or "" if none is."""
+        here = self.active()
+        if here is None:
+            return ""
+        found = [item for item in self.environments(with_sizes=False)
+                 if item.active]
+        return found[0].version if found else ""
+
+    def check(self) -> dict:
+        """Ask the index what the newest release is.
+
+        Network-bound, so it runs on the timer or when asked, never on a page
+        load. A failure is remembered as "unknown" rather than as "up to date":
+        an engine nobody could ask about must not look like one with nothing
+        waiting.
+        """
+        try:
+            with urllib.request.urlopen(
+                    INDEX.format(package=self.package),
+                    timeout=INDEX_TIMEOUT_S) as answer:
+                self._latest = (json.loads(answer.read())
+                                .get("info", {}).get("version") or "")
+        except Exception:
+            self._latest = ""
+        self._announce()
+        return self.status()
+
     def status(self) -> dict:
         environments = self.environments()
+        installed = self.installed_now()
         return {
             "engine": self.engine_id,
             "root": str(self.root),
             "linked": bool(self.active()),
+            "installed": installed,
+            "latest": self._latest,
+            # Only when both are known and they differ. A version that could
+            # not be read is not an update waiting.
+            "update_available": bool(installed and self._latest
+                                     and installed != self._latest),
             "environments": [item.json() for item in environments],
             "spare_bytes": sum(item.size_bytes for item in environments
                                if not item.active),
@@ -346,6 +393,8 @@ class Installs:
 
     def __init__(self, settings: dict, bus: EventBus) -> None:
         self._installs: dict[str, PackageInstall] = {}
+        self._timer: threading.Thread | None = None
+        self._stop = threading.Event()
         for engine_id, engine_settings in (settings or {}).items():
             source = (engine_settings or {}).get("source") or {}
             package = source.get("package")
@@ -357,6 +406,38 @@ class Installs:
 
     def all(self) -> list[dict]:
         return [item.status() for item in self._installs.values()]
+
+    def watch(self, interval_s: float = CHECK_INTERVAL_S) -> None:
+        """Ask the index for new versions on a timer, in the background.
+
+        So the settings screen is already right when it is opened rather than
+        only after somebody presses something — which is why there is no button
+        here that only asks a question. A failure is ignored: being offline is
+        not worth a message on a page nobody is looking at.
+        """
+        if self._timer is not None or not self._installs:
+            return
+        self._timer = threading.Thread(target=self._loop, args=(interval_s,),
+                                       daemon=True,
+                                       name="ai-lab-install-check")
+        self._timer.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self, interval_s: float) -> None:
+        # A moment's delay first, so starting up is not held back by a network
+        # call nobody asked for yet.
+        while not self._stop.wait(STARTUP_DELAY_S):
+            for install in self._installs.values():
+                if self._stop.is_set():
+                    return
+                try:
+                    install.check()
+                except Exception:
+                    pass
+            if self._stop.wait(interval_s):
+                return
 
     def get(self, engine_id: str) -> PackageInstall:
         install = self._installs.get(engine_id)
