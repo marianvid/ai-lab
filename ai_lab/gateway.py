@@ -628,7 +628,13 @@ class Gateway:
         return float(pool.get("available_mb", 0.0)) if pool else 0.0
 
     def _read_the_card(self) -> None:
-        """Take a fresh memory reading. Outside the scheduler's lock, always."""
+        """Take a fresh memory reading. Outside the scheduler's lock, always.
+
+        Kept rather than asked for when needed, because the decision about what
+        has to come off is taken while the scheduler holds its lock, and reading
+        the card there would stop the page that is asking what is going on —
+        which is exactly when somebody wants to know.
+        """
         try:
             found = budget.of(self.operations.host, self.operations.reserve_mb())
             self._budget_pools = {pool.name: pool.json() for pool in found.pools}
@@ -987,8 +993,7 @@ class Gateway:
             # the thing that says no. One accelerator reading gives this and
             # the temperature both — 35 ms on the container, against a page
             # that is otherwise 9.
-            "memory": self._budget(),
-            "card": self._card_reading(),
+            **self._memory_and_heat(),
             "requests_per_minute": self._rate(),
             "switches": counters.switches,
             "evictions": counters.evictions,
@@ -1013,38 +1018,37 @@ class Gateway:
         except Exception:
             return ""
 
-    def _budget(self) -> dict:
-        """How much memory is available for models, pool by pool.
+    def _memory_and_heat(self) -> dict:
+        """What the machine has room for, and how warm the card is.
 
-        Read through `budget` rather than worked out here, so that this page
-        and the thing that refuses a model give the same answer. Two numbers
-        that mean the same and are computed twice eventually disagree, and the
-        one on screen is the one nobody checks.
-        """
-        try:
-            return budget.of(self.operations.host,
-                             self.operations.reserve_mb()).json()
-        except Exception:
-            return {}
+        One accelerator reading answers both. On Linux each is an `nvidia-smi`
+        — 30 ms against a page that is otherwise 9 — and this used to take two
+        of them, which also let the two halves disagree by however long passed
+        between.
 
-    def _card_reading(self) -> dict:
-        """What the accelerator says that is not memory.
+        The memory comes through `budget` rather than being worked out here, so
+        that this page and the thing that refuses a model give the same answer.
+        Two figures meaning the same and computed twice eventually differ, and
+        the one on screen is the one nobody checks.
 
-        Only the temperature now: memory moved to `_budget`, which knows about
-        the reserve and about unified memory being one pool rather than two.
-
-        Utilisation is read in the same answer and is not reported — it is an
+        Utilisation is in the same reading and is not reported: it is an
         instantaneous sample, so a five-second page lands between requests more
         often than not and shows nought per cent on a machine working steadily.
-        A figure that is usually wrong is worse than none. Unified memory has
-        no temperature to read, and that comes back empty rather than as a
-        number meaning something else.
+        A figure that is usually wrong is worse than none.
         """
         try:
-            snapshot = self.operations.host.accelerator()
+            card = self.operations.host.accelerator()
         except Exception:
-            return {}
-        return {"temperature_c": snapshot.temperature_c}
+            return {"memory": {}, "card": {}}
+        try:
+            found = budget.of(self.operations.host, self.operations.reserve_mb(),
+                              card=card)
+            memory = found.json()
+        except Exception:
+            memory = {}
+        # Unified memory has no temperature to read, and that comes back empty
+        # rather than as a number meaning something else.
+        return {"memory": memory, "card": {"temperature_c": card.temperature_c}}
 
     def _rate(self) -> float:
         """Requests in the last minute. Zero when nothing is happening.

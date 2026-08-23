@@ -49,6 +49,9 @@ class LinuxHost:
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
         self.vllm_binary = vllm_binary
+        # What kind of accelerator this machine has, once it has said. It does
+        # not change while the machine is running, and asking costs 30 ms.
+        self._kind = ""
 
     # -- capabilities ------------------------------------------------------
 
@@ -61,14 +64,32 @@ class LinuxHost:
         # installed; PATH is only the fallback.
         if self.vllm_binary or which("vllm"):
             engines.add("vllm")
-        accelerator = self.accelerator()
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),
-            accelerator_kind=accelerator.kind,
+            accelerator_kind=self._accelerator_kind(),
             can_configure_accelerator=False,
             operating_system="Linux",
         )
+
+    def _accelerator_kind(self) -> str:
+        """Whether there is a card here, remembered once it says yes.
+
+        A full reading is an `nvidia-smi` — 30 ms — and this is asked for every
+        page draw, alongside the reading the page actually wants. What kind of
+        accelerator a machine has does not change while it is running, so it is
+        worth asking once.
+
+        Only a positive answer is kept. A machine whose driver is still coming
+        up answers "none", and remembering that would leave the card invisible
+        until the manager was restarted.
+        """
+        if not self._kind:
+            found = self.accelerator().kind
+            if found and found != "none":
+                self._kind = found
+            return found
+        return self._kind
 
     def system_memory(self) -> tuple[float, float]:
         """From /proc/meminfo, which is a file read rather than a command.

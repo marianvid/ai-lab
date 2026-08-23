@@ -34,6 +34,10 @@ class Settings:
     def view(self) -> dict:
         config = self.store.load()
         capabilities = self.host.capabilities()
+        # One reading, used twice. Each is an `nvidia-smi` on Linux — 30 ms —
+        # and this page was asking for three to draw itself. It also stops the
+        # two figures below disagreeing, which readings a moment apart do.
+        card = self.host.accelerator()
         return {
             "title": config.title,
             "host": {
@@ -42,11 +46,12 @@ class Settings:
                 "accelerator_kind": capabilities.accelerator_kind,
                 "can_configure_accelerator": capabilities.can_configure_accelerator,
             },
-            "accelerator": asdict(self.host.accelerator()),
+            "accelerator": asdict(card),
             # What is actually available for models, pool by pool. The page
             # reads this rather than doing the arithmetic itself, so the number
             # on screen is the same one an admission decision would use.
-            "memory": budget.of(self.host, self.reserve_mb(config)).json(),
+            "memory": budget.of(self.host, self.reserve_mb(config),
+                                card=card).json(),
             "models_root": config.models_root,
             "repositories": [self._repository(item) for item in config.repositories],
             "engines": self.engines.describe(capabilities),

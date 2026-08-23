@@ -156,17 +156,24 @@ class Budget:
                 "held_by_models_mb": round(self.held_by_models_mb)}
 
 
-def of(host, reserve_mb: float = DEFAULT_RESERVE_MB) -> Budget:
+def of(host, reserve_mb: float = DEFAULT_RESERVE_MB, card=None) -> Budget:
     """Read this machine and say what it can offer.
+
+    `card` is an accelerator reading already taken. Pass it when the caller has
+    one: on Linux each reading is an `nvidia-smi`, 30 ms, and the settings
+    screen was asking for three of them to draw one page. Passing it in also
+    means the figures on that page cannot disagree with each other, which two
+    readings a moment apart eventually would.
 
     Never raises and never returns nothing: a machine that cannot be read
     reports pools of zero, which reads as "no answer" rather than as "no room",
     and the caller decides what to do about that.
     """
-    try:
-        card = host.accelerator()
-    except Exception:
-        card = None
+    if card is None:
+        try:
+            card = host.accelerator()
+        except Exception:
+            card = None
     try:
         machine_used, machine_total = host.system_memory()
     except Exception:
