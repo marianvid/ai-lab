@@ -119,7 +119,7 @@ function memoryLines(memory, card) {
                           + 'is held back for the machine itself.'));
   });
   if (memory && memory.pools && memory.pools.length) {
-    lines.push(line('Room for a model', `${memory.for_models_mb} MB`,
+    lines.push(line('Room for a model', `${memory.available_mb} MB`,
                     'What is free, less what is held back for the machine. A '
                     + 'model has to fit in one pool, so this total is the '
                     + 'ceiling rather than the test.'));

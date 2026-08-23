@@ -97,8 +97,10 @@ class UnifiedMemory(unittest.TestCase):
         self.assertEqual(self.budget.pools[0].used_by_models_mb, 21000)
 
     def test_the_total_is_not_the_two_readings_added(self):
-        self.assertEqual(self.budget.for_models_mb,
+        self.assertEqual(self.budget.available_mb,
                          self.budget.pools[0].available_mb)
+        self.assertEqual(self.budget.capacity_mb,
+                         self.budget.pools[0].capacity_mb)
 
 
 class WhenTheMachineWillNotAnswer(unittest.TestCase):
@@ -112,7 +114,8 @@ class WhenTheMachineWillNotAnswer(unittest.TestCase):
 
         found = budget.of(Broken())
         self.assertEqual(found.pools, ())
-        self.assertEqual(found.for_models_mb, 0.0)
+        self.assertEqual(found.available_mb, 0.0)
+        self.assertEqual(found.capacity_mb, 0.0)
 
     def test_a_card_that_is_not_available_is_not_a_pool(self):
         found = budget.of(FakeHost(card=card(available=False, total=0),
@@ -124,8 +127,42 @@ class WhenTheMachineWillNotAnswer(unittest.TestCase):
         found = budget.of(FakeHost(card=card(total=32623, used=0),
                                    machine=(0.0, 0.0)))
         self.assertEqual([pool.name for pool in found.pools], [budget.CARD])
-        self.assertEqual(found.for_models_mb, 32623)
+        self.assertEqual(found.available_mb, 32623)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TwoDifferentQuestions(unittest.TestCase):
+    """How big this machine is, and how much is free right now.
+
+    Confusing the two would either refuse a model that fits or accept one that
+    does not, and the settings page and the gateway page ask different ones.
+    """
+
+    def setUp(self):
+        # A card holding a 29 GB model, so the two answers are far apart.
+        self.budget = budget.of(
+            FakeHost(card=card(total=32623, used=28946),
+                     machine=(5157.0, 49152.0)), reserve_mb=8192)
+
+    def test_capacity_does_not_move_when_a_model_loads(self):
+        pool = self.budget.pool(budget.CARD)
+        self.assertEqual(pool.capacity_mb, 32623, "the whole card, whatever holds it")
+        self.assertEqual(pool.available_mb, 32623 - 28946)
+
+    def test_the_reserve_comes_out_of_capacity_too(self):
+        machine = self.budget.pool(budget.MACHINE)
+        self.assertEqual(machine.capacity_mb, 49152 - 8192)
+        self.assertEqual(machine.available_mb, 49152 - 5157 - 8192)
+
+    def test_the_reserve_is_one_number_not_a_sum(self):
+        # Only the machine's own memory carries one; a card is used whole. A
+        # sum would double it on unified memory, where both readings are one
+        # pool.
+        self.assertEqual(self.budget.reserve_mb, 8192)
+        unified = budget.of(
+            FakeHost(card=card(total=131072, used=21000, kind="unified"),
+                     machine=(34600.0, 131072.0)), reserve_mb=16384)
+        self.assertEqual(unified.reserve_mb, 16384)

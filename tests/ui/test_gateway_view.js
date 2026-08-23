@@ -41,14 +41,15 @@ const STATS = {
   ],
   card: { temperature_c: 32 },
   memory: {
-    unified: false, for_models_mb: 29077 + 47608, held_by_models_mb: 3546,
+    unified: false, capacity_mb: 32623 + 55808,
+    available_mb: 29077 + 47608, held_by_models_mb: 3546,
     pools: [
       { name: 'card', kind: 'dedicated', total_mb: 32623, used_mb: 3546,
         used_by_models_mb: 3546, reserve_mb: 0, free_mb: 29077,
-        available_mb: 29077 },
+        capacity_mb: 32623, available_mb: 29077 },
       { name: 'machine', kind: 'dedicated', total_mb: 64000, used_mb: 8200,
         used_by_models_mb: 0, reserve_mb: 8192, free_mb: 55800,
-        available_mb: 47608 },
+        capacity_mb: 55808, available_mb: 47608 },
     ],
   },
   queue_runs: [],
@@ -456,10 +457,12 @@ describe('what the machine says about its memory', () => {
     // and worked out twice eventually disagree, and the one on screen is the
     // one nobody checks.
     const { view } = await renderPage({
-      memory: { unified: false, for_models_mb: 1234, held_by_models_mb: 0,
+      memory: { unified: false, available_mb: 1234, capacity_mb: 32623,
+                held_by_models_mb: 0,
                 pools: [{ name: 'card', kind: 'dedicated', total_mb: 32623,
                           used_mb: 31389, used_by_models_mb: 31389,
-                          reserve_mb: 0, free_mb: 1234, available_mb: 1234 }] },
+                          reserve_mb: 0, free_mb: 1234, capacity_mb: 32623,
+                          available_mb: 1234 }] },
     });
     assert.match(view.textContent, /Room for a model\s*1234 MB/);
   });
@@ -482,11 +485,12 @@ describe('what the machine says about its memory', () => {
     // else, and one pool shown twice would double the machine.
     const { view } = await renderPage({
       card: { temperature_c: null },
-      memory: { unified: true, for_models_mb: 80088, held_by_models_mb: 21000,
+      memory: { unified: true, available_mb: 80088, capacity_mb: 114688,
+                held_by_models_mb: 21000,
                 pools: [{ name: 'machine', kind: 'unified', total_mb: 131072,
                           used_mb: 34600, used_by_models_mb: 21000,
                           reserve_mb: 16384, free_mb: 96472,
-                          available_mb: 80088 }] },
+                          capacity_mb: 114688, available_mb: 80088 }] },
     });
     assert.match(view.textContent, /System mem\s*34600 \/ 131072 MB/);
     assert.equal(view.textContent.includes('°C'), false);

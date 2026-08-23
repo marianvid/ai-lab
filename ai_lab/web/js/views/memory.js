@@ -1,40 +1,85 @@
-// How much of this machine models may use.
+// How much memory this machine has for models.
 //
-// The card is used whole: nothing else on this machine wants it, so there is
-// no setting for it. The machine's own memory is shared with the browser, the
-// editor and the operating system, so a part of it is held back — and that is
-// the one number here.
+// A capacity, not a reading. What is *free right now* is on the Gateway page,
+// where the rest of what is happening lives; this says how big the machine is,
+// and it does not move when a model loads. Two different questions, and mixing
+// them makes a number that answers neither.
 //
-// It is set as a **reserve**, not as an allowance. A reserve stays right when
-// the machine changes: a container grown from 48 GB to 64 GB should offer
-// models the extra 16, and an allowance of "40 GB" would sit on it. The figure
-// somebody actually wants to read — how much that leaves — is shown beside it
-// rather than typed.
+// One line per kind of memory, because they are not interchangeable — a model
+// cannot spill from the card into the machine unless it was started to. And
+// one line for the only thing here that is set rather than read.
 //
-// On Apple silicon there is one pool. The chip and everything else share the
-// same memory, so showing a card figure and a machine figure would be counting
-// one thing twice.
+// The card is listed at its full size: nothing else on this machine wants it,
+// so all of it is for models. The machine's own memory is shared with the
+// browser, the editor and the operating system, so it is listed less what is
+// held back for them.
+//
+// Held back as a **reserve** rather than as an allowance. A reserve stays right
+// when the machine changes: a container grown from 48 GB to 64 GB should offer
+// models the extra 16, and an allowance of "40 GB" would sit on it.
 
 import { api } from '../api.js';
 import { showNotice } from '../confirm.js';
 import { element } from '../format.js';
 import { whileWorking } from '../working.js';
 
-const POOLS = {
-  card: 'Card',
-  machine: 'This machine',
+// What each pool is called, and what it is worth saying about it. On Apple
+// silicon the chip and the rest of the machine draw on one pool, which is why
+// there is no card line there — it would be the same memory under two names.
+const KINDS = {
+  card: {
+    label: 'VRAM',
+    help: 'The whole card. Nothing else on this machine uses it, so all of it '
+        + 'is for models. What is free right now is on the Gateway page.',
+  },
+  machine: {
+    label: 'RAM',
+    help: 'The machine’s own memory, less what is held back below. Where '
+        + 'the part of a model that does not fit on the card goes, and where '
+        + 'everything an engine keeps outside the card lives.',
+  },
+  unified: {
+    label: 'Unified memory',
+    help: 'Apple silicon shares one pool between the chip and the rest of the '
+        + 'machine, so this is both. Shown less what is held back below.',
+  },
 };
 
 
 export function memory(state, refresh) {
   // No pools means the machine could not be read — not that it has no room.
-  // Drawing "0 MB available for models" there would be a claim, and the wrong
-  // one.
+  // A row of zeroes there would be a claim, and the wrong one.
   if (!state || !state.pools || !state.pools.length) return null;
+
+  return element('section', { class: 'card memory' }, [
+    element('h3', { text: 'Available memory' }),
+    element('div', { class: 'rows' }, [
+      ...state.pools.map(kindRow),
+      reserveRow(state, refresh),
+    ]),
+  ]);
+}
+
+
+function kindRow(pool) {
+  const kind = KINDS[pool.kind === 'unified' ? 'unified' : pool.name] || {
+    label: pool.name, help: '',
+  };
+  return element('div', { class: 'row' }, [
+    element('span', { class: 'muted', text: kind.label, title: kind.help }),
+    element('span', { text: `${Math.round(pool.capacity_mb)} MB` }),
+  ]);
+}
+
+
+// The one thing on this card that is set rather than read, so it looks
+// different: a field and a Save, below the figures it explains.
+function reserveRow(state, refresh) {
   const field = element('input', {
     type: 'number', class: 'number small', min: '0', step: '1024',
-    value: String(Math.round(reserveOf(state))),
+    value: String(Math.round(state.reserve_mb || 0)),
   });
+  const before = field.value;
   const save = element('button', {
     class: 'action', text: 'Save', disabled: 'disabled',
     onclick: () => whileWorking(save, 'Saving…', async () => {
@@ -47,49 +92,14 @@ export function memory(state, refresh) {
       refresh();
     }),
   });
-  const before = field.value;
   field.addEventListener('input', () => { save.disabled = field.value === before; });
 
-  return element('section', { class: 'card memory' }, [
-    element('h3', { text: 'Memory for models' }),
-    ...state.pools.map(pool),
-    element('div', { class: 'row' }, [
-      element('span', { class: 'muted', title:
-        'Held back for the operating system and everything else you run. '
-        + 'Set as a reserve rather than as an allowance so it stays right if '
-        + 'this machine is given more memory.',
-        text: 'Reserved for the system (MB)' }),
-      element('span', { class: 'inline' }, [field, save]),
-    ]),
-    element('div', { class: 'row total' }, [
-      element('span', { text: 'Available for models' }),
-      element('strong', { text: `${Math.round(state.for_models_mb)} MB` }),
-    ]),
-  ]);
-}
-
-
-function pool(item) {
-  const share = item.total_mb
-    ? Math.round((100 * item.used_mb) / item.total_mb) : 0;
-  return element('div', { class: 'row pool' }, [
-    element('span', { class: 'muted', text: POOLS[item.name] || item.name }),
+  return element('div', { class: 'row reserve' }, [
     element('span', {
-      text: `${Math.round(item.used_mb)} / ${Math.round(item.total_mb)} MB`,
-      title: item.name === 'card' && item.kind === 'dedicated'
-        ? `${share}% of the card. All of it is available to models — nothing `
-          + 'else on this machine wants it.'
-        : `${share}% in use, by models and by everything else. On unified `
-          + 'memory this is the same pool the chip draws from.',
+      class: 'muted', text: 'Reserved for the system',
+      title: 'Kept for the operating system and everything else you run, so '
+           + 'models are never offered it. Taken out of the figures above.',
     }),
+    element('span', { class: 'inline' }, [field, save]),
   ]);
-}
-
-
-// The reserve as the server reported it, from whichever pool carries one. Read
-// back rather than remembered, so the field shows what is actually in force.
-function reserveOf(state) {
-  const held = (state.pools || []).find((item) => item.reserve_mb > 0);
-  return held ? held.reserve_mb
-              : ((state.pools || []).slice(-1)[0] || {}).reserve_mb || 0;
 }

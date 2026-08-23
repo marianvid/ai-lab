@@ -72,7 +72,25 @@ class Pool:
         return max(0.0, self.total_mb - self.used_mb)
 
     @property
+    def capacity_mb(self) -> float:
+        """How much of this pool models may ever use.
+
+        The whole pool, less what is held back for the machine. A property of
+        the machine and the setting, not of what is happening — it does not
+        move when a model loads. This is what a settings screen shows: how big
+        this machine is for models.
+        """
+        return max(0.0, self.total_mb - self.reserve_mb)
+
+    @property
     def available_mb(self) -> float:
+        """How much a model could take right now.
+
+        What is free, less the reserve. This moves as models come and go, and
+        it is what an admission decision asks and what the gateway page
+        watches. Not the same question as `capacity_mb`, and confusing the two
+        would either refuse a model that fits or accept one that does not.
+        """
         return max(0.0, self.free_mb - self.reserve_mb)
 
     def json(self) -> dict:
@@ -82,6 +100,7 @@ class Pool:
                 "used_by_models_mb": round(self.used_by_models_mb),
                 "reserve_mb": round(self.reserve_mb),
                 "free_mb": round(self.free_mb),
+                "capacity_mb": round(self.capacity_mb),
                 "available_mb": round(self.available_mb)}
 
 
@@ -99,7 +118,13 @@ class Budget:
     unified: bool
 
     @property
-    def for_models_mb(self) -> float:
+    def capacity_mb(self) -> float:
+        """How big this machine is for models, whatever is running."""
+        return sum(pool.capacity_mb for pool in self.pools)
+
+    @property
+    def available_mb(self) -> float:
+        """How much is free for a model right now."""
         return sum(pool.available_mb for pool in self.pools)
 
     @property
@@ -108,13 +133,25 @@ class Budget:
         # card's figure is the whole answer and the pools do not add up.
         return sum(pool.used_by_models_mb for pool in self.pools)
 
+    @property
+    def reserve_mb(self) -> float:
+        """What is held back for the machine. One number, whatever the pools.
+
+        Only the machine's own memory carries a reserve — a dedicated card is
+        used whole — so this is that one figure rather than a sum that would
+        double it on unified memory.
+        """
+        return max((pool.reserve_mb for pool in self.pools), default=0.0)
+
     def pool(self, name: str) -> "Pool | None":
         return next((item for item in self.pools if item.name == name), None)
 
     def json(self) -> dict:
         return {"pools": [pool.json() for pool in self.pools],
                 "unified": self.unified,
-                "for_models_mb": round(self.for_models_mb),
+                "reserve_mb": round(self.reserve_mb),
+                "capacity_mb": round(self.capacity_mb),
+                "available_mb": round(self.available_mb),
                 "held_by_models_mb": round(self.held_by_models_mb)}
 
 
