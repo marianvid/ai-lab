@@ -98,6 +98,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
+from . import budget
 from .operations import Operations
 from .scheduler import Abandoned, Scheduler
 
@@ -699,16 +700,23 @@ class Gateway:
         current = state["current"]
         waiting = state["waiting"]
         return {
-            "current": current.instance_id if current else None,
-            # The engine beside the name. One tells you what to send, the other
-            # tells you what will answer, and the second decides which request
-            # shapes work.
-            "current_engine": self._engine_name_of(current),
-            "current_settings": current.as_dict() if current else {},
+            # A list, always, even while the scheduler still holds exactly one.
+            # What is on the machine is a set — one model today, more when the
+            # budget allows it — and a report shaped as a single name would
+            # have to change shape later, taking every reader with it. The
+            # engine is beside each name because one tells you what to send and
+            # the other tells you what will answer, and the second decides
+            # which request shapes work.
+            "loaded": [{
+                "instance_id": current.instance_id,
+                "engine": self._engine_name_of(current),
+                "settings": current.as_dict(),
+                "in_flight": state["in_flight"],
+                "places": state["places"],
+            }] if current else [],
             "busy": bool(state["in_flight"] or waiting or state["switching"]),
             "holder": self.busy(),
             "in_flight": state["in_flight"],
-            "places": state["places"],
             "switching": state["switching"],
             # What is waiting, and for how long. A request that has been in the
             # queue for a minute is a fact worth seeing before it becomes a
@@ -725,9 +733,12 @@ class Gateway:
             # — an entry's engine and what that engine serves — so the page can
             # say it without the expensive question.
             "shapes": self._shapes_offered(),
-            # The card itself. One reading gives all three, so the second and
-            # third are free once the first has been asked for — 35 ms on the
-            # container, against a page that is otherwise 9.
+            # What the machine has room for, pool by pool. The same answer an
+            # admission decision would use, so the page cannot disagree with
+            # the thing that says no. One accelerator reading gives this and
+            # the temperature both — 35 ms on the container, against a page
+            # that is otherwise 9.
+            "memory": self._budget(),
             "card": self._card_reading(),
             "requests_per_minute": self._rate(),
             "average_first_token_s": round(
@@ -757,35 +768,38 @@ class Gateway:
         except Exception:
             return ""
 
+    def _budget(self) -> dict:
+        """How much memory is available for models, pool by pool.
+
+        Read through `budget` rather than worked out here, so that this page
+        and the thing that refuses a model give the same answer. Two numbers
+        that mean the same and are computed twice eventually disagree, and the
+        one on screen is the one nobody checks.
+        """
+        try:
+            return budget.of(self.operations.host,
+                             self.operations.reserve_mb()).json()
+        except Exception:
+            return {}
+
     def _card_reading(self) -> dict:
-        """Memory, load and temperature, as the accelerator reports them.
+        """What the accelerator says that is not memory.
 
-        Memory is the binding constraint on a machine like this, and the
-        temperature arrives in the same answer. Utilisation does too and is not
-        reported: it is an instantaneous sample, so a five-second page lands
-        between requests more often than not and shows nought per cent on a
-        machine that is working steadily. A figure that is usually wrong is
-        worse than none.
+        Only the temperature now: memory moved to `_budget`, which knows about
+        the reserve and about unified memory being one pool rather than two.
 
-        On unified memory there is no separate pool and no temperature to read,
-        so those come back empty rather than as a number meaning something
-        else.
+        Utilisation is read in the same answer and is not reported — it is an
+        instantaneous sample, so a five-second page lands between requests more
+        often than not and shows nought per cent on a machine working steadily.
+        A figure that is usually wrong is worse than none. Unified memory has
+        no temperature to read, and that comes back empty rather than as a
+        number meaning something else.
         """
         try:
             snapshot = self.operations.host.accelerator()
         except Exception:
             return {}
-        used, total = self.operations.host.system_memory()
-        return {
-            "used_mb": round(snapshot.memory_used_mb),
-            "total_mb": round(snapshot.memory_total_mb),
-            "kind": snapshot.memory_kind,
-            "temperature_c": snapshot.temperature_c,
-            # The machine's own memory, where there is a separate pool to
-            # report. A model split between card and system memory lives here.
-            "ram_used_mb": round(used),
-            "ram_total_mb": round(total),
-        }
+        return {"temperature_c": snapshot.temperature_c}
 
     def _rate(self) -> float:
         """Requests in the last minute. Zero when nothing is happening.

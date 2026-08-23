@@ -20,6 +20,23 @@ from ai_lab.runtime import Operation
 from ai_lab.types import AcceleratorSnapshot
 
 
+
+def loaded_names(gateway) -> list:
+    """What is on the machine, as the page reads it.
+
+    A list even while exactly one model is held, because that is the shape the
+    report has: what is loaded is a set, and a test asserting on a single name
+    would have to be rewritten when the set can hold two.
+    """
+    return [item["instance_id"] for item in gateway.stats()["loaded"]]
+
+
+def places(gateway) -> int:
+    """How many requests the loaded model serves at once. Zero when none is."""
+    loaded = gateway.stats()["loaded"]
+    return loaded[0]["places"] if loaded else 0
+
+
 class FakeHost:
     """A card whose memory reading follows what is loaded.
 
@@ -108,6 +125,12 @@ class FakeOperations:
         self.unloads = []
         self.load_delay_s = 0.0
         self.host = FakeHost(self, lag=lag)
+        # How much of the machine is held back for the machine. A number in
+        # configuration, which is what Operations is the gateway's window onto.
+        self.reserve = 0.0
+
+    def reserve_mb(self) -> float:
+        return self.reserve
 
     def instances(self):
         return [dict(entry) for entry in self._entries.values()]
@@ -460,17 +483,17 @@ class ReportingTests(unittest.TestCase):
         gateway = quick(operations)
         with gateway.acquire("coder"):
             pass
-        self.assertEqual(gateway.stats()["current"], "coder")
+        self.assertEqual(loaded_names(gateway), ["coder"])
 
         operations.unload("coder")              # straight past the gateway
         gateway.card_changed()                  # which the routes report
-        self.assertIsNone(gateway.stats()["current"])
+        self.assertEqual(loaded_names(gateway), [])
 
     def test_the_current_model_is_reported(self):
         gateway = quick(two_models(coder=True))
         with gateway.acquire("reviewer"):
             pass
-        self.assertEqual(gateway.stats()["current"], "reviewer")
+        self.assertEqual(loaded_names(gateway), ["reviewer"])
 
     def test_recent_history_says_what_was_unloaded_for_what(self):
         gateway = quick(two_models(coder=True))
@@ -946,9 +969,9 @@ class TogetherTests(unittest.TestCase):
 
     def test_the_number_of_places_is_the_engine_s_own(self):
         gateway = quick(busy_models())          # nothing running
-        self.assertEqual(gateway.stats()["places"], 0, "nothing loaded yet")
+        self.assertEqual(places(gateway), 0, "nothing loaded yet")
         with gateway.acquire("coder"):
-            self.assertEqual(gateway.stats()["places"], 4)
+            self.assertEqual(places(gateway), 4)
 
     def test_one_slot_still_means_one_at_a_time(self):
         # The GGUF entries are configured that way, and llama.cpp divides the
@@ -1075,7 +1098,7 @@ class ForcedResetTests(unittest.TestCase):
         stats = gateway.stats()
         self.assertEqual(stats["in_flight"], 0)
         self.assertEqual(stats["waiting"], 0)
-        self.assertIsNone(stats["current"])
+        self.assertEqual([item["instance_id"] for item in stats["loaded"]], [])
 
 
 def _ignore(function, *args, **kwargs):
@@ -1184,10 +1207,18 @@ class QueueRunsTests(unittest.TestCase):
 class CardReadingTests(unittest.TestCase):
     """What the accelerator reports, on the page that watches it."""
 
-    def test_memory_is_reported(self):
-        card = quick(two_models()).stats()["card"]
+    def test_memory_is_reported_as_a_budget(self):
+        # Not as a raw card reading: the page and the thing that refuses a
+        # model have to give the same answer, so both read the budget.
+        found = quick(two_models()).stats()["memory"]
+        card = next(pool for pool in found["pools"] if pool["name"] == "card")
         self.assertEqual(card["total_mb"], 32000)
-        self.assertIn("used_mb", card)
+        self.assertIn("available_mb", card)
+        self.assertEqual(card["reserve_mb"], 0,
+                         "a dedicated card is used whole")
+
+    def test_the_temperature_is_still_reported_beside_it(self):
+        self.assertIn("temperature_c", quick(two_models()).stats()["card"])
 
     def test_a_card_that_cannot_be_read_reports_nothing_rather_than_zero(self):
         # Zero of zero would read as an empty card, which is a different thing
@@ -1211,7 +1242,7 @@ class WhatThePageSeesTests(unittest.TestCase):
 
     def test_it_reports_a_model_nobody_has_asked_for_yet(self):
         gateway = quick(two_models(coder=True))
-        self.assertEqual(gateway.stats()["current"], "coder")
+        self.assertEqual(loaded_names(gateway), ["coder"])
 
     def test_looking_costs_the_expensive_read_once(self):
         operations = two_models(coder=True)
@@ -1235,16 +1266,16 @@ class WhatThePageSeesTests(unittest.TestCase):
     def test_it_looks_again_after_a_button_moves_a_model(self):
         operations = two_models(coder=True)
         gateway = quick(operations)
-        self.assertEqual(gateway.stats()["current"], "coder")
+        self.assertEqual(loaded_names(gateway), ["coder"])
         operations.unload("coder")
         operations._entries["reviewer"].update(running=True, ready=True)
         gateway.card_changed()
-        self.assertEqual(gateway.stats()["current"], "reviewer")
+        self.assertEqual(loaded_names(gateway), ["reviewer"])
 
     def test_two_models_up_is_not_a_card_to_report(self):
         # It is a card to clear, and the next request clears it.
         gateway = quick(two_models(coder=True, reviewer=True))
-        self.assertIsNone(gateway.stats()["current"])
+        self.assertEqual(loaded_names(gateway), [])
 
 
 def _no_card():

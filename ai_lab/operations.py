@@ -421,9 +421,13 @@ class Operations:
 
     # -- how much of this machine models may use ---------------------------
 
+    def reserve_mb(self) -> float:
+        """How much of this machine is held back for the machine itself."""
+        return self.settings.reserve_mb(self.store.load())
+
     def memory_budget(self) -> dict:
         """What is available for models right now, pool by pool."""
-        return budget.of(self.host, self.settings.reserve_mb(self.store.load())).json()
+        return budget.of(self.host, self.reserve_mb()).json()
 
     def update_memory(self, changes: dict) -> dict:
         """Change how much of the machine is held back for the machine.

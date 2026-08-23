@@ -10,13 +10,13 @@ import { describe, it } from 'node:test';
 import { installDom, settle } from './support/dom.js';
 
 const STATS = {
-  current: 'coder',
-  current_engine: 'vLLM',
-  current_settings: { context_size: 32768 },
+  // A list, always. What is on the machine is a set — one model today, more
+  // when the budget allows it — so the page reads it the same either way.
+  loaded: [{ instance_id: 'coder', engine: 'vLLM',
+             settings: { context_size: 32768 }, in_flight: 0, places: 8 }],
   busy: false,
   holder: null,
   in_flight: 0,
-  places: 8,
   switching: false,
   waiting: 0,
   waiting_for: [],
@@ -39,9 +39,18 @@ const STATS = {
     { path: '/v1/messages', models: ['fast'], engines: ['vLLM'] },
     { path: '/v1/messages/count_tokens', models: ['fast'], engines: ['vLLM'] },
   ],
-  card: { used_mb: 3546, total_mb: 32623, kind: 'dedicated',
-          temperature_c: 32,
-          ram_used_mb: 8200, ram_total_mb: 64000 },
+  card: { temperature_c: 32 },
+  memory: {
+    unified: false, for_models_mb: 29077 + 47608, held_by_models_mb: 3546,
+    pools: [
+      { name: 'card', kind: 'dedicated', total_mb: 32623, used_mb: 3546,
+        used_by_models_mb: 3546, reserve_mb: 0, free_mb: 29077,
+        available_mb: 29077 },
+      { name: 'machine', kind: 'dedicated', total_mb: 64000, used_mb: 8200,
+        used_by_models_mb: 0, reserve_mb: 8192, free_mb: 55800,
+        available_mb: 47608 },
+    ],
+  },
   queue_runs: [],
   recent: [],
 };
@@ -73,11 +82,31 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /http:\/\/localhost:8090\/v1/);
   });
 
-  it('says which model is on the card, and what will answer', async () => {
-    // The name to send, and the engine — which decides what request shapes
-    // work on it.
+  it('says what is loaded, and what will answer', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /Current model\s*coder · vLLM/);
+    assert.match(view.textContent, /Loaded\s*coder · vLLM/);
+  });
+
+  it('lists every loaded model, and says how many', async () => {
+    // The scheduler holds one today. The page is written for the set it will
+    // hold, so going from one to three changes no code here.
+    const { view } = await renderPage({
+      loaded: [
+        { instance_id: 'coder', engine: 'vLLM', settings: {}, in_flight: 2, places: 8 },
+        { instance_id: 'reviewer', engine: 'llama.cpp', settings: {}, in_flight: 0, places: 1 },
+      ],
+      in_flight: 2, busy: true,
+    });
+    assert.match(view.textContent, /Loaded \(2\)/);
+    assert.match(view.textContent, /reviewer · llama\.cpp/);
+    // Places are the engine's own number, so they are counted per model.
+    assert.match(view.textContent, /Processing · coder\s*2 from 8/);
+    assert.match(view.textContent, /Processing · reviewer\s*0 from 1/);
+  });
+
+  it('says so plainly when nothing is loaded', async () => {
+    const { view } = await renderPage({ loaded: [] });
+    assert.match(view.textContent, /nothing loaded/);
   });
 
   it('says the card is idle when nothing is running on it', async () => {
@@ -98,7 +127,11 @@ describe('the Gateway page', () => {
     // Requests to the model on the card run together now. How many are in
     // flight, and how many could be, is the figure that says whether the
     // concurrency you configured is being used.
-    const { view } = await renderPage({ in_flight: 3, places: 8, busy: true });
+    const { view } = await renderPage({
+      loaded: [{ instance_id: 'coder', engine: 'vLLM', settings: {},
+                 in_flight: 3, places: 8 }],
+      in_flight: 3, busy: true,
+    });
     assert.match(view.textContent, /Processing\s*3 from 8/);
   });
 
@@ -154,12 +187,30 @@ describe('the Gateway page', () => {
   });
 
   it('shows what is loaded above what is waiting for it', async () => {
-    const { view } = await renderPage({ in_flight: 2, waiting: 1,
+    const { view } = await renderPage({
+      loaded: [{ instance_id: 'coder', engine: 'vLLM', settings: {},
+                 in_flight: 2, places: 8 }],
+      in_flight: 2, waiting: 1,
       queue_runs: [{ instance_id: 'reviewer', requests: 1, longest_wait_s: 2 }] });
     const now = view.querySelector('.row.now');
     assert.ok(now, 'the loaded model was not shown');
     assert.match(now.textContent, /coder/);
     assert.match(now.textContent, /2 running/);
+  });
+
+  it('gives every loaded model its own row above the queue', async () => {
+    const { view } = await renderPage({
+      loaded: [
+        { instance_id: 'coder', engine: 'vLLM', settings: {}, in_flight: 2, places: 8 },
+        { instance_id: 'reviewer', engine: 'llama.cpp', settings: {}, in_flight: 0, places: 1 },
+      ],
+      in_flight: 2,
+      queue_runs: [{ instance_id: 'writer', requests: 3, longest_wait_s: 9 }],
+    });
+    const now = [...view.querySelectorAll('.row.now')].map((r) => r.textContent);
+    assert.equal(now.length, 2);
+    assert.match(now[0], /coder.*2 running/s);
+    assert.match(now[1], /reviewer.*idle/s);
   });
 
   it('says so plainly when nothing is waiting', async () => {
@@ -374,20 +425,43 @@ describe('what is happening, in one word', () => {
     assert.match(view.textContent, /loading a model/);
   });
 
-  it('says it is waiting to swap when the card is empty but somebody wants it', async () => {
+  it('says it is waiting for room when nothing runs but somebody wants in', async () => {
+    // "Waiting to swap" said there was one place and it was taken. With a
+    // budget there may be room for another model instead of a swap, so the
+    // word is what is actually true: waiting for room.
     const { view } = await renderPage({
-      in_flight: 0, waiting: 1, busy: true,
+      loaded: [], in_flight: 0, waiting: 1, busy: true,
       waiting_for: [{ instance_id: 'reviewer', waiting: 1, longest_wait_s: 1 }],
     });
-    assert.match(view.textContent, /waiting to swap/);
+    assert.match(view.textContent, /waiting for room/);
   });
 });
 
-describe('what the card says about itself', () => {
-  it('shows how much of it is used', async () => {
-    // The binding constraint on a machine that holds one model at a time.
+describe('what the machine says about its memory', () => {
+  it('shows each pool, and how much of it is used', async () => {
+    // The binding constraint, and now the thing that decides how many models
+    // fit at once.
     const { view } = await renderPage();
-    assert.match(view.textContent, /GPU mem\s*3546 \/ 32623 MB/);
+    assert.match(view.textContent, /Card mem\s*3546 \/ 32623 MB/);
+    assert.match(view.textContent, /System mem\s*8200 \/ 64000 MB/);
+  });
+
+  it('ends with what a model could actually have', async () => {
+    const { view } = await renderPage();
+    assert.match(view.textContent, /Room for a model\s*76685 MB/);
+  });
+
+  it('reads the same numbers the admission decision would', async () => {
+    // Not a second reading computed here. Two figures meaning the same thing
+    // and worked out twice eventually disagree, and the one on screen is the
+    // one nobody checks.
+    const { view } = await renderPage({
+      memory: { unified: false, for_models_mb: 1234, held_by_models_mb: 0,
+                pools: [{ name: 'card', kind: 'dedicated', total_mb: 32623,
+                          used_mb: 31389, used_by_models_mb: 31389,
+                          reserve_mb: 0, free_mb: 1234, available_mb: 1234 }] },
+    });
+    assert.match(view.textContent, /Room for a model\s*1234 MB/);
   });
 
   it('shows the temperature', async () => {
@@ -403,17 +477,20 @@ describe('what the card says about itself', () => {
     assert.equal(view.textContent.includes('busy'), false);
   });
 
-  it('says nothing about load or heat where there is nothing to read', async () => {
-    // Apple silicon reports neither. A dash would be a number that means
-    // something else.
+  it('says nothing about heat where there is nothing to read', async () => {
+    // Apple silicon reports none. A dash would be a number meaning something
+    // else, and one pool shown twice would double the machine.
     const { view } = await renderPage({
-      card: { used_mb: 64200, total_mb: 131072, kind: 'unified',
-              temperature_c: null,
-              ram_used_mb: 0, ram_total_mb: 0 },
+      card: { temperature_c: null },
+      memory: { unified: true, for_models_mb: 80088, held_by_models_mb: 21000,
+                pools: [{ name: 'machine', kind: 'unified', total_mb: 131072,
+                          used_mb: 34600, used_by_models_mb: 21000,
+                          reserve_mb: 16384, free_mb: 96472,
+                          available_mb: 80088 }] },
     });
-    assert.match(view.textContent, /64200 \/ 131072 MB/);
+    assert.match(view.textContent, /System mem\s*34600 \/ 131072 MB/);
     assert.equal(view.textContent.includes('°C'), false);
-    assert.equal(view.textContent.includes('System mem'), false,
+    assert.equal(view.textContent.includes('Card mem'), false,
                  'unified memory is one pool, reported twice');
   });
 

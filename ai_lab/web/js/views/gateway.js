@@ -90,44 +90,71 @@ function address(stats) {
 // What the accelerator says about itself. Memory is the binding constraint on
 // a machine that holds one model at a time; the other two arrive in the same
 // reading, so they cost nothing extra.
-function cardLines(card) {
-  if (!card.total_mb) return [];
+// What the machine has room for, and how warm it is.
+//
+// The pools come from the same reading that decides whether a model may be
+// loaded, so this page cannot disagree with the thing that says no. On a
+// dedicated card there are two — the card, used whole, and the machine, which
+// keeps a reserve. On Apple silicon there is one, because the chip and
+// everything else draw on the same memory.
+const POOL_NAMES = { card: 'Card mem', machine: 'System mem' };
+
+function memoryLines(memory, card) {
   const lines = [];
-  if (card.temperature_c !== null && card.temperature_c !== undefined) {
+  if (card && card.temperature_c !== null && card.temperature_c !== undefined) {
     lines.push(line('GPU temp', `${card.temperature_c} °C`));
   }
-  lines.push(line('GPU mem', `${card.used_mb} / ${card.total_mb} MB`,
-                  card.kind === 'unified'
-                    ? 'Apple silicon shares one pool between the chip and '
-                      + 'everything else, so this is what the engines hold '
-                      + 'against the machine.'
-                    : `${Math.round((100 * card.used_mb) / card.total_mb)}% of the card`));
-  if (card.ram_total_mb) {
-    lines.push(line('System mem', `${card.ram_used_mb} / ${card.ram_total_mb} MB`,
-                    'The machine\u2019s own memory. A model split between the '
-                    + 'card and here lives in it, and so does everything an '
-                    + 'engine keeps outside the card.'));
+  (memory && memory.pools ? memory.pools : []).forEach((pool) => {
+    const share = pool.total_mb
+      ? Math.round((100 * pool.used_mb) / pool.total_mb) : 0;
+    lines.push(line(POOL_NAMES[pool.name] || pool.name,
+                    `${pool.used_mb} / ${pool.total_mb} MB`,
+                    pool.kind === 'unified'
+                      ? `${share}% in use, by models and by everything else. `
+                        + 'Apple silicon shares one pool between the chip and '
+                        + 'the rest of the machine.'
+                      : pool.name === 'card'
+                        ? `${share}% of the card. All of it is for models.`
+                        : `${share}% in use. ${pool.reserve_mb} MB of the rest `
+                          + 'is held back for the machine itself.'));
+  });
+  if (memory && memory.pools && memory.pools.length) {
+    lines.push(line('Room for a model', `${memory.for_models_mb} MB`,
+                    'What is free, less what is held back for the machine. A '
+                    + 'model has to fit in one pool, so this total is the '
+                    + 'ceiling rather than the test.'));
   }
   return lines;
 }
 
+// What is on the machine. One line each, because the answer is a set: today
+// the scheduler holds exactly one, and this reads the same either way rather
+// than being rewritten when it holds three.
+function loadedLines(loaded) {
+  if (!loaded.length) return [line('Loaded', 'nothing loaded')];
+  return loaded.map((item, index) => line(
+    index === 0 ? (loaded.length > 1 ? `Loaded (${loaded.length})` : 'Loaded') : '',
+    `${item.instance_id}${item.engine ? ` · ${item.engine}` : ''}`,
+    'The name to send in a request, and the engine that will answer it. The '
+    + 'engine decides which request shapes work.'));
+}
+
 function activity(stats) {
+  const loaded = stats.loaded || [];
   const status = stats.switching ? 'loading a model'
     : stats.in_flight && stats.waiting ? 'working, with a queue'
     : stats.in_flight ? 'working'
-    : stats.waiting ? 'waiting to swap'
+    : stats.waiting ? 'waiting for room'
     : 'idle';
   return section('Activity', [
     line('Status', status),
-    line('Current model',
-         stats.current
-           ? `${stats.current}${stats.current_engine ? ` · ${stats.current_engine}` : ''}`
-           : 'nothing loaded',
-         'The name to send in a request, and the engine that will answer it. '
-         + 'The engine decides which request shapes work.'),
-    line('Processing', `${stats.in_flight} from ${stats.places}`,
-         'Requests running together on the model that is loaded, against the '
-         + 'number the engine was started to serve.'),
+    ...loadedLines(loaded),
+    ...loaded.map((item) => line(
+      loaded.length > 1 ? `Processing · ${item.instance_id}` : 'Processing',
+      `${item.in_flight} from ${item.places}`,
+      'Requests running together on this model, against the number the engine '
+      + 'was started to serve.')),
+    loaded.length ? null : line('Processing', '—'),
     line('Queue size', String(stats.waiting),
          'Requests waiting for a model that is not loaded.'),
     line('Requests per minute', String(stats.requests_per_minute),
@@ -141,7 +168,7 @@ function activity(stats) {
     line('Time spent switching', `${stats.switching_share}%`,
          'Of the time this was working — answering or loading — how much went '
          + 'on loading.'),
-    ...cardLines(stats.card || {}),
+    ...memoryLines(stats.memory, stats.card),
     stats.last_error
       ? element('p', { class: 'error', text: `Last error: ${stats.last_error}` })
       : null,
@@ -232,12 +259,21 @@ function limits(stats, redraw) {
 // which is the thing worth knowing before it does.
 function coming(stats) {
   const runs = stats.queue_runs || [];
+  const loaded = stats.loaded || [];
   const rows = [];
-  if (stats.current || stats.in_flight) {
+  // What is on the machine now, above what is waiting for it. One row each:
+  // the top of this list is the present and the rest is the schedule.
+  loaded.forEach((item) => {
     rows.push(element('div', { class: 'row tight now' }, [
-      element('span', { text: stats.current || 'nothing loaded' }),
-      element('span', { class: 'muted', text: stats.in_flight
-        ? `${stats.in_flight} running` : 'idle' }),
+      element('span', { text: item.instance_id }),
+      element('span', { class: 'muted', text: item.in_flight
+        ? `${item.in_flight} running` : 'idle' }),
+    ]));
+  });
+  if (!loaded.length && stats.in_flight) {
+    rows.push(element('div', { class: 'row tight now' }, [
+      element('span', { text: 'nothing loaded' }),
+      element('span', { class: 'muted', text: `${stats.in_flight} running` }),
     ]));
   }
   runs.forEach((run, index) => {
