@@ -197,6 +197,56 @@ describe('the machine', () => {
     assert.deepEqual(JSON.parse(sent.body), { reserve_mb: 24576 });
   });
 
+  it('works it out when the server is older than this page', async () => {
+    // Found on the Mac: the browser had this file and the manager, started
+    // half an hour earlier, was still sending the figure under its previous
+    // name. `Math.round(undefined)` is NaN, and NaN reaches the screen as the
+    // word "NaN". The page and the server are never replaced in the same
+    // instant, so this is the ordinary case during a deployment.
+    const older = {
+      unified: true, reserve_mb: 8192, available_mb: 88280,
+      pools: [{ name: 'machine', kind: 'unified', total_mb: 131072,
+                used_mb: 34600, used_by_models_mb: 21000, reserve_mb: 8192,
+                free_mb: 96472, available_mb: 88280 }],   // no for_models_mb
+    };
+    const { view } = await draw(older, { chip: APPLE });
+    assert.equal(view.textContent.includes('NaN'), false, view.textContent);
+    assert.deepEqual(rows(view)[1],
+                     { label: 'Unified memory', value: '122880 / 131072 MB' });
+  });
+
+  it('never prints NaN, whatever the server sends', async () => {
+    // Every field missing at once, which is what a much older manager, or a
+    // failed read, looks like.
+    const nonsense = {
+      unified: false, reserve_mb: undefined,
+      pools: [
+        { name: 'card', kind: 'dedicated' },
+        { name: 'machine', kind: 'dedicated', total_mb: 'not a number',
+          reserve_mb: null },
+      ],
+    };
+    const { view } = await draw(nonsense);
+    assert.equal(view.textContent.includes('NaN'), false, view.textContent);
+    assert.equal(view.textContent.includes('undefined'), false, view.textContent);
+    assert.equal(view.textContent.includes('null'), false, view.textContent);
+  });
+
+  it('leaves out a pool it cannot say anything true about', async () => {
+    const half = {
+      unified: false, reserve_mb: 8192,
+      pools: [
+        { name: 'card', kind: 'dedicated' },                    // no total
+        { name: 'machine', kind: 'dedicated', total_mb: 49152,
+          reserve_mb: 8192, for_models_mb: 40960 },
+      ],
+    };
+    const { view } = await draw(half);
+    const listed = rows(view);
+    assert.equal(listed.filter((r) => r.label === 'VRAM').length, 0);
+    assert.ok(listed.some((r) => r.value === '40960 / 49152 MB'));
+  });
+
   it('leaves the memory lines out when they could not be read', async () => {
     // No pools means the machine could not answer — not that it has no room.
     // A row of zeroes would be a claim, and the wrong one. The chip is still

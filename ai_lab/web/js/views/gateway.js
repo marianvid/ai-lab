@@ -99,16 +99,25 @@ function address(stats) {
 // everything else draw on the same memory.
 const POOL_NAMES = { card: 'Card mem', machine: 'System mem' };
 
+// A figure, or a dash. Every number here comes from a manager that may be
+// older than this file — they are not replaced in the same instant — and
+// `String(undefined)` reaches the screen as the word "undefined". A dash says
+// "no answer", which is true, and is what the rest of this interface uses.
+function figure(value, suffix = '') {
+  const found = Number(value);
+  return Number.isFinite(found) ? `${found}${suffix}` : '—';
+}
+
 function memoryLines(memory, card) {
   const lines = [];
   if (card && card.temperature_c !== null && card.temperature_c !== undefined) {
-    lines.push(line('GPU temp', `${card.temperature_c} °C`));
+    lines.push(line('GPU temp', figure(card.temperature_c, ' °C')));
   }
   (memory && memory.pools ? memory.pools : []).forEach((pool) => {
     const share = pool.total_mb
       ? Math.round((100 * pool.used_mb) / pool.total_mb) : 0;
     lines.push(line(POOL_NAMES[pool.name] || pool.name,
-                    `${pool.used_mb} / ${pool.total_mb} MB`,
+                    `${figure(pool.used_mb)} / ${figure(pool.total_mb)} MB`,
                     pool.kind === 'unified'
                       ? `${share}% in use, by models and by everything else. `
                         + 'Apple silicon shares one pool between the chip and '
@@ -119,7 +128,7 @@ function memoryLines(memory, card) {
                           + 'is held back for the machine itself.'));
   });
   if (memory && memory.pools && memory.pools.length) {
-    lines.push(line('Room for a model', `${memory.available_mb} MB`,
+    lines.push(line('Room for a model', figure(memory.available_mb, ' MB'),
                     'What is free, less what is held back for the machine. A '
                     + 'model has to fit in one pool, so this total is the '
                     + 'ceiling rather than the test.'));
@@ -151,21 +160,21 @@ function activity(stats) {
     ...loadedLines(loaded),
     ...loaded.map((item) => line(
       loaded.length > 1 ? `Processing · ${item.instance_id}` : 'Processing',
-      `${item.in_flight} from ${item.places}`,
+      `${figure(item.in_flight)} from ${figure(item.places)}`,
       'Requests running together on this model, against the number the engine '
       + 'was started to serve.')),
     loaded.length ? null : line('Processing', '—'),
-    line('Queue size', String(stats.waiting),
+    line('Queue size', figure(stats.waiting),
          'Requests waiting for a model that is not loaded.'),
-    line('Requests per minute', String(stats.requests_per_minute),
+    line('Requests per minute', figure(stats.requests_per_minute),
          'In the last sixty seconds.'),
-    line('Time to first token (s)', String(stats.average_first_token_s),
+    line('Time to first token (s)', figure(stats.average_first_token_s),
          'Averaged over requests that asked for streaming. Without it an '
          + 'engine sends nothing until the answer is finished, so its first '
          + 'byte is the whole generation.'),
-    line('Switches', String(stats.switches)),
-    line('Average switch (s)', String(stats.average_switch_s)),
-    line('Time spent switching', `${stats.switching_share}%`,
+    line('Switches', figure(stats.switches)),
+    line('Average switch (s)', figure(stats.average_switch_s)),
+    line('Time spent switching', figure(stats.switching_share, '%'),
          'Of the time this was working — answering or loading — how much went '
          + 'on loading.'),
     ...memoryLines(stats.memory, stats.card),

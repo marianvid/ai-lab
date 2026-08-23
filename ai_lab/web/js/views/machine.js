@@ -60,8 +60,11 @@ export function machine(settings, refresh) {
   // A row of zeroes there would be a claim, and the wrong one.
   const pools = (memory && memory.pools) || [];
   if (pools.length) {
-    pools.forEach((pool, index) => rows.push(poolRow(pool, index === 0)));
-    rows.push(reserveRow(memory, refresh));
+    const drawn = pools.map((pool, index) => poolRow(pool, index === 0))
+                       .filter(Boolean);
+    if (drawn.length) {
+      rows.push(...drawn, reserveRow(memory, refresh));
+    }
   }
 
   if (!rows.length) return null;
@@ -86,11 +89,19 @@ function poolRow(pool, first) {
   // two ways of saying the same thing and reads like a fault. Keyed on the
   // reserve rather than on which pool it is, so a card that one day holds
   // something back gets the pair without this having to be told.
-  const total = Math.round(pool.total_mb);
-  const value = pool.reserve_mb > 0
-    ? `${Math.round(pool.for_models_mb)} / ${total} MB`
-    : `${total} MB`;
-  return row(kind.label, value, kind.help, first ? 'memory' : '');
+  const total = number(pool.total_mb);
+  if (total === null) return null;          // nothing true to say about it
+  const reserve = number(pool.reserve_mb) || 0;
+  // Worked out here when the server did not send it. The page and the server
+  // are not replaced in the same instant — a browser holding this file against
+  // a manager started ten minutes earlier is the ordinary case during a
+  // deployment — so a field that arrived under another name last week must not
+  // become `NaN` on screen. Total and reserve have been there from the start.
+  const forModels = number(pool.for_models_mb);
+  const usable = forModels === null ? Math.max(0, total - reserve) : forModels;
+  return row(kind.label,
+             reserve > 0 ? `${usable} / ${total} MB` : `${total} MB`,
+             kind.help, first ? 'memory' : '');
 }
 
 
@@ -99,7 +110,7 @@ function poolRow(pool, first) {
 function reserveRow(memory, refresh) {
   const field = element('input', {
     type: 'number', class: 'number small', min: '0', step: '1024',
-    value: String(Math.round(memory.reserve_mb || 0)),
+    value: String(number(memory.reserve_mb) ?? 0),
   });
   const before = field.value;
   const save = element('button', {
@@ -124,6 +135,17 @@ function reserveRow(memory, refresh) {
     }),
     element('span', { class: 'inline' }, [field, save]),
   ]);
+}
+
+
+// A number, or nothing. Anything that is not a real number — missing, a
+// string, the result of arithmetic on `undefined` — comes back as null so the
+// caller decides what to draw. `Math.round(undefined)` is `NaN`, and `NaN`
+// reaches the screen as the word "NaN", which is the same fault as printing
+// "null" and was found the same way: by looking at it.
+function number(value) {
+  const found = Math.round(Number(value));
+  return Number.isFinite(found) ? found : null;
 }
 
 
