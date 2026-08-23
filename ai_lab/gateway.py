@@ -243,15 +243,24 @@ class _Counters:
     # there, because a machine that sits idle overnight would report a
     # flattering number for a workflow that spends its life swapping.
     served_s: float = 0.0
-    # When each request arrived, for a rate rather than a total. Pruned to the
-    # last minute whenever it is read.
+    # When each request arrived and which model it wanted, for a rate rather
+    # than a total. Pruned to the last minute whenever it is read.
+    #
+    # The model is kept because the total answers "how busy is this machine"
+    # and the split answers "which model is carrying it" — and the second is
+    # what decides which one is worth keeping loaded.
     arrivals: deque = field(default_factory=lambda: deque(maxlen=4096))
     # Time to the first token, over requests that asked for streaming. Only
     # those: without streaming an engine sends nothing until the answer is
     # finished, so its "first byte" is the whole generation and averaging the
     # two together measures neither.
-    first_token_s: float = 0.0
-    first_tokens: int = 0
+    #
+    # Kept per model and never totalled. A 3B and a 35B have first-token times
+    # that differ by an order of magnitude, and one average across both is a
+    # figure that describes neither. With one model on the machine the average
+    # was right by accident.
+    first_token_s: dict = field(default_factory=dict)
+    first_tokens: dict = field(default_factory=dict)
     last_error: str = ""
     history: list[dict] = field(default_factory=list)
 
@@ -411,7 +420,7 @@ class Gateway:
         try:
             self.counters.requests += 1
             self.counters.waited_s += time.perf_counter() - started
-            self.counters.arrivals.append(time.time())
+            self.counters.arrivals.append((time.time(), instance_id))
             return Lease(self, instance_id, port, self._engine_name(instance),
                          started=time.perf_counter())
         except BaseException:
@@ -426,13 +435,18 @@ class Gateway:
         self.counters.served_s += held_s
         self.scheduler.leave()
 
-    def first_token(self, seconds: float) -> None:
+    def first_token(self, seconds: float, instance_id: str = "") -> None:
         """How long that request waited for its first token.
 
         Reported only for requests that asked for streaming — see `_Counters`.
+        Kept against the model that answered, because that is the only level at
+        which the figure means anything.
         """
-        self.counters.first_token_s += seconds
-        self.counters.first_tokens += 1
+        counters = self.counters
+        counters.first_token_s[instance_id] = (
+            counters.first_token_s.get(instance_id, 0.0) + seconds)
+        counters.first_tokens[instance_id] = (
+            counters.first_tokens.get(instance_id, 0) + 1)
 
     def _adopt_what_is_there(self) -> None:
         """Tell the scheduler what is already on the card, once.
@@ -713,6 +727,12 @@ class Gateway:
                 "settings": current.as_dict(),
                 "in_flight": state["in_flight"],
                 "places": state["places"],
+                # Per model, because neither figure means anything averaged
+                # across two: a 3B and a 35B differ by an order of magnitude on
+                # the first, and the second answers "which of these is carrying
+                # the traffic", which is what decides what is worth keeping.
+                "requests_per_minute": self._rate_of(current.instance_id),
+                "first_token_s": self._first_token_of(current.instance_id),
             }] if current else [],
             "busy": bool(state["in_flight"] or waiting or state["switching"]),
             "holder": self.busy(),
@@ -741,12 +761,7 @@ class Gateway:
             "memory": self._budget(),
             "card": self._card_reading(),
             "requests_per_minute": self._rate(),
-            "average_first_token_s": round(
-                counters.first_token_s / counters.first_tokens, 2)
-                if counters.first_tokens else 0.0,
             "switches": counters.switches,
-            "average_switch_s": round(counters.switch_s / counters.switches, 1)
-                                if counters.switches else 0.0,
             # Of the time this was working — answering or loading — how much
             # went on loading. Against the wall clock instead, a machine that
             # sits idle overnight reports a flattering number for a workflow
@@ -807,11 +822,27 @@ class Gateway:
         A rate rather than a total: a lifetime count grows while you watch it
         and means the same at 40 as at 40,000.
         """
+        return len(self._recent_arrivals())
+
+    def _rate_of(self, instance_id: str) -> float:
+        """Requests in the last minute for one model."""
+        return sum(1 for _, wanted in self._recent_arrivals()
+                   if wanted == instance_id)
+
+    def _recent_arrivals(self) -> deque:
+        """The last minute of arrivals, pruning what has aged out."""
         arrivals = self.counters.arrivals
         cutoff = time.time() - 60.0
-        while arrivals and arrivals[0] < cutoff:
+        while arrivals and arrivals[0][0] < cutoff:
             arrivals.popleft()
-        return len(arrivals)
+        return arrivals
+
+    def _first_token_of(self, instance_id: str) -> float:
+        """Average time to the first token for one model, over streamed requests."""
+        many = self.counters.first_tokens.get(instance_id, 0)
+        if not many:
+            return 0.0
+        return round(self.counters.first_token_s.get(instance_id, 0.0) / many, 2)
 
     def _switching_share(self) -> float:
         """What share of the working time went on loading models, as a percent."""

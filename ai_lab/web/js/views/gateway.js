@@ -128,7 +128,7 @@ function memoryLines(memory, card) {
                           + 'is held back for the machine itself.'));
   });
   if (memory && memory.pools && memory.pools.length) {
-    lines.push(line('Room for a model', figure(memory.available_mb, ' MB'),
+    lines.push(line('Available mem', figure(memory.available_mb, ' MB'),
                     'What is free, less what is held back for the machine. A '
                     + 'model has to fit in one pool, so this total is the '
                     + 'ceiling rather than the test.'));
@@ -136,16 +136,28 @@ function memoryLines(memory, card) {
   return lines;
 }
 
-// What is on the machine. One line each, because the answer is a set: today
-// the scheduler holds exactly one, and this reads the same either way rather
-// than being rewritten when it holds three.
-function loadedLines(loaded) {
-  if (!loaded.length) return [line('Loaded', 'nothing loaded')];
-  return loaded.map((item, index) => line(
-    index === 0 ? (loaded.length > 1 ? `Loaded (${loaded.length})` : 'Loaded') : '',
-    `${item.instance_id}${item.engine ? ` · ${item.engine}` : ''}`,
-    'The name to send in a request, and the engine that will answer it. The '
-    + 'engine decides which request shapes work.'));
+// One line per loaded model, at the foot of the totals above.
+//
+// Two of these figures only mean something per model. A 3B and a 35B have
+// first-token times an order of magnitude apart, so one average across both
+// describes neither — with a single model on the machine it was right by
+// accident. And the split of the request rate answers "which of these is
+// carrying the traffic", which is what decides which one is worth keeping.
+function perModel(loaded) {
+  if (!loaded.length) return [];
+  return [
+    element('div', { class: 'row heading' },
+            element('span', { class: 'muted', text: 'Per model' })),
+    ...loaded.map((item) => element('div', { class: 'row tight bymodel' }, [
+      element('span', { class: 'grow',
+                        title: item.engine ? `answered by ${item.engine}` : '' },
+              [element('strong', { text: item.instance_id })]),
+      element('span', { class: 'muted', title: 'requests a minute',
+                        text: `${figure(item.requests_per_minute)} rpm` }),
+      element('span', { class: 'muted', title: 'time to first token',
+                        text: `${figure(item.first_token_s)} s` }),
+    ])),
+  ];
 }
 
 function activity(stats) {
@@ -155,29 +167,26 @@ function activity(stats) {
     : stats.in_flight ? 'working'
     : stats.waiting ? 'waiting for room'
     : 'idle';
+  const places = loaded.reduce((total, item) => total + (Number(item.places) || 0), 0);
   return section('Activity', [
     line('Status', status),
-    ...loadedLines(loaded),
-    ...loaded.map((item) => line(
-      loaded.length > 1 ? `Processing · ${item.instance_id}` : 'Processing',
-      `${figure(item.in_flight)} from ${figure(item.places)}`,
-      'Requests running together on this model, against the number the engine '
-      + 'was started to serve.')),
-    loaded.length ? null : line('Processing', '—'),
+    line('Loaded', figure(loaded.length),
+         'How many models are on the machine. Which ones, and what each is '
+         + 'doing, is below.'),
+    line('Processing', `${figure(stats.in_flight)} from ${figure(places)}`,
+         'Requests running right now, against the places every loaded model '
+         + 'offers between them. Places are the engine\u2019s own number and '
+         + 'differ per model.'),
     line('Queue size', figure(stats.waiting),
          'Requests waiting for a model that is not loaded.'),
     line('Requests per minute', figure(stats.requests_per_minute),
          'In the last sixty seconds.'),
-    line('Time to first token (s)', figure(stats.average_first_token_s),
-         'Averaged over requests that asked for streaming. Without it an '
-         + 'engine sends nothing until the answer is finished, so its first '
-         + 'byte is the whole generation.'),
     line('Switches', figure(stats.switches)),
-    line('Average switch (s)', figure(stats.average_switch_s)),
     line('Time spent switching', figure(stats.switching_share, '%'),
          'Of the time this was working — answering or loading — how much went '
          + 'on loading.'),
     ...memoryLines(stats.memory, stats.card),
+    ...perModel(loaded),
     stats.last_error
       ? element('p', { class: 'error', text: `Last error: ${stats.last_error}` })
       : null,

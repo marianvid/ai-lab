@@ -110,7 +110,8 @@ def _forwarder(gateway: Gateway, path: str):
             # Without it an engine sends nothing until the answer is finished,
             # so its first byte is the whole generation and the two averaged
             # together measure neither.
-            timed = gateway.first_token if payload.get("stream") else None
+            timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
+                     if payload.get("stream") else None)
             return forward(url, outgoing, on_close=lease.release,
                            first_byte_s=gateway.first_byte_s,
                            between_bytes_s=gateway.between_bytes_s,

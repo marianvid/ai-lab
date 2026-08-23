@@ -13,7 +13,8 @@ const STATS = {
   // A list, always. What is on the machine is a set — one model today, more
   // when the budget allows it — so the page reads it the same either way.
   loaded: [{ instance_id: 'coder', engine: 'vLLM',
-             settings: { context_size: 32768 }, in_flight: 0, places: 8 }],
+             settings: { context_size: 32768 }, in_flight: 0, places: 8,
+             requests_per_minute: 12, first_token_s: 0.42 }],
   busy: false,
   holder: null,
   in_flight: 0,
@@ -25,10 +26,8 @@ const STATS = {
   first_byte_s: 120.0,
   between_bytes_s: 30.0,
   requests_per_minute: 12,
-  average_first_token_s: 0.42,
   switches: 2,
   average_wait_s: 1.4,
-  average_switch_s: 31.2,
   switching_share: 18.5,
   last_error: '',
   shapes: [
@@ -83,31 +82,58 @@ describe('the Gateway page', () => {
     assert.match(view.textContent, /http:\/\/localhost:8090\/v1/);
   });
 
-  it('says what is loaded, and what will answer', async () => {
-    const { view } = await renderPage();
-    assert.match(view.textContent, /Loaded\s*coder · vLLM/);
-  });
-
-  it('lists every loaded model, and says how many', async () => {
-    // The scheduler holds one today. The page is written for the set it will
-    // hold, so going from one to three changes no code here.
+  it('counts what is loaded, and names them below', async () => {
+    // The heading line is a count. Which ones, and what each is doing, is the
+    // per-model block — two names on one line was a heading that grew.
     const { view } = await renderPage({
       loaded: [
-        { instance_id: 'coder', engine: 'vLLM', settings: {}, in_flight: 2, places: 8 },
-        { instance_id: 'reviewer', engine: 'llama.cpp', settings: {}, in_flight: 0, places: 1 },
+        { instance_id: 'coder', engine: 'vLLM', in_flight: 2, places: 8,
+          requests_per_minute: 14, first_token_s: 0.31 },
+        { instance_id: 'reviewer', engine: 'llama.cpp', in_flight: 0, places: 1,
+          requests_per_minute: 3, first_token_s: 0.08 },
       ],
       in_flight: 2, busy: true,
     });
-    assert.match(view.textContent, /Loaded \(2\)/);
-    assert.match(view.textContent, /reviewer · llama\.cpp/);
-    // Places are the engine's own number, so they are counted per model.
-    assert.match(view.textContent, /Processing · coder\s*2 from 8/);
-    assert.match(view.textContent, /Processing · reviewer\s*0 from 1/);
+    assert.match(view.textContent, /Loaded\s*2/);
+    // Read column by column: the spans sit side by side, so joining their
+    // text would say "coder14 rpm0.31 s".
+    const rows = [...view.querySelectorAll('.row.bymodel')]
+      .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
+    assert.deepEqual(rows, [['coder', '14 rpm', '0.31 s'],
+                            ['reviewer', '3 rpm', '0.08 s']]);
   });
 
-  it('says so plainly when nothing is loaded', async () => {
+  it('adds the places up, because they are the engines own numbers', async () => {
+    const { view } = await renderPage({
+      loaded: [
+        { instance_id: 'coder', engine: 'vLLM', in_flight: 2, places: 8,
+          requests_per_minute: 0, first_token_s: 0 },
+        { instance_id: 'reviewer', engine: 'llama.cpp', in_flight: 1, places: 1,
+          requests_per_minute: 0, first_token_s: 0 },
+      ],
+      in_flight: 3, busy: true,
+    });
+    assert.match(view.textContent, /Processing\s*3 from 9/);
+  });
+
+  it('keeps the time to first token per model, never averaged', async () => {
+    // A 3B and a 35B differ by an order of magnitude, so one average across
+    // both describes neither. With a single model it was right by accident.
+    const { view } = await renderPage();
+    assert.equal(view.textContent.includes('Time to first token'), false,
+                 'a machine-wide first-token average is back');
+    assert.match(view.querySelector('.row.bymodel').textContent, /0\.42 s/);
+  });
+
+  it('says nothing per model when nothing is loaded', async () => {
     const { view } = await renderPage({ loaded: [] });
-    assert.match(view.textContent, /nothing loaded/);
+    assert.match(view.textContent, /Loaded\s*0/);
+    assert.equal(view.querySelector('.row.bymodel'), null);
+  });
+
+  it('has no average switch, which said nothing anybody acted on', async () => {
+    const { view } = await renderPage();
+    assert.equal(view.textContent.includes('Average switch'), false);
   });
 
   it('says the card is idle when nothing is running on it', async () => {
@@ -152,11 +178,6 @@ describe('the Gateway page', () => {
   it('reports a rate rather than a total that only grows', async () => {
     const { view } = await renderPage();
     assert.match(view.textContent, /Requests per minute\s*12/);
-  });
-
-  it('reports the time to the first token', async () => {
-    const { view } = await renderPage();
-    assert.match(view.textContent, /Time to first token \(s\)\s*0.42/);
   });
 
   it('reports how many are waiting', async () => {
@@ -449,7 +470,7 @@ describe('what the machine says about its memory', () => {
 
   it('ends with what a model could actually have', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /Room for a model\s*76685 MB/);
+    assert.match(view.textContent, /Available mem\s*76685 MB/);
   });
 
   it('reads the same numbers the admission decision would', async () => {
@@ -464,7 +485,7 @@ describe('what the machine says about its memory', () => {
                           reserve_mb: 0, free_mb: 1234, capacity_mb: 32623,
                           available_mb: 1234 }] },
     });
-    assert.match(view.textContent, /Room for a model\s*1234 MB/);
+    assert.match(view.textContent, /Available mem\s*1234 MB/);
   });
 
   it('shows the temperature', async () => {

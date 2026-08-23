@@ -455,14 +455,41 @@ class ReportingTests(unittest.TestCase):
     def test_nothing_working_is_reported_as_no_share_rather_than_a_crash(self):
         self.assertEqual(quick(two_models()).stats()["switching_share"], 0.0)
 
-    def test_time_to_the_first_token_is_averaged(self):
+    def test_time_to_the_first_token_is_averaged_per_model(self):
+        # Never across models. A 3B and a 35B differ by an order of magnitude,
+        # so one average over both describes neither — with a single model on
+        # the machine it was right by accident.
         gateway = quick(two_models(coder=True))
-        gateway.first_token(0.4)
-        gateway.first_token(0.6)
-        self.assertEqual(gateway.stats()["average_first_token_s"], 0.5)
+        gateway.first_token(0.4, "coder")
+        gateway.first_token(0.6, "coder")
+        gateway.first_token(9.0, "reviewer")
+        loaded = gateway.stats()["loaded"][0]
+        self.assertEqual(loaded["instance_id"], "coder")
+        self.assertEqual(loaded["first_token_s"], 0.5,
+                         "the other model's 9 seconds leaked into this average")
 
     def test_no_streamed_request_yet_reports_nothing_rather_than_dividing(self):
-        self.assertEqual(quick(two_models()).stats()["average_first_token_s"], 0.0)
+        gateway = quick(two_models(coder=True))
+        with gateway.acquire("coder"):
+            pass
+        self.assertEqual(gateway.stats()["loaded"][0]["first_token_s"], 0.0)
+
+    def test_the_request_rate_is_reported_per_model_as_well_as_in_total(self):
+        # The total answers "how busy is this machine"; the split answers
+        # "which of these is carrying it", which is what decides which one is
+        # worth keeping loaded.
+        gateway = quick(two_models(coder=True))
+        for _ in range(3):
+            with gateway.acquire("coder"):
+                pass
+        stats = gateway.stats()
+        self.assertEqual(stats["requests_per_minute"], 3)
+        self.assertEqual(stats["loaded"][0]["requests_per_minute"], 3)
+
+    def test_there_is_no_average_switch_any_more(self):
+        # It said nothing anybody acted on: a number that mixes a load with an
+        # unload, over runs that differ by a factor of ten.
+        self.assertNotIn("average_switch_s", quick(two_models()).stats())
 
     def test_a_run_with_no_switching_reports_none(self):
         gateway = quick(two_models(coder=True))
