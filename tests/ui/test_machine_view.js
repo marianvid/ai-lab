@@ -79,20 +79,10 @@ describe('the machine', () => {
     assert.equal(view.querySelector('h3').parentElement.className, 'section machine');
   });
 
-  it('names the chip and what starts the engines', async () => {
+  it('names the chip', async () => {
     const { view } = await draw(LINUX);
-    const listed = rows(view);
-    assert.deepEqual(listed[0],
+    assert.deepEqual(rows(view)[0],
                      { label: 'Accelerator', value: 'NVIDIA RTX PRO 4500 Blackwell' });
-    assert.deepEqual(listed[1], { label: 'Engines started by', value: 'systemd' });
-  });
-
-  it('says what the supervisor is rather than what the code calls it', async () => {
-    // "subprocess" is a word from the source, not a thing anybody runs.
-    const { view } = await draw(MAC, { chip: APPLE,
-                                       host: { supervisor: 'subprocess' } });
-    assert.deepEqual(rows(view)[1],
-                     { label: 'Engines started by', value: 'this application' });
   });
 
   it('holds nothing that moves on its own', async () => {
@@ -113,34 +103,46 @@ describe('the machine', () => {
   it('lists VRAM and RAM on a machine with a card', async () => {
     const { view } = await draw(LINUX);
     const listed = rows(view);
-    assert.deepEqual(listed[2], { label: 'VRAM', value: '32623 MB' });
-    assert.deepEqual(listed[3], { label: 'RAM', value: '40960 MB' });
+    assert.deepEqual(listed[1], { label: 'VRAM', value: '32623 MB' });
+    assert.deepEqual(listed[2], { label: 'RAM', value: '49152 MB' });
+  });
+
+  it('shows what this machine has, not what is left after the reserve', async () => {
+    // The reserve is its own line directly below. Subtracting it here as well
+    // would print a number matching neither the hardware nor the line beside
+    // it, and leave nowhere to read the real size of the machine.
+    const { view } = await draw(LINUX);
+    assert.equal(rows(view)[2].value, '49152 MB');
+    assert.equal(view.textContent.includes('40960'), false,
+                 'RAM is showing what is left rather than what there is');
   });
 
   it('lists the card whole, not what is left of it', async () => {
     // 28.9 GB of this card is held by a running model. That is a fact about
     // now and belongs on the Gateway page; this line says how big the card is.
     const { view } = await draw(LINUX);
-    assert.match(rows(view)[2].value, /32623/);
+    assert.match(rows(view)[1].value, /32623/);
     assert.equal(view.textContent.includes('3677'), false,
                  'this card is showing what is free rather than what there is');
   });
 
-  it('takes the reserve out of RAM but not out of VRAM', async () => {
-    // Nothing but models uses the card. The machine is shared.
+  it('shows the reserve as its own line, to be taken off in the head', async () => {
+    // The card carries none — nothing but models uses it — so only one of
+    // these two figures has anything taken off it, and saying which in prose
+    // under them would be an explanation nobody rereads.
     const { view } = await draw(LINUX);
-    assert.equal(rows(view)[2].value, '32623 MB');    // the whole card
-    assert.equal(rows(view)[3].value, '40960 MB');    // 49152 less 8192
+    const listed = rows(view);
+    assert.equal(listed[listed.length - 1].label, 'Reserved for the system');
   });
 
   it('says unified memory once, and calls it that', async () => {
     const { view } = await draw(MAC, { chip: APPLE });
     const listed = rows(view);
-    assert.deepEqual(listed[2], { label: 'Unified memory', value: '114688 MB' });
+    assert.deepEqual(listed[1], { label: 'Unified memory', value: '131072 MB' });
     assert.equal(view.textContent.includes('VRAM'), false,
                  'one pool shown twice doubles the machine');
-    assert.equal(listed.length, 4,
-                 'expected the chip, the supervisor, one memory line and the reserve');
+    assert.equal(listed.length, 3,
+                 'expected the chip, one memory line and the reserve');
   });
 
   it('names the reserve for what it protects, not for what it withholds', async () => {

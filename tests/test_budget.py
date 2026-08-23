@@ -99,8 +99,6 @@ class UnifiedMemory(unittest.TestCase):
     def test_the_total_is_not_the_two_readings_added(self):
         self.assertEqual(self.budget.available_mb,
                          self.budget.pools[0].available_mb)
-        self.assertEqual(self.budget.capacity_mb,
-                         self.budget.pools[0].capacity_mb)
 
 
 class WhenTheMachineWillNotAnswer(unittest.TestCase):
@@ -115,7 +113,6 @@ class WhenTheMachineWillNotAnswer(unittest.TestCase):
         found = budget.of(Broken())
         self.assertEqual(found.pools, ())
         self.assertEqual(found.available_mb, 0.0)
-        self.assertEqual(found.capacity_mb, 0.0)
 
     def test_a_card_that_is_not_available_is_not_a_pool(self):
         found = budget.of(FakeHost(card=card(available=False, total=0),
@@ -147,14 +144,16 @@ class TwoDifferentQuestions(unittest.TestCase):
             FakeHost(card=card(total=32623, used=28946),
                      machine=(5157.0, 49152.0)), reserve_mb=8192)
 
-    def test_capacity_does_not_move_when_a_model_loads(self):
+    def test_how_big_a_pool_is_does_not_move_when_a_model_loads(self):
+        # The settings screen shows this and it stays put; what a model could
+        # take is the other figure and it does not.
         pool = self.budget.pool(budget.CARD)
-        self.assertEqual(pool.capacity_mb, 32623, "the whole card, whatever holds it")
+        self.assertEqual(pool.total_mb, 32623, "the whole card, whatever holds it")
         self.assertEqual(pool.available_mb, 32623 - 28946)
 
-    def test_the_reserve_comes_out_of_capacity_too(self):
+    def test_the_reserve_comes_off_what_is_free(self):
         machine = self.budget.pool(budget.MACHINE)
-        self.assertEqual(machine.capacity_mb, 49152 - 8192)
+        self.assertEqual(machine.total_mb, 49152)
         self.assertEqual(machine.available_mb, 49152 - 5157 - 8192)
 
     def test_the_reserve_is_one_number_not_a_sum(self):

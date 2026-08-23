@@ -72,24 +72,18 @@ class Pool:
         return max(0.0, self.total_mb - self.used_mb)
 
     @property
-    def capacity_mb(self) -> float:
-        """How much of this pool models may ever use.
-
-        The whole pool, less what is held back for the machine. A property of
-        the machine and the setting, not of what is happening — it does not
-        move when a model loads. This is what a settings screen shows: how big
-        this machine is for models.
-        """
-        return max(0.0, self.total_mb - self.reserve_mb)
-
-    @property
     def available_mb(self) -> float:
         """How much a model could take right now.
 
         What is free, less the reserve. This moves as models come and go, and
         it is what an admission decision asks and what the gateway page
-        watches. Not the same question as `capacity_mb`, and confusing the two
-        would either refuse a model that fits or accept one that does not.
+        watches.
+
+        Not the same as how big this pool is. The settings screen shows
+        `total_mb` and the reserve on separate lines and lets the reader take
+        one off the other, which is why there is no third figure here for the
+        difference: it would be a number matching neither the hardware nor
+        anything printed beside it.
         """
         return max(0.0, self.free_mb - self.reserve_mb)
 
@@ -100,7 +94,6 @@ class Pool:
                 "used_by_models_mb": round(self.used_by_models_mb),
                 "reserve_mb": round(self.reserve_mb),
                 "free_mb": round(self.free_mb),
-                "capacity_mb": round(self.capacity_mb),
                 "available_mb": round(self.available_mb)}
 
 
@@ -116,11 +109,6 @@ class Budget:
 
     pools: tuple[Pool, ...]
     unified: bool
-
-    @property
-    def capacity_mb(self) -> float:
-        """How big this machine is for models, whatever is running."""
-        return sum(pool.capacity_mb for pool in self.pools)
 
     @property
     def available_mb(self) -> float:
@@ -150,7 +138,6 @@ class Budget:
         return {"pools": [pool.json() for pool in self.pools],
                 "unified": self.unified,
                 "reserve_mb": round(self.reserve_mb),
-                "capacity_mb": round(self.capacity_mb),
                 "available_mb": round(self.available_mb),
                 "held_by_models_mb": round(self.held_by_models_mb)}
 

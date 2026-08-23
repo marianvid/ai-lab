@@ -6,7 +6,7 @@
 
 import { api } from './api.js';
 import { onChange, startEventStream } from './events.js';
-import { element } from './format.js';
+import { element, pageTitle } from './format.js';
 import { installTheme } from './theme.js';
 
 import { render as renderSettings } from './views/settings.js';
@@ -87,7 +87,7 @@ function drawTabs() {
 
 async function drawHostSummary() {
   const settings = await api.settings();
-  document.title = settings.title;
+  document.title = pageTitle(settings);
   const accelerator = settings.accelerator;
   const memory = accelerator.memory_total_mb
     ? `${Math.round(accelerator.memory_total_mb / 1024)} GB ${accelerator.memory_kind}`

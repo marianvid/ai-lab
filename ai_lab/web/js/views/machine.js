@@ -34,44 +34,28 @@ const KINDS = {
   },
   machine: {
     label: 'RAM',
-    help: 'This machine’s own memory, less what is held back below. Where the '
-        + 'part of a model that does not fit on the card goes, and where '
-        + 'everything an engine keeps outside the card lives.',
+    help: 'All of this machine’s own memory. Where the part of a model that '
+        + 'does not fit on the card goes, and where everything an engine keeps '
+        + 'outside the card lives. Models are offered it less the reserve '
+        + 'below.',
   },
   unified: {
     label: 'Unified memory',
-    help: 'Apple silicon shares one pool between the chip and the rest of the '
-        + 'machine, so this is both. Shown less what is held back below.',
+    help: 'All of it. Apple silicon shares one pool between the chip and the '
+        + 'rest of the machine, so this is both. Models are offered it less '
+        + 'the reserve below.',
   },
 };
-
-// What starts and stops the engines. "subprocess" is what the code calls it;
-// it is not what it is.
-const SUPERVISORS = {
-  systemd: 'systemd',
-  subprocess: 'this application',
-};
-
 
 export function machine(settings, refresh) {
   const chip = settings.accelerator || {};
   const memory = settings.memory;
-  const host = settings.host || {};
   const rows = [];
 
   if (chip.name) {
     rows.push(row('Accelerator', chip.name,
                   'What the engines compute on.'));
   }
-  if (host.supervisor) {
-    rows.push(row('Engines started by',
-                  SUPERVISORS[host.supervisor] || host.supervisor,
-                  host.supervisor === 'systemd'
-                    ? 'So a model survives a restart of this application and '
-                      + 'comes back after a reboot.'
-                    : 'So a model stops when this application stops.'));
-  }
-
   // No pools means the machine could not be read — not that it has no room.
   // A row of zeroes there would be a claim, and the wrong one.
   const pools = (memory && memory.pools) || [];
@@ -93,7 +77,10 @@ export function machine(settings, refresh) {
 function poolRow(pool, first) {
   const kind = KINDS[pool.kind === 'unified' ? 'unified' : pool.name]
     || { label: pool.name, help: '' };
-  return row(kind.label, `${Math.round(pool.capacity_mb)} MB`, kind.help,
+  // What this machine has, whole. The reserve is a line of its own
+  // directly below, so subtracting it here as well would show a number
+  // that matches neither the hardware nor anything printed beside it.
+  return row(kind.label, `${Math.round(pool.total_mb)} MB`, kind.help,
              first ? 'memory' : '');
 }
 
