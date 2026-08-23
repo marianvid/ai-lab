@@ -647,24 +647,40 @@ class Operations:
                 return path.parent
         return Path.home()
 
-    def update_repository(self, repository_id: str, changes: dict) -> dict:
-        """Point a repository somewhere else, or rename it.
+    def update_models_root(self, path: str) -> dict:
+        """Point every repository somewhere else, in one move.
 
-        The path is checked before it is saved. A repository that does not
-        exist shows up as broken on every screen afterwards, and the moment to
-        say so is while the person is still looking at the field they typed
-        into.
+        There is one root and each format is a folder in it. Setting them
+        separately let GGUF end up on one disk and NVFP4 on another, which is
+        a state nothing else in this application expects and which nobody
+        chooses on purpose — `MODEL_STORAGE.md` has described the format-first
+        tree as the layout all along.
+
+        Checked before it is saved. A root that does not exist shows up as
+        broken on every screen afterwards, and the moment to say so is while
+        the person is still looking at the field they typed into.
         """
-        allowed = {"name", "path", "writable"}
+        root = Path(str(path)).expanduser()
+        if not root.is_dir():
+            raise ValueError(f"{root} is not a directory")
+        with self.store.mutate() as config:
+            config.models_root = str(root.resolve())
+        self._changed("models")
+        return {"models_root": self.store.load().models_root}
+
+    def update_repository(self, repository_id: str, changes: dict) -> dict:
+        """Rename a repository, or say whether it may be written to.
+
+        Its path is not among these: it comes from the models root and this
+        repository's id. See `update_models_root`.
+        """
+        allowed = {"name", "writable"}
         unknown = set(changes) - allowed
         if unknown:
-            raise ValueError(f"Cannot change: {', '.join(sorted(unknown))}")
-
-        if "path" in changes:
-            path = Path(str(changes["path"])).expanduser()
-            if not path.is_dir():
-                raise ValueError(f"{path} is not a directory")
-            changes = {**changes, "path": str(path.resolve())}
+            raise ValueError(
+                f"Cannot change: {', '.join(sorted(unknown))}"
+                + (". Every repository sits under the models root; set that "
+                   "instead." if "path" in unknown else ""))
 
         with self.store.mutate() as config:
             repository = config.repository(repository_id)

@@ -345,7 +345,10 @@ Runtime data is intentionally separate:
   never copied over a running one, because instances created from the interface
   live in that file
 - application state: `/var/lib/ai-lab`
-- models: `/models`, a bind mount of the model volume on the internal disk, organised by weight format (see `MODEL_STORAGE.md`)
+- models: `/models`, a bind mount of the model volume on the internal disk,
+  organised by weight format (see `MODEL_STORAGE.md`). One root is configured
+  and each format is a folder in it, so the tree is the same on every machine
+  and no format can be left behind on another disk
 - deployed source: `/opt/ai-lab`
 
 Generated state, virtual environments, logs and downloaded model weights stay

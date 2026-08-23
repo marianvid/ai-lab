@@ -56,16 +56,18 @@ def operations_with_instances(count, last_loaded=None):
     """
     import tempfile
     directory = Path(tempfile.mkdtemp())
-    (directory / "models").mkdir()
+    # The layout every machine has: one root, a folder in it per weight
+    # format. See `MODEL_STORAGE.md`.
+    (directory / "models" / "gguf").mkdir(parents=True)
     for index in range(count):
-        model = directory / "models" / f"model-{index}"
+        model = directory / "models" / "gguf" / f"model-{index}"
         model.mkdir()
         make_files(model, f"model-{index}.gguf", size=1024)
     config = {
         "title": "AI-Lab", "host": "127.0.0.1", "port": 8090,
         "engines": {"llamacpp": {"binary": "/bin/true"}},
+        "models_root": str(directory / "models"),
         "repositories": [{"id": "gguf", "name": "GGUF",
-                          "path": str(directory / "models"),
                           "format": "gguf", "writable": True}],
         "instances": [
             {"id": f"model-{index}", "name": f"Model {index}",
@@ -120,10 +122,10 @@ class OperationsTests(unittest.TestCase):
 
         self.path = self.root / "config.json"
         self.path.write_text(json.dumps({
+            "models_root": str(self.root),
             "repositories": [
-                {"id": "gguf", "name": "GGUF", "path": str(self.root / "gguf"), "format": "gguf"},
-                {"id": "st", "name": "Safetensors", "path": str(self.root / "safetensors"),
-                 "format": "safetensors"},
+                {"id": "gguf", "name": "GGUF", "format": "gguf"},
+                {"id": "st", "name": "Safetensors", "format": "safetensors"},
             ],
             "instances": [{"id": "qwen", "name": "Coding", "engine": "llamacpp",
                            "model_id": "gguf/qwen/qwen", "port": 8080,
@@ -299,8 +301,8 @@ class EffectiveSettingsTests(unittest.TestCase):
         make_files(self.root / "gguf" / "qwen", "qwen.gguf", size=64)
         self.path = self.root / "config.json"
         self.path.write_text(json.dumps({
-            "repositories": [{"id": "gguf", "name": "GGUF",
-                              "path": str(self.root / "gguf"), "format": "gguf"}],
+            "models_root": str(self.root),
+            "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
             # Written by an older version: no temperature, and a setting that
             # has since been removed.
             "instances": [{"id": "qwen", "name": "Coding", "engine": "llamacpp",
@@ -339,8 +341,8 @@ class DeleteModelTests(unittest.TestCase):
         make_files(self.root / "gguf" / "spare", "spare.gguf", "config.json", size=50)
         self.path = self.root / "config.json"
         self.path.write_text(json.dumps({
-            "repositories": [{"id": "gguf", "name": "GGUF",
-                              "path": str(self.root / "gguf"), "format": "gguf"}],
+            "models_root": str(self.root),
+            "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
             "instances": [{"id": "qwen", "name": "Coding", "engine": "llamacpp",
                            "model_id": "gguf/qwen/qwen", "port": 8080, "params": {}}],
         }))
@@ -477,17 +479,20 @@ class WritabilityTests(unittest.TestCase):
         self._temporary = TemporaryDirectory()
         self.root = Path(self._temporary.name)
         self.addCleanup(self._temporary.cleanup)
-        (self.root / "open").mkdir()
-        (self.root / "locked").mkdir()
-        (self.root / "locked").chmod(0o500)          # readable, not writable
-        self.addCleanup((self.root / "locked").chmod, 0o700)
+        # Two formats under one root, which is the only shape there is now.
+        # One of the folders is readable and not writable, which is the case
+        # this exists for and does happen — a disk mounted read-only, or a
+        # folder owned by somebody else.
+        (self.root / "gguf").mkdir()
+        (self.root / "nvfp4").mkdir()
+        (self.root / "nvfp4").chmod(0o500)           # readable, not writable
+        self.addCleanup((self.root / "nvfp4").chmod, 0o700)
         self.path = self.root / "config.json"
         self.path.write_text(json.dumps({
+            "models_root": str(self.root),
             "repositories": [
-                {"id": "open", "name": "Open", "path": str(self.root / "open"),
-                 "format": "gguf"},
-                {"id": "locked", "name": "Locked", "path": str(self.root / "locked"),
-                 "format": "gguf"},
+                {"id": "open", "name": "Open", "format": "gguf"},
+                {"id": "locked", "name": "Locked", "format": "nvfp4"},
             ],
             "instances": [],
         }))
@@ -665,11 +670,13 @@ class RepositoryEditingTests(unittest.TestCase):
         self.root = Path(self._temporary.name).resolve()
         self.addCleanup(self._temporary.cleanup)
         (self.root / "old").mkdir()
+        (self.root / "old" / "gguf").mkdir()
         (self.root / "new").mkdir()
+        (self.root / "new" / "gguf").mkdir()
         self.path = self.root / "config.json"
         self.path.write_text(json.dumps({
-            "repositories": [{"id": "gguf", "name": "GGUF",
-                              "path": str(self.root / "old"), "format": "gguf"}],
+            "models_root": str(self.root / "old"),
+            "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
             "instances": [],
         }))
         self.store = ConfigStore(self.path)
@@ -682,16 +689,29 @@ class RepositoryEditingTests(unittest.TestCase):
             host=host, engines=FakeRegistry(host),
         )
 
-    def test_the_path_can_be_changed(self):
-        self.operations.update_repository("gguf", {"path": str(self.root / "new")})
-        self.assertEqual(self.store.load().repository("gguf").path, str(self.root / "new"))
+    def test_moving_the_root_moves_every_repository(self):
+        # The whole point of there being one: a model store that moves to
+        # another disk moves in one act, and no format is left behind.
+        self.operations.update_models_root(str(self.root / "new"))
+        self.assertEqual(self.store.load().models_root, str(self.root / "new"))
+        self.assertEqual(self.store.load().repository("gguf").path,
+                         str(self.root / "new" / "gguf"))
 
-    def test_a_path_that_does_not_exist_is_refused_before_saving(self):
+    def test_a_root_that_does_not_exist_is_refused_before_saving(self):
         """Saying so while the field is still on screen beats a broken screen."""
         with self.assertRaises(ValueError) as caught:
-            self.operations.update_repository("gguf", {"path": "/nowhere/at/all"})
+            self.operations.update_models_root("/nowhere/at/all")
         self.assertIn("not a directory", str(caught.exception))
-        self.assertEqual(self.store.load().repository("gguf").path, str(self.root / "old"))
+        self.assertEqual(self.store.load().models_root, str(self.root / "old"))
+
+    def test_a_repository_cannot_be_pointed_somewhere_of_its_own(self):
+        # Setting them one at a time let GGUF sit on one disk and NVFP4 on
+        # another. The refusal says where to go instead.
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_repository("gguf", {"path": str(self.root / "new")})
+        self.assertIn("models root", str(caught.exception))
+        self.assertEqual(self.store.load().repository("gguf").path,
+                         str(self.root / "old" / "gguf"))
 
     def test_the_name_can_be_changed(self):
         self.operations.update_repository("gguf", {"name": "My models"})

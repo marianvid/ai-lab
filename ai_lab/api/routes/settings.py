@@ -14,6 +14,9 @@ def register(router, operations) -> None:
     # replacing anything.
     # How much of this machine's memory is held back for the machine, and what
     # that leaves for models. A GET that reads the machine, not the file.
+    router.add("PATCH", "/api/models-root",
+               lambda body=None, **_: operations.update_models_root(
+                   (body or {}).get("path", "")))
     router.add("GET", "/api/memory", lambda **_: operations.memory_budget())
     router.add("PATCH", "/api/memory",
                lambda body=None, **_: operations.update_memory(body or {}))

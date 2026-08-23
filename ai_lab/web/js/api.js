@@ -31,6 +31,9 @@ export const api = {
   formats: () => request('GET', '/api/formats'),
   updateRepository: (id, changes) =>
     request('PATCH', `/api/repositories/${encodeURIComponent(id)}`, changes),
+  // One root; every format is a folder in it. Repositories have no path of
+  // their own to set.
+  updateModelsRoot: (path) => request('PATCH', '/api/models-root', { path }),
   deleteModel: (id) => request('DELETE', `/api/models/${encodeURIComponent(id)}`),
   instances: () => request('GET', '/api/instances'),
   // `force` goes ahead even though a request is being answered on the card.

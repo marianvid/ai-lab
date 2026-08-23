@@ -2,6 +2,7 @@
   "title": "AI-Lab",
   "host": "0.0.0.0",
   "port": 8090,
+  "models_root": "/models",
   "engines": {
     "llamacpp": {
       "binary": "/opt/ai/llama.cpp/build/bin/llama-server",
@@ -25,25 +26,21 @@
     {
       "id": "gguf",
       "name": "GGUF models",
-      "path": "/models/gguf",
       "format": "gguf"
     },
     {
       "id": "safetensors",
       "name": "Safetensors sources",
-      "path": "/models/safetensors",
       "format": "safetensors"
     },
     {
       "id": "fp8",
       "name": "FP8",
-      "path": "/models/fp8",
       "format": "fp8"
     },
     {
       "id": "nvfp4",
       "name": "NVFP4",
-      "path": "/models/nvfp4",
       "format": "nvfp4"
     }
   ],

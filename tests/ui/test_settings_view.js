@@ -9,6 +9,10 @@ const REPOSITORY = {
   id: 'gguf', name: 'GGUF models', path: '/models/gguf', format: 'gguf',
   writable: true, exists: true, free_bytes: 3.4 * 1024 ** 4, total_bytes: 4 * 1024 ** 4,
 };
+const NVFP4 = {
+  id: 'nvfp4', name: 'NVFP4', path: '/models/nvfp4', format: 'nvfp4',
+  writable: true, exists: true, free_bytes: 3.4 * 1024 ** 4, total_bytes: 4 * 1024 ** 4,
+};
 
 function responses(overrides = {}) {
   return {
@@ -20,7 +24,8 @@ function responses(overrides = {}) {
                      memory_kind: 'dedicated', memory_used_mb: 24817,
                      memory_total_mb: 32623, temperature_c: 32,
                      utilization_percent: 0 },
-      repositories: [REPOSITORY],
+      models_root: '/models',
+      repositories: [REPOSITORY, NVFP4],
       engines: [
         { id: 'llamacpp', name: 'llama.cpp', available: true, reason: '',
           binary: '/opt/ai/llama.cpp/build/bin/llama-server',
@@ -56,14 +61,38 @@ describe('the Settings page', () => {
     assert.equal(view.textContent.includes('null'), false, view.textContent);
   });
 
-  it('shows the path in a field that can be edited', async () => {
+  it('offers one editable path, the root everything sits under', async () => {
     // A path set up on another machine, or a folder that moved, makes every
-    // other screen useless. Fixing it should not mean editing a file over ssh.
+    // other screen useless. Fixing it should not mean editing a file over ssh
+    // — but it is one field, not one per format.
     const { view } = await renderPage();
-    const field = [...view.querySelectorAll('input')]
-      .find((item) => item.value === '/models/gguf');
-    assert.ok(field, 'the path is not editable');
-    assert.equal(field.disabled, false);
+    const fields = [...view.querySelectorAll('.section input')]
+      .filter((item) => item.classList.contains('path'));
+    assert.equal(fields.length, 1, 'one root, not a path per format');
+    assert.equal(fields[0].value, '/models');
+    assert.equal(fields[0].disabled, false);
+  });
+
+  it('shows each format as a folder in it, and does not let it be set', async () => {
+    // Setting them separately let GGUF sit on one disk and NVFP4 on another,
+    // which nothing else in this application expects.
+    const { view } = await renderPage();
+    const derived = [...view.querySelectorAll('.row.derived')];
+    assert.equal(derived.length, 2);
+    assert.match(derived[0].textContent, /\/models\/gguf/);
+    assert.match(derived[1].textContent, /\/models\/nvfp4/);
+    derived.forEach((row) => {
+      assert.equal(row.querySelector('input'), null, 'a folder is editable');
+      assert.equal(row.querySelector('button'), null, 'a folder has a button');
+    });
+  });
+
+  it('says so when there is no root to work from', async () => {
+    const { view } = await renderPage({ '/api/settings': {
+      title: 'AI-Lab', engines: [], accelerator: {}, host: {}, memory: { pools: [] },
+      models_root: '',
+      repositories: [{ ...REPOSITORY, path: '', exists: false, writable: false }] } });
+    assert.match(view.textContent, /no models root set/);
   });
 
   it('offers a way to pick a folder rather than only typing one', async () => {
@@ -102,17 +131,18 @@ describe('the Settings page', () => {
     const saved = calls.find((call) => call.method === 'PATCH');
     assert.ok(saved, 'nothing was saved');
     assert.equal(JSON.parse(saved.body).path, '/models');
+    assert.match(saved.path, /models-root/, 'saved as a repository path');
   });
 
-  it('saves a path typed by hand', async () => {
+  it('saves a root typed by hand', async () => {
     const { view, calls } = await renderPage();
-    const field = [...view.querySelectorAll('input')]
-      .find((item) => item.value === '/models/gguf');
+    const field = [...view.querySelectorAll('input.path')][0];
     field.value = '/somewhere/else';
     button(view, 'Save').click();
     await settle();
     const saved = calls.find((call) => call.method === 'PATCH');
     assert.equal(JSON.parse(saved.body).path, '/somewhere/else');
+    assert.match(saved.path, /models-root/);
   });
 
   it('leaves out what is already known: no format pill, no free space', async () => {
@@ -122,12 +152,11 @@ describe('the Settings page', () => {
     assert.equal(view.textContent.includes('3.4 TB'), false, 'free space is noise here');
   });
 
-  it('puts each repository on one line', async () => {
+  it('puts the root and its buttons on one line', async () => {
     const { view } = await renderPage();
-    const rows = [...view.querySelectorAll('.row.tight')];
-    assert.equal(rows.length, 1, 'one row per repository');
-    const row = rows[0];
-    assert.ok(row.querySelector('input'), 'the path field is on that line');
+    const row = [...view.querySelectorAll('.row')]
+      .find((item) => item.querySelector('input.path'));
+    assert.ok(row, 'no root field');
     assert.equal(row.querySelectorAll('button').length, 2, 'Browse and Save, same line');
   });
 

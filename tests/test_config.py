@@ -39,12 +39,54 @@ class ConfigStoreTests(unittest.TestCase):
     def test_round_trip_preserves_everything(self):
         store = ConfigStore(self.path)
         original = Config(
-            repositories=[Repository(id="a", name="A", path="/a", format="gguf")],
+            models_root="/models",
+            repositories=[Repository(id="a", name="A", format="gguf",
+                                     path="/models/gguf")],
             instances=[Instance(id="i", engine="llamacpp",
                                 model_id="a/m", port=9000, params={"x": 1})],
         )
         store.save(original)
         self.assertEqual(store.load(), original)
+
+    def test_a_repository_path_is_recomputed_rather_than_remembered(self):
+        # Whatever was written down is ignored: there is one root, and each
+        # format is a folder in it. A file edited by hand to point one format
+        # somewhere else comes back pointing where it belongs.
+        self.path.write_text(json.dumps({
+            "models_root": "/models",
+            "repositories": [{"id": "a", "name": "A", "format": "nvfp4",
+                              "path": "/somewhere/else/entirely"}],
+        }))
+        self.assertEqual(ConfigStore(self.path).load().repository("a").path,
+                         "/models/nvfp4")
+
+    def test_a_configuration_without_a_root_takes_it_from_the_paths(self):
+        # Written before there was a root. It must come back pointing at the
+        # same directories, or a machine loses its models on an upgrade.
+        self.path.write_text(json.dumps({
+            "repositories": [
+                {"id": "a", "name": "A", "format": "gguf", "path": "/models/gguf"},
+                {"id": "b", "name": "B", "format": "nvfp4", "path": "/models/nvfp4"},
+            ],
+        }))
+        config = ConfigStore(self.path).load()
+        self.assertEqual(config.models_root, "/models")
+        self.assertEqual(config.repository("a").path, "/models/gguf")
+        self.assertEqual(config.repository("b").path, "/models/nvfp4")
+
+    def test_paths_that_shared_no_directory_leave_the_root_empty(self):
+        # There is no root that expresses this, and inventing one would move
+        # somebody's models without saying so. Empty is visible; the interface
+        # shows it as not configured and one field fixes it.
+        self.path.write_text(json.dumps({
+            "repositories": [
+                {"id": "a", "name": "A", "format": "gguf", "path": "/one/gguf"},
+                {"id": "b", "name": "B", "format": "nvfp4", "path": "/two/nvfp4"},
+            ],
+        }))
+        config = ConfigStore(self.path).load()
+        self.assertEqual(config.models_root, "")
+        self.assertEqual(config.repository("a").path, "")
 
     def test_mutate_writes_back(self):
         store = ConfigStore(self.path)

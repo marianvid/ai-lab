@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import re
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from threading import RLock
 from typing import Iterator
@@ -46,8 +46,17 @@ class Repository:
 
     id: str
     name: str
-    path: str
     format: str
+    # Where this format's models are, worked out rather than stored: the models
+    # root plus the format. One root is set and the rest follows, so GGUF and
+    # NVFP4 cannot end up on different disks by accident, and a machine set up
+    # from this configuration has the same tree as every other.
+    #
+    # The *format* names the folder, not the id. `MODEL_STORAGE.md` has
+    # described a format-first tree all along — `gguf/`, `safetensors/`,
+    # `fp8/`, `nvfp4/` — and an id is a name somebody chose, which may be
+    # shorter.
+    path: str = ""
     writable: bool = True
 
 
@@ -100,6 +109,9 @@ class Config:
     # How much of this machine's memory to leave for the machine. See
     # `budget.py` for why it is a reserve rather than an allowance.
     memory: dict = field(default_factory=dict)
+    # The one directory every model lives under. Each repository is a
+    # folder in it, named after the format.
+    models_root: str = ""
 
     def repository(self, repository_id: str) -> Repository:
         found = next((item for item in self.repositories if item.id == repository_id), None)
@@ -124,11 +136,13 @@ class ConfigStore:
     def load(self) -> Config:
         with self._lock:
             raw = json.loads(self.path.read_text())
+        root = raw.get("models_root") or _root_of(raw.get("repositories", []))
         return Config(
             title=raw.get("title", "AI-Lab"),
             host=raw.get("host", "0.0.0.0"),
             port=int(raw.get("port", 8090)),
-            repositories=[Repository(**item) for item in raw.get("repositories", [])],
+            models_root=root,
+            repositories=[_under(root, item) for item in raw.get("repositories", [])],
             # `name` is dropped rather than rejected: a configuration written
             # before the label was removed still loads, and loses only the
             # label.
@@ -158,3 +172,31 @@ class ConfigStore:
             config = self.load()
             yield config
             self.save(config)
+
+
+def _under(root: str, stored: dict) -> Repository:
+    """A repository, pointed at its folder under the models root.
+
+    Whatever path was stored is ignored: there is one root now, and the rest
+    follows from it. A configuration written before that still loads, and comes
+    out pointing at the same place — see `_root_of`.
+    """
+    fields = {key: value for key, value in stored.items() if key != "path"}
+    repository = Repository(**fields)
+    return replace(repository,
+                   path=str(Path(root) / repository.format) if root else "")
+
+
+def _root_of(stored: list) -> str:
+    """The models root of a configuration written before there was one.
+
+    The directory every repository sat in. Read from what is there rather than
+    guessed at, so a machine keeps pointing where it pointed: on the container
+    that is `/models`, on the Mac `/Volumes/Marian_Backup/models`.
+
+    Nothing when they did not share one — which cannot be expressed under one
+    root, and is better left empty and visible than silently moved.
+    """
+    parents = {str(Path(item["path"]).parent)
+               for item in stored if item.get("path")}
+    return parents.pop() if len(parents) == 1 else ""

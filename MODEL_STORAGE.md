@@ -126,6 +126,17 @@ format-first tree — `gguf/`, `safetensors/`, `fp8/`, `nvfp4/` — so a path me
 the same thing on both machines and a model can be moved across without being
 reorganised.
 
+**The application now enforces this.** One directory is configured — the models
+root — and each repository is a folder in it named after its weight format.
+Setting them one at a time let GGUF sit on one disk and NVFP4 on another, which
+nothing else here expects and which nobody chooses on purpose. A configuration
+written before that still loads: the root is read back from the directory the
+repositories shared, so `/models` on the container and
+`/Volumes/Marian_Backup/models` on the Mac come out unchanged.
+
+The *format* names the folder, not the repository's id — an id is a short name
+somebody chose and may differ.
+
 Two differences that are not going away:
 
 - **Only `gguf/` has anything in it, and only llama.cpp reads it.** vLLM needs

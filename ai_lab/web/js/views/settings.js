@@ -43,55 +43,76 @@ function section(title, children) {
   ]);
 }
 
-// Each repository's path is editable, with a chooser beside it. A path that is
-// wrong — pointing at a folder that was moved, or set up on another machine —
-// makes every other screen useless, and fixing it should not mean editing a
-// file over ssh.
-function repositoryRow(item, refresh) {
-  const field = element('input', { class: 'grow path', value: item.path });
+// One directory holds every model, with a folder in it per weight format.
+//
+// It used to be four editable paths, one per format, which let GGUF sit on one
+// disk and NVFP4 on another — a state nothing else in this application expects
+// and nobody chooses on purpose. `MODEL_STORAGE.md` has described the
+// format-first tree as the layout all along; this now enforces it.
+//
+// A path that is wrong — pointing at a folder that was moved, or set up on
+// another machine — makes every other screen useless, and fixing it should not
+// mean editing a file over ssh. So the root is editable, with a chooser beside
+// it, and the folders below it are shown as what they are: worked out, not
+// set.
+function repositories(root, items, refresh) {
+  const field = element('input', { class: 'grow path', value: root || '' });
 
   const save = async (path) => {
     field.value = path;
     try {
-      await api.updateRepository(item.id, { path });
-      // Nothing is said on success: the field now shows the new path, which
-      // is the whole message.
+      await api.updateModelsRoot(path);
       refresh();
     } catch (error) {
-      await showNotice({ title: `Could not point ${item.name} at ${path}`,
-                         body: error.message });
+      await showNotice({ title: 'Could not move the model store', body: error.message });
     }
   };
 
-  field.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') save(field.value.trim());
-  });
+  const rows = [
+    element('div', { class: 'row' }, [
+      element('strong', { text: 'Models root',
+                          title: 'Every weight format is a folder in here.' }),
+      field,
+      element('button', {
+        class: 'action', text: 'Browse…',
+        onclick: async () => {
+          const picked = await chooseFolder(root || null);
+          if (picked) await save(picked);
+        },
+      }),
+      element('button', {
+        class: 'action', text: 'Save',
+        onclick: (event) => whileWorking(event.target, 'Saving…',
+                                         () => save(field.value)),
+      }),
+    ]),
+    ...items.map(repositoryRow),
+  ];
+  return section('Model repositories', rows);
+}
 
-  // Only says something when something is wrong. A folder that is there and
-  // writable needs no announcement.
-  const trouble = !item.exists ? 'missing'
-    : !item.writable ? 'read-only' : null;
 
-  return element('div', { class: 'row tight' }, [
-    element('span', { class: 'label', text: item.name }),
-    field,
-    trouble ? element('span', { class: 'error', text: trouble }) : null,
-    element('button', {
-      class: 'action', text: 'Browse…',
-      onclick: async () => {
-        const picked = await chooseFolder(item.exists ? item.path : null);
-        if (picked) await save(picked);
-      },
-    }),
-    element('button', { class: 'action', text: 'Save',
-                        onclick: () => save(field.value.trim()) }),
+// One format, and where it therefore is. Read-only on purpose.
+//
+// No free space and no format pill: the name says which format it is, and
+// free space belongs where a download chooses its destination rather than on
+// four repeated lines. What is worth saying is when a folder is not there or
+// cannot be written to, because that is the thing that will fail later.
+function repositoryRow(item) {
+  const trouble = !item.path ? 'no models root set'
+    : !item.exists ? 'missing'
+    : !item.writable ? 'read-only'
+    : '';
+  return element('div', { class: 'row tight derived' }, [
+    element('span', { class: 'muted', text: item.name }),
+    element('span', { class: 'path muted grow', text: item.path || '—' }),
+    trouble
+      ? element('span', { class: 'pill', style: 'color:var(--warn);border-color:var(--warn)',
+                          text: trouble })
+      : null,
   ].filter(Boolean));
 }
 
-function repositories(list, refresh) {
-  return section('Model repositories',
-                 list.map((item) => repositoryRow(item, refresh)));
-}
 
 // The installed folders of each package engine, from the last fetch.
 const byEngine = new Map();
@@ -250,7 +271,7 @@ export async function render(container) {
   container.replaceChildren(element('div', { class: 'columns' }, [
     element('div', {}, [
       engines(settings.engines, refresh),
-      repositories(settings.repositories, refresh),
+      repositories(settings.models_root, settings.repositories, refresh),
     ]),
     element('div', {}, [
       machine(settings, refresh),

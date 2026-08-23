@@ -477,3 +477,8 @@ dialog.review .small { font-size: 0.85rem; }
   margin-top: 0.4rem; padding-top: 0.5rem;
 }
 .machine .card input.number.small { width: 7rem; text-align: right; }
+
+/* A repository's folder, which is worked out from the models root rather than
+   set. It reads as a consequence of the field above it, not as a field. */
+.row.derived { gap: 0.75rem; align-items: baseline; }
+.row.derived > .muted:first-child { min-width: 10rem; }

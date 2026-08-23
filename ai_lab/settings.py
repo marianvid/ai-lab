@@ -47,6 +47,7 @@ class Settings:
             # reads this rather than doing the arithmetic itself, so the number
             # on screen is the same one an admission decision would use.
             "memory": budget.of(self.host, self.reserve_mb(config)).json(),
+            "models_root": config.models_root,
             "repositories": [self._repository(item) for item in config.repositories],
             "engines": self.engines.describe(capabilities),
         }
@@ -73,8 +74,12 @@ class Settings:
         that is offered and then fails on a permission error is worse than one
         that was never offered.
         """
-        path = Path(repository.path)
-        exists = path.is_dir()
+        # An empty path means the models root is not set, which is not the
+        # same as a folder that is there. `Path("")` is the current working
+        # directory and exists, so asking without checking would report a
+        # configured store where there is none.
+        path = Path(repository.path) if repository.path else None
+        exists = bool(path and path.is_dir())
         row = {**asdict(repository), "exists": exists,
                "free_bytes": 0, "total_bytes": 0,
                "writable": bool(repository.writable and exists
