@@ -23,5 +23,8 @@ tmp/
 node_modules/
 package-lock.json
 
-# The private half. Its own repository, cloned here. See README.
+# Repository checkouts kept inside this workspace but versioned independently.
+# Private machine-specific configuration.
 opts/
+# Public benchmark study.
+benchmark/
