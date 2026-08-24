@@ -5,12 +5,12 @@
 > approach may be useful to someone; it is not a product and has no support.
 > It may change over time.
 
-**This was written with an AI agent, and it is meant to be read the same way.**
+_This was written with an AI agent, and it is meant to be read the same way.**
 Take it as a starting point rather than as something to install. Your machine is
 not this machine: different card, different amount of memory, different models,
 a different idea of what the thing should do. Point your own agent at this
 repository and have it adapt the code to what you have. That is a good deal
-faster than reading it all yourself, and it is how the code got here.**
+faster than reading it all yourself, and it is how the code got here._
 
 **A layer that lets an agent workflow use several models on a machine that
 cannot hold them all.**
