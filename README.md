@@ -5,11 +5,18 @@
 > approach may be useful to someone; it is not a product and has no support.
 > It may change over time.
 
+**This was written with an AI agent, and it is meant to be read the same way.**
+Take it as a starting point rather than as something to install. Your machine is
+not this machine: different card, different amount of memory, different models,
+a different idea of what the thing should do. Point your own agent at this
+repository and have it adapt the code to what you have. That is a good deal
+faster than reading it all yourself, and it is how the code got here.**
+
 **A layer that lets an agent workflow use several models on a machine that
 cannot hold them all.**
 
 That is the whole point. An agent workflow uses one model to read, another to
-write, another to check. A 32 GB card holds one of the large ones, or one large
+write, another to check, etc. A 32 GB card holds one of the large ones, or one large
 and one small. Pointed straight at the engines, an agent naming a model that
 happens not to be running gets a refused connection and the workflow stops
 there.
@@ -25,16 +32,11 @@ them used to cost a 3-second and a 7-second load.
 **One thing is not standard and cannot be.** Some settings decide how a model
 *process* starts — how much context it will hold, how much of the card it may
 claim — and no chat API has a field for them. They travel in an `ai_lab` object
-in the request body, which is this project's own invention; a client that does
+in the request body, which is this project's specific; a client that does
 not send it gets the entry's configured settings and nothing breaks. See
 [the `ai_lab` field](#the-ai_lab-field-asking-for-a-model-started-a-particular-way).
 
-**This was written with an AI agent, and it is meant to be read the same way.**
-Take it as a starting point rather than as something to install. Your machine is
-not this machine: different card, different amount of memory, different models,
-a different idea of what the thing should do. Point your own agent at this
-repository and have it adapt the code to what you have. That is a good deal
-faster than reading it all yourself, and it is how the code got here.
+
 
 Runs on Linux with an NVIDIA card, where systemd supervises the engines, and on
 macOS with Apple silicon, where it supervises them itself. llama.cpp works on
