@@ -218,7 +218,7 @@ describe('the Gateway page', () => {
     });
     const tally = [...view.querySelectorAll('.row.tally')]
       .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
-    assert.deepEqual(tally[0], ['Waiting for these', '5']);
+    assert.deepEqual(tally[0], ['Waiting', '5']);
   });
 
   it('names the next model to be loaded, and what is held up behind it', async () => {
@@ -233,18 +233,25 @@ describe('the Gateway page', () => {
       ],
     });
     const next = view.querySelector('.row.next');
-    assert.match(next.textContent, /reviewer\s*←/);
-    assert.match(next.textContent, /3 waiting/);
+    assert.deepEqual([...next.children].map((cell) => cell.textContent.trim()),
+                     ['Next change', 'reviewer  ←', '3 waiting']);
     assert.match(next.title, /longest has waited 9 s/);
     const tally = [...view.querySelectorAll('.row.tally')]
       .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
-    assert.deepEqual(tally[1], ['Waiting behind it', '3'],
+    assert.deepEqual(tally[1], ['Remaining', '3'],
                      'the 2 for coder and the 1 for glm-flash');
   });
 
-  it('says so plainly when no change is coming', async () => {
+  it('keeps the lines in place when no change is coming', async () => {
+    // A row that appears and disappears makes the panel jump under the eye
+    // every few seconds. The labels stay; the values say there is nothing.
     const { view } = await renderPage();
-    assert.match(view.textContent, /Nothing waiting for a change/);
+    const next = view.querySelector('.row.next');
+    assert.deepEqual([...next.children].map((cell) => cell.textContent.trim()),
+                     ['Next change', '—']);
+    const tally = [...view.querySelectorAll('.row.tally')]
+      .map((row) => [...row.children].map((cell) => cell.textContent.trim()));
+    assert.deepEqual(tally[1], ['Remaining', '0']);
   });
 
   it('shows the last error rather than hiding a failure behind good averages', async () => {

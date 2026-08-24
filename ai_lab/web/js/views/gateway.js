@@ -274,7 +274,7 @@ function coming(stats) {
   // place, not for a load.
   const onLoaded = loaded.reduce((total, item) => total + (Number(item.waiting) || 0), 0);
   rows.push(element('div', { class: 'row tight tally' }, [
-    element('span', { class: 'muted', text: 'Waiting for these' }),
+    element('span', { class: 'muted', text: 'Waiting' }),
     element('span', { class: 'muted', text: figure(onLoaded) }),
   ]));
 
@@ -282,21 +282,25 @@ function coming(stats) {
   // Read together they are the cost of the change: this many requests are
   // stopped until that one is on.
   const next = runs[0];
-  if (next) {
-    const behind = runs.reduce((total, run) => total + (Number(run.requests) || 0), 0)
-      - (Number(next.requests) || 0);
-    rows.push(element('div', { class: 'row tight next',
-                               title: `longest has waited ${next.longest_wait_s} s` }, [
-      element('span', { class: 'swap', text: `${next.instance_id}  ←` }),
-      element('span', { class: 'muted', text: `${figure(next.requests)} waiting` }),
-    ]));
-    rows.push(element('div', { class: 'row tight tally' }, [
-      element('span', { class: 'muted', text: 'Waiting behind it' }),
-      element('span', { class: 'muted', text: figure(behind) }),
-    ]));
-  } else {
-    rows.push(element('p', { class: 'muted', text: 'Nothing waiting for a change.' }));
-  }
+  const behind = next
+    ? runs.reduce((total, run) => total + (Number(run.requests) || 0), 0)
+      - (Number(next.requests) || 0)
+    : 0;
+  rows.push(element('div', { class: 'row tight next',
+                             ...(next ? { title: 'longest has waited '
+                                                 + `${next.longest_wait_s} s` } : {}) }, [
+    element('span', { class: 'muted', text: 'Next change' }),
+    next
+      ? element('span', { class: 'swap grow', text: `${next.instance_id}  ←` })
+      : element('span', { class: 'muted grow', text: '—' }),
+    next
+      ? element('span', { class: 'muted', text: `${figure(next.requests)} waiting` })
+      : null,
+  ].filter(Boolean)));
+  rows.push(element('div', { class: 'row tight tally' }, [
+    element('span', { class: 'muted', text: 'Remaining' }),
+    element('span', { class: 'muted', text: figure(behind) }),
+  ]));
   return section('Queue', rows);
 }
 
