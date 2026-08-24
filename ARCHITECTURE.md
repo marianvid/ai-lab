@@ -1,5 +1,8 @@
 # Architecture
 
+> What each module is for, and what it must not contain. For what the
+> application *does*, start at [the documents index](README.md).
+
 Read this before changing anything. It says what each module is for and,
 more usefully, what it must *not* contain.
 
