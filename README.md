@@ -3,6 +3,31 @@
 > **Built for personal use.** This is a home-lab tool that runs on one
 > particular pair of machines. It is public because the measurements and the
 > approach may be useful to someone; it is not a product and has no support.
+> It may change over time.
+
+**A layer that lets an agent workflow use several models on a machine that
+cannot hold them all.**
+
+That is the whole point. An agent workflow uses one model to read, another to
+write, another to check. A 32 GB card holds one of the large ones, or one large
+and one small. Pointed straight at the engines, an agent naming a model that
+happens not to be running gets a refused connection and the workflow stops
+there.
+
+AI-Lab is one address in front of all of them. A request names any configured
+model; if it is loaded the request goes straight through, and if it is not,
+**room is made and it is loaded first** — see [the Gateway](#the-gateway-one-address-and-models-that-come-and-go)
+for exactly which model comes off and when. As many models stay loaded as the
+memory allows, so the common case costs nothing: measured here, two models
+served together answered in 0.04 and 0.08 seconds where alternating between
+them used to cost a 3-second and a 7-second load.
+
+**One thing is not standard and cannot be.** Some settings decide how a model
+*process* starts — how much context it will hold, how much of the card it may
+claim — and no chat API has a field for them. They travel in an `ai_lab` object
+in the request body, which is this project's own invention; a client that does
+not send it gets the entry's configured settings and nothing breaks. See
+[the `ai_lab` field](#the-ai_lab-field-asking-for-a-model-started-a-particular-way).
 
 **This was written with an AI agent, and it is meant to be read the same way.**
 Take it as a starting point rather than as something to install. Your machine is
@@ -11,18 +36,54 @@ a different idea of what the thing should do. Point your own agent at this
 repository and have it adapt the code to what you have. That is a good deal
 faster than reading it all yourself, and it is how the code got here.
 
-Provides a manager for local inference engines. It shows what models are on disk, what
-is loaded on the accelerator right now, and how long a model took to load —
-and it moves models on and off, measuring every step.
+Runs on Linux with an NVIDIA card, where systemd supervises the engines, and on
+macOS with Apple silicon, where it supervises them itself. llama.cpp works on
+both. vLLM works on the Linux machine and is shown greyed out on the Mac, with
+the reason — it needs CUDA, and Apple silicon offers Metal.
 
-Runs on Linux with an NVIDIA card, where systemd supervises the engines, and
-on macOS with Apple silicon, where it supervises them itself. llama.cpp works
-on both. vLLM works on the Linux machine and is shown greyed out on the Mac,
-with the reason — it needs CUDA, and Apple silicon offers Metal.
+## Contents
 
-Read `ARCHITECTURE.md` before changing anything.
+**The four pages**
 
-## What it looks like
+- [Models](#models-what-is-configured-and-what-is-running) — one row per
+  configured model: what it runs, what it can do, whether it is loaded, and how
+  long the last load took. Where models are started, stopped and configured.
+- [Library](#library-what-is-on-disk-and-what-could-be) — what is on disk, per
+  weight format, and a search of Hugging Face to download more.
+- [Gateway](#the-gateway-one-address-and-models-that-come-and-go) — the address
+  an agent talks to, what is loaded right now, what is queued, and the rules by
+  which models are loaded and unloaded.
+- [Settings](#settings-the-machine-its-engines-and-where-models-live) — what
+  this machine is, how much of its memory models may use, the engines and their
+  versions, and where the model store lives.
+
+**Using it**
+
+- [How loading and unloading is decided](#how-loading-and-unloading-is-decided)
+  — the queue, who gets unloaded, and why nothing jumps ahead.
+- [What fits beside what, measured](#what-fits-beside-what-measured) — every
+  model's real footprint on the card. The table to consult before assuming two
+  will fit.
+- [The `ai_lab` field](#the-ai_lab-field-asking-for-a-model-started-a-particular-way)
+  — asking for a model started a particular way, and the settings worth
+  knowing.
+- [Two ways of writing a request](#two-ways-of-writing-a-request) — the OpenAI
+  shape and the Anthropic one, and which engine answers which.
+- [When a model cannot be loaded](#when-a-model-cannot-be-loaded) — what the
+  refusal contains, so an agent can correct itself.
+- [Running Claude Code against it](#running-claude-code-against-a-model-on-your-own-card)
+  — the one setting most models need first.
+- [Updating an engine](#updating-an-engine) — reading what an update brings
+  before taking it, and installing beside what works.
+
+**Working on it**
+
+- [Structure](#structure) — what each module is for. Read `ARCHITECTURE.md`
+  before changing anything: it records the one dependency rule and why.
+- [Local development](#local-development) and [Deploying](#deploying).
+- [Safety model](#safety-model) — what this can and cannot reach.
+
+## Models: what is configured, and what is running
 
 One line per configured model: the name you gave it, the model it runs, and —
 at the right, against the buttons — what the model can do, the weight format
@@ -48,25 +109,65 @@ away. vLLM's "Text only" loads a model that can see without the part that sees,
 so the picture icon goes when it is set — and the wrench stays, because that
 setting has nothing to do with the chat template.
 
-Settings reports the engines, their versions and the accelerator. Both engines
-can be updated from this page, and neither updates without being read first —
-see **Updating an engine** below.
+**Load** and **Unload** act directly, not through the queue, so they ask first
+when a model is mid-answer and offer to stop it anyway. A wedged model has to be
+stoppable — but by decision rather than by accident. Load never unloads
+anything else: it is a manual act, for looking at one model, and if there is no
+room it says what is in the way. On llama.cpp it loads anyway and lets the
+engine leave the layers that will not fit in system memory.
+
+**Settings** on a row shows what the model will be started with — context,
+cache precision, how many requests at once, and per engine the rest. Changing
+them means restarting the model, which is why the button says **Apply & reload**.
+**Save** writes them down without touching the card.
+
+## Library: what is on disk, and what could be
+
+Every model found on disk, grouped by weight format, with what it can do and
+whether the set is complete. Below it, a search of Hugging Face: pick a
+repository, see which of its models this machine can actually run, and download
+one whole — never file by file, because four shards of five is a model that
+fails to load with an unhelpful message.
+
+![The library](docs/screenshots/library.png)
+
+A download goes to the folder for its format, decided by the server rather than
+chosen. Deleting a model is refused while a configured entry points at it, and
+that refusal sends you to Models to remove the entry first — two actions on two
+pages, so it is always clear which kind of data is about to disappear.
+
+## Settings: the machine, its engines, and where models live
+
+Nothing on this page moves on its own. What is used, how warm the card is, how
+many requests are running are facts about right now, and right now is the
+Gateway page — a figure read here is still true an hour later.
 
 ![Settings](docs/screenshots/settings.png)
 
-> The screenshots are from an earlier state of the interface and do not show
-> the capability icons or the version list.
+**Machine** is what this machine is, and the one thing that decides how many
+models fit: how much of its memory is held back for the machine itself. A
+dedicated card is used whole — nothing else here wants it. The machine's own
+memory is shared with the browser and the operating system, so a reserve is
+kept out of it. Set as a reserve rather than as an allowance, because a reserve
+stays right when the machine is given more memory.
 
-## One address for an agent
+**Engines** shows what is installed, its version, and — only when there is one
+— what it could be updated to. No button here updates anything: they open what
+the update would bring, and the real Update is at the foot of that. See
+[Updating an engine](#updating-an-engine).
 
-An agent workflow uses several models — one to read, one to write, one to
-check. Each is a separate entry here, on its own port, and only one of them can
-be on the card at a time. Pointed straight at the engines, an agent naming a
-model that happens not to be running gets a refused connection, and the
-workflow stops there.
+**Paths** is every path this installation depends on: one models root with a
+folder per weight format under it, and each engine's program. All of them are
+picked from a listing of what is actually on the machine rather than typed — a
+path typed by hand is a path with a typo in it, and the failure arrives much
+later as a screen with no models on it.
 
-The Gateway is one address in front of all of them, speaking the OpenAI shape
-that agent tools already send:
+## The Gateway: one address, and models that come and go
+
+Each configured model is a separate engine on its own port. Pointed straight at
+those, an agent naming a model that happens not to be running gets a refused
+connection. The Gateway is one address in front of all of them, speaking the
+OpenAI shape that agent tools already send:
 
 ```sh
 curl http://ai-lab.lan:8090/v1/chat/completions \
@@ -74,67 +175,127 @@ curl http://ai-lab.lan:8090/v1/chat/completions \
   -d '{"model": "reviewer", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
-Name any configured model. If it is the one on the card, the request goes
-straight through. If it is not, the card is emptied and that model is loaded
-first — the agent waits longer for that one request and sees nothing else. No
-API key is checked; any value will do. `GET /v1/models` lists every configured
-entry, loaded or not, which is the point: a client is meant to be able to ask
-for one of them.
+Name any configured model. No API key is checked; any value will do.
+`GET /v1/models` lists every configured entry, loaded or not, which is the
+point: a client is meant to be able to ask for one of them.
 
-## Running an agent workflow when the models do not all fit
+![The gateway](docs/screenshots/gateway.png)
 
-This is the problem the whole thing exists for. An agent workflow uses several
-models and a card holds one or two of them. Something has to give, and the
-question is only whether it gives silently.
+The page is what is happening now. **Loaded** is how many models are on the
+machine and the queue below names them. **Processing** is requests in flight
+against the places every loaded model offers between them — places are the
+engine's own number and differ per model. **Switches** counts loads and **Time
+spent switching** is the share of the working time that went on loading rather
+than answering: the number that says a workflow is thrashing.
 
-**As many models as fit stay loaded.** How many is not a decision, it is the
-machine: whatever the memory budget allows — what is free, less what is held
-back for the machine itself, which you set in Settings. Measured on the RTX PRO
-4500, two llama.cpp models sat together and both answered without reloading:
+The **Queue** is not a list of requests, it is what is about to happen. Each
+loaded model with what it is answering and what is queued for it; **Waiting**,
+the total queued for models already there; **Next change**, the model that has
+to be loaded next; and **Remaining**, everything held up behind that change.
 
-| | on the card | answered in |
-|---|---|---|
-| `gemma-general` | 3,544 MB | 0.04 s |
-| `gemma26-gguf` | 20,539 MB together | 0.08 s |
+### How loading and unloading is decided
 
-Alternating between those two used to cost a load every time — 3 s and 9.6 s.
-Now it costs 40 and 80 milliseconds, because neither leaves.
+**Nothing is loaded or unloaded on a timer, or in the background, or because
+something looked idle.** Every change happens because a request needs it.
 
-**Requests to a loaded model run together**, up to the number the engine was
-started to serve: `parallel` for llama.cpp, `max_sequences` for vLLM. Measured
-with Qwen3-Coder-30B at eight places: eight requests at once took 1.2 s against
-3.1 s one after another.
+**A request goes straight through only if all three hold:** nobody is waiting,
+the model it names is loaded, and that model has a free place. Otherwise it
+joins the back of the queue.
 
-**When the next model does not fit, everything stops until it does.** The queue
-is served in order and the door closes for everybody — including requests for a
-model that is loaded and idle, which would cost nothing. That is deliberate: let
-them past and the request at the head is never served, because there is always
-another cheap one behind it. So the machine frees what it has to, waits for
-those models to finish what they are answering, unloads them, and loads the one
-that was asked for.
+The first of those matters more than it looks. **The moment anybody is waiting,
+the door closes for everybody** — including a request for a model that is
+loaded and idle, which would cost nothing to serve. That is deliberate. Let
+those past and the request at the head of the queue is never served, because
+under a steady stream there is always another cheap one behind it. It is not
+unlikely; it is certain.
 
-Which models go: idle ones first, because taking one off costs no waiting, then
-whichever has gone longest without a request. Nothing is protected, and nothing
-is unloaded until something needs the room.
+**When a request finishes** and frees a place:
 
-**A model that will not fit however much is unloaded is refused before
-anything is disturbed**, with the numbers to correct by — see the errors below.
-Unloading what was working to load something that was never going to fit is the
-worst of both.
+- the head of the queue wants a loaded model with room — it goes in, and again
+  for as many as fit;
+- the head wants something not loaded — nobody goes in. Room has to be made
+  first;
+- room can be made — the models chosen come off and the wanted one goes on.
+
+**When the head of the queue wants a model that is not loaded**, how much room
+it needs is worked out from the settings it asked for. If that fits in what is
+free, it is simply loaded and **nothing comes off**. If it does not, models are
+chosen to come off until it does:
+
+1. **Idle models first**, longest-unused among them. Taking an idle model off
+   costs no waiting.
+2. **Then whichever answering model has gone longest without a request** — and
+   everything stops until it has finished what it is doing. Cutting an answer
+   short to make room is never done automatically; only the Unload button
+   offers that, and it asks.
+
+Because the door is shut while anybody waits, the models being drained cannot
+pick up new work, so that wait is bounded by whatever was already in flight.
+
+Nothing is protected from being unloaded. A model that is answering is waited
+for, not spared.
+
+**The run taken at a switch is the requests immediately behind the head that
+want the same model, and no further.** The run stops at the first request
+wanting something else, however many more of the first model are behind it.
+Sweeping those up too would serve requests younger than one already waiting,
+and the whole point of oldest-first is that a workflow may be held up by
+exactly that older request. So the cost is visible rather than hidden: a
+workflow alternating between two models that cannot both fit pays a load on
+every step, and the fix is to reorder the workflow, not to change a setting
+here.
+
+**Requests arriving while a model loads wait for the next round**, even for the
+model being loaded. Without that, the model just loaded starves the request
+that was already waiting — the door problem again with the names swapped.
+
+**How much a model needs is worked out each time and never remembered.** For
+vLLM the answer is exact: it claims `gpu_memory_fraction` of the whole card and
+the setting says which. For llama.cpp the weights are taken as a floor and
+nothing more — measured at a 32k context, the gap between file size and card
+usage ran from **−476 MiB to +6,663** across four models, so a computed cache
+figure would look precise and be wrong. What a model took last time is
+knowledge about the past, and it belongs to whatever is making the requests.
+
+**A model that will not fit however much comes off is refused before anything
+is disturbed**, with the numbers to correct by — see
+[When a model cannot be loaded](#when-a-model-cannot-be-loaded). Unloading what
+was working to load something that was never going to fit is the worst of both.
+
+**A model that is running but that the Gateway did not load** — started from
+the Models page, or left over from a manager restart — is taken up as it is
+rather than reloaded. If it is still coming up it is left for later and looked
+at again, because sending requests to a port with nothing behind it is worse
+than waiting.
 
 Two consequences worth designing around:
 
 - A model plus the settings it was started with is one thing. Two requests for
   the same model wanting different context sizes cannot both be served without
   a reload.
-- A request must not wait, inside itself, on another request to this gateway.
-  Fill every place with things that cannot finish and nothing finishes.
+- **A request must not wait, inside itself, on another request to this
+  gateway.** Fill every place with things that cannot finish and nothing
+  finishes.
 
-What this costs is on the Gateway page: how many loads happened, how many of
-them pushed another model off, and what share of the working time went on
-loading rather than answering.
+### What it costs, measured
 
-### What actually fits, measured
+Two llama.cpp models loaded together on the RTX PRO 4500:
+
+| | on the card | answered in |
+|---|---|---|
+| `gemma-general` | 3,544 MB | 0.04 s |
+| `gemma26-gguf` | 20,539 MB together | 0.08 s |
+
+Alternating between those two used to cost a load every time — 3.1 s and 7.3 s.
+Neither leaves now.
+
+Requests to one loaded model run together, up to the number the engine was
+started to serve. Measured with Qwen3-Coder-30B at eight places: eight requests
+at once took 1.2 s against 3.1 s one after another.
+
+The gateway itself costs **1 ms** over talking to the engine directly.
+
+### What fits beside what, measured
 
 Every model here was loaded on the RTX PRO 4500 (32,623 MiB) and the card read
 afterwards:
@@ -167,9 +328,9 @@ Generation suffers far less.
 
 ## Asking for a model a particular way
 
-Load and Unload on the Models page reach the engines directly, so they ask
-first when the card is mid-answer, and offer to stop it anyway. A wedged model
-has to be stoppable — but by decision rather than by accident.
+Everything below is about the request itself: the two shapes that are accepted,
+the one field that is this project's own, and what comes back when a model
+cannot be served.
 
 ### Two ways of writing a request
 
@@ -190,7 +351,7 @@ Which shapes each entry answers is in `GET /v1/models`, so a client can look
 rather than guess. The engine declares it, so adding a shape — or an engine
 that speaks one — is a line in that engine's file and nothing else changes.
 
-### The `ai_lab` field: asking for the model started a particular way
+### The `ai_lab` field: asking for a model started a particular way
 
 Some settings go in a request — temperature, top-p, how many tokens to write.
 Others decide how the model *process* starts, and cannot: a model has to be
