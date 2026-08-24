@@ -513,3 +513,27 @@ details.build-log > .log { margin-top: 0.4rem; }
 .row.tight.tally { opacity: 0.8; }
 .row.tight.next { border-top: 1px solid var(--line, rgba(127, 127, 127, 0.25));
                   margin-top: 0.3rem; padding-top: 0.4rem; }
+
+/* Anything carrying an explanation.
+ *
+ * The cursor becomes a question mark, so hovering over a figure looks like
+ * asking rather than like selecting text — an I-beam over a number invites
+ * dragging across it, which is not what is on offer.
+ *
+ * The label also gets a faint dotted underline, the same mark a setting with
+ * an explanation behind it already carries. Without it a tooltip is only found
+ * by hovering everything, and an explanation nobody finds may as well not be
+ * written. This is where the reasoning goes; the screen itself stays facts.
+ *
+ * Interactive things keep their own cursor. A button with a title is still a
+ * button, and a pointer says so better than a question mark.
+ */
+[title]:not(button):not(a):not(input):not(select):not(summary):not(label),
+svg.capability {
+  cursor: help;
+}
+.row[title] > :first-child,
+.row > [title]:not(.pill):not(button) {
+  text-decoration: underline dotted var(--border);
+  text-underline-offset: 3px;
+}

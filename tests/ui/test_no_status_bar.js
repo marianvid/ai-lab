@@ -43,6 +43,18 @@ describe('the page does not narrate itself', () => {
     assert.equal(/id="status"/.test(page), false);
   });
 
+  it('gives anything with an explanation the question-mark cursor', () => {
+    // An I-beam over a figure invites dragging across it, which is not what is
+    // on offer. And a tooltip nobody knows is there may as well not be
+    // written, so the label carries a faint mark too — the same one a setting
+    // with an explanation behind it already had.
+    const css = readFileSync('ai_lab/web/css/app.css', 'utf8');
+    assert.match(css, /\[title\][^{]*\{[^}]*cursor:\s*help/s,
+                 'nothing gives a tooltip its own cursor');
+    assert.match(css, /underline dotted/,
+                 'a tooltip with no mark on the label is one nobody finds');
+  });
+
   it('still has the two things that replaced it', () => {
     // Deleting the bar without these would lose real information: a failure
     // nobody sees, and a button that looks like it did nothing.
