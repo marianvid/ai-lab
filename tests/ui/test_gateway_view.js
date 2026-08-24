@@ -144,7 +144,7 @@ describe('the Gateway page', () => {
     // Status that had just said idle. They are counts; Status is the state.
     const { view } = await renderPage();
     assert.match(view.textContent, /Processing\s*0 from 8/);
-    assert.match(view.textContent, /Queue size\s*0/);
+    assert.match(view.textContent, /Queued\s*0/);
     assert.equal(view.textContent.includes('nobody waiting'), false);
   });
 
@@ -165,7 +165,7 @@ describe('the Gateway page', () => {
       waiting: 4, longest_wait_s: 12.5, busy: true,
       waiting_for: [{ instance_id: 'reviewer', waiting: 4, longest_wait_s: 12.5 }],
     });
-    assert.match(view.textContent, /Queue size\s*4/);
+    assert.match(view.textContent, /Queued\s*4/);
   });
 
   it('says a model is loading rather than answering', async () => {
@@ -180,7 +180,7 @@ describe('the Gateway page', () => {
 
   it('reports how many are waiting', async () => {
     const { view } = await renderPage({ waiting: 7 });
-    assert.match(view.textContent, /Queue size\s*7/);
+    assert.match(view.textContent, /Queued\s*7/);
   });
 
   it('states the share of working time spent loading', async () => {
@@ -484,7 +484,12 @@ describe('what the machine says about its memory', () => {
 
   it('ends with what a model could actually have', async () => {
     const { view } = await renderPage();
-    assert.match(view.textContent, /Available mem\s*76685 MB/);
+    assert.match(view.textContent, /Available mem\s*29077 card\s*·\s*47608 RAM/);
+
+    // Never a sum. A model has to fit in one pool, and 76,685 on a machine
+    // with a 32 GB card and 64 GB of memory reads as somewhere with 76 GB in
+    // it. There is no such place.
+    assert.equal(view.textContent.includes('76685'), false, view.textContent);
   });
 
   it('reads the same numbers the admission decision would', async () => {
@@ -500,6 +505,48 @@ describe('what the machine says about its memory', () => {
                           available_mb: 1234 }] },
     });
     assert.match(view.textContent, /Available mem\s*1234 MB/);
+  });
+
+  it('never adds the pools together', async () => {
+    // A model has to fit in one of them. 12,090 free on the card plus 40,061
+    // in system memory is not a place anything can go, and printing 52,151
+    // reads as though it were.
+    const { view } = await renderPage();
+    const row = [...view.querySelectorAll('.row')]
+      .find((item) => item.textContent.includes('Available mem'));
+    assert.match(row.textContent, /29077 card/);
+    assert.match(row.textContent, /47608 RAM/);
+  });
+
+  it('says one figure where there is one pool', async () => {
+    // On Apple silicon the chip and the machine share it, so there is nothing
+    // to keep apart and a name beside the number would be noise.
+    const { view } = await renderPage({
+      card: { temperature_c: null },
+      memory: { unified: true, available_mb: 80088, reserve_mb: 16384,
+                held_by_models_mb: 21000,
+                pools: [{ name: 'machine', kind: 'unified', total_mb: 131072,
+                          used_mb: 34600, used_by_models_mb: 21000,
+                          reserve_mb: 16384, free_mb: 96472,
+                          for_models_mb: 114688, available_mb: 80088 }] },
+    });
+    const row = [...view.querySelectorAll('.row')]
+      .find((item) => item.textContent.includes('Available mem'));
+    assert.match(row.textContent, /80088 MB/);
+    assert.equal(row.textContent.includes('card'), false);
+  });
+
+  it('gives every figure in Activity something to hover', async () => {
+    // A number with no explanation is a number somebody has to guess at, and
+    // the guess is what gets acted on.
+    const { view } = await renderPage();
+    const activity = [...view.querySelectorAll('.section')]
+      .find((item) => item.textContent.startsWith('Activity'));
+    // The tooltip is on the row, so hovering anywhere along it works.
+    const bare = [...activity.querySelectorAll('.row')]
+      .filter((row) => !row.title)
+      .map((row) => row.children[0].textContent.trim());
+    assert.deepEqual(bare, [], `no tooltip on: ${bare.join(', ')}`);
   });
 
   it('shows the temperature', async () => {

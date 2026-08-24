@@ -98,6 +98,8 @@ function address(stats) {
 // keeps a reserve. On Apple silicon there is one, because the chip and
 // everything else draw on the same memory.
 const POOL_NAMES = { card: 'Card mem', machine: 'System mem' };
+// Short enough to put two on one line.
+const SHORT = { card: 'card', machine: 'RAM' };
 
 // A figure, or a dash. Every number here comes from a manager that may be
 // older than this file — they are not replaced in the same instant — and
@@ -111,7 +113,8 @@ function figure(value, suffix = '') {
 function memoryLines(memory, card) {
   const lines = [];
   if (card && card.temperature_c !== null && card.temperature_c !== undefined) {
-    lines.push(line('GPU temp', figure(card.temperature_c, ' °C')));
+    lines.push(line('GPU temp', figure(card.temperature_c, ' °C'),
+                    'The card\u2019s own reading. Nothing here acts on it; it is here because a card that is throttling explains a slow answer.'));
   }
   (memory && memory.pools ? memory.pools : []).forEach((pool) => {
     const share = pool.total_mb
@@ -127,11 +130,20 @@ function memoryLines(memory, card) {
                         : `${share}% in use. ${pool.reserve_mb} MB of the rest `
                           + 'is held back for the machine itself.'));
   });
-  if (memory && memory.pools && memory.pools.length) {
-    lines.push(line('Available mem', figure(memory.available_mb, ' MB'),
-                    'What is free, less what is held back for the machine. A '
-                    + 'model has to fit in one pool, so this total is the '
-                    + 'ceiling rather than the test.'));
+  // Per pool, never added up. A model has to fit in *one* of them, so a single
+  // figure of 52,151 MB on a machine with a 32 GB card and 48 GB of memory
+  // reads as though there were somewhere with 52 GB in it. There is not, and
+  // no model can ever have that much.
+  const pools = (memory && memory.pools) || [];
+  if (pools.length) {
+    lines.push(line(
+      'Available mem',
+      pools.map((pool) => pools.length > 1
+        ? `${figure(pool.available_mb)} ${SHORT[pool.name] || pool.name}`
+        : `${figure(pool.available_mb)} MB`).join('  ·  '),
+      'Room for another model: what is free in each pool, less what is held '
+      + 'back for the machine. Shown separately because a model has to fit in '
+      + 'one of them — these do not add up to a place anything can go.'));
   }
   return lines;
 }
@@ -145,7 +157,10 @@ function activity(stats) {
     : 'idle';
   const places = loaded.reduce((total, item) => total + (Number(item.places) || 0), 0);
   return section('Activity', [
-    line('Status', status),
+    line('Status', status,
+         'Idle means nothing running and nobody waiting. "Waiting for room" '
+         + 'means a request needs a model that is not loaded and something has '
+         + 'to come off first.'),
     line('Loaded', figure(loaded.length),
          'How many models are on the machine. Which ones, and what each is '
          + 'doing, is below.'),
@@ -153,11 +168,18 @@ function activity(stats) {
          'Requests running right now, against the places every loaded model '
          + 'offers between them. Places are the engine\u2019s own number and '
          + 'differ per model.'),
-    line('Queue size', figure(stats.waiting),
-         'Requests waiting for a model that is not loaded.'),
+    line('Queued', figure(stats.waiting),
+         'Requests waiting their turn — for a place on a model that is loaded, '
+         + 'or for a model that has to be loaded first. The queue below says '
+         + 'which is which.'),
     line('Requests per minute', figure(stats.requests_per_minute),
          'In the last sixty seconds.'),
-    line('Switches', figure(stats.switches)),
+    line('Loads', figure(stats.switches),
+         'How many times a model has been put on since this manager started.'),
+    line('Evictions', figure(stats.evictions),
+         'How many models were pushed off to make room. The number that hurts: '
+         + 'a load beside what is there costs a load, one that displaces '
+         + 'something costs that too and the next request for it.'),
     line('Time spent switching', figure(stats.switching_share, '%'),
          'Of the time this was working — answering or loading — how much went '
          + 'on loading.'),

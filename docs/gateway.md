@@ -21,12 +21,26 @@ point: a client is meant to be able to ask for one of them.
 
 ![The gateway](screenshots/gateway.png)
 
-The page is what is happening now. **Loaded** is how many models are on the
-machine and the queue below names them. **Processing** is requests in flight
-against the places every loaded model offers between them — places are the
-engine's own number and differ per model. **Switches** counts loads and **Time
-spent switching** is the share of the working time that went on loading rather
-than answering: the number that says a workflow is thrashing.
+The page is what is happening now, and every figure on it says what it means
+when you hover it.
+
+**Loaded** is how many models are on the machine; the queue below names them.
+**Processing** is requests in flight against the places every loaded model
+offers between them — places are the engine's own number and differ per model.
+**Queued** is everything waiting its turn, whether for a place on a loaded
+model or for one that has to be loaded first; the queue below says which is
+which.
+
+**Loads** counts models put on, **Evictions** counts models pushed off to make
+room — the second is the one that hurts, because it costs the next request for
+whatever was displaced. **Time spent switching** is the share of the working
+time that went on loading rather than answering: the number that says a
+workflow is thrashing.
+
+**Available mem is given per pool and never added up.** A model has to fit in
+one of them, so `12090 card · 40065 RAM` is two separate answers. Summed, it
+would read as 52 GB of room on a machine with a 32 GB card and 48 GB of memory
+— a place nothing can actually go.
 
 The **Queue** is not a list of requests, it is what is about to happen. Each
 loaded model with what it is answering and what is queued for it; **Waiting**,
