@@ -5,7 +5,7 @@
 > approach may be useful to someone; it is not a product and has no support.
 > It may change over time.
 
-_This was written with an AI agent, and it is meant to be read the same way.**
+_**This was written with an AI agent, and it is meant to be read the same way.**
 Take it as a starting point rather than as something to install. Your machine is
 not this machine: different card, different amount of memory, different models,
 a different idea of what the thing should do. Point your own agent at this
