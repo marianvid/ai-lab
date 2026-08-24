@@ -191,6 +191,55 @@ describe('the Library page', () => {
   });
 });
 
+describe('getting out of a search', () => {
+  // Without a way out, the results sat there for the rest of the session,
+  // pushing the models actually on disk — which is what this page is for —
+  // off the bottom of the screen.
+
+  async function searchThen(responses = {}) {
+    const context = await renderPage(responses);
+    const input = context.view.querySelector('input.grow');
+    input.value = 'qwen';
+    button(context.view, 'Search').click();
+    await settle();
+    return context;
+  }
+
+  it('offers nothing to clear before anything has been searched', async () => {
+    const { view } = await renderPage();
+    assert.equal([...view.querySelectorAll('button')]
+      .some((item) => item.textContent.trim() === 'Clear'), false,
+      'a button that does nothing is one people stop trusting');
+  });
+
+  it('offers a way out once there are results', async () => {
+    const { view } = await searchThen();
+    assert.doesNotThrow(() => button(view, 'Clear'));
+    assert.match(view.textContent, /unsloth\/Qwen3-GGUF/);
+  });
+
+  it('puts the search away and shows what is on disk', async () => {
+    const { view } = await searchThen();
+    button(view, 'Clear').click();
+    await settle();
+    assert.equal(view.textContent.includes('unsloth/Qwen3-GGUF'), false,
+                 'the results stayed');
+    assert.match(view.textContent, /qwen/, 'the model on disk went with them');
+    assert.equal(view.querySelector('input.grow').value, '',
+                 'the box still held the old query');
+  });
+
+  it('offers a way out of a search that found nothing, too', async () => {
+    // That leaves a sentence rather than a list, and it needs clearing just
+    // the same.
+    const { view } = await searchThen({ '/api/hf/search': { results: [], hidden: 4 } });
+    assert.match(view.textContent, /none in a format this machine can run/);
+    button(view, 'Clear').click();
+    await settle();
+    assert.equal(view.textContent.includes('none in a format'), false);
+  });
+});
+
 describe('what a search that found nothing means', () => {
   // Two different answers used to look identical. Either Hugging Face has
   // nothing by that name, or it has plenty and none of it is in a format this

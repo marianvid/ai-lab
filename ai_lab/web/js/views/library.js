@@ -22,6 +22,8 @@ let redraw = () => {};
 // seconds, and rebuilding these would wipe whatever is being typed and steal
 // the focus mid-word.
 let searchRow = null;
+let searchInput = null;
+let searchGo = null;
 
 // -- what is on disk --------------------------------------------------------
 
@@ -131,22 +133,56 @@ async function openRepository(repo) {
   }
 }
 
+// The search box, kept between redraws.
+//
+// Rebuilt each time it would lose what was half-typed, and the page redraws
+// whenever anything changes — a download ticking along was enough to wipe a
+// word mid-sentence.
 function searchBox() {
-  if (searchRow) return searchRow;
-  const input = element('input', {
+  if (searchRow) {
+    // The row itself survives, but whether there is anything to clear does
+    // not, so that part is rebuilt.
+    searchRow.replaceChildren(searchInput, searchGo, ...clearButton());
+    return searchRow;
+  }
+  searchInput = element('input', {
     class: 'grow', placeholder: 'Search Hugging Face, e.g. qwen3 gguf',
   });
   const go = async () => {
-    if (!input.value.trim()) return;
-    await search(input.value.trim());
+    if (!searchInput.value.trim()) return;
+    await search(searchInput.value.trim());
     redraw();
   };
-  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') go(); });
-  searchRow = element('div', { class: 'row' }, [
-    input,
-    element('button', { class: 'action', text: 'Search', onclick: go }),
-  ]);
+  searchInput.addEventListener('keydown',
+                               (event) => { if (event.key === 'Enter') go(); });
+  searchGo = element('button', { class: 'action', text: 'Search', onclick: go });
+  searchRow = element('div', { class: 'row' },
+                      [searchInput, searchGo, ...clearButton()]);
   return searchRow;
+}
+
+
+// A way out of a search. Without it the results sat there for the rest of the
+// session, pushing the models actually on disk — which is what this page is
+// for — off the bottom of the screen.
+//
+// Only when there is something to clear: a button that does nothing is a
+// button somebody presses once and stops trusting.
+function clearButton() {
+  if (!results.length && !openRepo && !outcome) return [];
+  return [element('button', {
+    class: 'action', text: 'Clear',
+    title: 'Put the search away and show what is on disk',
+    onclick: () => {
+      results = [];
+      sets = [];
+      openRepo = null;
+      outcome = '';
+      lastQuery = '';
+      searchInput.value = '';
+      redraw();
+    },
+  })];
 }
 
 async function startDownload(set, button) {
