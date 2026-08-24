@@ -476,24 +476,30 @@ class Gateway:
         authority and reading again would only be a chance to disagree with
         itself.
 
-        Exactly one model, and answering: anything else is left as unknown, and
-        the next request switches, which unloads whatever is there. Two engines
-        up is not a card to adopt, it is a card to clear.
+        Everything that is up and answering, however many. This used to insist
+        on exactly one and give up otherwise — two engines up was not a card to
+        adopt but a card to clear — and with a memory budget that is simply
+        the ordinary state. The page reported "nothing loaded" while two models
+        were serving.
+
+        A model that is up but not yet answering is left for later, and the
+        flag stays set so the question is asked again. Adopting it would send
+        requests to a port with nothing behind it; giving up on it for good
+        would leave it invisible until something else changed.
         """
         if not self._resweep:
             return
-        self._resweep = False
         # The expensive question, asked once after an outside change rather
         # than on every request.
         instances = self.operations.instances()
-        running = [item for item in instances if item["running"] and item["ready"]]
-        if len(running) != 1 or any(item["running"] for item in instances
-                                    if item["id"] != running[0]["id"]):
-            return
-        found = running[0]
-        self.scheduler.adopt(Shape.of(
-            found["id"], {**found.get("params", {}),
-                          **found.get("active_params", {})}))
+        running = [item for item in instances if item["running"]]
+        if any(not item["ready"] for item in running):
+            return                      # still coming up: ask again next time
+        self._resweep = False
+        self.scheduler.adopt(*[
+            Shape.of(item["id"], {**item.get("params", {}),
+                                  **item.get("active_params", {})})
+            for item in running])
 
     # -- what the scheduler asks of us --------------------------------------
 

@@ -574,27 +574,43 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class OneModelOnlyTests(unittest.TestCase):
-    """One model on the card, with no exceptions.
+class TakingUpWhatIsAlreadyThere(unittest.TestCase):
+    """What the gateway makes of models it did not load itself.
 
-    A card found with two engines up is not a card to adopt, it is a card to
-    clear. The gateway only takes up what it finds when it finds exactly one
-    model answering; anything else is left unknown, and the next request
-    switches — which unloads everything before it loads.
+    systemd keeps the engines across a manager restart, which is the reason for
+    using it, and the buttons on the Models page load and unload without asking
+    the gateway. So it has to be able to look at the machine and believe what
+    it sees.
     """
 
-    def test_a_stray_is_unloaded(self):
-        # Both are up: a manager restart found two units enabled, or somebody
-        # pressed Load twice. The request asks for one of them.
+    def test_two_models_answering_are_both_taken_up(self):
+        # Found reported as "nothing loaded" while two models were serving on
+        # the container. This used to insist on finding exactly one and give up
+        # otherwise — with a memory budget, two is the ordinary state.
         operations = two_models(coder=True, reviewer=True)
         gateway = quick(operations)
+        self.assertEqual(sorted(loaded_names(gateway)), ["coder", "reviewer"])
 
+    def test_neither_is_unloaded_to_serve_the_other(self):
+        operations = two_models(coder=True, reviewer=True)
+        gateway = quick(operations)
         with gateway.acquire("coder") as lease:
             self.assertEqual(lease.port, 8080)
+        self.assertEqual(operations.unloads, [])
+        self.assertEqual(operations.loads, [])
+        running = sorted(e["id"] for e in operations.instances() if e["running"])
+        self.assertEqual(running, ["coder", "reviewer"])
 
-        self.assertIn("reviewer", operations.unloads)
-        running = [e["id"] for e in operations.instances() if e["running"]]
-        self.assertEqual(running, ["coder"])
+    def test_one_still_coming_up_is_left_for_later(self):
+        # Adopting it would send requests to a port with nothing behind it.
+        # Giving up on it for good would leave it invisible until something
+        # else changed, so the question is asked again.
+        operations = two_models(coder=True, reviewer=True)
+        operations._entries["reviewer"]["ready"] = False
+        gateway = quick(operations)
+        self.assertEqual(loaded_names(gateway), [])
+        operations._entries["reviewer"]["ready"] = True
+        self.assertEqual(sorted(loaded_names(gateway)), ["coder", "reviewer"])
 
     def test_a_card_with_one_model_answering_is_taken_up_as_it_is(self):
         # The ordinary case on Linux: systemd keeps the engines across a
@@ -1300,10 +1316,10 @@ class WhatThePageSeesTests(unittest.TestCase):
         gateway.card_changed()
         self.assertEqual(loaded_names(gateway), ["reviewer"])
 
-    def test_two_models_up_is_not_a_card_to_report(self):
-        # It is a card to clear, and the next request clears it.
+    def test_two_models_up_are_both_reported(self):
+        # The page said "nothing loaded" while two were serving.
         gateway = quick(two_models(coder=True, reviewer=True))
-        self.assertEqual(loaded_names(gateway), [])
+        self.assertEqual(sorted(loaded_names(gateway)), ["coder", "reviewer"])
 
 
 def _no_card():
