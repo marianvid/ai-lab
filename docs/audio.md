@@ -31,9 +31,9 @@ The manager, vLLM, NeMo and Silero do not share Python packages:
 ```text
 /opt/ai-lab                 manager and adapters
 /opt/ai/vllm/current       vLLM environment selected by a stable link
-/opt/ai/nemo/.venv         NeMo ASR and its CUDA dependencies
-/opt/ai/silero/.venv       Silero VAD, CPU Torch and ONNX Runtime
-/opt/ai/pyannote/.venv     pyannote.audio and its CUDA dependencies
+/opt/ai/nemo/current       selected NeMo environment and CUDA dependencies
+/opt/ai/silero/current     selected Silero, CPU Torch and ONNX environment
+/opt/ai/pyannote/current   selected pyannote.audio and CUDA environment
 ```
 
 The adapter in `ai_lab/audio/server.py` is launched with the runtime's Python.

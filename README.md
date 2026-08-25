@@ -46,14 +46,15 @@ unsupported engine stays visible but disabled, with the reason.
 Each part has its own document. Every one of them says what the thing is for
 before it says how it works.
 
-**The four pages**
+**The five pages**
 
 | | |
 |---|---|
 | [Models](docs/models.md) | One row per configured model: what it runs, what it can do, whether it is loaded and how long the last load took. Where models are started, stopped and set up. |
 | [Library](docs/library.md) | What is on disk, per weight format, and a search of Hugging Face to download more. |
 | [Gateway](docs/gateway.md) | The address an agent talks to. What is loaded, what is queued, and **the rules by which models are loaded and unloaded** — the part nobody can guess. |
-| [Settings](docs/settings.md) | What this machine is, how much of its memory models may use, the engines and their versions, and where the model store lives. |
+| [Storage](docs/storage.md) | Cache, incomplete files and inactive engine versions whose space can be reclaimed. Model deletion stays in Library. |
+| [Settings](docs/settings.md) | What this machine is, how much of its memory models may use, engine updates, and where the model store lives. |
 
 **Using it**
 

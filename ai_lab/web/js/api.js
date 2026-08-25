@@ -83,6 +83,9 @@ export const api = {
     request('POST', `/api/installs/${encodeURIComponent(engine)}/${encodeURIComponent(name)}/activate`),
   removeInstall: (engine, name) =>
     request('DELETE', `/api/installs/${encodeURIComponent(engine)}/${encodeURIComponent(name)}`),
+  storage: () => request('GET', '/api/storage'),
+  clearStorage: (id) =>
+    request('DELETE', `/api/storage/${encodeURIComponent(id)}`),
   // Only what this machine can run is listed, and there is no way to ask for
   // the rest. The search answer carries how many were filtered out.
   search: (q) => request('GET', `/api/hf/search?q=${encodeURIComponent(q)}`),

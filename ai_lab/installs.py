@@ -107,10 +107,22 @@ class PackageInstall:
     """
 
     def __init__(self, engine_id: str, root: str, package: str, bus: EventBus,
-                 uv: str = "uv", python: str = "") -> None:
+                 uv: str = "uv", python: str = "", install: str = "",
+                 modules: list[str] | None = None,
+                 requirements: list[str] | None = None,
+                 requires_cuda: bool = False,
+                 pip_args: list[str] | None = None) -> None:
         self.engine_id = engine_id
         self.root = Path(root)
         self.package = package
+        # Distribution names and import names are not the same thing. NeMo is
+        # installed as `nemo_toolkit[asr]` but verified by importing
+        # `nemo.collections.asr`; pyannote has the same distinction.
+        self.install_spec = install or package
+        self.modules = list(modules or [_module_of(package)])
+        self.requirements = list(requirements or [])
+        self.requires_cuda = requires_cuda
+        self.pip_args = list(pip_args or [])
         self.bus = bus
         self.uv = uv
         self.python = python          # which Python to build a new one from
@@ -238,34 +250,46 @@ class PackageInstall:
             return int((time.monotonic() - started) * 1000)
 
         target: Path | None = None
+        created = False
         try:
-            wanted = f"{self.package}=={version}" if version else self.package
-            # Built somewhere temporary first, because the folder's name is the
-            # version and the version is only known once it is resolved.
-            building = self.root / f"{PREFIX}installing"
-            if building.exists():
-                shutil.rmtree(building, ignore_errors=True)
-
-            self._say("status", f"Creating an environment in {building}", elapsed())
-            create = [self.uv, "venv", str(building)]
-            if self.python:
-                create += ["--python", self.python]
-            self._stream(create, elapsed, UV_TIMEOUT_S)
-
-            self._say("status", f"Installing {wanted}. This downloads gigabytes.",
-                      elapsed())
-            self._stream([self.uv, "pip", "install", wanted], elapsed,
-                         INSTALL_TIMEOUT_S, venv=building)
-
-            landed = _version_in(building, self.package)
+            landed = version or self._latest or self._latest_version()
             if not landed:
-                raise ValueError(
-                    f"{self.package} is not in the new environment after installing")
+                raise ValueError(f"Could not determine which {self.package} version to install")
+            wanted = _pin(self.install_spec, landed)
             target = self.root / f"{PREFIX}{landed}"
             if target.exists():
                 raise ValueError(
                     f"{landed} is already installed at {target.name}. "
                     "Remove it first, or activate it instead of installing it.")
+
+            # A virtual environment must be created at its final path: launcher
+            # scripts contain that absolute path. Building elsewhere and then
+            # renaming produces an environment whose shebangs point nowhere.
+            building = target
+
+            self._say("status", f"Creating an environment in {building}", elapsed())
+            create = [self.uv, "venv", str(building)]
+            if self.python:
+                create += ["--python", self.python]
+            # The target was proven absent above, so from here on any content
+            # at that path belongs to this attempt, including a partial folder
+            # left by `uv venv` itself failing.
+            created = True
+            self._stream(create, elapsed, UV_TIMEOUT_S)
+
+            self._say("status", f"Installing {wanted}. This downloads gigabytes.",
+                      elapsed())
+            self._stream([self.uv, "pip", "install", wanted,
+                          *self.requirements, *self.pip_args], elapsed,
+                         INSTALL_TIMEOUT_S, venv=building)
+
+            installed = _version_in(building, self.package)
+            if not installed:
+                raise ValueError(
+                    f"{self.package} is not in the new environment after installing")
+            if installed != landed:
+                raise ValueError(
+                    f"Asked for {landed}, but {installed} was installed")
 
             # Started before anything is swapped. An environment that will not
             # import is not one to point the engine at, and finding that out
@@ -273,7 +297,6 @@ class PackageInstall:
             self._say("status", "Checking that it starts", elapsed())
             self._verify(building, elapsed)
 
-            building.rename(target)
             self._say("status", f"Installed {landed} at {target.name}", elapsed())
 
             previous = self.active()
@@ -288,15 +311,28 @@ class PackageInstall:
             self._say("err", self._error, elapsed())
             # Whatever was half-built goes. What was working is untouched: it
             # was never written to.
-            leftover = self.root / f"{PREFIX}installing"
-            if leftover.exists():
-                shutil.rmtree(leftover, ignore_errors=True)
+            if created and target is not None and target.exists() and target != self.active():
+                shutil.rmtree(target, ignore_errors=True)
         self._announce()
+
+    def _latest_version(self) -> str:
+        """Read the newest version when install was called before the timer."""
+        try:
+            with urllib.request.urlopen(
+                    INDEX.format(package=self.package),
+                    timeout=INDEX_TIMEOUT_S) as answer:
+                return (json.loads(answer.read()).get("info", {}).get("version") or "")
+        except Exception:
+            return ""
 
     def _verify(self, environment: Path, elapsed) -> None:
         """Refuse to hand the engine something that will not start."""
-        program = (f"import {self.package} as engine, importlib.metadata as meta;"
-                   f"print('ok', meta.version({self.package!r}))")
+        imports = ";".join(
+            f"importlib.import_module({module!r})" for module in self.modules)
+        cuda = (";import torch;assert torch.cuda.is_available(),"
+                "'CUDA is not available'" if self.requires_cuda else "")
+        program = ("import importlib, importlib.metadata as meta;"
+                   f"{imports}{cuda};print('ok', meta.version({self.package!r}))")
         result = subprocess.run([str(environment / "bin" / "python"), "-c", program],
                                 capture_output=True, text=True,
                                 timeout=CHECK_TIMEOUT_S)
@@ -402,7 +438,12 @@ class Installs:
             if package and root:
                 self._installs[engine_id] = PackageInstall(
                     engine_id, root, package, bus,
-                    uv=source.get("uv", "uv"), python=source.get("python", ""))
+                    uv=source.get("uv", "uv"), python=source.get("python", ""),
+                    install=source.get("install", ""),
+                    modules=source.get("modules"),
+                    requirements=source.get("requirements"),
+                    requires_cuda=bool(source.get("requires_cuda", False)),
+                    pip_args=source.get("pip_args"))
 
     def all(self) -> list[dict]:
         return [item.status() for item in self._installs.values()]
@@ -455,6 +496,15 @@ def _root_of(binary: str) -> str:
     if path.parent.name == "bin":
         return str(path.parent.parent.parent)
     return ""
+
+
+def _module_of(package: str) -> str:
+    return package.replace("-", "_")
+
+
+def _pin(spec: str, version: str) -> str:
+    """`nemo_toolkit[asr]` -> `nemo_toolkit[asr]==3.0.2`."""
+    return f"{spec}=={version}"
 
 
 def _version_in(environment: Path, package: str) -> str:

@@ -34,7 +34,7 @@ already in this checkout's history? Exact, the same question on both lines, and
 still right when you switch between them. An update moves to a named tag rather
 than pulling whatever master has reached, so what got compiled has a name.
 
-**vLLM arrives as ready-built packages.** Nothing is compiled and nothing is
+**vLLM and the speech runtimes arrive as ready-built packages.** Nothing is compiled and nothing is
 recompiled indirectly. What there is instead is release notes written by
 people, shown as they were written — sifting those by guessing at prefixes
 would damage the one thing written for a reader.
@@ -57,7 +57,8 @@ break inference on the card.
 
 ### Installing beside what works, never over it
 
-A new vLLM goes in a **new folder**, is checked that it actually imports, and
+A new package-engine version goes in a **new folder**, is checked that its
+runtime imports and its required accelerator is available, and
 only then does the engine start using it. The previous one is untouched, so
 going back is one press.
 
@@ -72,7 +73,7 @@ beside it and renaming it over the top, in one step: a link deleted and then
 recreated has a moment where it points at nothing, and anything starting in
 that moment fails for a reason nobody would guess.
 
-Settings lists the folders, marks the one in use, and offers the others as a
+Storage lists the folders, marks the one in use, and offers the others as a
 way back or as space to reclaim. **Nothing is ever tidied automatically** — the
 previous version *is* the way back, and deciding it has stopped being needed is
 a judgement about whether the new one has proved itself, which no timer can
@@ -93,11 +94,10 @@ otherwise.
 
 ### Speech runtimes are isolated capabilities
 
-NeMo ASR and the Silero ONNX adapter are installed in separate environments,
-beside both the manager and vLLM. They follow the same operational rule — a
-working environment is not modified indirectly by installing another engine —
-but they do not yet have the automatic side-by-side update workflow described
-above for vLLM.
+NeMo ASR, pyannote.audio and the Silero ONNX adapter are installed in separate
+environments, beside both the manager and vLLM. They use the same side-by-side
+update workflow: create at the final versioned path, install, import the
+runtime, verify CUDA for the GPU engines, and only then repoint `current`.
 
 The interface reports whether each runtime is available on the current host.
 NeMo is offered for native `.nemo` transcription checkpoints. The ONNX adapter
@@ -105,10 +105,11 @@ is offered for VAD. On a host where the runtime or required accelerator is
 missing, the engine is disabled with a reason rather than failing after an
 instance has been configured.
 
-Until managed updates exist, changing either speech environment is an explicit
-deployment operation: record its package versions, validate import and device
-access, run an inference smoke test, then deploy the manager. The versions used
-for published measurements are recorded in the benchmark repository.
+The package distribution, import modules, companion requirements and CUDA
+requirement are separate configuration fields. This matters for names such as
+`nemo_toolkit[asr]`, whose package name and Python import are not the same.
+The versions used for published measurements remain recorded in the benchmark
+repository.
 
 ---
 

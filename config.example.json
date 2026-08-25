@@ -22,17 +22,67 @@
       }
     },
     "nemo": {
-      "binary": "/opt/ai/nemo/.venv/bin/python",
-      "server": "/opt/ai-lab/ai_lab/audio/server.py"
+      "binary": "/opt/ai/nemo/current/bin/python",
+      "server": "/opt/ai-lab/ai_lab/audio/server.py",
+      "source": {
+        "package": "nemo_toolkit",
+        "install": "nemo_toolkit[asr]",
+        "modules": ["nemo.collections.asr"],
+        "requires_cuda": true,
+        "root": "/opt/ai/nemo",
+        "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
+        "uv": "/usr/local/bin/uv"
+      }
     },
     "onnx": {
-      "binary": "/opt/ai/silero/.venv/bin/python",
-      "server": "/opt/ai-lab/ai_lab/audio/server.py"
+      "binary": "/opt/ai/silero/current/bin/python",
+      "server": "/opt/ai-lab/ai_lab/audio/server.py",
+      "source": {
+        "package": "onnxruntime",
+        "modules": ["onnxruntime", "torch", "soundfile"],
+        "requirements": ["torch", "soundfile"],
+        "root": "/opt/ai/silero",
+        "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
+        "uv": "/usr/local/bin/uv"
+      }
     },
     "pyannote": {
-      "binary": "/opt/ai/pyannote/.venv/bin/python",
-      "server": "/opt/ai-lab/ai_lab/audio/server.py"
+      "binary": "/opt/ai/pyannote/current/bin/python",
+      "server": "/opt/ai-lab/ai_lab/audio/server.py",
+      "source": {
+        "package": "pyannote.audio",
+        "modules": ["pyannote.audio"],
+        "requires_cuda": true,
+        "root": "/opt/ai/pyannote",
+        "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
+        "uv": "/usr/local/bin/uv"
+      }
     }
+  },
+  "storage": {
+    "reclaimable": [
+      {
+        "id": "package-cache",
+        "name": "Package download cache",
+        "path": "/var/lib/ai-lab/.cache/uv",
+        "kind": "cache",
+        "description": "Downloaded Python packages kept to make later updates faster."
+      },
+      {
+        "id": "vllm-compile-cache",
+        "name": "vLLM compile cache",
+        "path": "/var/lib/ai-lab/.cache/vllm/torch_compile_cache",
+        "kind": "cache",
+        "description": "Generated kernels; the next matching load rebuilds them."
+      },
+      {
+        "id": "flashinfer-cache",
+        "name": "FlashInfer cache",
+        "path": "/var/lib/ai-lab/.cache/flashinfer",
+        "kind": "cache",
+        "description": "Generated kernels; they are rebuilt when needed."
+      }
+    ]
   },
   "repositories": [
     {

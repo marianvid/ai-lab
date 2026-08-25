@@ -26,6 +26,7 @@ from .lastloaded import LastLoaded
 from .operations import Operations
 from .runtime import Runtime
 from .settings import Settings
+from .storage import Storage
 
 
 def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway]:
@@ -42,6 +43,7 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     # Engines that arrive as packages rather than as source. A new
     # version is installed beside the one that works, never over it.
     installs = Installs(engine_settings, bus)
+    storage = Storage(store.load().storage, bus)
     # Same reason as the build watcher: the page should already know what
     # is waiting when it is opened, so there is no button that only asks.
     installs.watch()
@@ -72,6 +74,7 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
         host=host,
         builds=builds,
         installs=installs,
+        storage=storage,
         bus=bus,
         # What was on the card when the manager last stopped. The host says
         # where a machine keeps such things.

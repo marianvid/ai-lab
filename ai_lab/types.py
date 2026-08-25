@@ -176,7 +176,7 @@ class ChangeEvent:
     the state.
     """
 
-    topic: str                    # "instances", "downloads", "models", "engines"
+    topic: str                    # instances, downloads, models, engines, storage
 
 
 @dataclass(frozen=True, slots=True)

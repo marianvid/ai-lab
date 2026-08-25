@@ -6,7 +6,6 @@ import { showNotice } from '../confirm.js';
 import { chooseFolder, chooseProgram } from '../browse.js';
 import { whileWorking } from '../working.js';
 import { reviewUpdate } from './whatchanges.js';
-import { versions } from './versions.js';
 import { machine } from './machine.js';
 import { onLog } from '../events.js';
 import { bytes, element, seconds } from '../format.js';
@@ -320,14 +319,6 @@ function engineCard(engine, refresh) {
     ].filter(Boolean)),
   ];
 
-  // Only once there is a choice. With a single environment the list repeated
-  // the version already beside the name and offered nothing to press; with two
-  // it is the way back from an update that went badly, and the way to reclaim
-  // the 8 GB the old one holds.
-  const installed = byEngine.get(engine.id);
-  if (installed && (installed.environments || []).length > 1) {
-    rows.push(versions(installed, engine, refresh));
-  }
   if (source && source.note) rows.push(element('div', { class: 'warn', text: source.note }));
   if (source && source.error) rows.push(element('div', { class: 'error', text: source.error }));
   const building = Boolean(source && source.state === 'running');

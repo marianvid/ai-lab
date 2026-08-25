@@ -37,6 +37,7 @@ from .hosts.base import Host
 from .runtime import Operation, Runtime
 from .types import ChangeEvent, Interests, LogEvent, Task
 from .settings import Settings
+from .storage import Storage
 
 
 class Operations:
@@ -45,6 +46,7 @@ class Operations:
                  huggingface: HuggingFaceClient, host: Host,
                  engines=None, builds: Builds | None = None,
                  installs: Installs | None = None,
+                 storage: Storage | None = None,
                  bus=None, last_loaded=None) -> None:
         # `engines` is the engine registry. It is passed in rather than
         # imported for two reasons: the binary paths come from configuration,
@@ -56,6 +58,7 @@ class Operations:
         # Engines installed as packages rather than compiled. Optional:
         # a machine with none, and a test that does not care, pass nothing.
         self.installs = installs
+        self.storage = storage
         self.bus = bus
         self.store = store
         self.catalog = catalog
@@ -627,6 +630,17 @@ class Operations:
         judgement a timer can make.
         """
         return self._installs().get(engine_id).remove(name)
+
+    # -- disk space that is not model storage ------------------------------
+
+    def storage_view(self) -> dict:
+        return self.storage.view() if self.storage else {
+            "items": [], "recoverable_bytes": 0}
+
+    def clear_storage(self, item_id: str) -> dict:
+        if self.storage is None:
+            raise KeyError("No reclaimable storage is configured")
+        return self.storage.clear(item_id)
 
     def _nothing_running(self, why: str) -> None:
         running = [item["id"] for item in self.instances() if item["running"]]

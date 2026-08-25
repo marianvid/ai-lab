@@ -22,6 +22,7 @@ ai_lab/capabilities.py  What a model can do, read from its own files and remembe
 ai_lab/changes/         What an update would bring, read before anything is pressed
 ai_lab/builds.py        Engine source versions, and updating them from git
 ai_lab/installs.py      Engines that arrive as packages: versions side by side
+ai_lab/storage.py       Explicitly allowed caches and leftovers that may be reclaimed
 ai_lab/operations.py    Joining the services into whole actions
 ai_lab/config.py        Reading and writing config.json
 ai_lab/naming.py        Rules about model file names

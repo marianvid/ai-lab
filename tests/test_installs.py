@@ -186,7 +186,7 @@ class Installing(unittest.TestCase):
     def _run(self, **how):
         one, two, three = self._pretend(**how)
         with one, two, three:
-            self.install.install()
+            self.install.install(how.get("lands", "0.27.1"))
             self.install._thread.join(timeout=10)
         return self.install.status()
 
@@ -240,10 +240,10 @@ class Installing(unittest.TestCase):
         with patch.object(PackageInstall, "_stream", slow), \
              patch.object(PackageInstall, "_verify", lambda *a, **k: None), \
              patch("ai_lab.installs._version_in", lambda path, package: "0.27.1"):
-            self.install.install()
+            self.install.install("0.27.1")
             self.assertTrue(started.wait(timeout=5), "the first never started")
             with self.assertRaises(ValueError):
-                self.install.install()
+                self.install.install("0.27.1")
             holding.set()
             self.install._thread.join(timeout=10)
         self.assertEqual(self.install.status()["state"], "done")

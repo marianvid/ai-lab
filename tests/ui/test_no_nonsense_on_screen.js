@@ -39,11 +39,12 @@ const EMPTY = {
                     waiting_for: [] },
   '/api/downloads': [],
   '/api/installs': [],
+  '/api/storage': { items: [], recoverable_bytes: 0 },
   '/api/hf/search': { results: [], hidden: 0 },
   '/api/hf/sets': [],
 };
 
-const VIEWS = ['runtime', 'library', 'settings', 'gateway'];
+const VIEWS = ['runtime', 'library', 'settings', 'gateway', 'storage'];
 
 describe('words that are never an answer', () => {
   let dom;

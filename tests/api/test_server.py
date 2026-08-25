@@ -25,6 +25,14 @@ class FakeOperations:
     def settings_view(self):
         return {"title": "AI-Lab"}
 
+    def storage_view(self):
+        return {"items": [{"id": "cache", "size_bytes": 42}],
+                "recoverable_bytes": 42}
+
+    def clear_storage(self, item_id):
+        self.calls.append(("clear_storage", item_id))
+        return {"items": [], "recoverable_bytes": 0}
+
     def models(self, engine_id=None):
         self.calls.append(("models", engine_id))
         return [{"id": "gguf/a", "name": "a"}]
@@ -111,6 +119,12 @@ class ServerTests(unittest.TestCase):
     def test_a_query_string_reaches_the_handler(self):
         self.call("GET", "/api/models?engine=llamacpp")
         self.assertIn(("models", "llamacpp"), self.operations.calls)
+
+    def test_storage_deletion_sends_an_id_not_a_path(self):
+        status, payload = self.call("DELETE", "/api/storage/package-cache")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["recoverable_bytes"], 0)
+        self.assertIn(("clear_storage", "package-cache"), self.operations.calls)
 
     def test_a_path_parameter_reaches_the_handler(self):
         status, payload = self.call("POST", "/api/instances/qwen/load")

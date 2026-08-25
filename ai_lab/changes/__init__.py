@@ -51,6 +51,7 @@ class Reader:
         self.checkout = source.get("path") or ""
         self.releases = source.get("releases") or ""
         self.package = source.get("package") or ""
+        self.install = source.get("install") or self.package
         self.binary = binary
         self.uv = uv
 
@@ -99,7 +100,9 @@ class Reader:
         if not self.package or not self.binary:
             return "", ""
         installed = installed_version(venv_of(self.binary), self.package)
-        moving = next((move for move in moves if move.name == self.package), None)
+        canonical = lambda name: name.lower().replace("_", "-").replace(".", "-")
+        moving = next((move for move in moves
+                       if canonical(move.name) == canonical(self.package)), None)
         latest = moving.becomes if moving and moving.becomes else installed
         return installed or (moving.was if moving else ""), latest
 
@@ -111,6 +114,6 @@ class Reader:
         if not self.package or not self.binary:
             return [], ""
         try:
-            return would_move(venv_of(self.binary), self.package, self.uv), ""
+            return would_move(venv_of(self.binary), self.install, self.uv), ""
         except ValueError as error:
             return [], f"Could not work out which packages would change: {error}"

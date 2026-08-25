@@ -115,6 +115,9 @@ class Config:
     # How much of this machine's memory to leave for the machine. See
     # `budget.py` for why it is a reserve rather than an allowance.
     memory: dict = field(default_factory=dict)
+    # Explicit allow-list of caches and leftovers that may be removed from the
+    # Storage page. Models are never listed here; Library owns them.
+    storage: dict = field(default_factory=dict)
     # The one directory every model lives under. Each repository is a
     # folder in it, named after the format.
     models_root: str = ""
@@ -158,6 +161,7 @@ class ConfigStore:
             engines=raw.get("engines", {}),
             gateway=raw.get("gateway", {}),
             memory=raw.get("memory", {}),
+            storage=raw.get("storage", {}),
         )
 
     def save(self, config: Config) -> None:
