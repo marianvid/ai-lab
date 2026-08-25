@@ -323,8 +323,14 @@ function updateControls(engine, source, refresh, waiting) {
     element('button', {
       class: 'action', text: 'Update…',
       title: `Read what ${waiting} brings before taking it`,
-      onclick: (event) => whileWorking(event.target, 'Reading…', () =>
-        reviewUpdate(engine, take(engine, buildable, installable, refresh))),
+      onclick: (event) => whileWorking(event.target, 'Reading…', async () => {
+        await reviewUpdate(engine, take(engine, buildable, installable, refresh));
+        // Reading the review can take several seconds. Update checks may have
+        // completed while the dialog was open, so redraw from one fresh pair
+        // of Settings responses instead of leaving whichever status happened
+        // to be on the page before it opened.
+        await refresh();
+      }),
     }),
   ];
 }
@@ -427,9 +433,8 @@ export async function render(container) {
   ]);
   byEngine.clear();
   (installed || []).forEach((item) => byEngine.set(item.engine, item));
-  // Two balanced stacks. Engine state and its launch programs use the narrower
-  // left column; the machine and the longer model-store list use the wider
-  // right column. On a narrow screen they return to one column in this order.
+  // Two balanced stacks. On a narrow screen they return to one column in this
+  // order.
   container.replaceChildren(element('div', { class: 'columns settings-columns' }, [
     element('div', {}, [
       engines(settings.engines, refresh),

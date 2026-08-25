@@ -394,6 +394,31 @@ describe('the Settings page', () => {
                  'reading what would change must not start it');
   });
 
+  it('refreshes every engine status after an update review is closed', async () => {
+    // Reading release notes takes long enough for a background update check to
+    // finish. Closing the dialog must draw one coherent, fresh snapshot rather
+    // than leave a status that happened to be on screen before it opened.
+    const base = responses()['/api/settings'];
+    const withUpdate = { ...base, engines: [{ ...base.engines[0],
+      source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }] };
+    const changes = {
+      engine: 'llamacpp', engine_name: 'llama.cpp',
+      installed: 'b10398', latest: 'v0.2.0', yours: [], others: [],
+      by_area: {}, other_areas: {}, notes: '', packages: [], unreadable: '',
+    };
+    let settingsReads = 0;
+    const { view, calls } = await renderPage({
+      '/api/settings': () => { settingsReads += 1; return withUpdate; },
+      '/api/builds/llamacpp/changes': changes,
+    });
+    button(engineEntry(view, 'llama.cpp'), 'Update…').click();
+    await settle();
+    button(document.querySelector('dialog.review'), 'Close').click();
+    await settle(12);
+    assert.equal(settingsReads, 2, calls.map((call) => call.path).join(', '));
+    assert.match(engineEntry(view, 'llama.cpp').textContent, /v0\.2\.0 available/);
+  });
+
   it('has nothing to press that only asks upstream a question', async () => {
     // "Check for updates" did what the timer already does, and its only real
     // effect was to make the page look like it needed pressing.
