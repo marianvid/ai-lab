@@ -27,8 +27,8 @@ describe('the browser tab', () => {
 
   it('keeps whatever the installation is called', () => {
     // The name is configuration. Somebody who renamed it did so on purpose.
-    assert.equal(pageTitle({ title: 'ParallaxVox lab', host: { operating_system: 'Linux' } }),
-                 'ParallaxVox lab · Linux');
+    assert.equal(pageTitle({ title: 'Private inference lab', host: { operating_system: 'Linux' } }),
+                 'Private inference lab · Linux');
   });
 
   it('says just the name when the machine will not say what it is', () => {

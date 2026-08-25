@@ -5,10 +5,9 @@ FFmpeg conversion, long-file chunking, durable storage, orchestration and
 metrics. The client sends normalised audio over the private network and gets
 model output back; it never mounts `/models` and never installs an AI runtime.
 
-That boundary matters when one client becomes many. Beacon may begin with
-public meetings and Romanian news video, while another project uses interviews
-or archives. They can share the expensive, versioned inference layer without
-sharing their source data or their workflow.
+That boundary matters when one client becomes many. Public-meeting processing,
+interview analysis and archive indexing can share the expensive, versioned
+inference layer without sharing source data or workflow-specific code.
 
 ## Tasks and engines
 
@@ -45,7 +44,7 @@ it does for text engines.
 vLLM's base package does not include audio decoding. The active vLLM
 environment therefore also carries its declared audio dependencies (`av`,
 `scipy`, `soundfile` and `soxr`). They are part of the inference runtime, not a
-reason to move decoding or source-file preparation out of Data-Lab.
+reason to move decoding or source-file preparation out of the client.
 
 ## Input contract
 
@@ -69,7 +68,7 @@ measurements live in
 [ai-lab-benchmarks](https://github.com/marianvid/ai-lab-benchmarks); evaluation
 audio is fetched from its publisher and is not committed. The Echo dataset
 card does not currently state a licence; its benchmark audio therefore remains
-only on Data-Lab and is not redistributed.
+only in the private evaluation store and is not redistributed.
 
 ---
 
