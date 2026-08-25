@@ -4,6 +4,19 @@ AI-Lab exposes the configured audio models through task-specific endpoints.
 How callers obtain, store or otherwise prepare their source material is outside
 this project's contract.
 
+## How the evaluation audio was prepared
+
+The Romanian evaluation audio published for this personal AI-Lab was prepared
+by [Data-Lab](https://github.com/marianvid/data-lab). Its public repository has
+one deliberately narrow purpose: it shows the deterministic FLEURS selection
+and FFmpeg normalisation used before the files were sent here. The complete
+Data-Lab service and its operational workflows remain in a separate private
+repository because they may handle confidential source material.
+
+Data-Lab is not required to use these endpoints. Any caller may prepare input
+according to the selected model's contract; the link records how this project's
+published audio measurements were made.
+
 ## Tasks and engines
 
 | Task | Endpoint | Current engine | Current models |
@@ -38,8 +51,8 @@ it does for text engines.
 
 vLLM's base package does not include audio decoding. The active vLLM
 environment therefore also carries its declared audio dependencies (`av`,
-`scipy`, `soundfile` and `soxr`). They are part of the inference runtime, not a
-separate data-processing facility.
+`scipy`, `soundfile` and `soxr`). They are part of the inference runtime. The
+separate Data-Lab preparation step described above is outside this runtime.
 
 ## Input contract
 
