@@ -111,4 +111,21 @@ describe('choosing between installed versions', () => {
     const old = rowFor(view, '0.26.1rc1.dev949');
     assert.ok([...old.querySelectorAll('button')].every((b) => b.disabled));
   });
+
+  it('uses source-build controls for a compiled llama.cpp rollback', async () => {
+    const source = { ...STATE, kind: 'source', engine: 'llamacpp',
+      environments: STATE.environments.map((item) => ({ ...item,
+        name: item.active ? 'build-v0.3.0' : 'build-b10448' })) };
+    const context = installDom({
+      'POST /api/builds/llamacpp/build-b10448/activate': source,
+    });
+    const { versions } = await import(`../../ai_lab/web/js/views/versions.js?${Math.random()}`);
+    context.view.append(versions(source, { id: 'llamacpp', name: 'llama.cpp' }, () => {}));
+    [...context.view.querySelectorAll('button')]
+      .find((button) => button.textContent === 'Use this one').click();
+    await settle();
+    assert.ok(context.calls.some((call) =>
+      call.path === '/api/builds/llamacpp/build-b10448/activate'));
+    assert.equal(context.calls.some((call) => call.path.includes('/api/installs/')), false);
+  });
 });

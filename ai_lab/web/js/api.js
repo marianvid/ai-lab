@@ -66,6 +66,10 @@ export const api = {
   builds: () => request('GET', '/api/builds'),
   checkBuild: (engine) => request('POST', `/api/builds/${encodeURIComponent(engine)}/check`),
   updateBuild: (engine) => request('POST', `/api/builds/${encodeURIComponent(engine)}/update`),
+  activateBuild: (engine, name) =>
+    request('POST', `/api/builds/${encodeURIComponent(engine)}/${encodeURIComponent(name)}/activate`),
+  removeBuild: (engine, name) =>
+    request('DELETE', `/api/builds/${encodeURIComponent(engine)}/${encodeURIComponent(name)}`),
   // What an update would bring. A GET because it changes nothing — it
   // reads a checkout, asks upstream what it wrote, and asks the package
   // manager what it would do.

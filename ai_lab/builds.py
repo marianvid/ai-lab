@@ -1,16 +1,19 @@
-"""Keeping an engine's source build up to date.
+"""Keeping an engine's compiled source versions up to date.
 
 Both machines compile llama.cpp from git rather than installing a package, so
 this module does what you would otherwise do by hand: report which build is
 installed, ask upstream whether there is a newer one, and run the update while
 streaming its output to the browser.
 
-**It rebuilds; it does not reconfigure.** The existing `build/` directory
-already holds the flags each machine was set up with — CUDA compiled for this
-exact card on the Linux box, Metal with embedded shaders on the Mac. Running
-`cmake --build` reuses them. Regenerating the configuration would mean guessing
-those flags, and guessing wrong is silent: you would get a working binary that
-quietly lost an optimisation.
+On a versioned installation every update is configured and compiled in a new
+folder, verified, and only then selected through the stable `current` link.
+The previous build remains untouched for rollback. Configuration supplies the
+machine-specific CMake flags explicitly; guessing them would risk producing a
+working binary that quietly lost an optimisation.
+
+An installation without a configured build root keeps the original behaviour
+for backwards compatibility: it checks out the selected tag and rebuilds the
+existing `build/` directory in place.
 
 **There are two lines to follow, and which one is a choice.** Upstream tags
 almost every commit to master as `b10448` — about seven a day, 7,160 of them in
@@ -33,7 +36,9 @@ when somebody switches from one to the other.
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -58,6 +63,10 @@ STARTUP_DELAY_S = 20.0
 LOG_LINES = 500
 GIT_TIMEOUT = 120
 BUILD_TIMEOUT = 3600
+VERIFY_TIMEOUT = 60
+CURRENT = "current"
+META = ".ai-lab-build.json"
+BUILD_NAME = re.compile(r"^build-(b\d+|v\d+\.\d+\.\d+)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,16 +93,38 @@ class Version:
         return tuple(int(part) for part in re.findall(r"\d+", self.tag or ""))
 
 
+class BuildEnvironment:
+    """One compiled source version, shaped like a package environment."""
+
+    def __init__(self, path: Path, version: Version, active: bool,
+                 movable: bool = True) -> None:
+        self.path, self.version, self.active = path, version, active
+        self.name = path.name
+        self.movable = movable
+        self.size_bytes = 0
+
+    def json(self) -> dict:
+        return {"name": self.name, "version": self.version.tag,
+                "commit": self.version.commit, "active": self.active,
+                "size_bytes": self.size_bytes, "path": str(self.path),
+                "movable": self.movable}
+
+
 class SourceBuild:
     """One engine's source checkout, and the ability to update it."""
 
     def __init__(self, engine_id: str, path: str, bus: EventBus,
-                 jobs: int | None = None, line: str = DEFAULT_LINE) -> None:
+                 jobs: int | None = None, line: str = DEFAULT_LINE,
+                 builds: str = "", legacy_build: str = "",
+                 cmake_args: list[str] | None = None) -> None:
         self.engine_id = engine_id
         self.line = line if line in LINES else DEFAULT_LINE
         self.path = Path(path)
         self.bus = bus
         self.jobs = jobs
+        self.build_root = Path(builds) if builds else None
+        self.legacy_build = Path(legacy_build) if legacy_build else None
+        self.cmake_args = list(cmake_args or [])
         self._lines: deque[str] = deque(maxlen=LOG_LINES)
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
@@ -103,11 +134,13 @@ class SourceBuild:
 
     # -- reading -----------------------------------------------------------
 
-    def status(self) -> dict:
+    def status(self, with_sizes: bool = True) -> dict:
         installed = self.installed()
         latest = self._latest
+        environments = self.environments(with_sizes=with_sizes) if self.build_root else []
         return {
             "engine": self.engine_id,
+            "kind": "source",
             "path": str(self.path),
             "exists": self.exists,
             "installed": installed.tag,
@@ -120,6 +153,10 @@ class SourceBuild:
             "state": self._state,
             "error": self._error,
             "log": list(self._lines),
+            "environments": [item.json() for item in environments],
+            "spare_bytes": sum(item.size_bytes for item in environments
+                               if not item.active),
+            "free_bytes": _free(self.build_root) if self.build_root else 0,
         }
 
     def _update_available(self, installed: Version, latest: Version | None) -> bool:
@@ -139,12 +176,12 @@ class SourceBuild:
         """
         if latest is None or not latest.tag or not installed.tag:
             return False
-        return self._is_ahead(latest.tag)
+        return self._is_ahead(latest.tag, installed.commit or installed.tag or "HEAD")
 
-    def _is_ahead(self, tag: str) -> bool:
+    def _is_ahead(self, tag: str, against: str = "HEAD") -> bool:
         """Would moving to this tag bring anything this checkout does not have?"""
         try:
-            subprocess.run(["git", "merge-base", "--is-ancestor", tag, "HEAD"],
+            subprocess.run(["git", "merge-base", "--is-ancestor", tag, against],
                            cwd=self.path, capture_output=True, timeout=15,
                            check=True)
         except subprocess.CalledProcessError:
@@ -167,12 +204,29 @@ class SourceBuild:
         return (self.path / ".git").is_dir()
 
     def installed(self) -> Version:
-        """What is checked out right now.
+        """What the engine is launched from, or the checkout on legacy setups.
 
         Never raises. This is read whenever the settings screen is drawn, and a
         checkout that git cannot read should show as unknown rather than
         breaking the whole page.
         """
+        if self.build_root:
+            active = self.active()
+            if active is None:
+                return Version("")
+            marked = _marked(active)
+            if marked.tag:
+                return marked
+            # A legacy build can be introduced to the versioned scheme before
+            # its marker is written. It still corresponds to the checkout at
+            # that moment; migration writes the marker before any update.
+            if self.legacy_build and active == self.legacy_build.resolve():
+                return self.checkout_version()
+            return Version("")
+        return self.checkout_version()
+
+    def checkout_version(self) -> Version:
+        """What source is checked out, independently of the active binary."""
         if not self.exists:
             return Version("")
         try:
@@ -181,6 +235,50 @@ class SourceBuild:
         except ValueError:
             return Version("")
         return Version(tag, commit)
+
+    @property
+    def link(self) -> Path | None:
+        return self.build_root / CURRENT if self.build_root else None
+
+    def active(self) -> Path | None:
+        if self.link is None:
+            return None
+        try:
+            return self.link.resolve(strict=True)
+        except OSError:
+            return None
+
+    def environments(self, with_sizes: bool = True) -> list[BuildEnvironment]:
+        """The active source build and every compiled rollback beside it."""
+        if not self.build_root:
+            return []
+        active = self.active()
+        candidates: list[tuple[Path, bool]] = []
+        if self.legacy_build and self.legacy_build.is_dir():
+            candidates.append((self.legacy_build, False))
+        try:
+            candidates.extend((entry, True) for entry in sorted(self.build_root.iterdir())
+                              if entry.is_dir() and BUILD_NAME.match(entry.name))
+        except OSError:
+            pass
+        found = []
+        seen = set()
+        for path, movable in candidates:
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            version = _marked(path)
+            if not version.tag and path == self.legacy_build and active == resolved:
+                version = self.checkout_version()
+            environment = BuildEnvironment(path, version, active == resolved, movable)
+            if with_sizes:
+                environment.size_bytes = _size(path)
+            found.append(environment)
+        return found
 
     def check(self) -> dict:
         """Fetch, then take the newest tag on the line being followed.
@@ -204,7 +302,7 @@ class SourceBuild:
                    "August 2026." if self.line == "stable" else ""))
         self._latest = Version(newest)
         self._announce()
-        return self.status()
+        return self.status(with_sizes=False)
 
     def newest_on(self, line: str) -> str:
         """The highest tag on one line, or "" if that line has none here.
@@ -251,6 +349,9 @@ class SourceBuild:
         def elapsed() -> int:
             return int((time.monotonic() - started) * 1000)
 
+        previous = self.installed()
+        target_dir: Path | None = None
+        created = False
         try:
             self._say("status", f"Updating {self.path}", elapsed())
             self._stream(["git", "fetch", "--tags", "--prune"], elapsed, GIT_TIMEOUT)
@@ -270,25 +371,116 @@ class SourceBuild:
             self._stream(["git", "checkout", "--force", target],
                          elapsed, GIT_TIMEOUT)
 
-            before = self.installed()
-            self._say("status", f"Now at {before.tag} ({before.commit})", elapsed())
+            source = self.checkout_version()
+            self._say("status", f"Now at {source.tag} ({source.commit})", elapsed())
 
-            command = ["cmake", "--build", "build", "--config", "Release"]
+            if self.build_root:
+                target_dir = self.build_root / f"build-{target}"
+                if target_dir.exists():
+                    raise ValueError(
+                        f"{target} is already compiled at {target_dir.name}. "
+                        "Remove it first, or activate it instead of rebuilding it.")
+                target_dir.parent.mkdir(parents=True, exist_ok=True)
+                created = True
+                configure = ["cmake", "-S", ".", "-B", str(target_dir),
+                             "-DCMAKE_BUILD_TYPE=Release", *self.cmake_args]
+                self._say("status", f"Configuring {target_dir.name}", elapsed())
+                self._stream(configure, elapsed, BUILD_TIMEOUT)
+                build_path = str(target_dir)
+            else:
+                build_path = "build"
+
+            command = ["cmake", "--build", build_path, "--config", "Release"]
             if self.jobs:
                 command += ["-j", str(self.jobs)]
             self._say("status", "Compiling. This takes a while.", elapsed())
             self._stream(command, elapsed, BUILD_TIMEOUT)
 
+            if self.build_root and target_dir:
+                binary = target_dir / "bin" / "llama-server"
+                if not binary.is_file():
+                    raise ValueError(f"The new build has no {binary}")
+                self._say("status", "Checking that llama-server starts", elapsed())
+                self._stream([str(binary), "--version"], elapsed, VERIFY_TIMEOUT)
+                _mark(target_dir, source)
+                old = self.active()
+                self.point_at(target_dir)
+                self._say("status", f"{self.engine_id} now runs from {target_dir.name}."
+                          + (f" {old.name} is kept for rollback." if old else ""),
+                          elapsed())
+
             after = self.installed()
             self._state = "done"
-            self._announce()
             self._latest = None          # force a fresh check before offering another
+            self._announce()
             self._say("status", f"Finished at {after.tag}", elapsed())
         except Exception as error:
             self._state = "failed"
             self._error = str(error) or error.__class__.__name__
             self._say("err", self._error, elapsed())
+            if created and target_dir and target_dir.exists() \
+                    and target_dir != self.active():
+                shutil.rmtree(target_dir, ignore_errors=True)
+            # A failed versioned build did not become active. Put the checkout
+            # back too, so update detection and change reading still compare
+            # upstream with the binary that actually runs.
+            if self.build_root and previous.tag:
+                try:
+                    self._git("checkout", "--force", previous.commit or previous.tag,
+                              timeout=GIT_TIMEOUT)
+                except ValueError:
+                    pass
             self._announce()
+
+    # -- choosing compiled versions ---------------------------------------
+
+    def point_at(self, build: Path) -> None:
+        if self.link is None:
+            raise ValueError("This source build has no versioned build root")
+        if not (build / "bin" / "llama-server").is_file():
+            raise ValueError(f"{build.name} has no bin/llama-server")
+        temporary = self.build_root / f".{CURRENT}-new"
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+        temporary.symlink_to(build, target_is_directory=True)
+        temporary.replace(self.link)
+
+    def activate(self, name: str) -> dict:
+        environment = self._one(name)
+        reference = environment.version.commit or environment.version.tag
+        if not reference:
+            raise ValueError(f"{name} does not record which source it was built from")
+        # Keep the source and the selected binary describing the same version.
+        # This is a quick checkout, not a rebuild, and makes the next update
+        # comparison start from what actually runs.
+        previous = self.checkout_version()
+        self._git("checkout", "--force", reference, timeout=GIT_TIMEOUT)
+        try:
+            self.point_at(environment.path)
+        except Exception:
+            if previous.tag:
+                try:
+                    self._git("checkout", "--force",
+                              previous.commit or previous.tag, timeout=GIT_TIMEOUT)
+                except ValueError:
+                    pass
+            raise
+        self._announce()
+        return self.status()
+
+    def remove(self, name: str) -> dict:
+        environment = self._one(name)
+        if environment.active:
+            raise ValueError(f"{name} is the build in use. Activate another one first.")
+        shutil.rmtree(environment.path)
+        self._announce()
+        return self.status()
+
+    def _one(self, name: str) -> BuildEnvironment:
+        for environment in self.environments(with_sizes=False):
+            if environment.name == name:
+                return environment
+        raise KeyError(f"No compiled build called {name}")
 
     def _stream(self, command: list[str], elapsed, timeout: int) -> None:
         """Run a command, forwarding each line as it appears.
@@ -349,10 +541,13 @@ class Builds:
             if source and source.get("path"):
                 self._builds[engine_id] = SourceBuild(
                     engine_id, source["path"], bus, jobs=source.get("jobs"),
-                    line=source.get("line", DEFAULT_LINE))
+                    line=source.get("line", DEFAULT_LINE),
+                    builds=source.get("builds", ""),
+                    legacy_build=source.get("legacy_build", ""),
+                    cmake_args=source.get("cmake_args"))
 
-    def all(self) -> list[dict]:
-        return [item.status() for item in self._builds.values()]
+    def all(self, with_sizes: bool = True) -> list[dict]:
+        return [item.status(with_sizes=with_sizes) for item in self._builds.values()]
 
     def get(self, engine_id: str) -> SourceBuild:
         build = self._builds.get(engine_id)
@@ -390,3 +585,39 @@ class Builds:
                     pass
             if self._stop.wait(interval_s):
                 return
+
+
+def _marked(path: Path) -> Version:
+    try:
+        raw = json.loads((path / META).read_text())
+        return Version(str(raw.get("tag") or ""), str(raw.get("commit") or ""))
+    except (OSError, ValueError, TypeError):
+        return Version("")
+
+
+def _mark(path: Path, version: Version) -> None:
+    temporary = path / f"{META}.tmp"
+    temporary.write_text(json.dumps({"tag": version.tag,
+                                     "commit": version.commit}) + "\n")
+    temporary.replace(path / META)
+
+
+def _size(path: Path) -> int:
+    total = 0
+    try:
+        for item in path.rglob("*"):
+            try:
+                if item.is_file() and not item.is_symlink():
+                    total += item.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return total
+
+
+def _free(path: Path | None) -> int:
+    try:
+        return shutil.disk_usage(path).free if path else 0
+    except OSError:
+        return 0

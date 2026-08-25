@@ -5,9 +5,12 @@
   "models_root": "/models",
   "engines": {
     "llamacpp": {
-      "binary": "/opt/ai/llama.cpp/build/bin/llama-server",
+      "binary": "/opt/ai/llama.cpp-builds/current/bin/llama-server",
       "source": {
         "path": "/opt/ai/llama.cpp",
+        "builds": "/opt/ai/llama.cpp-builds",
+        "legacy_build": "/opt/ai/llama.cpp/build",
+        "cmake_args": ["-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"],
         "line": "stable",
         "releases": "ggml-org/llama.cpp"
       }

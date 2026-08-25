@@ -1,13 +1,8 @@
-# Audio — inference belongs here, data handling does not
+# Audio inference
 
-AI-Lab owns models and inference. A data-processing client owns downloads,
-FFmpeg conversion, long-file chunking, durable storage, orchestration and
-metrics. The client sends normalised audio over the private network and gets
-model output back; it never mounts `/models` and never installs an AI runtime.
-
-That boundary matters when one client becomes many. Public-meeting processing,
-interview analysis and archive indexing can share the expensive, versioned
-inference layer without sharing source data or workflow-specific code.
+AI-Lab exposes the configured audio models through task-specific endpoints.
+How callers obtain, store or otherwise prepare their source material is outside
+this project's contract.
 
 ## Tasks and engines
 
@@ -44,18 +39,14 @@ it does for text engines.
 vLLM's base package does not include audio decoding. The active vLLM
 environment therefore also carries its declared audio dependencies (`av`,
 `scipy`, `soundfile` and `soxr`). They are part of the inference runtime, not a
-reason to move decoding or source-file preparation out of the client.
+separate data-processing facility.
 
 ## Input contract
 
-Transcription accepts common audio files understood by the selected engine.
-For reproducible bulk work the client should produce mono 16 kHz PCM WAV before
-sending it. Silero currently requires 16 kHz and converts stereo to mono inside
-the inference boundary; other sample rates are refused with a clear error.
-
-Very long recordings should be downloaded once by the data client, converted
-once, split at technical or VAD boundaries, and then sent in pieces. This avoids
-moving a whole video through AI-Lab and allows retrying only the failed piece.
+Transcription accepts the common audio files understood by the selected
+engine. Silero is the one AI-Lab-specific exception worth documenting here: it
+requires 16 kHz audio, converts stereo to mono, and refuses other sample rates
+with a clear error. Other preparation follows the selected model and endpoint.
 
 ## Licensing and evaluation
 

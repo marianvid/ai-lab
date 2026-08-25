@@ -93,7 +93,7 @@ class Operations:
         and two badges.
         """
         view = self.settings.view()
-        sources = {item["engine"]: item for item in self.build_status()}
+        sources = {item["engine"]: item for item in self.build_status(with_sizes=False)}
         for engine in view["engines"]:
             engine["source"] = sources.get(engine["id"])
         return view
@@ -501,8 +501,8 @@ class Operations:
         self._changed("settings")
         return self.memory_budget()
 
-    def build_status(self) -> list[dict]:
-        return self.builds.all() if self.builds else []
+    def build_status(self, with_sizes: bool = True) -> list[dict]:
+        return self.builds.all(with_sizes=with_sizes) if self.builds else []
 
     def check_for_update(self, engine_id: str) -> dict:
         return self.builds.get(engine_id).check()
@@ -630,6 +630,16 @@ class Operations:
         judgement a timer can make.
         """
         return self._installs().get(engine_id).remove(name)
+
+    def activate_build(self, engine_id: str, name: str) -> dict:
+        """Select a compiled source version without rebuilding it."""
+        self._nothing_running("The engine is about to be launched from "
+                              "somewhere else.")
+        return self.builds.get(engine_id).activate(name)
+
+    def remove_build(self, engine_id: str, name: str) -> dict:
+        """Delete a compiled source version that is not in use."""
+        return self.builds.get(engine_id).remove(name)
 
     # -- disk space that is not model storage ------------------------------
 

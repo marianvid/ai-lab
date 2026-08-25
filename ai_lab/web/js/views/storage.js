@@ -74,12 +74,12 @@ function rollbacks(installs, engines, refresh) {
 
 export async function render(container) {
   const refresh = () => render(container);
-  const [storage, installs, settings] = await Promise.all([
-    api.storage(), api.allInstalls(), api.settings(),
+  const [storage, installs, builds, settings] = await Promise.all([
+    api.storage(), api.allInstalls(), api.builds(), api.settings(),
   ]);
   const engines = new Map((settings.engines || []).map((item) => [item.id, item]));
   container.replaceChildren(element('div', { class: 'columns' }, [
     reclaimable(storage, refresh),
-    rollbacks(installs, engines, refresh),
+    rollbacks([...installs, ...builds], engines, refresh),
   ]));
 }

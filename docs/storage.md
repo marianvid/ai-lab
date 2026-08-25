@@ -5,7 +5,7 @@ be reclaimed. It has two subjects:
 
 - downloaded package and generated-kernel caches, plus explicitly named
   leftovers from interrupted work;
-- inactive package-engine environments kept as rollback versions.
+- inactive engine environments and compiled builds kept as rollback versions.
 
 Models do not appear here. Their files, deletion rules and confirmations stay
 in Library, so there is one place responsible for model storage.
@@ -26,11 +26,12 @@ such; AI-Lab does not scan the disk and guess what is unwanted.
 
 ## Rollback versions
 
-Package engines install a new version beside the one in use. Storage shows the
-inactive environments because they are simultaneously a recovery option and
-recoverable disk space. The active version cannot be deleted. Nothing removes
-an inactive version automatically: only the person who has decided the new
-version has proved itself can know that the rollback copy is no longer needed.
+Engines install or compile a new version beside the one in use. Storage shows
+the inactive environments and builds because they are simultaneously a
+recovery option and recoverable disk space. The active version cannot be
+deleted. Nothing removes an inactive version automatically: only the person
+who has decided the new version has proved itself can know that the rollback
+copy is no longer needed.
 
 ---
 

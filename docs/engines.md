@@ -34,6 +34,12 @@ already in this checkout's history? Exact, the same question on both lines, and
 still right when you switch between them. An update moves to a named tag rather
 than pulling whatever master has reached, so what got compiled has a name.
 
+Each update is configured and compiled in its own `build-<tag>` folder. Its
+`llama-server` binary must start and report a version before the stable
+`current` link moves to it. The old build is left untouched and appears in
+Storage as a rollback version. The CUDA or Metal configuration is not inferred:
+the exact CMake arguments belong to that host's private configuration.
+
 **vLLM and the speech runtimes arrive as ready-built packages.** Nothing is compiled and nothing is
 recompiled indirectly. What there is instead is release notes written by
 people, shown as they were written — sifting those by guessing at prefixes
@@ -57,10 +63,11 @@ break inference on the card.
 
 ### Installing beside what works, never over it
 
-A new package-engine version goes in a **new folder**, is checked that its
-runtime imports and its required accelerator is available, and
-only then does the engine start using it. The previous one is untouched, so
-going back is one press.
+A new engine version goes in a **new folder**, is checked that its runtime
+starts and its required accelerator is available, and only then does the
+engine start using it. The previous one is untouched, so going back is one
+press. For llama.cpp that folder contains a compiled build; for package
+engines it contains an isolated Python environment.
 
 That is not caution for its own sake. The vLLM installed on the container could
 not have been reinstalled: its wheel had left the local cache and the index it

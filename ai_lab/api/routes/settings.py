@@ -39,6 +39,10 @@ def register(router, operations) -> None:
                lambda engine, **_: operations.check_for_update(engine))
     router.add("POST", "/api/builds/{engine}/update",
                lambda engine, **_: operations.update_engine(engine))
+    router.add("POST", "/api/builds/{engine}/{name}/activate",
+               lambda engine, name, **_: operations.activate_build(engine, name))
+    router.add("DELETE", "/api/builds/{engine}/{name}",
+               lambda engine, name, **_: operations.remove_build(engine, name))
 
     # Picking a folder: a web page cannot open a dialog on the server's
     # machine, so the server lists directories itself.

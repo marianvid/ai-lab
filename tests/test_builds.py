@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from ai_lab.builds import Builds, SourceBuild, Version
+from ai_lab.builds import Builds, SourceBuild, Version, _mark
 from ai_lab.events import EventBus
 from ai_lab.types import LogEvent
 
@@ -191,6 +191,105 @@ class BuildsTests(unittest.TestCase):
 
     def test_no_configuration_means_no_builds(self):
         self.assertEqual(Builds({}, EventBus()).all(), [])
+
+
+class VersionedBuildTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.source = self.root / "source"
+        (self.source / ".git").mkdir(parents=True)
+        self.legacy = self.source / "build"
+        (self.legacy / "bin").mkdir(parents=True)
+        (self.legacy / "bin" / "llama-server").write_text("binary")
+        _mark(self.legacy, Version("b10448", "oldcommit"))
+        self.builds = self.root / "compiled"
+        self.builds.mkdir()
+        self.build = SourceBuild(
+            "llamacpp", str(self.source), EventBus(), builds=str(self.builds),
+            legacy_build=str(self.legacy),
+            cmake_args=["-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"])
+        self.build.point_at(self.legacy)
+
+    def _compiled(self, tag="v0.3.0", commit="newcommit"):
+        path = self.builds / f"build-{tag}"
+        (path / "bin").mkdir(parents=True)
+        (path / "bin" / "llama-server").write_text("binary")
+        _mark(path, Version(tag, commit))
+        return path
+
+    def test_the_active_binary_not_checkout_is_the_installed_version(self):
+        with patch.object(SourceBuild, "checkout_version",
+                          return_value=Version("v0.3.0", "newcommit")):
+            self.assertEqual(self.build.installed(), Version("b10448", "oldcommit"))
+
+    def test_compiled_versions_are_listed_and_the_active_one_is_marked(self):
+        newer = self._compiled()
+        found = {item.version.tag: item.active for item in self.build.environments()}
+        self.assertEqual(found, {"b10448": True, "v0.3.0": False})
+        self.assertTrue(newer.exists())
+
+    def test_switching_is_instant_and_deletes_nothing(self):
+        newer = self._compiled()
+        with patch.object(SourceBuild, "_git", return_value="") as git:
+            self.build.activate(newer.name)
+        self.assertEqual(self.build.active(), newer.resolve())
+        self.assertTrue(self.legacy.exists())
+        self.assertIn("newcommit", git.call_args.args)
+
+    def test_the_active_build_cannot_be_deleted(self):
+        with self.assertRaises(ValueError):
+            self.build.remove(self.legacy.name)
+        self.assertTrue(self.legacy.exists())
+
+    def test_an_inactive_build_can_be_deleted(self):
+        newer = self._compiled()
+        self.build.remove(newer.name)
+        self.assertFalse(newer.exists())
+
+    def test_update_configures_and_builds_beside_the_active_one(self):
+        commands = []
+
+        def stream(owner, command, elapsed, timeout):
+            commands.append(command)
+            if command[:2] == ["cmake", "-S"]:
+                target = Path(command[command.index("-B") + 1])
+                (target / "bin").mkdir(parents=True)
+                (target / "bin" / "llama-server").write_text("binary")
+
+        with patch.object(SourceBuild, "_stream", stream), \
+             patch.object(SourceBuild, "_git",
+                          side_effect=["v0.3.0\n", "v0.3.0\n", "newcommit\n"]):
+            self.build.update()
+            self.build._thread.join(timeout=5)
+
+        status = self.build.status()
+        self.assertEqual(status["state"], "done", status["error"])
+        self.assertEqual(status["installed"], "v0.3.0")
+        self.assertEqual({item["version"] for item in status["environments"]},
+                         {"b10448", "v0.3.0"})
+        configure = next(command for command in commands if command[:2] == ["cmake", "-S"])
+        self.assertIn("-DGGML_CUDA=ON", configure)
+        self.assertIn("-DCMAKE_CUDA_ARCHITECTURES=native", configure)
+        self.assertTrue(any(command[-1:] == ["--version"] for command in commands))
+
+    def test_a_failed_new_build_leaves_the_active_one_and_no_partial_copy(self):
+        def stream(owner, command, elapsed, timeout):
+            if command[:3] == ["cmake", "--build", str(self.builds / "build-v0.3.0")]:
+                raise RuntimeError("compile failed")
+            if command[:2] == ["cmake", "-S"]:
+                Path(command[command.index("-B") + 1]).mkdir(parents=True)
+
+        with patch.object(SourceBuild, "_stream", stream), \
+             patch.object(SourceBuild, "_git",
+                          side_effect=["v0.3.0\n", "v0.3.0\n", "newcommit\n", ""]):
+            self.build.update()
+            self.build._thread.join(timeout=5)
+
+        self.assertEqual(self.build.status()["state"], "failed")
+        self.assertEqual(self.build.active(), self.legacy.resolve())
+        self.assertFalse((self.builds / "build-v0.3.0").exists())
 
 
 if __name__ == "__main__":
