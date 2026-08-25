@@ -10,6 +10,13 @@ be reclaimed. It has two subjects:
 Models do not appear here. Their files, deletion rules and confirmations stay
 in Library, so there is one place responsible for model storage.
 
+![Storage](screenshots/storage.png)
+
+The left side contains only cache or leftover locations that currently exist
+and contain something reclaimable. The right side contains only genuine engine
+rollback choices; when no second version exists, it says so instead of showing
+the active version as something that can be removed.
+
 ## An explicit allow-list
 
 The page cannot send an arbitrary path to the manager. Every removable cache

@@ -86,6 +86,18 @@ The address to point an agent at, what is loaded right now, and the queue read
 as what is about to happen rather than as a list of requests. More in
 [Gateway](docs/gateway.md).
 
+![Settings](docs/screenshots/settings.png)
+
+Installed engine versions and available updates, the machine's memory reserve,
+and every path the installation depends on. More in
+[Settings](docs/settings.md).
+
+![Storage](docs/screenshots/storage.png)
+
+Caches and leftovers that actually exist, plus inactive engine versions kept
+as a way back after an update. Model files remain the Library's responsibility.
+More in [Storage](docs/storage.md).
+
 ## Licence
 
 MIT. See `LICENSE`.
