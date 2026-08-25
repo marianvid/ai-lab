@@ -38,11 +38,18 @@ class Storage:
         items = []
         for configured in self._items.values():
             path = configured["path"]
+            exists = path.exists() or path.is_symlink()
             size = _size(path)
+            # Configuration describes places worth knowing about; the page is
+            # an inventory of what is actually there. A missing leftover, or
+            # an empty cache directory recreated by a runtime, offers nothing
+            # to reclaim and should not leave a permanent empty row behind.
+            if not exists or (configured["kind"] == "cache" and size == 0):
+                continue
             items.append({
                 **{key: value for key, value in configured.items() if key != "path"},
                 "path": str(path),
-                "exists": path.exists() or path.is_symlink(),
+                "exists": True,
                 "size_bytes": size,
             })
         return {"items": items,

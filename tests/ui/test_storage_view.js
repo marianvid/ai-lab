@@ -26,6 +26,20 @@ describe('the Storage page', () => {
     assert.doesNotMatch(context.view.textContent, /Delete model/);
   });
 
+  it('does not show a configured location after it has disappeared', async () => {
+    const context = installDom({
+      ...ANSWERS,
+      '/api/storage': { recoverable_bytes: 0, items: [{
+        id: 'old', name: 'Incomplete copy', path: '/opt/ai/old',
+        kind: 'leftover', exists: false, size_bytes: 0,
+      }] },
+    });
+    const view = await import(`../../ai_lab/web/js/views/storage.js?${Math.random()}`);
+    await view.render(context.view);
+    assert.doesNotMatch(context.view.textContent, /Incomplete copy/);
+    assert.match(context.view.textContent, /Nothing reclaimable is present/);
+  });
+
   it('asks before clearing and sends only the configured id', async () => {
     const context = installDom({ ...ANSWERS,
       'DELETE /api/storage/uv': { items: [], recoverable_bytes: 0 } });

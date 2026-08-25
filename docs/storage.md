@@ -16,6 +16,8 @@ The page cannot send an arbitrary path to the manager. Every removable cache
 or leftover is declared under `storage.reclaimable` in configuration with an
 id, a fixed path, a kind and a plain-language consequence. A delete request
 sends only that id. Broad paths are refused when configuration is loaded.
+The configuration is a list of places AI-Lab knows how to interpret, not a
+list of rows to draw: missing leftovers and empty caches do not appear.
 
 Clearing a cache may make the next engine start or update slower because files
 must be downloaded or generated again. It never removes model weights. A

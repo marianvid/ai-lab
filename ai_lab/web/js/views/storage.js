@@ -8,7 +8,11 @@ import { versions } from './versions.js';
 
 
 function reclaimable(state, refresh) {
-  const rows = (state.items || []).map((item) => element('div', { class: 'row' }, [
+  // Older managers returned configured locations even when they did not
+  // exist. Filter them here too, so upgrading the page immediately removes a
+  // stale row while server and browser versions overlap during deployment.
+  const rows = (state.items || []).filter((item) => item.exists !== false)
+    .map((item) => element('div', { class: 'row' }, [
     element('div', { class: 'grow' }, [
       element('strong', { text: item.name }),
       item.description
@@ -16,7 +20,7 @@ function reclaimable(state, refresh) {
       element('div', { class: 'path muted', text: item.path }),
     ].filter(Boolean)),
     element('span', { class: 'muted', text: bytes(item.size_bytes) }),
-    item.exists ? element('button', {
+    element('button', {
       class: 'action danger', text: item.kind === 'cache' ? 'Clear' : 'Delete',
       onclick: (event) => whileWorking(event.target, 'Clearing…', async () => {
         const yes = await confirmDestructive({
@@ -35,7 +39,7 @@ function reclaimable(state, refresh) {
         }
         refresh();
       }),
-    }) : null,
+    }),
   ].filter(Boolean)));
 
   return element('div', { class: 'section' }, [
@@ -46,7 +50,7 @@ function reclaimable(state, refresh) {
         : null,
     ].filter(Boolean)),
     element('div', { class: 'card' }, rows.length ? rows : [
-      element('div', { class: 'muted', text: 'Nothing reclaimable is configured.' }),
+      element('div', { class: 'muted', text: 'Nothing reclaimable is present.' }),
     ]),
   ]);
 }
