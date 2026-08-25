@@ -1,13 +1,14 @@
-# The Gateway — one address, and models that come and go
+# The Gateway — one address for every model
 
 The part an agent talks to, and the part nobody can guess: which model is
 loaded, which comes off to make room, and when. If you read one document
 here, read this one.
 
 Each configured model is a separate engine on its own port. Pointed straight at
-those, an agent naming a model that happens not to be running gets a refused
-connection. The Gateway is one address in front of all of them, speaking the
-OpenAI shape that agent tools already send:
+those, a client naming a model that happens not to be running gets a refused
+connection. The Gateway is one address in front of all of them. It exposes the
+OpenAI text and audio shapes supported by the configured engines, plus the
+Anthropic Messages shape where the engine supports it:
 
 ```sh
 curl http://ai-lab.lan:8090/v1/chat/completions \
@@ -19,10 +20,16 @@ Name any configured model. No API key is checked; any value will do.
 `GET /v1/models` lists every configured entry, loaded or not, which is the
 point: a client is meant to be able to ask for one of them.
 
+The **Server address** block is the contract of this particular installation.
+It lists the endpoints available now and which configured models can answer
+each one. That includes chat and completion requests, Anthropic messages and
+token counting, transcription, voice-activity detection and speaker
+diarization. An endpoint absent from this block is not served here.
+
 ![The gateway](screenshots/gateway.png)
 
-The page is what is happening now, and every figure on it says what it means
-when you hover it.
+The rest of the page is what is happening now, and every figure on it says what
+it means when you hover it.
 
 **Loaded** is how many models are on the machine; the queue below names them.
 **Processing** is requests in flight against the places every loaded model

@@ -47,10 +47,9 @@ curl http://ai-lab.lan:8090/v1/audio/speech-segments \
   -F model=silero-vad -F file=@recording.wav
 ```
 
-It returns time intervals in seconds. The current Silero adapter requires mono
-or stereo audio already normalised to 16 kHz; converting, segmenting large
-source files and storing the results belong to the data-processing client. See
-[Audio](audio.md).
+It returns time intervals in seconds. The current Silero adapter requires
+16 kHz input and converts stereo to mono internally; other sample rates are
+refused. See [Audio](audio.md).
 
 Speaker diarization uses the same multipart shape:
 

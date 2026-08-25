@@ -62,7 +62,7 @@ before it says how it works.
 |---|---|
 | [Writing a request](docs/requests.md) | Chat and multipart audio requests, the `ai_lab` field for startup settings, and what a refusal contains so a client can correct itself. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
-| [Audio](docs/audio.md) | Speech-to-text, VAD and speaker diarization, their endpoints and the boundary between AI-Lab and data-processing clients. |
+| [Audio](docs/audio.md) | Speech-to-text, VAD and speaker diarization, their endpoints and the input requirements specific to AI-Lab. |
 
 **Working on it**
 
