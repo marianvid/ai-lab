@@ -18,7 +18,8 @@ sharing their source data or their workflow.
 | transcription | `/v1/audio/transcriptions` | NeMo | Parakeet TDT 0.6B v3, Canary 1B v2; Nemotron 3.5 ASR Streaming 0.6B is installed but its checkpoint does not accept Romanian |
 | voice activity detection | `/v1/audio/speech-segments` | ONNX Runtime adapter | Silero VAD 6.2.1 |
 | alignment | — | not served for Romanian | Qwen3 ForcedAligner is stored, but Romanian is not in its supported-language list |
-| diarization | — | pending | Pyannote Community-1 requires accepting its gated-model terms and an access token |
+| diarization | `/v1/audio/diarizations` | NeMo | NVIDIA Sortformer 4-speaker v1; non-commercial evaluation only |
+| diarization | `/v1/audio/diarizations` | pyannote.audio | Speaker Diarization Community-1 |
 
 The task is a property of both a stored model and a configured instance. The
 interface filters out engines that cannot serve that task instead of allowing a
@@ -33,6 +34,7 @@ The manager, vLLM, NeMo and Silero do not share Python packages:
 /opt/ai/vllm/current       vLLM environment selected by a stable link
 /opt/ai/nemo/.venv         NeMo ASR and its CUDA dependencies
 /opt/ai/silero/.venv       Silero VAD, CPU Torch and ONNX Runtime
+/opt/ai/pyannote/.venv     pyannote.audio and its CUDA dependencies
 ```
 
 The adapter in `ai_lab/audio/server.py` is launched with the runtime's Python.
@@ -58,12 +60,16 @@ moving a whole video through AI-Lab and allows retrying only the failed piece.
 
 ## Licensing and evaluation
 
-The configured collection intentionally excludes non-commercial checkpoints.
+The configured collection includes one NC checkpoint, Sortformer 4-speaker
+v1, strictly for personal comparative evaluation. It is clearly marked and is
+not a production candidate. Pyannote Community-1 is CC BY 4.0.
 The exact upstream repository, revision and licence of every audio model are
 kept with the private deployment inventory. Public, reproducible Romanian
 measurements live in
 [ai-lab-benchmarks](https://github.com/marianvid/ai-lab-benchmarks); evaluation
-audio is fetched from its publisher and is not committed.
+audio is fetched from its publisher and is not committed. The Echo dataset
+card does not currently state a licence; its benchmark audio therefore remains
+only on Data-Lab and is not redistributed.
 
 ---
 

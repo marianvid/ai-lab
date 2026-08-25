@@ -17,7 +17,7 @@ points at.
 
 from __future__ import annotations
 
-from ...engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS,
+from ...engines.base import (ANTHROPIC_PATHS, DIARIZATION_PATHS, OPENAI_PATHS,
                              TRANSCRIPTION_PATHS, VAD_PATHS)
 from ...gateway import Gateway
 from ..multipart import MultipartBody
@@ -27,7 +27,8 @@ from ..passthrough import forward
 # configured: a path that exists and explains why this model cannot serve it is
 # more use than one that does not exist at all.
 FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
-                                + TRANSCRIPTION_PATHS + VAD_PATHS))
+                                + TRANSCRIPTION_PATHS + VAD_PATHS
+                                + DIARIZATION_PATHS))
 
 
 def register(router, operations, gateway: Gateway) -> None:

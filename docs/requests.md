@@ -52,6 +52,20 @@ or stereo audio already normalised to 16 kHz; converting, segmenting large
 source files and storing the results belong to the data-processing client. See
 [Audio](audio.md).
 
+Speaker diarization uses the same multipart shape:
+
+```sh
+curl http://ai-lab.lan:8090/v1/audio/diarizations \
+  -F model=pyannote-community-1 -F file=@meeting.wav
+```
+
+The response contains speaker-labelled intervals and the distinct speaker
+labels found:
+
+```json
+{"segments":[{"start":0.15,"end":2.48,"speaker":"SPEAKER_01"}],"speakers":["SPEAKER_01"]}
+```
+
 The request-specific `ai_lab` startup override below applies to JSON text
 requests. Audio currently uses the settings saved on its configured instance.
 

@@ -46,13 +46,15 @@ class LinuxHost:
     def __init__(self, control_helper: str = CONTROL_HELPER,
                  vllm_binary: str | None = None,
                  nemo_binary: str | None = None,
-                 onnx_binary: str | None = None) -> None:
+                 onnx_binary: str | None = None,
+                 pyannote_binary: str | None = None) -> None:
         self.control_helper = control_helper
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
         self.vllm_binary = vllm_binary
         self.nemo_binary = nemo_binary
         self.onnx_binary = onnx_binary
+        self.pyannote_binary = pyannote_binary
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -72,6 +74,8 @@ class LinuxHost:
             engines.add("nemo")
         if self.onnx_binary or which("onnxruntime"):
             engines.add("onnx")
+        if self.pyannote_binary:
+            engines.add("pyannote")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),

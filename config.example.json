@@ -20,6 +20,18 @@
         "root": "/opt/ai/vllm",
         "uv": "/usr/local/bin/uv"
       }
+    },
+    "nemo": {
+      "binary": "/opt/ai/nemo/.venv/bin/python",
+      "server": "/opt/ai-lab/ai_lab/audio/server.py"
+    },
+    "onnx": {
+      "binary": "/opt/ai/silero/.venv/bin/python",
+      "server": "/opt/ai-lab/ai_lab/audio/server.py"
+    },
+    "pyannote": {
+      "binary": "/opt/ai/pyannote/.venv/bin/python",
+      "server": "/opt/ai-lab/ai_lab/audio/server.py"
     }
   },
   "repositories": [
@@ -42,6 +54,20 @@
       "id": "nvfp4",
       "name": "NVFP4",
       "format": "nvfp4"
+    },
+    {
+      "id": "audio-nemo-diarization",
+      "name": "NeMo speaker diarization",
+      "format": "nemo",
+      "task": "diarization",
+      "subpath": "audio/diarization"
+    },
+    {
+      "id": "audio-pyannote-diarization",
+      "name": "Pyannote speaker diarization",
+      "format": "pyannote",
+      "task": "diarization",
+      "subpath": "audio/diarization/pyannote"
     }
   ],
   "instances": [

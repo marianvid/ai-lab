@@ -6,7 +6,8 @@ from pathlib import Path
 
 from ..hosts.command import which
 from ..types import Format, ModelSet, Task
-from .base import LaunchPlan, ParamSpec, TRANSCRIPTION_PATHS, validate
+from .base import (DIARIZATION_PATHS, LaunchPlan, ParamSpec,
+                   TRANSCRIPTION_PATHS, validate)
 from .probe import http_ok
 
 
@@ -33,22 +34,23 @@ class NemoEngine:
         return frozenset({Format.NEMO})
 
     def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.TRANSCRIPTION})
+        return frozenset({Task.TRANSCRIPTION, Task.DIARIZATION})
 
     def params(self, task: Task = Task.TRANSCRIPTION) -> tuple[ParamSpec, ...]:
-        return PARAMS if task is Task.TRANSCRIPTION else ()
+        return PARAMS if task in (Task.TRANSCRIPTION, Task.DIARIZATION) else ()
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if model.format is not Format.NEMO:
             raise ValueError(f"NeMo cannot load {model.format.value} models")
-        if model.task is not Task.TRANSCRIPTION:
+        if model.task not in self.tasks():
             raise ValueError(f"NeMo cannot perform {model.task.value}")
         if not model.complete:
             raise ValueError(f"{model.name} is incomplete")
         settings = validate(PARAMS, params)
         return LaunchPlan(
             argv=[self.binary, self.server,
-                  "--backend", "nemo",
+                  "--backend", ("sortformer" if model.task is Task.DIARIZATION
+                                else "nemo"),
                   "--model", model.entrypoint,
                   "--name", model.name,
                   "--host", "0.0.0.0",
@@ -69,4 +71,8 @@ class NemoEngine:
         return model.size_bytes / (1024 * 1024) * multiplier
 
     def api_paths(self, task: Task = Task.TRANSCRIPTION) -> tuple[str, ...]:
-        return TRANSCRIPTION_PATHS if task is Task.TRANSCRIPTION else ()
+        if task is Task.TRANSCRIPTION:
+            return TRANSCRIPTION_PATHS
+        if task is Task.DIARIZATION:
+            return DIARIZATION_PATHS
+        return ()

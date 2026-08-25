@@ -25,6 +25,7 @@ class Format(str, Enum):
     GPTQ = "gptq"
     NEMO = "nemo"
     ONNX = "onnx"
+    PYANNOTE = "pyannote"
 
 
 class Task(str, Enum):

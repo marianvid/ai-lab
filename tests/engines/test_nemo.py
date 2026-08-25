@@ -18,8 +18,11 @@ class NemoEngineTests(unittest.TestCase):
 
     def test_it_is_an_audio_engine_for_nemo_checkpoints(self):
         self.assertEqual(self.engine.formats(), frozenset({Format.NEMO}))
-        self.assertEqual(self.engine.tasks(), frozenset({Task.TRANSCRIPTION}))
+        self.assertEqual(self.engine.tasks(),
+                         frozenset({Task.TRANSCRIPTION, Task.DIARIZATION}))
         self.assertIn("/v1/audio/transcriptions", self.engine.api_paths())
+        self.assertIn("/v1/audio/diarizations",
+                      self.engine.api_paths(Task.DIARIZATION))
 
     def test_the_isolated_python_and_adapter_are_started(self):
         argv = self.engine.plan(model(), 8096, {}).argv
@@ -33,6 +36,10 @@ class NemoEngineTests(unittest.TestCase):
             self.engine.plan(model(format=Format.SAFETENSORS), 8096, {})
         with self.assertRaises(ValueError):
             self.engine.plan(model(task=Task.VAD), 8096, {})
+
+    def test_sortformer_uses_the_diarization_backend(self):
+        argv = self.engine.plan(model(task=Task.DIARIZATION), 8100, {}).argv
+        self.assertEqual(argv[argv.index("--backend") + 1], "sortformer")
 
     def test_fp32_accounts_for_twice_the_weight_memory(self):
         normal = self.engine.needs_mb(model(), {"precision": "bf16"}, 32000)

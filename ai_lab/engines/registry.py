@@ -20,6 +20,7 @@ from .base import Engine
 from .llamacpp import LlamaCppEngine
 from .nemo import NemoEngine
 from .onnx import OnnxEngine
+from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
 
@@ -42,6 +43,9 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         OnnxEngine.id: OnnxEngine(
             binary=settings.get(OnnxEngine.id, {}).get("binary"),
             server=settings.get(OnnxEngine.id, {}).get("server")),
+        PyannoteEngine.id: PyannoteEngine(
+            binary=settings.get(PyannoteEngine.id, {}).get("binary"),
+            server=settings.get(PyannoteEngine.id, {}).get("server")),
     }
 
 
@@ -96,6 +100,6 @@ def _reason(engine_id: str, capabilities: Capabilities) -> str:
         return "Requires an NVIDIA GPU"
     if engine_id == "nemo" and capabilities.accelerator_kind != "cuda":
         return "Requires an NVIDIA GPU"
-    if engine_id in ("vllm", "nemo", "onnx"):
+    if engine_id in ("vllm", "nemo", "onnx", "pyannote"):
         return "Not installed"
     return "Binary not found"

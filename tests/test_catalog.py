@@ -101,6 +101,16 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len(models[0].files), 2)
         self.assertEqual(models[0].format, Format.ONNX)
 
+    def test_a_pyannote_pipeline_is_one_tree_model(self):
+        make_files(self.root / "community-1", "config.yaml")
+        make_files(self.root / "community-1" / "segmentation", "model.safetensors")
+        make_files(self.root / "community-1" / "embedding", "model.safetensors")
+        models = self.scan(format="pyannote")
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0].format, Format.PYANNOTE)
+        self.assertEqual(models[0].entrypoint, str(self.root / "community-1"))
+        self.assertEqual(len(models[0].files), 3)
+
     def test_the_repository_job_reaches_every_model_it_contains(self):
         make_files(self.root / "whisper", "model.safetensors", "config.json")
         repository = Repository(id="audio", name="Audio", path=str(self.root),

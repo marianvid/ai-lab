@@ -71,6 +71,8 @@ class Catalog:
         multi-token-prediction head, not a second model, and on its own it will
         not load.
         """
+        if repository.format == Format.PYANNOTE.value:
+            return self._scan_pyannote(repository, root)
         models: list[ModelSet] = []
         for directory in self._directories(root):
             weights, companions = self._classify(directory)
@@ -83,6 +85,31 @@ class Catalog:
                 continue
             for base, shards in self._group(weights).items():
                 models.append(self._build(repository, root, directory, base, shards, companions))
+        return models
+
+    def _scan_pyannote(self, repository: Repository, root: Path) -> list[ModelSet]:
+        """A downloaded pyannote pipeline is one directory tree.
+
+        Its root config refers to segmentation and embedding assets in child
+        directories, so scanning those weight files separately would expose
+        unusable fragments instead of the pipeline.
+        """
+        directories = [root] if (root / "config.yaml").is_file() else [
+            path for path in sorted(root.iterdir())
+            if path.is_dir() and (path / "config.yaml").is_file()
+        ]
+        models = []
+        for directory in directories:
+            files = tuple(ModelFile(path=str(path), size_bytes=path.stat().st_size)
+                          for path in sorted(directory.rglob("*")) if path.is_file())
+            relative = directory.relative_to(root)
+            name = directory.name
+            parts = [repository.id, *relative.parts[:-1], name] if relative.parts \
+                else [repository.id, name]
+            models.append(ModelSet(id="/".join(parts), name=name,
+                                   format=Format.PYANNOTE,
+                                   entrypoint=str(directory), files=files,
+                                   task=Task(repository.task)))
         return models
 
     @staticmethod

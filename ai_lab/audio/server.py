@@ -69,6 +69,64 @@ class NemoBackend:
         return str(text or "")
 
 
+class SortformerBackend:
+    owner = "nemo-sortformer"
+    path = "/v1/audio/diarizations"
+
+    def __init__(self, model_path: str, precision: str) -> None:
+        import torch
+        import nemo.collections.asr as nemo_asr
+
+        self.torch = torch
+        self.model = nemo_asr.models.ASRModel.restore_from(_checkpoint(model_path))
+        dtype = {"bf16": torch.bfloat16, "fp16": torch.float16,
+                 "fp32": torch.float32}[precision]
+        self.model = self.model.to(device="cuda", dtype=dtype).eval()
+        self.lock = Lock()
+
+    @staticmethod
+    def _segment(value) -> dict:
+        if isinstance(value, str):
+            parts = value.split()
+        else:
+            parts = list(value)
+        if len(parts) != 3:
+            raise ValueError(f"unexpected diarization segment: {value!r}")
+        start, end, speaker = parts
+        speaker = str(speaker)
+        if speaker.isdigit():
+            speaker = f"speaker_{speaker}"
+        return {"start": float(start), "end": float(end), "speaker": speaker}
+
+    def diarize(self, audio_path: str) -> list[dict]:
+        with self.lock, self.torch.inference_mode():
+            result = self.model.diarize([audio_path], batch_size=1,
+                                        verbose=False)[0]
+        return [self._segment(segment) for segment in result]
+
+
+class PyannoteBackend:
+    owner = "pyannote"
+    path = "/v1/audio/diarizations"
+
+    def __init__(self, model_path: str, precision: str) -> None:
+        import torch
+        from pyannote.audio import Pipeline
+
+        self.torch = torch
+        self.pipeline = Pipeline.from_pretrained(model_path)
+        self.pipeline.to(torch.device("cuda"))
+        self.lock = Lock()
+
+    def diarize(self, audio_path: str) -> list[dict]:
+        with self.lock, self.torch.inference_mode():
+            output = self.pipeline(audio_path)
+        annotation = getattr(output, "speaker_diarization", output)
+        return [{"start": float(turn.start), "end": float(turn.end),
+                 "speaker": str(speaker)}
+                for turn, _, speaker in annotation.itertracks(yield_label=True)]
+
+
 class SileroBackend:
     owner = "silero-vad"
     path = "/v1/audio/speech-segments"
@@ -140,6 +198,11 @@ class Handler(BaseHTTPRequestHandler):
                     language = (language_part[1].decode("utf-8")
                                 if language_part is not None else None)
                     result = {"text": self.backend.transcribe(temporary.name, language)}
+                elif isinstance(self.backend, (SortformerBackend, PyannoteBackend)):
+                    segments = self.backend.diarize(temporary.name)
+                    result = {"segments": segments,
+                              "speakers": sorted({item["speaker"]
+                                                  for item in segments})}
                 else:
                     threshold = self._number(fields, "threshold", 0.5, float)
                     silence = self._number(fields, "min_silence_duration_ms", 100, int)
@@ -184,7 +247,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=("nemo", "silero"), required=True)
+    parser.add_argument("--backend",
+                        choices=("nemo", "sortformer", "pyannote", "silero"),
+                        required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--host", default="127.0.0.1")
@@ -192,7 +257,9 @@ def main() -> None:
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"),
                         default="bf16")
     args = parser.parse_args()
-    backend = NemoBackend if args.backend == "nemo" else SileroBackend
+    backends = {"nemo": NemoBackend, "sortformer": SortformerBackend,
+                "pyannote": PyannoteBackend, "silero": SileroBackend}
+    backend = backends[args.backend]
     Handler.backend = backend(args.model, args.precision)
     Handler.model_name = args.name
     print(f"{args.backend} ready with {args.name} on {args.host}:{args.port}", flush=True)

@@ -29,4 +29,5 @@ def current_host(engines: dict | None = None) -> Host:
         vllm_binary=settings.get("vllm", {}).get("binary"),
         nemo_binary=settings.get("nemo", {}).get("binary"),
         onnx_binary=settings.get("onnx", {}).get("binary"),
+        pyannote_binary=settings.get("pyannote", {}).get("binary"),
     )
