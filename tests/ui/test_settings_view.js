@@ -31,7 +31,7 @@ function responses(overrides = {}) {
           binary: '/opt/ai/llama.cpp/build/bin/llama-server',
           formats: ['gguf'], params: [],
           source: { engine: 'llamacpp', path: '/opt/ai/llama.cpp', exists: true,
-                    installed: 'b10398', commit: '8e7f22b67', latest: '',
+                    installed: 'b10398', commit: '8e7f22b67', latest: 'b10398',
                     update_available: false, note: '', state: 'idle',
                     error: '', log: [] } },
         { id: 'vllm', name: 'vLLM', available: false,
@@ -316,14 +316,22 @@ describe('the Settings page', () => {
                  'nothing to press when there is no update');
   });
 
-  it('says nothing at all about an engine that plainly works', async () => {
-    // A green "available" on a working engine told nobody anything: the
-    // version beside its name already says it runs, and a badge that is always
-    // there is a badge nobody reads.
+  it('says plainly when a managed engine has no update', async () => {
     const { view } = await renderPage();
     const engine = [...view.querySelectorAll('.card')]
       .find((card) => card.textContent.includes('llama.cpp · '));
-    assert.equal(engine.textContent.includes('available'), false, engine.textContent);
+    assert.match(engine.textContent, /No update available/);
+  });
+
+  it('does not call an unreadable upstream up to date', async () => {
+    const base = responses()['/api/settings'];
+    const unknown = { ...base, engines: [{ ...base.engines[0],
+      source: { ...base.engines[0].source, latest: '', update_available: false } }] };
+    const { view } = await renderPage({ '/api/settings': unknown });
+    const engine = [...view.querySelectorAll('.card')]
+      .find((card) => card.textContent.includes('llama.cpp · '));
+    assert.match(engine.textContent, /Update status unavailable/);
+    assert.doesNotMatch(engine.textContent, /No update available/);
   });
 
   it('still says when an engine cannot run here', async () => {

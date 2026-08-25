@@ -12,7 +12,8 @@ import { installTheme } from './theme.js';
 import { render as renderSettings } from './views/settings.js';
 import { render as renderLibrary } from './views/library.js';
 import { render as renderRuntime } from './views/runtime.js';
-import { render as renderGateway } from './views/gateway.js';
+import { render as renderGateway,
+         stopRefreshing as stopGatewayRefreshing } from './views/gateway.js';
 import { render as renderStorage } from './views/storage.js';
 
 // "Models" is the list you run; "Library" is what is on disk. They were both
@@ -32,7 +33,8 @@ const VIEWS = [
   // The one address an agent talks to. Its numbers come from traffic the
   // manager only forwards, which produces no events, so this view keeps
   // itself fresh on a timer of its own rather than waiting to be told.
-  { id: 'gateway', label: 'Gateway', render: renderGateway, topics: ['instances'] },
+  { id: 'gateway', label: 'Gateway', render: renderGateway,
+    leave: stopGatewayRefreshing, topics: ['instances'] },
   { id: 'storage', label: 'Storage', render: renderStorage,
     topics: ['storage', 'engines'] },
   { id: 'settings', label: 'Settings', render: renderSettings,
@@ -45,21 +47,48 @@ const tabs = document.getElementById('tabs');
 installTheme(document.getElementById('theme'));
 
 let current = VIEWS[0];
+let page = null;
+let generation = 0;
 let pending = null;
 
-async function draw() {
+function working(node, yes) {
+  if (!node) return;
+  if (yes) node.setAttribute('aria-busy', 'true');
+  else node.removeAttribute('aria-busy');
+  // Only the page currently on screen owns the global cursor. An older fetch
+  // completing after another tab was selected must not turn it off.
+  if (view.contains(node)) document.body.classList.toggle('view-loading', yes);
+}
+
+async function draw(entry = current, target = page, mine = generation) {
+  if (!target) return;
+  working(target, true);
   try {
-    await current.render(view);
+    await entry.render(target);
   } catch (error) {
-    view.replaceChildren(element('p', { class: 'error', text: error.message }));
+    if (mine === generation) {
+      target.replaceChildren(element('p', { class: 'error', text: error.message }));
+    }
+  } finally {
+    if (mine === generation) working(target, false);
   }
 }
 
 function select(entry) {
+  if (current && current !== entry && current.leave) current.leave();
   current = entry;
+  generation += 1;
+  const mine = generation;
   [...tabs.children].forEach((button) =>
     button.classList.toggle('active', button.dataset.id === entry.id));
-  draw();
+  // The new tab becomes a real page before any request starts. Keeping the
+  // previous page visible until the fetch completed made a click look ignored.
+  page = element('div', { class: 'view-page', 'aria-busy': 'true' }, [
+    element('p', { class: 'muted loading-view', text: `Loading ${entry.label}…` }),
+  ]);
+  view.replaceChildren(page);
+  document.body.classList.add('view-loading');
+  draw(entry, page, mine);
 }
 
 // Somebody is in the middle of something: a field has the focus, or a menu is
@@ -75,7 +104,7 @@ function refreshLater() {
   pending = setTimeout(function attempt() {
     if (busy()) { pending = setTimeout(attempt, 1000); return; }
     pending = null;
-    draw();
+    draw(current, page, generation);
   }, 150);   // a moment's wait, so a burst of notices redraws once
 }
 

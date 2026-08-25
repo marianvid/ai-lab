@@ -293,6 +293,26 @@ function updateControls(engine, source, refresh, waiting) {
 }
 
 
+// An empty right side made an engine look as though update support was
+// missing. Say which of the three honest states it is in: something is
+// waiting, upstream was checked and there is nothing, or upstream could not
+// yet be read. Engines whose installation is not managed say that explicitly.
+function updateState(engine, source, refresh) {
+  if (!engine.available) return [];
+  const installed = byEngine.get(engine.id);
+  const waiting = updateWaiting(engine);
+  if (waiting) return updateControls(engine, source, refresh, waiting);
+  const managed = Boolean((source && source.exists) || installed);
+  if (!managed) {
+    return [element('span', { class: 'muted', text: 'Updates not managed' })];
+  }
+  const known = Boolean((source && source.latest) || (installed && installed.latest));
+  return [element('span', { class: 'muted',
+                            text: known ? 'No update available'
+                                        : 'Update status unavailable' })];
+}
+
+
 
 function engineCard(engine, refresh) {
   const source = engine.source;
@@ -307,7 +327,6 @@ function engineCard(engine, refresh) {
   // — which said something a reader of this page cannot act on, and which the
   // model list says better by only offering an entry the formats its engine
   // can read.
-  const waiting = engine.available ? updateWaiting(engine) : '';
   const rows = [
     element('div', { class: 'row engine' }, [
       element('div', { class: 'grow' }, [
@@ -315,7 +334,7 @@ function engineCard(engine, refresh) {
         version ? element('span', { class: 'muted', text: ` · ${version}` }) : null,
       ].filter(Boolean)),
       engineState(engine),
-      ...(waiting ? updateControls(engine, source, refresh, waiting) : []),
+      ...updateState(engine, source, refresh),
     ].filter(Boolean)),
   ];
 

@@ -13,9 +13,12 @@ memory is shared with the browser and the operating system, so a reserve is
 kept out of it. Set as a reserve rather than as an allowance, because a reserve
 stays right when the machine is given more memory.
 
-**Engines** shows what is installed, its version, and — only when there is one
-— what it could be updated to. No button here updates anything: they open what
-the update would bring, and the real Update is at the foot of that. See
+**Engines** shows what is installed, its version, and the state of its update
+source. `No update available` means upstream was read and matches what is
+installed; `Update status unavailable` means it could not yet be read. When a
+new version exists it is named beside the Update button. No button here updates
+anything directly: it opens what the update would bring, and the real Update
+is at the foot of that. See
 [Updating an engine](engines.md).
 
 NeMo and ONNX audio adapters use isolated Python environments. They are shown

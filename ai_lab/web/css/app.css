@@ -67,6 +67,12 @@ nav button {
 }
 nav button.active { color: var(--text); border-bottom-color: var(--accent); }
 
+/* A tab is selected before its data arrives. The progress cursor makes the
+   wait explicit without disabling the tabs — another page can still be
+   chosen immediately. */
+body.view-loading, body.view-loading * { cursor: progress; }
+.loading-view { margin: 0; }
+
 /* Centred rather than pinned to the left: on a wide screen the content sat in
    the left third with the rest empty, and every page reads better with the
    space split between the two sides. */
