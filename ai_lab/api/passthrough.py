@@ -48,10 +48,11 @@ class Passthrough:
     headers: dict[str, str]
 
 
-def forward(url: str, payload: dict, on_close=None,
+def forward(url: str, payload: dict | bytes, on_close=None,
             first_byte_s: float = FIRST_BYTE_S,
             between_bytes_s: float = BETWEEN_BYTES_S,
-            on_first_chunk=None) -> Passthrough:
+            on_first_chunk=None,
+            content_type: str = "application/json") -> Passthrough:
     """POST a JSON body to an engine and hand back its answer as it arrives.
 
     `on_close` runs when the body has been fully read or the connection has
@@ -66,9 +67,9 @@ def forward(url: str, payload: dict, on_close=None,
     silence mid-answer is a fault, while a minute before the first byte can be
     an ordinary large prompt on a slow machine.
     """
+    data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
     request = urllib.request.Request(
-        url, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}, method="POST")
+        url, data=data, headers={"Content-Type": content_type}, method="POST")
     sent_at = time.perf_counter()
     try:
         response = urllib.request.urlopen(request, timeout=first_byte_s)

@@ -104,6 +104,7 @@ from dataclasses import dataclass, field
 from . import budget
 from .operations import Operations
 from .scheduler import Abandoned, Scheduler, WillNotFit
+from .types import Task
 
 
 class NotConfigured(KeyError):
@@ -333,7 +334,8 @@ class Gateway:
 
     def _shapes(self, instance: dict) -> list[str]:
         try:
-            return list(self.operations.engines.get(instance["engine"]).api_paths())
+            task = Task(instance.get("task", Task.TEXT_GENERATION.value))
+            return list(self.operations.engines.get(instance["engine"]).api_paths(task))
         except KeyError:
             return []
 
@@ -752,7 +754,8 @@ class Gateway:
             engine = self.operations.engines.get(instance["engine"])
         except KeyError:
             return False
-        return shape in engine.api_paths()
+        task = Task(instance.get("task", Task.TEXT_GENERATION.value))
+        return shape in engine.api_paths(task)
 
     def _refuse_wrong_shape(self, instance: dict, shape: str,
                             instances: list[dict]) -> None:
@@ -1104,7 +1107,8 @@ class Gateway:
         for entry in self.operations.configured():
             try:
                 engine = self.operations.engines.get(entry["engine"])
-                paths = engine.api_paths()
+                task = Task(entry.get("task", Task.TEXT_GENERATION.value))
+                paths = engine.api_paths(task)
             except Exception:
                 continue
             for path in paths:

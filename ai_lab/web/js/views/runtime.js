@@ -19,6 +19,11 @@ let adding = false;
 let subscribed = false;
 let redraw = () => {};
 
+// Responses from an older manager, and fixtures saved before audio existed,
+// have no task field. They are text models: that was the only kind there was.
+const taskOf = (model) => model?.task || 'text-generation';
+const tasksOf = (engine) => engine?.tasks || ['text-generation'];
+
 // -- the progress bar -------------------------------------------------------
 
 // The bar is the progress of the operation, 0 to 100%, worked out by the
@@ -153,7 +158,7 @@ function details(instance, models, latest) {
   const model = models.find((item) => item.id === instance.model_id);
   const settings = instance.params || {};
   const lines = [
-    model ? `${model.name} · ${model.format} · ${bytes(model.size_bytes)}`
+    model ? `${model.name} · ${taskOf(model)} · ${model.format} · ${bytes(model.size_bytes)}`
           : instance.model_id,
     [`port ${instance.port}`,
      settings.context_size ? `ctx ${settings.context_size}` : null,
@@ -227,7 +232,9 @@ function formatOf(instance, models) {
 
 function card(instance, models, engines) {
   const engine = engines.find((item) => item.id === instance.engine);
-  const specs = engine ? engine.params : [];
+  const specs = engine
+    ? (engine.task_params?.[instance.task || 'text-generation'] || engine.params)
+    : [];
   const expanded = open.has(instance.id);
   const form = expanded ? settingsForm(specs, instance.params || {}) : null;
 
@@ -248,7 +255,8 @@ function card(instance, models, engines) {
 
   const chooser = element('select', { 'data-model': instance.id },
     models
-      .filter((item) => !engine || engine.formats.includes(item.format))
+      .filter((item) => !engine || (engine.formats.includes(item.format)
+        && tasksOf(engine).includes(taskOf(item))))
       .map((item) => element('option', {
         value: item.id, text: `${item.name} · ${bytes(item.size_bytes)}`,
         ...(item.id === instance.model_id ? { selected: 'selected' } : {}),
@@ -432,7 +440,9 @@ function chatLink(instance) {
 
 function addCard(form) {
   const usable = form.models.filter((model) =>
-    form.engines.some((engine) => engine.available && engine.formats.includes(model.format)));
+    form.engines.some((engine) => engine.available
+      && engine.formats.includes(model.format)
+      && tasksOf(engine).includes(taskOf(model))));
 
   if (!usable.length) {
     return element('div', { class: 'card' }, [
@@ -447,7 +457,7 @@ function addCard(form) {
   const chooser = element('select', {},
     usable.map((model) => element('option', {
       value: model.id,
-      text: `${model.name} · ${model.format} · ${bytes(model.size_bytes)}`,
+      text: `${model.name} · ${taskOf(model)} · ${model.format} · ${bytes(model.size_bytes)}`,
     })));
   const name = element('input', {
     placeholder: 'e.g. gemma-31b-nvfp4', size: 28,
@@ -458,13 +468,20 @@ function addCard(form) {
   const engineFor = (modelId) => {
     const model = usable.find((item) => item.id === modelId);
     return form.engines.find((engine) =>
-      engine.available && engine.formats.includes(model.format));
+      engine.available && engine.formats.includes(model.format)
+        && tasksOf(engine).includes(taskOf(model)));
   };
 
-  let settings = settingsForm(engineFor(chooser.value).params, {});
+  const specsFor = (modelId) => {
+    const model = usable.find((item) => item.id === modelId);
+    const engine = engineFor(modelId);
+    return engine.task_params?.[taskOf(model)] || engine.params;
+  };
+
+  let settings = settingsForm(specsFor(chooser.value), {});
   const holder = element('div', {}, settings.node);
   chooser.addEventListener('change', () => {
-    settings = settingsForm(engineFor(chooser.value).params, {});
+    settings = settingsForm(specsFor(chooser.value), {});
     holder.replaceChildren(settings.node);
   });
 

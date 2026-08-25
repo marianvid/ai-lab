@@ -25,4 +25,8 @@ def current_host(engines: dict | None = None) -> Host:
     from .linux import LinuxHost
 
     settings = engines or {}
-    return LinuxHost(vllm_binary=settings.get("vllm", {}).get("binary"))
+    return LinuxHost(
+        vllm_binary=settings.get("vllm", {}).get("binary"),
+        nemo_binary=settings.get("nemo", {}).get("binary"),
+        onnx_binary=settings.get("onnx", {}).get("binary"),
+    )

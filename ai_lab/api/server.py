@@ -23,6 +23,7 @@ from ..events import EventBus
 from ..gateway import CardBusy
 from ..operations import Operations
 from . import sse
+from .multipart import MultipartBody
 from .passthrough import Passthrough
 from .router import Router
 from .routes import register_all
@@ -136,12 +137,16 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return True
 
-    def _body(self) -> dict:
+    def _body(self) -> dict | MultipartBody:
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             return {}
+        content_type = self.headers.get("Content-Type", "application/json")
+        data = self.rfile.read(length)
+        if content_type.lower().startswith("multipart/form-data"):
+            return MultipartBody(content_type, data)
         try:
-            return json.loads(self.rfile.read(length) or b"{}")
+            return json.loads(data or b"{}")
         except ValueError:
             raise ValueError("Request body is not valid JSON") from None
 

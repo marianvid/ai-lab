@@ -14,8 +14,10 @@ wanted occasionally and were costing three lines of screen every time.
 
 ![The model list](screenshots/models.png)
 
-**The two small pictures say what the model can do**: a wrench for calling
-tools, a photograph for reading pictures. Neither is configured anywhere —
+**The task label says what kind of request an entry accepts**: text generation,
+transcription, alignment, voice activity detection or diarization. The two
+small pictures on text models say whether they can call tools or read pictures.
+Those capabilities are not configured anywhere —
 both are read from the model's own files, once, and remembered. A directory of
 weights must carry both a vision section *and* a token to put a picture in
 before it claims pictures, because a text model's config can name a vision
@@ -36,10 +38,11 @@ room it says what is in the way. On llama.cpp it loads anyway and lets the
 engine leave the layers that will not fit in system memory.
 
 **Settings** on a row shows what the model will be started with — context,
-cache precision, how many requests at once, and per engine the rest. Changing
+cache precision, how many requests at once, precision for NeMo, and per engine
+the rest. Settings that do not apply to the selected task are not shown. Changing
 them means restarting the model, which is why the button says **Apply & reload**.
 **Save** writes them down without touching the card.
 
 ---
 
-[← all documents](../README.md)  ·  [Library](library.md)
+[← all documents](../README.md)  ·  [Library](library.md)  ·  [Audio](audio.md)

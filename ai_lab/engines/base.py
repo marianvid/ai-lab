@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..types import Format, ModelSet
+from ..types import Format, ModelSet, Task
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +99,8 @@ def validate(specs: tuple[ParamSpec, ...], values: dict) -> dict:
 # engine from another.
 OPENAI_PATHS = ("/v1/chat/completions", "/v1/completions")
 ANTHROPIC_PATHS = ("/v1/messages", "/v1/messages/count_tokens")
+TRANSCRIPTION_PATHS = ("/v1/audio/transcriptions", "/v1/chat/completions")
+VAD_PATHS = ("/v1/audio/speech-segments",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +129,11 @@ class Engine(Protocol):
         """Weight formats this engine can load."""
         ...
 
-    def params(self) -> tuple[ParamSpec, ...]:
+    def tasks(self) -> frozenset[Task]:
+        """Kinds of work this engine can perform."""
+        ...
+
+    def params(self, task: Task = Task.TEXT_GENERATION) -> tuple[ParamSpec, ...]:
         """The settings this engine accepts."""
         ...
 
@@ -171,7 +177,7 @@ class Engine(Protocol):
         """
         ...
 
-    def api_paths(self) -> tuple[str, ...]:
+    def api_paths(self, task: Task = Task.TEXT_GENERATION) -> tuple[str, ...]:
         """The request shapes this engine answers.
 
         Every engine answers `OPENAI_PATHS`. One that also speaks another shape

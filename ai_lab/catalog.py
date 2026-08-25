@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .config import Repository
 from .naming import base_name, is_companion, is_part, is_weight, missing_shards
-from .types import Format, ModelFile, ModelSet
+from .types import Format, ModelFile, ModelSet, Task
 
 
 class Catalog:
@@ -157,6 +157,7 @@ class Catalog:
             format=Format(repository.format),
             entrypoint=entrypoint,
             files=files,
+            task=Task(repository.task),
             complete=complete,
             missing=missing,
             capabilities=self._can_do(repository, entrypoint, companions),

@@ -21,9 +21,10 @@ startup — which is why every setting below belongs to the memory group.
 
 from __future__ import annotations
 
-from ..types import Format, ModelSet
+from ..types import Format, ModelSet, Task
 from ..hosts.command import which
-from .base import ANTHROPIC_PATHS, OPENAI_PATHS, LaunchPlan, ParamSpec, validate
+from .base import (ANTHROPIC_PATHS, OPENAI_PATHS, TRANSCRIPTION_PATHS,
+                   LaunchPlan, ParamSpec, validate)
 from .probe import http_ok
 
 # Every one of these was arrived at by running it on this machine. The help
@@ -131,6 +132,21 @@ PARAMS = (
                    "text nobody acts on."),
 )
 
+# Speech recognition has no text context window, tool parser or text-only
+# switch. Showing those settings on an ASR model suggests knobs that either do
+# nothing or prevent its audio tower from loading.
+TRANSCRIPTION_PARAMS = (
+    ParamSpec("gpu_memory_fraction", "GPU memory share", "float", 0.90,
+              minimum=0.10, maximum=0.98, group="memory",
+              help="How much of the card vLLM may use for this speech model."),
+    ParamSpec("max_sequences", "Concurrent recordings", "int", 8,
+              minimum=1, maximum=128, group="memory",
+              help="How many recordings may be transcribed at once."),
+    ParamSpec("enforce_eager", "Skip kernel compilation", "bool", False,
+              group="memory",
+              help="Start faster for testing, at the cost of slower inference."),
+)
+
 # Formats vLLM reads. NVFP4 arrives in two different packagings —
 # compressed-tensors and NVIDIA's modelopt — and vLLM reads both, which is
 # worth knowing because TensorRT-LLM reads only the second.
@@ -151,38 +167,45 @@ class VllmEngine:
     def formats(self) -> frozenset[Format]:
         return FORMATS
 
-    def params(self) -> tuple[ParamSpec, ...]:
-        return PARAMS
+    def tasks(self) -> frozenset[Task]:
+        return frozenset({Task.TEXT_GENERATION, Task.TRANSCRIPTION})
+
+    def params(self, task: Task = Task.TEXT_GENERATION) -> tuple[ParamSpec, ...]:
+        return TRANSCRIPTION_PARAMS if task is Task.TRANSCRIPTION else PARAMS
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if model.format not in FORMATS:
             raise ValueError(f"vLLM cannot load {model.format.value} models")
+        if model.task not in self.tasks():
+            raise ValueError(f"vLLM cannot perform {model.task.value}")
         if not model.complete:
             raise ValueError(f"{model.name} is missing {len(model.missing)} shard(s)")
-        settings = validate(PARAMS, params)
+        settings = validate(self.params(model.task), params)
         argv = [
             self.binary, "serve", model.entrypoint,
             "--served-model-name", model.name,
             "--host", "0.0.0.0",
             "--port", str(port),
-            "--max-model-len", str(settings["context_size"]),
             "--gpu-memory-utilization", str(settings["gpu_memory_fraction"]),
             "--max-num-seqs", str(settings["max_sequences"]),
         ]
-        if settings["language_model_only"]:
-            argv.append("--language-model-only")
-        # `auto` is vLLM's own default, so saying it changes nothing and
-        # leaving the flag off keeps the command line to what was chosen.
-        if settings["kv_cache_dtype"] != "auto":
-            argv += ["--kv-cache-dtype", settings["kv_cache_dtype"]]
-        if settings["prefix_caching"]:
-            argv.append("--enable-prefix-caching")
+        if model.task is Task.TEXT_GENERATION:
+            argv += ["--max-model-len", str(settings["context_size"])]
+        if model.task is Task.TEXT_GENERATION:
+            if settings["language_model_only"]:
+                argv.append("--language-model-only")
+            # `auto` is vLLM's own default, so saying it changes nothing and
+            # leaving the flag off keeps the command line to what was chosen.
+            if settings["kv_cache_dtype"] != "auto":
+                argv += ["--kv-cache-dtype", settings["kv_cache_dtype"]]
+            if settings["prefix_caching"]:
+                argv.append("--enable-prefix-caching")
         if settings["enforce_eager"]:
             argv.append("--enforce-eager")
         # The two flags go together. vLLM refuses "auto" tool choice unless it
         # has both, so one setting sets both and there is no way to configure
         # half of it.
-        if settings["tool_parser"]:
+        if model.task is Task.TEXT_GENERATION and settings["tool_parser"]:
             argv += ["--enable-auto-tool-choice",
                      "--tool-call-parser", settings["tool_parser"]]
         # No chat page: vLLM serves an API and nothing a person can open.
@@ -217,7 +240,7 @@ class VllmEngine:
         """
         return max(1, int(validate(PARAMS, params)["max_sequences"]))
 
-    def api_paths(self) -> tuple[str, ...]:
+    def api_paths(self, task: Task = Task.TEXT_GENERATION) -> tuple[str, ...]:
         """Both shapes.
 
         Besides the usual one, vLLM serves `/v1/messages` — the shape a client
@@ -226,4 +249,6 @@ class VllmEngine:
         vLLM depends on the `anthropic` package: it borrows the request and
         answer definitions rather than writing them out again.
         """
+        if task is Task.TRANSCRIPTION:
+            return TRANSCRIPTION_PATHS
         return OPENAI_PATHS + ANTHROPIC_PATHS

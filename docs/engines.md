@@ -91,6 +91,25 @@ entries to unload. The engine is about to be launched from somewhere else, and
 a model already on the card would keep running the old one while the page said
 otherwise.
 
+### Speech runtimes are isolated capabilities
+
+NeMo ASR and the Silero ONNX adapter are installed in separate environments,
+beside both the manager and vLLM. They follow the same operational rule — a
+working environment is not modified indirectly by installing another engine —
+but they do not yet have the automatic side-by-side update workflow described
+above for vLLM.
+
+The interface reports whether each runtime is available on the current host.
+NeMo is offered for native `.nemo` transcription checkpoints. The ONNX adapter
+is offered for VAD. On a host where the runtime or required accelerator is
+missing, the engine is disabled with a reason rather than failing after an
+instance has been configured.
+
+Until managed updates exist, changing either speech environment is an explicit
+deployment operation: record its package versions, validate import and device
+access, run an inference smoke test, then deploy the manager. The versions used
+for published measurements are recorded in the benchmark repository.
+
 ---
 
-[← all documents](../README.md)  ·  [Writing a request](requests.md)  ·  [Working on it](development.md)
+[← all documents](../README.md)  ·  [Audio](audio.md)  ·  [Writing a request](requests.md)  ·  [Working on it](development.md)

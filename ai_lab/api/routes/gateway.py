@@ -17,14 +17,17 @@ points at.
 
 from __future__ import annotations
 
-from ...engines.base import ANTHROPIC_PATHS, OPENAI_PATHS
+from ...engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS,
+                             TRANSCRIPTION_PATHS, VAD_PATHS)
 from ...gateway import Gateway
+from ..multipart import MultipartBody
 from ..passthrough import forward
 
 # Every shape any engine here can answer. Registered as routes whatever is
 # configured: a path that exists and explains why this model cannot serve it is
 # more use than one that does not exist at all.
-FORWARDED = OPENAI_PATHS + ANTHROPIC_PATHS
+FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
+                                + TRANSCRIPTION_PATHS + VAD_PATHS))
 
 
 def register(router, operations, gateway: Gateway) -> None:
@@ -72,7 +75,8 @@ SETTINGS_FIELD = "ai_lab"
 def _forwarder(gateway: Gateway, path: str):
     def handle(body=None, alive=None, **_):
         payload = body or {}
-        wanted = payload.get("model")
+        wanted = (payload.field("model") if isinstance(payload, MultipartBody)
+                  else payload.get("model"))
         if not wanted:
             raise ValueError("the request must name a model")
 
@@ -81,7 +85,8 @@ def _forwarder(gateway: Gateway, path: str):
         # not know them, and would ignore them without a word. They travel in a
         # field of ours, which is read here and removed before forwarding, so
         # what reaches the engine is exactly what would have reached it before.
-        settings = payload.get(SETTINGS_FIELD) or None
+        settings = (None if isinstance(payload, MultipartBody)
+                    else payload.get(SETTINGS_FIELD) or None)
         if settings is not None and not isinstance(settings, dict):
             raise ValueError(f"{SETTINGS_FIELD} must be an object of settings")
 
@@ -101,23 +106,29 @@ def _forwarder(gateway: Gateway, path: str):
             # does, and rejects a name it does not recognise. Ask by the name it
             # reports rather than passing ours through. The lease carries it, so
             # this costs nothing.
-            outgoing = dict(payload)
-            outgoing.pop(SETTINGS_FIELD, None)
-            outgoing["model"] = lease.model_name or wanted
+            if isinstance(payload, MultipartBody):
+                outgoing = payload.replace("model", lease.model_name or wanted)
+                content_type = payload.content_type
+            else:
+                outgoing = dict(payload)
+                outgoing.pop(SETTINGS_FIELD, None)
+                outgoing["model"] = lease.model_name or wanted
+                content_type = "application/json"
 
             url = f"http://127.0.0.1:{lease.port}{path}"
             # Time to the first token, but only when streaming was asked for.
             # Without it an engine sends nothing until the answer is finished,
             # so its first byte is the whole generation and the two averaged
             # together measure neither.
+            streaming = (False if isinstance(payload, MultipartBody)
+                         else bool(payload.get("stream")))
             timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
-                     if payload.get("stream") else None)
+                     if streaming else None)
             return forward(url, outgoing, on_close=lease.release,
                            first_byte_s=gateway.first_byte_s,
                            between_bytes_s=gateway.between_bytes_s,
-                           on_first_chunk=timed)
+                           on_first_chunk=timed, content_type=content_type)
         except BaseException:
             lease.release()
             raise
     return handle
-

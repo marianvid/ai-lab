@@ -12,12 +12,12 @@ a different idea of what the thing should do. Point your own agent at this
 repository and have it adapt the code to what you have. That is a good deal
 faster than reading it all yourself, and it is how the code got here._
 
-**A layer that lets an agent workflow use several models on a machine that
+**One local address for text, speech and other AI models on a machine that
 cannot hold them all.**
 
-That is the whole point. An agent workflow uses one model to read, another to
-write, another to check, etc. A 32 GB card holds one of the large ones, or one large
-and one small. Pointed straight at the engines, an agent naming a model that
+That is the whole point. A workflow may use one model to read, another to
+write, one to transcribe a recording and another to detect speech. A 32 GB card
+holds one of the large ones, or one large and one small. Pointed straight at the engines, a client naming a model that
 happens not to be running gets a refused connection and the workflow stops
 there.
 
@@ -38,8 +38,8 @@ not send it gets the entry's configured settings and nothing breaks. See
 
 Runs on Linux with an NVIDIA card, where systemd supervises the engines, and on
 macOS with Apple silicon, where it supervises them itself. llama.cpp works on
-both. vLLM works on the Linux machine and is shown greyed out on the Mac, with
-the reason — it needs CUDA, and Apple silicon offers Metal.
+both. vLLM, NeMo and the current speech services are Linux capabilities. An
+unsupported engine stays visible but disabled, with the reason.
 
 ## Where things are
 
@@ -59,8 +59,9 @@ before it says how it works.
 
 | | |
 |---|---|
-| [Writing a request](docs/requests.md) | The two request shapes that are accepted, the `ai_lab` field for settings no chat API has, and what a refusal contains so an agent can correct itself. |
+| [Writing a request](docs/requests.md) | Chat and multipart audio requests, the `ai_lab` field for startup settings, and what a refusal contains so a client can correct itself. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
+| [Audio](docs/audio.md) | Speech-to-text and VAD, their endpoints and the boundary between AI-Lab and data-processing clients. |
 
 **Working on it**
 

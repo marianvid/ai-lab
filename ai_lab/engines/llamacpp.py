@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..types import Format, ModelSet
+from ..types import Format, ModelSet, Task
 from ..hosts.command import which
 from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
@@ -177,8 +177,11 @@ class LlamaCppEngine:
     def formats(self) -> frozenset[Format]:
         return frozenset({Format.GGUF})
 
-    def params(self) -> tuple[ParamSpec, ...]:
-        return PARAMS
+    def tasks(self) -> frozenset[Task]:
+        return frozenset({Task.TEXT_GENERATION})
+
+    def params(self, task: Task = Task.TEXT_GENERATION) -> tuple[ParamSpec, ...]:
+        return PARAMS if task is Task.TEXT_GENERATION else ()
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if model.format is not Format.GGUF:
@@ -269,11 +272,11 @@ class LlamaCppEngine:
         """
         return max(1, int(validate(PARAMS, params)["parallel"]))
 
-    def api_paths(self) -> tuple[str, ...]:
+    def api_paths(self, task: Task = Task.TEXT_GENERATION) -> tuple[str, ...]:
         """The OpenAI shape, and only that one.
 
         llama.cpp's server does not serve `/v1/messages`. Said here rather than
         assumed anywhere else, so an entry on this engine is refused that shape
         with an explanation instead of a puzzling 404 from the engine.
         """
-        return OPENAI_PATHS
+        return OPENAI_PATHS if task is Task.TEXT_GENERATION else ()

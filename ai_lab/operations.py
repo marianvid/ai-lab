@@ -35,7 +35,7 @@ from .downloads import DownloadManager, HuggingFaceClient
 from .engines.base import validate
 from .hosts.base import Host
 from .runtime import Operation, Runtime
-from .types import ChangeEvent, Interests, LogEvent
+from .types import ChangeEvent, Interests, LogEvent, Task
 from .settings import Settings
 
 
@@ -100,8 +100,11 @@ class Operations:
         config = self.store.load()
         models = self.catalog.scan(config.repositories)
         if engine_id:
-            formats = self.engines.get(engine_id).formats()
-            models = [item for item in models if item.format in formats]
+            engine = self.engines.get(engine_id)
+            formats = engine.formats()
+            tasks = engine.tasks()
+            models = [item for item in models
+                      if item.format in formats and item.task in tasks]
         return [self._model(item) for item in models]
 
     def configured(self) -> list[dict]:
@@ -119,7 +122,10 @@ class Operations:
             engine = self.engines.get(item.engine)
             rows.append({"id": item.id, "engine": item.engine,
                          "model_id": item.model_id, "port": item.port,
-                         "params": self._effective(engine, item.params)})
+                         "task": self._task(config, item.model_id),
+                         "params": self._effective(
+                             engine, item.params,
+                             Task(self._task(config, item.model_id)))})
         return rows
 
     def instances(self) -> list[dict]:
@@ -140,17 +146,29 @@ class Operations:
         for item in config.instances:
             engine = self.engines.get(item.engine)
             row = self.runtime.status(item, engine, processes.get(item.id))
-            row["params"] = self._effective(engine, item.params)
+            task = Task(self._task(config, item.model_id))
+            row["params"] = self._effective(engine, item.params, task)
+            row["task"] = task.value
             rows.append(row)
         return rows
 
     def instance(self, instance_id: str) -> dict:
         """One configured entry, without asking what it is doing. See `configured`."""
-        item = self.store.load().instance(instance_id)     # raises if unknown
+        config = self.store.load()
+        item = config.instance(instance_id)     # raises if unknown
         engine = self.engines.get(item.engine)
         return {"id": item.id, "engine": item.engine,
                 "model_id": item.model_id, "port": item.port,
-                "params": self._effective(engine, item.params)}
+                "task": self._task(config, item.model_id),
+                "params": self._effective(
+                    engine, item.params,
+                    Task(self._task(config, item.model_id)))}
+
+    @staticmethod
+    def _task(config, model_id: str) -> str:
+        """The job of a model without walking its files."""
+        repository_id = model_id.split("/", 1)[0]
+        return config.repository(repository_id).task
 
     def model_for(self, instance_id: str):
         """The model an entry points at, for asking how big it is.
@@ -164,10 +182,12 @@ class Operations:
         return self.catalog.find(config.repositories, instance.model_id)
 
     @staticmethod
-    def _effective(engine, stored: dict) -> dict:
+    def _effective(engine, stored: dict,
+                   task: Task = Task.TEXT_GENERATION) -> dict:
         try:
-            return validate(engine.params(), {key: value for key, value in stored.items()
-                                              if key in {spec.key for spec in engine.params()}})
+            specs = engine.params(task)
+            return validate(specs, {key: value for key, value in stored.items()
+                                    if key in {spec.key for spec in specs}})
         except ValueError:
             return dict(stored)
 
@@ -211,9 +231,11 @@ class Operations:
         # walking every model directory — 11 ms on the container, for an answer
         # made entirely of the configuration and the engine's own rules. This
         # is asked on every request through the front door.
-        instance = self.store.load().instance(instance_id)
+        config = self.store.load()
+        instance = config.instance(instance_id)
         engine = self.engines.get(instance.engine)
-        return validate(engine.params(), {**instance.params, **settings})
+        task = Task(self._task(config, instance.model_id))
+        return validate(engine.params(task), {**instance.params, **settings})
 
     def unload(self, instance_id: str) -> Operation:
         operation = self.runtime.unload(instance_id)
@@ -316,8 +338,10 @@ class Operations:
         carry was decided by a sentence somebody wrote for reading. Now it is
         typed, checked, and is the only name the entry has.
         """
+        config = self.store.load()
         engine = self.engines.get(payload["engine"])
-        params = validate(engine.params(), payload.get("params", {}))
+        model = self.catalog.find(config.repositories, payload["model_id"])
+        params = validate(engine.params(model.task), payload.get("params", {}))
         identifier = str(payload.get("id", "")).strip()
         if not INSTANCE_ID.match(identifier):
             raise ValueError(
@@ -358,8 +382,10 @@ class Operations:
         with self.store.mutate() as config:
             instance = config.instance(instance_id)
             engine = self.engines.get(instance.engine)
+            target_model_id = str(changes.get("model_id", instance.model_id))
+            model = self.catalog.find(config.repositories, target_model_id)
             if "params" in changes:
-                instance.params = validate(engine.params(), changes["params"])
+                instance.params = validate(engine.params(model.task), changes["params"])
             if "model_id" in changes:
                 instance.model_id = str(changes["model_id"])
             if "port" in changes:
@@ -930,6 +956,7 @@ class Operations:
     @staticmethod
     def _model(model) -> dict:
         return {"id": model.id, "name": model.name, "format": model.format.value,
+                "task": model.task.value,
                 "entrypoint": model.entrypoint, "size_bytes": model.size_bytes,
                 "file_count": len(model.files), "complete": model.complete,
                 "missing": list(model.missing),

@@ -44,11 +44,15 @@ class LinuxHost:
     """See `base.Host` for what each method promises."""
 
     def __init__(self, control_helper: str = CONTROL_HELPER,
-                 vllm_binary: str | None = None) -> None:
+                 vllm_binary: str | None = None,
+                 nemo_binary: str | None = None,
+                 onnx_binary: str | None = None) -> None:
         self.control_helper = control_helper
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
         self.vllm_binary = vllm_binary
+        self.nemo_binary = nemo_binary
+        self.onnx_binary = onnx_binary
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -64,6 +68,10 @@ class LinuxHost:
         # installed; PATH is only the fallback.
         if self.vllm_binary or which("vllm"):
             engines.add("vllm")
+        if self.nemo_binary or which("nemo"):
+            engines.add("nemo")
+        if self.onnx_binary or which("onnxruntime"):
+            engines.add("onnx")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),

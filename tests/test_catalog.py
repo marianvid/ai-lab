@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from ai_lab.catalog import Catalog
 from ai_lab.naming import split_shard
 from ai_lab.config import Repository
-from ai_lab.types import Format
+from ai_lab.types import Format, Task
 
 from tests.support import make_files, repository
 
@@ -86,6 +86,26 @@ class CatalogTests(unittest.TestCase):
         models = self.scan(format="safetensors")
         self.assertEqual(models[0].entrypoint, str(self.root / "gemma"))
         self.assertEqual(models[0].format, Format.SAFETENSORS)
+
+    def test_a_nemo_checkpoint_is_a_directory_model(self):
+        make_files(self.root / "parakeet", "parakeet.nemo", "config.json")
+        models = self.scan(format="nemo")
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0].entrypoint, str(self.root / "parakeet"))
+        self.assertEqual(models[0].format, Format.NEMO)
+
+    def test_an_onnx_directory_is_one_model_even_with_several_exports(self):
+        make_files(self.root / "silero", "silero.onnx", "silero-fp16.onnx")
+        models = self.scan(format="onnx")
+        self.assertEqual(len(models), 1)
+        self.assertEqual(len(models[0].files), 2)
+        self.assertEqual(models[0].format, Format.ONNX)
+
+    def test_the_repository_job_reaches_every_model_it_contains(self):
+        make_files(self.root / "whisper", "model.safetensors", "config.json")
+        repository = Repository(id="audio", name="Audio", path=str(self.root),
+                                format="safetensors", task="transcription")
+        self.assertEqual(Catalog().scan([repository])[0].task, Task.TRANSCRIPTION)
 
     def test_a_missing_repository_directory_is_skipped(self):
         absent = Repository(id="gone", name="Gone", path="/does/not/exist", format="gguf")

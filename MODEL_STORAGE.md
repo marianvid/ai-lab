@@ -1,9 +1,9 @@
 # Model storage layout
 
 This document describes how model weights are organised on the AI-Lab host and
-why. It is written to be useful later, when engines other than llama.cpp are
-added — the directory layout is deliberately chosen so that adding vLLM,
-SGLang or TensorRT-LLM does not require moving anything.
+why. The layout was chosen before multiple engines arrived, and now lets
+llama.cpp, vLLM, NeMo and ONNX-backed audio services coexist without moving or
+duplicating weights. It leaves room for SGLang or TensorRT-LLM later.
 
 ## Where the weights live
 
@@ -47,6 +47,11 @@ format-first tree also allows mounting individual subtrees read-only later.
 
 ```
 /models/
+├── audio/           ASR, alignment, VAD and diarization model repositories
+│   ├── asr/
+│   ├── alignment/
+│   ├── vad/
+│   └── diarization/
 ├── gguf/            llama.cpp, ollama — quantised single files
 │   ├── qwen-coder/
 │   └── gemma-general/
@@ -63,9 +68,15 @@ format-first tree also allows mounting individual subtrees read-only later.
     └── hf/          HF_HOME — keeps huggingface_hub off the container root disk
 ```
 
-`downloads/` is the only directory owned by `ai-lab-manager`; the rest are owned
-by root inside the container. On the host these appear as uid `100999`/`100000`
-respectively, because LXC `102` is unprivileged and shifts uids by 100000.
+Audio models keep their upstream runtime layout. Hugging Face ASR and alignment
+repositories remain whole directories, NVIDIA NeMo checkpoints remain native
+`.nemo` files, and VAD packages retain the code and weights shipped together by
+their upstream project. They are served only by AI-Lab; data-processing clients
+never mount this tree or load the weights directly.
+
+`downloads/`, `cache/hf/` and `audio/` are owned by `ai-lab-manager`; the stable
+language-model trees are owned by root inside the container. On the host these
+appear as shifted LXC uids because container `102` is unprivileged.
 
 ### Two directories that are easy to forget
 
@@ -176,20 +187,17 @@ quantised. Since Blackwell has native FP8 and FP4 tensor cores, **FP8 and NVFP4
 are the formats worth targeting** — AWQ and GPTQ would run but waste the
 hardware's capability.
 
-## Adding a second engine later
+## Multiple engines now share the store
 
-Nothing here is llama.cpp specific except the contents of `gguf/`. A future
-vLLM instance would:
+Nothing here is llama.cpp specific except the contents of `gguf/`. vLLM reads
+the native and quantised safetensors trees, NeMo restores native `.nemo`
+checkpoints under `audio/asr/`, and the ONNX adapter serves Silero from
+`audio/vad/`. All run under the same templated systemd supervision.
 
-1. download into `fp8/` or `nvfp4/` with `HF_HOME=/models/cache/hf`;
-2. register that directory as a storage location in `config.json`;
-3. run under the same `ai-lab-engine@` unit as everything else.
-
-Nothing in the application assumes GGUF any more. `ai_lab/engines/vllm.py`
-already declares which formats it reads; what is missing is the command line it
-would build and the settings it would accept. Instances already carry an
-explicit `engine` field, and the templated systemd unit serves any engine, so
-no plumbing has to change.
+A repository can now declare both a task and a subtree. That is how two catalog
+views share `audio/asr/`: the safetensors transcription repository recognises
+Hugging Face directories, while the NeMo repository recognises `.nemo`
+checkpoints. Neither lists the other's format and no model is duplicated.
 
 ## Performance note
 
@@ -222,6 +230,25 @@ when vLLM was installed and the first native-format models were downloaded.
 | `nvfp4/qwopus3.6-27b-coder/` | Qwopus3.6-27B-Coder | 20 GB | vLLM |
 
 The format-first layout held up: adding vLLM required no file to move.
+
+## What is actually stored, 25 August 2026 — audio
+
+| Path | Model | Weights | Engine | Task |
+|---|---|---:|---|---|
+| `audio/asr/whisper-large-v3/` | Whisper large-v3 | 3.09 GB | vLLM | transcription |
+| `audio/asr/whisper-large-v3-turbo/` | Whisper large-v3-turbo | 1.62 GB | vLLM | transcription |
+| `audio/asr/qwen3-asr-0.6b/` | Qwen3-ASR-0.6B | 1.88 GB | vLLM | transcription |
+| `audio/asr/qwen3-asr-1.7b/` | Qwen3-ASR-1.7B | 4.70 GB | vLLM | transcription |
+| `audio/asr/parakeet-tdt-0.6b-v3/` | Parakeet TDT 0.6B v3 | 2.51 GB | NeMo | transcription |
+| `audio/asr/canary-1b-v2/` | Canary 1B v2 | 6.36 GB | NeMo | transcription |
+| `audio/asr/nemotron-3.5-asr-streaming-0.6b/` | Nemotron 3.5 ASR Streaming 0.6B | 2.37 GB | NeMo | transcription |
+| `audio/alignment/qwen3-forced-aligner-0.6b/` | Qwen3 ForcedAligner 0.6B | 1.84 GB | not configured for Romanian | alignment |
+| `audio/vad/silero-vad/` | Silero VAD 6.2.1 | package repository | ONNX Runtime | VAD |
+
+The forced aligner stays on disk for possible international use, but Romanian
+is not among the languages its model card supports. The diarization directory
+is intentionally empty: the commercial-compatible Pyannote checkpoint is
+gated, while the inspected NVIDIA Sortformer checkpoint is non-commercial.
 
 ### The size limit is the real limit
 

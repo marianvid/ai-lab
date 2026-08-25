@@ -401,6 +401,39 @@ class SettingsFieldTests(unittest.TestCase):
                          SETTINGS_FIELD: "context_size=65536"})
         self.assertIn(SETTINGS_FIELD, str(caught.exception))
 
+    def test_audio_multipart_is_forwarded_without_becoming_a_json_body(self):
+        from ai_lab.api.multipart import MultipartBody
+        from ai_lab.api.routes.gateway import _forwarder
+        boundary = "----ai-lab-route-test"
+        data = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="model"\r\n\r\n'
+            "qwen\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n'
+            "Content-Type: audio/wav\r\n\r\n"
+        ).encode() + b"\x00\x01audio\xff\r\n" + f"--{boundary}--\r\n".encode()
+        body = MultipartBody(f"multipart/form-data; boundary={boundary}", data)
+        forwarded = {}
+
+        def fake_forward(url, payload, on_close=None, **kwargs):
+            forwarded.update(url=url, payload=payload, kwargs=kwargs)
+            if on_close:
+                on_close()
+            return None
+
+        import ai_lab.api.routes.gateway as module
+        original, module.forward = module.forward, fake_forward
+        try:
+            _forwarder(self.Gateway(), "/v1/audio/transcriptions")(body=body)
+        finally:
+            module.forward = original
+
+        sent = MultipartBody(body.content_type, forwarded["payload"])
+        self.assertEqual(sent.field("model"), "qwen-real")
+        self.assertIn(b"\x00\x01audio\xff", forwarded["payload"])
+        self.assertEqual(forwarded["kwargs"]["content_type"], body.content_type)
+
 
 class NoGatewayTests(unittest.TestCase):
     """A router built without a gateway still starts and stops models.

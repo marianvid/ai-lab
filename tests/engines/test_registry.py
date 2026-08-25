@@ -14,7 +14,8 @@ class RegistryTests(unittest.TestCase):
         self.registry = Registry()
 
     def test_every_engine_is_known_everywhere(self):
-        self.assertEqual(set(self.registry.known()), {"llamacpp", "vllm"})
+        self.assertEqual(set(self.registry.known()),
+                         {"llamacpp", "vllm", "nemo", "onnx"})
 
     def test_only_installed_engines_are_available(self):
         self.assertEqual(set(self.registry.available(capabilities())), {"llamacpp"})
@@ -29,6 +30,15 @@ class RegistryTests(unittest.TestCase):
         rows = {row["id"]: row for row in self.registry.describe(capabilities())}
         keys = {item["key"] for item in rows["llamacpp"]["params"]}
         self.assertIn("context_size", keys)
+
+    def test_describe_carries_the_jobs_for_model_filtering(self):
+        rows = {row["id"]: row for row in self.registry.describe(capabilities())}
+        self.assertEqual(rows["llamacpp"]["tasks"], ["text-generation"])
+        self.assertIn("transcription", rows["vllm"]["tasks"])
+        self.assertEqual(rows["nemo"]["tasks"], ["transcription"])
+        self.assertEqual(rows["onnx"]["tasks"], ["vad"])
+        transcription = rows["vllm"]["task_params"]["transcription"]
+        self.assertNotIn("context_size", {item["key"] for item in transcription})
 
     def test_unknown_engine_raises(self):
         with self.assertRaises(KeyError):
@@ -50,6 +60,15 @@ class ConfiguredBinaryTests(unittest.TestCase):
 
     def test_without_configuration_it_falls_back_to_path(self):
         self.assertTrue(Registry().get("llamacpp").binary.endswith("llama-server"))
+
+    def test_nemo_keeps_its_runtime_and_server_paths_separate(self):
+        registry = Registry({"nemo": {
+            "binary": "/opt/ai/nemo/.venv/bin/python",
+            "server": "/opt/ai-lab/ai_lab/audio/server.py",
+        }})
+        engine = registry.get("nemo")
+        self.assertEqual(engine.binary, "/opt/ai/nemo/.venv/bin/python")
+        self.assertEqual(engine.server, "/opt/ai-lab/ai_lab/audio/server.py")
 
     def test_the_configured_binary_reaches_the_command_line(self):
         from ai_lab.types import Format, ModelFile, ModelSet

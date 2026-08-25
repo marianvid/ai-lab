@@ -1,10 +1,10 @@
 # Writing a request
 
-Everything below is about the request itself: the two shapes that are accepted,
-the one field that is this project's own, and what comes back when a model
-cannot be served.
+Everything below is about the request itself: chat, transcription and VAD, the
+one field that is this project's own, and what comes back when a model cannot
+be served.
 
-### Two ways of writing a request
+### Text requests have two shapes
 
 Nearly every client speaks the shape above. A client written against
 Anthropic's own library speaks a different one and posts to `/v1/messages`
@@ -22,6 +22,38 @@ Configured models that do: coder-fast, glm-flash, qwen36-nvfp4, text-bulk.
 Which shapes each entry answers is in `GET /v1/models`, so a client can look
 rather than guess. The engine declares it, so adding a shape — or an engine
 that speaks one — is a line in that engine's file and nothing else changes.
+
+### Audio is multipart
+
+Transcription uses the OpenAI-compatible endpoint and sends the configured
+instance name in `model`:
+
+```sh
+curl http://ai-lab.lan:8090/v1/audio/transcriptions \
+  -F model=whisper-large-v3-turbo -F language=ro -F file=@recording.wav
+```
+
+The gateway preserves the uploaded bytes, makes room for that instance when
+needed, and forwards the same multipart request. The response is:
+
+```json
+{"text": "textul transcris"}
+```
+
+Voice activity detection uses the same transport but a separate endpoint:
+
+```sh
+curl http://ai-lab.lan:8090/v1/audio/speech-segments \
+  -F model=silero-vad -F file=@recording.wav
+```
+
+It returns time intervals in seconds. The current Silero adapter requires mono
+or stereo audio already normalised to 16 kHz; converting, segmenting large
+source files and storing the results belong to the data-processing client. See
+[Audio](audio.md).
+
+The request-specific `ai_lab` startup override below applies to JSON text
+requests. Audio currently uses the settings saved on its configured instance.
 
 ### The `ai_lab` field: asking for a model started a particular way
 
@@ -55,7 +87,7 @@ loads. The ones worth knowing:
 | `parallel` | llama.cpp | slots. llama.cpp divides the context between them rather than sharing it, so four slots means a quarter each |
 | `gpu_layers` | llama.cpp | `-1` all on the card, `-2` fit what you can and leave the rest in system memory, a number to set it yourself |
 | `cache_type_k`, `cache_type_v` | llama.cpp | how the context cache is stored. `q4_0` costs a fraction of `f16` |
-| `tool_calling` | vLLM | which family's tool-call format to expect. Empty means tools are refused |
+| `tool_parser` | vLLM | which family's tool-call format to expect. Empty means tools are refused |
 
 Two examples of the second row, which is the one that matters for fitting more
 than one model:
@@ -168,4 +200,4 @@ largest that would. 96k fits, loads in 70 seconds, and leaves the card at
 
 ---
 
-[← all documents](../README.md)  ·  [Settings](settings.md)  ·  [Updating an engine](engines.md)
+[← all documents](../README.md)  ·  [Audio](audio.md)  ·  [Settings](settings.md)  ·  [Updating an engine](engines.md)

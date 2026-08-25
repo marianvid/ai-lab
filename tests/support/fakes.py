@@ -105,6 +105,10 @@ class FakeEngine:
         from ai_lab.types import Format
         return frozenset({Format.GGUF})
 
+    def tasks(self):
+        from ai_lab.types import Task
+        return frozenset({Task.TEXT_GENERATION})
+
     def params(self):
         return ()
 

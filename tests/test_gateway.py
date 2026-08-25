@@ -84,7 +84,7 @@ class FakeEngine:
     def __init__(self, shapes):
         self._shapes = shapes
 
-    def api_paths(self):
+    def api_paths(self, task=None):
         return self._shapes
 
     def params(self):

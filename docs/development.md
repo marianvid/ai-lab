@@ -8,6 +8,7 @@ records the one dependency rule every module follows, and why.
 ```text
 ai_lab/hosts/           Platform: processes and accelerator, per operating system
 ai_lab/engines/         One file per inference engine
+ai_lab/audio/           Small HTTP adapters launched inside speech runtimes
 ai_lab/downloads/       Hugging Face browsing and whole-set transfers
 ai_lab/api/             HTTP routing and the progress event stream
 ai_lab/web/             Browser interface, native ES modules, no build step
@@ -59,7 +60,8 @@ outside Git entirely.
 
 ## Local development
 
-The application uses the Python standard library and supports Python 3.11 or newer.
+The manager uses the Python standard library and supports Python 3.11 or newer.
+Inference runtimes have their own environments and are not project dependencies.
 
 ```bash
 python3 -m unittest discover -t . -s tests

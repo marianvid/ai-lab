@@ -60,6 +60,25 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(ConfigStore(self.path).load().repository("a").path,
                          "/models/nvfp4")
 
+    def test_a_repository_can_use_a_deliberate_folder_below_the_models_root(self):
+        self.path.write_text(json.dumps({
+            "models_root": "/models",
+            "repositories": [{"id": "audio-asr", "name": "Audio ASR",
+                              "format": "safetensors", "task": "transcription",
+                              "subpath": "audio/asr"}],
+        }))
+        repository = ConfigStore(self.path).load().repository("audio-asr")
+        self.assertEqual(repository.path, "/models/audio/asr")
+        self.assertEqual(repository.task, "transcription")
+
+    def test_old_repositories_remain_text_generation_repositories(self):
+        repository = self.write({
+            "models_root": "/models",
+            "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
+        }).load().repository("gguf")
+        self.assertEqual(repository.task, "text-generation")
+        self.assertEqual(repository.subpath, "")
+
     def test_a_configuration_without_a_root_takes_it_from_the_paths(self):
         # Written before there was a root. It must come back pointing at the
         # same directories, or a machine loses its models on an upgrade.

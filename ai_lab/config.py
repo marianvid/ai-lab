@@ -47,6 +47,12 @@ class Repository:
     id: str
     name: str
     format: str
+    # The job performed by models here. Existing configurations contain only
+    # text models, so their missing value deliberately defaults to this.
+    task: str = "text-generation"
+    # A folder below models_root. Empty keeps the original format-first path.
+    # This permits `audio/asr` without storing a machine-specific absolute path.
+    subpath: str = ""
     # Where this format's models are, worked out rather than stored: the models
     # root plus the format. One root is set and the rest follows, so GGUF and
     # NVFP4 cannot end up on different disks by accident, and a machine set up
@@ -183,8 +189,9 @@ def _under(root: str, stored: dict) -> Repository:
     """
     fields = {key: value for key, value in stored.items() if key != "path"}
     repository = Repository(**fields)
+    relative = repository.subpath or repository.format
     return replace(repository,
-                   path=str(Path(root) / repository.format) if root else "")
+                   path=str(Path(root) / relative) if root else "")
 
 
 def _root_of(stored: list) -> str:

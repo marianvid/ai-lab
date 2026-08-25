@@ -23,6 +23,18 @@ class Format(str, Enum):
     NVFP4 = "nvfp4"
     AWQ = "awq"
     GPTQ = "gptq"
+    NEMO = "nemo"
+    ONNX = "onnx"
+
+
+class Task(str, Enum):
+    """What a model does, independently of how its weights are stored."""
+
+    TEXT_GENERATION = "text-generation"
+    TRANSCRIPTION = "transcription"
+    ALIGNMENT = "alignment"
+    VAD = "vad"
+    DIARIZATION = "diarization"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +65,7 @@ class ModelSet:
     format: Format
     entrypoint: str
     files: tuple[ModelFile, ...]
+    task: Task = Task.TEXT_GENERATION
     complete: bool = True
     missing: tuple[str, ...] = ()
     # What the weights can do, read from the model's own files rather than

@@ -28,6 +28,7 @@ there is exactly one place to look.
 | `hosts/` | Starting and stopping processes, reading the accelerator, saying what this machine supports | Anything about models or engines |
 | `hosts/base.py` | The questions every platform must answer, including `statuses` — the same question as `status`, asked about several instances at once | — |
 | `engines/` | Per engine: formats read, settings offered, command line built, readiness probe | Process supervision, filesystem scanning |
+| `audio/` | Thin HTTP adapters executed by isolated speech runtimes | Scheduling, configuration, model discovery |
 | `catalog.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
 | `capabilities.py` | Reading a model's own files to find out whether it can call tools or read pictures, and remembering the answer | Which engine will run it, and what any setting says |
 | `runtime.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |
@@ -40,7 +41,7 @@ there is exactly one place to look.
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
 | `lastloaded.py` | One fact on disk: which model was on the card and how it was started | Deciding anything — it remembers and is read |
-| `api/` | HTTP routing, JSON, the event stream | Any decision about models, engines or formats |
+| `api/` | HTTP routing, JSON and multipart bodies, the event stream | Any decision about models, engines or formats |
 | `web/` | The browser interface | — |
 
 Five supporting files carry no policy of their own:

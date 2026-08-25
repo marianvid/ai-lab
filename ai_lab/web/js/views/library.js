@@ -59,6 +59,7 @@ function modelRow(model) {
       ...capabilities(model.capabilities),
     ])),
     element('td', { class: 'muted', text: model.format }),
+    element('td', { class: 'muted', text: model.task || 'text-generation' }),
     element('td', { class: 'number', text: bytes(model.size_bytes) }),
     element('td', { class: 'number muted', text: String(model.file_count) }),
     element('td', {}, state),
@@ -79,6 +80,7 @@ function repositorySection(repository, models) {
           element('thead', {}, element('tr', {}, [
             element('th', { text: 'Model' }),
             element('th', { text: 'Format' }),
+            element('th', { text: 'Task' }),
             element('th', { class: 'number', text: 'Size' }),
             element('th', { class: 'number', text: 'Files' }),
             element('th', { text: '' }),

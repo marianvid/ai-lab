@@ -18,6 +18,11 @@ stays right when the machine is given more memory.
 the update would bring, and the real Update is at the foot of that. See
 [Updating an engine](engines.md).
 
+NeMo and ONNX audio adapters use isolated Python environments. They are shown
+as installed capabilities and can be selected only for compatible tasks and
+weight formats. Their environments are deliberately separate from the manager
+and vLLM so a speech dependency cannot replace the CUDA stack used elsewhere.
+
 **Paths** is every path this installation depends on: one models root with a
 folder per weight format under it, and each engine's program. All of them are
 picked from a listing of what is actually on the machine rather than typed — a

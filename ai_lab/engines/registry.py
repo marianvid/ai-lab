@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from ..types import Capabilities
+from ..types import Capabilities, Task
 from .base import Engine
 from .llamacpp import LlamaCppEngine
+from .nemo import NemoEngine
+from .onnx import OnnxEngine
 from .vllm import VllmEngine
 
 
@@ -34,6 +36,12 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
             binary=settings.get(LlamaCppEngine.id, {}).get("binary")),
         VllmEngine.id: VllmEngine(
             binary=settings.get(VllmEngine.id, {}).get("binary")),
+        NemoEngine.id: NemoEngine(
+            binary=settings.get(NemoEngine.id, {}).get("binary"),
+            server=settings.get(NemoEngine.id, {}).get("server")),
+        OnnxEngine.id: OnnxEngine(
+            binary=settings.get(OnnxEngine.id, {}).get("binary"),
+            server=settings.get(OnnxEngine.id, {}).get("server")),
     }
 
 
@@ -73,7 +81,12 @@ class Registry:
                 "reason": "" if usable else _reason(key, capabilities),
                 "binary": getattr(engine, "binary", ""),
                 "formats": sorted(item.value for item in engine.formats()),
+                "tasks": sorted(item.value for item in engine.tasks()),
                 "params": [asdict(spec) for spec in engine.params()],
+                "task_params": {
+                    task.value: [asdict(spec) for spec in engine.params(task)]
+                    for task in engine.tasks()
+                },
             })
         return rows
 
@@ -81,6 +94,8 @@ class Registry:
 def _reason(engine_id: str, capabilities: Capabilities) -> str:
     if engine_id == "vllm" and capabilities.accelerator_kind != "cuda":
         return "Requires an NVIDIA GPU"
-    if engine_id == "vllm":
+    if engine_id == "nemo" and capabilities.accelerator_kind != "cuda":
+        return "Requires an NVIDIA GPU"
+    if engine_id in ("vllm", "nemo", "onnx"):
         return "Not installed"
     return "Binary not found"

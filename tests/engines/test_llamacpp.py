@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ai_lab.engines.llamacpp import LlamaCppEngine
-from ai_lab.types import Format, ModelFile, ModelSet
+from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
 def model(format=Format.GGUF, complete=True, entrypoint="/models/a-00001-of-00002.gguf"):
@@ -51,6 +51,9 @@ class PlanTests(unittest.TestCase):
 
     def test_it_reads_only_gguf(self):
         self.assertEqual(self.engine.formats(), frozenset({Format.GGUF}))
+
+    def test_it_only_generates_text(self):
+        self.assertEqual(self.engine.tasks(), frozenset({Task.TEXT_GENERATION}))
 
 
 if __name__ == "__main__":

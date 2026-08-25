@@ -1,12 +1,14 @@
 import unittest
 
 from ai_lab.engines.vllm import VllmEngine
-from ai_lab.types import Format, ModelFile, ModelSet
+from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
-def model(format=Format.NVFP4, complete=True, entrypoint="/models/nvfp4/a"):
+def model(format=Format.NVFP4, complete=True, entrypoint="/models/nvfp4/a",
+          task=Task.TEXT_GENERATION):
     return ModelSet(id="nvfp4/a", name="a", format=format, entrypoint=entrypoint,
                     files=(ModelFile(entrypoint + "/model.safetensors", 10),),
+                    task=task,
                     complete=complete,
                     missing=() if complete else ("model-00002-of-00002.safetensors",))
 
@@ -76,8 +78,30 @@ class PlanTests(unittest.TestCase):
         self.assertIn(Format.FP8, formats)
         self.assertNotIn(Format.GGUF, formats)
 
+    def test_it_serves_text_and_transcription_models(self):
+        self.assertEqual(self.engine.tasks(),
+                         frozenset({Task.TEXT_GENERATION, Task.TRANSCRIPTION}))
+
+    def test_it_refuses_a_task_it_does_not_serve(self):
+        with self.assertRaises(ValueError) as caught:
+            self.engine.plan(model(task=Task.ALIGNMENT), 8082, {})
+        self.assertIn("alignment", str(caught.exception))
+
     def test_it_serves_no_page(self):
         self.assertFalse(self.engine.plan(model(), 8082, {}).web_ui)
+
+    def test_a_transcription_model_offers_the_openai_audio_path(self):
+        self.assertIn("/v1/audio/transcriptions",
+                      self.engine.api_paths(Task.TRANSCRIPTION))
+        self.assertNotIn("/v1/completions",
+                         self.engine.api_paths(Task.TRANSCRIPTION))
+
+    def test_a_transcription_plan_omits_text_only_settings(self):
+        argv = self.engine.plan(model(task=Task.TRANSCRIPTION), 8082, {}).argv
+        for flag in ("--max-model-len", "--language-model-only",
+                     "--kv-cache-dtype", "--tool-call-parser"):
+            self.assertNotIn(flag, argv)
+        self.assertEqual(argv[argv.index("--max-num-seqs") + 1], "8")
 
 
 class ParamTests(unittest.TestCase):

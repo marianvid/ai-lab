@@ -17,7 +17,12 @@ import re
 SHARD = re.compile(r"^(?P<base>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})$")
 
 # Files that hold weights, and the container they use.
-WEIGHT_SUFFIXES = {".gguf": "gguf", ".safetensors": "safetensors"}
+WEIGHT_SUFFIXES = {
+    ".gguf": "gguf",
+    ".safetensors": "safetensors",
+    ".nemo": "nemo",
+    ".onnx": "onnx",
+}
 
 # Files that belong to a model without holding weights.
 COMPANION_NAMES = frozenset({
