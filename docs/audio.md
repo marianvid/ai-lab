@@ -9,9 +9,7 @@ this project's contract.
 The Romanian evaluation audio published for this personal AI-Lab was prepared
 by [Data-Lab](https://github.com/marianvid/data-lab). Its public repository has
 one deliberately narrow purpose: it shows the deterministic FLEURS selection
-and FFmpeg normalisation used before the files were sent here. The complete
-Data-Lab service and its operational workflows remain in a separate private
-repository because they may handle confidential source material.
+and FFmpeg normalisation used before the files were sent here.
 
 Data-Lab is not required to use these endpoints. Any caller may prepare input
 according to the selected model's contract; the link records how this project's
