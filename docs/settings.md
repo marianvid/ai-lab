@@ -28,10 +28,13 @@ and vLLM so a speech dependency cannot replace the CUDA stack used elsewhere.
 
 **Engine paths** sits under Engines and names the program used to launch each
 one. **Paths** sits under Machine and contains the models root plus the folder
-derived for every weight format. The paths that are choices are picked from a
-listing of what is actually on the machine rather than typed — a path typed by
-hand is a path with a typo in it, and the failure arrives much later as a
-screen with no models on it.
+derived for every text weight format and audio task. Audio formats used by
+different engines are grouped under transcription, voice activity detection
+and speaker diarization; engine-specific submodels do not become separate
+storage locations. The paths that are choices are picked from a listing of
+what is actually on the machine rather than typed — a path typed by hand is a
+path with a typo in it, and the failure arrives much later as a screen with no
+models on it.
 
 ---
 

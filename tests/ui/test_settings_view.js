@@ -13,6 +13,21 @@ const NVFP4 = {
   id: 'nvfp4', name: 'NVFP4', path: '/models/nvfp4', format: 'nvfp4',
   writable: true, exists: true, free_bytes: 3.4 * 1024 ** 4, total_bytes: 4 * 1024 ** 4,
 };
+const AUDIO_REPOSITORIES = [
+  { id: 'audio-asr', name: 'Audio transcription', path: '/models/audio/asr',
+    format: 'safetensors', task: 'transcription', writable: true, exists: true },
+  { id: 'audio-nemo-asr', name: 'NeMo audio transcription', path: '/models/audio/asr',
+    format: 'nemo', task: 'transcription', writable: true, exists: true },
+  { id: 'audio-vad', name: 'Voice activity detection',
+    path: '/models/audio/vad/silero-vad/src/silero_vad/data',
+    format: 'onnx', task: 'vad', writable: true, exists: true },
+  { id: 'audio-nemo-diarization', name: 'NeMo speaker diarization',
+    path: '/models/audio/diarization', format: 'nemo', task: 'diarization',
+    writable: true, exists: true },
+  { id: 'audio-pyannote-diarization', name: 'Pyannote speaker diarization',
+    path: '/models/audio/diarization/pyannote', format: 'pyannote',
+    task: 'diarization', writable: true, exists: true },
+];
 
 function responses(overrides = {}) {
   return {
@@ -134,6 +149,20 @@ describe('the Settings page', () => {
       .map((item) => item.textContent.replace(/\s+/g, ' ').trim());
     assert.ok(rows.some((row) => row.includes('/models/gguf')), rows.join(' | '));
     assert.ok(rows.some((row) => row.includes('/models/nvfp4')), rows.join(' | '));
+  });
+
+  it('shows audio task roots rather than engine-specific submodels', async () => {
+    const base = responses()['/api/settings'];
+    const { view } = await renderPage({ '/api/settings': {
+      ...base, repositories: [...base.repositories, ...AUDIO_REPOSITORIES],
+    } });
+    const paths = namedSection(view, 'Paths').textContent;
+    assert.match(paths, /Audio transcription\s*\/models\/audio\/asr/);
+    assert.match(paths, /Voice activity detection\s*\/models\/audio\/vad/);
+    assert.match(paths, /Speaker diarization\s*\/models\/audio\/diarization/);
+    assert.equal(paths.includes('NeMo audio transcription'), false);
+    assert.equal(paths.includes('silero-vad'), false);
+    assert.equal(paths.includes('Pyannote speaker diarization'), false);
   });
 
   it('puts engine programs in their own card under the engines', async () => {

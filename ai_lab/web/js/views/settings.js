@@ -52,17 +52,46 @@ function section(title, children) {
 function paths(settings, refresh) {
   const rows = [
     chosen(settings.models_root, refresh),
-    ...(settings.repositories || []).map((item) =>
+    ...displayRepositories(settings).map((item) =>
       readOnly(item.name, item.path, trouble(item))),
   ];
   return section('Paths', rows);
 }
 
 
+// The catalogue needs a repository for every format an engine can load. The
+// Settings page does not: a person needs to know where a kind of model lives,
+// not that two engines read different formats below the same folder. Keep the
+// detailed repositories in configuration and collapse audio here to its three
+// useful roots.
+function displayRepositories(settings) {
+  const repositories = settings.repositories || [];
+  const visible = repositories.filter((item) =>
+    !item.task || item.task === 'text-generation');
+  const audio = [
+    ['transcription', 'Audio transcription', 'audio/asr'],
+    ['vad', 'Voice activity detection', 'audio/vad'],
+    ['diarization', 'Speaker diarization', 'audio/diarization'],
+  ];
+  audio.forEach(([task, name, subpath]) => {
+    const members = repositories.filter((item) => item.task === task);
+    if (!members.length) return;
+    visible.push({
+      name,
+      path: settings.models_root
+        ? `${settings.models_root.replace(/\/+$/, '')}/${subpath}`
+        : '',
+      exists: members.some((item) => item.exists),
+      writable: members.some((item) => item.writable),
+    });
+  });
+  return visible;
+}
+
+
 // Programs are paths too, but they belong with the engines they launch rather
-// than with the model store. Keeping them in their own card also lets the
-// engine column stay compact while the larger repository list uses the wider
-// column beneath Machine.
+// than with the model store. Keeping them in their own card also keeps the
+// engine status list compact and easy to scan.
 function enginePaths(settings, refresh) {
   const rows = (settings.engines || [])
     // An engine that cannot run here is not given a path. Pointing it at

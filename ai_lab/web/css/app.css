@@ -511,12 +511,11 @@ details.build-log > .log { margin-top: 0.4rem; }
   padding-top: 0.65rem;
 }
 
-/* Settings has two stacks with different content pressure: executable paths
-   and engine states can be narrow, while model repository names and paths need
-   the wider side. Other pages keep the general 2:1 columns above. */
+/* Settings is two equal stacks. Other pages keep the general 2:1 columns
+   above. */
 @media (min-width: 60rem) {
   .settings-columns {
-    grid-template-columns: minmax(27rem, 0.9fr) minmax(32rem, 1.15fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -529,6 +528,11 @@ details.build-log > .log { margin-top: 0.4rem; }
   word-break: normal;
 }
 .engine-paths .row.path-row { grid-template-columns: 8.5rem minmax(0, 1fr) auto; }
+.engine-paths .path-row + .path-row {
+  border-top: 1px solid var(--border);
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+}
 
 /* Every path on one grid, so the labels line up down the left and the buttons
    down the right. A row that steps in and out because one label is longer than
