@@ -26,11 +26,12 @@ as installed capabilities and can be selected only for compatible tasks and
 weight formats. Their environments are deliberately separate from the manager
 and vLLM so a speech dependency cannot replace the CUDA stack used elsewhere.
 
-**Paths** is every path this installation depends on: one models root with a
-folder per weight format under it, and each engine's program. All of them are
-picked from a listing of what is actually on the machine rather than typed — a
-path typed by hand is a path with a typo in it, and the failure arrives much
-later as a screen with no models on it.
+**Engine paths** sits under Engines and names the program used to launch each
+one. **Paths** sits under Machine and contains the models root plus the folder
+derived for every weight format. The paths that are choices are picked from a
+listing of what is actually on the machine rather than typed — a path typed by
+hand is a path with a typo in it, and the failure arrives much later as a
+screen with no models on it.
 
 ---
 

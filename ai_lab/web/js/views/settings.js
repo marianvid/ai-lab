@@ -42,12 +42,7 @@ function section(title, children) {
   ]);
 }
 
-// Every path this installation depends on, in one place.
-//
-// It used to be two: the model folders here, and each engine's program down in
-// its own card. They are the same kind of thing — somewhere on disk that has to
-// be right or a screen stops working — and looking for them in two places was
-// the only reason it took two.
+// The model store and the folders derived from it.
 //
 // **Nothing here is typed.** A path typed by hand is a path with a typo in it,
 // and the failure arrives much later as a screen with no models on it. The one
@@ -59,14 +54,26 @@ function paths(settings, refresh) {
     chosen(settings.models_root, refresh),
     ...(settings.repositories || []).map((item) =>
       readOnly(item.name, item.path, trouble(item))),
-    // An engine that cannot run here is not given a path. Pointing it at
-    // something would not make it work — vLLM on the Mac needs CUDA, and no
-    // path fixes that — and the engine card already says why.
-    ...(settings.engines || [])
-      .filter((engine) => engine.available && engine.binary)
-      .map((engine) => program(engine, refresh)),
   ];
   return section('Paths', rows);
+}
+
+
+// Programs are paths too, but they belong with the engines they launch rather
+// than with the model store. Keeping them in their own card also lets the
+// engine column stay compact while the larger repository list uses the wider
+// column beneath Machine.
+function enginePaths(settings, refresh) {
+  const rows = (settings.engines || [])
+    // An engine that cannot run here is not given a path. Pointing it at
+    // something would not make it work — vLLM on the Mac needs CUDA, and no
+    // path fixes that — and the engine row already says why.
+    .filter((engine) => engine.available && engine.binary)
+    .map((engine) => program(engine, refresh));
+  if (!rows.length) return null;
+  const found = section('Engine paths', rows);
+  found.classList.add('engine-paths');
+  return found;
 }
 
 
@@ -96,7 +103,8 @@ function chosen(root, refresh) {
 function pathRow(label, path, { help, choose, save, trouble, refresh }) {
   return element('div', { class: 'row path-row' }, [
     element('strong', { text: label, title: help }),
-    element('span', { class: 'path muted grow', text: path || '—' }),
+    element('span', { class: 'path muted grow', text: path || '—',
+                      ...(path ? { title: path } : {}) }),
     element('button', {
       class: 'action', text: 'Browse…',
       onclick: (event) => whileWorking(event.target, 'Choosing…', async () => {
@@ -314,7 +322,7 @@ function updateState(engine, source, refresh) {
 
 
 
-function engineCard(engine, refresh) {
+function engineEntry(engine, refresh) {
   const source = engine.source;
   const stored = logs.get(engine.id) || (source && source.log) || [];
   const version = installedVersion(engine);
@@ -343,7 +351,7 @@ function engineCard(engine, refresh) {
   const building = Boolean(source && source.state === 'running');
   if (stored.length || building) rows.push(buildLog(engine, stored, building));
 
-  return element('div', { class: 'card' }, rows);
+  return element('div', { class: 'engine-entry' }, rows);
 }
 
 // What a build said, while it says it and afterwards.
@@ -370,11 +378,12 @@ function buildLog(engine, lines, building) {
 }
 
 function engines(list, refresh) {
-  // Each engine gets its own panel, so the heading stands above the group.
-  return element('div', { class: 'section' }, [
-    element('h3', { text: 'Engines' }),
-    ...list.map((engine) => engineCard(engine, refresh)),
-  ]);
+  // All engines are one compact subject. A separator retains the scan line
+  // that separate cards used to provide without spending their repeated
+  // borders, margins and padding on every row.
+  const found = section('Engines', list.map((engine) => engineEntry(engine, refresh)));
+  found.classList.add('engines');
+  return found;
 }
 
 export async function render(container) {
@@ -389,16 +398,17 @@ export async function render(container) {
   ]);
   byEngine.clear();
   (installed || []).forEach((item) => byEngine.set(item.engine, item));
-  // Two columns. On the left the things that are worked on — engines that get
-  // updated, folders that get pointed somewhere else. On the right what this
-  // machine is, which is read far more often than it is changed.
-  container.replaceChildren(element('div', { class: 'columns' }, [
+  // Two balanced stacks. Engine state and its launch programs use the narrower
+  // left column; the machine and the longer model-store list use the wider
+  // right column. On a narrow screen they return to one column in this order.
+  container.replaceChildren(element('div', { class: 'columns settings-columns' }, [
     element('div', {}, [
       engines(settings.engines, refresh),
-      paths(settings, refresh),
-    ]),
+      enginePaths(settings, refresh),
+    ].filter(Boolean)),
     element('div', {}, [
       machine(settings, refresh),
+      paths(settings, refresh),
     ].filter(Boolean)),
   ]));
 }

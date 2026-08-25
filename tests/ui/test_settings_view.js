@@ -55,6 +55,17 @@ async function renderPage(overrides = {}) {
   return context;
 }
 
+function namedSection(view, name) {
+  const heading = [...view.querySelectorAll('.section > h3')]
+    .find((item) => item.textContent.trim() === name);
+  return heading && heading.parentElement;
+}
+
+function engineEntry(view, name) {
+  return [...view.querySelectorAll('.engine-entry')]
+    .find((item) => item.querySelector('.row.engine')?.textContent.includes(name));
+}
+
 describe('the Settings page', () => {
   it('never puts the word null on the page', async () => {
     const { view } = await renderPage();
@@ -67,14 +78,16 @@ describe('the Settings page', () => {
     // engine's program are choices; the format folders follow from the root
     // and are not.
     const { view } = await renderPage();
-    const section = [...view.querySelectorAll('.section')]
-      .find((item) => item.textContent.startsWith('Paths'));
-    assert.equal(section.querySelectorAll('input').length, 0, 'a path is typeable');
-    const buttons = [...section.querySelectorAll('button')]
+    const modelPaths = namedSection(view, 'Paths');
+    const enginePaths = namedSection(view, 'Engine paths');
+    assert.equal(modelPaths.querySelectorAll('input').length, 0, 'a path is typeable');
+    assert.equal(enginePaths.querySelectorAll('input').length, 0, 'a path is typeable');
+    const buttons = [...modelPaths.querySelectorAll('button'),
+                     ...enginePaths.querySelectorAll('button')]
       .map((item) => item.textContent.trim());
     assert.deepEqual(buttons, ['Browse…', 'Browse…'],
                      'expected the models root and one engine, and no Save');
-    assert.equal(section.querySelectorAll('.row.derived button').length, 0,
+    assert.equal(modelPaths.querySelectorAll('.row.derived button').length, 0,
                  'a folder that follows from the root offered a choice');
   });
 
@@ -82,9 +95,8 @@ describe('the Settings page', () => {
     // A row that steps in and out because one label is longer than another
     // reads as several unrelated things.
     const { view } = await renderPage();
-    const section = [...view.querySelectorAll('.section')]
-      .find((item) => item.textContent.startsWith('Paths'));
-    const rows = [...section.querySelectorAll('.row')];
+    const rows = [...namedSection(view, 'Paths').querySelectorAll('.row'),
+                  ...namedSection(view, 'Engine paths').querySelectorAll('.row')];
     assert.ok(rows.length >= 3);
     rows.forEach((row) => assert.ok(row.classList.contains('path-row'),
                                     row.textContent));
@@ -98,9 +110,7 @@ describe('the Settings page', () => {
                                    path: '/opt/ai/llama.cpp/build/bin/llama-server',
                                    writable: false }] },
     });
-    // The second Browse… is the engine's; the first is the models root.
-    [...view.querySelectorAll('button')]
-      .filter((item) => item.textContent.trim() === 'Browse…')[1].click();
+    button(namedSection(view, 'Engine paths'), 'Browse…').click();
     await settle();
     const dialog = document.querySelector('dialog.confirm');
     assert.match(dialog.textContent, /Choose a program/);
@@ -126,29 +136,27 @@ describe('the Settings page', () => {
     assert.ok(rows.some((row) => row.includes('/models/nvfp4')), rows.join(' | '));
   });
 
-  it('puts the engine programs with the other paths', async () => {
-    // They are the same kind of thing — somewhere on disk that has to be right
-    // — and looking for them in two places was the only reason it took two.
+  it('puts engine programs in their own card under the engines', async () => {
     const { view } = await renderPage();
-    const engine = [...view.querySelectorAll('.card')]
-      .find((card) => card.textContent.includes('llama.cpp · '));
+    const engine = engineEntry(view, 'llama.cpp');
     assert.equal(engine.textContent.includes('/opt/ai/llama.cpp/build/bin'), false,
-                 'the program is still on the engine card');
-    assert.match(view.textContent, /\/opt\/ai\/llama\.cpp\/build\/bin\/llama-server/);
+                 'the program is still on the engine row');
+    const paths = namedSection(view, 'Engine paths');
+    assert.match(paths.textContent, /\/opt\/ai\/llama\.cpp\/build\/bin\/llama-server/);
+    assert.equal(paths.previousElementSibling, namedSection(view, 'Engines'));
   });
 
   it('gives no path to an engine that cannot run here', async () => {
     // Pointing it somewhere would not make it work — vLLM on the Mac needs
     // CUDA — and the engine card already says why.
     const { view } = await renderPage();
-    const section = [...view.querySelectorAll('.section')]
-      .find((item) => item.textContent.startsWith('Paths'));
+    const section = namedSection(view, 'Engine paths');
     assert.equal(section.textContent.includes('vLLM'), false, section.textContent);
   });
 
   it('saves the moment a folder is chosen', async () => {
     const { view, calls } = await renderPage();
-    button(view, 'Browse…').click();
+    button(namedSection(view, 'Paths'), 'Browse…').click();
     await settle();
     button(document.querySelector('dialog.confirm'), 'Use this folder').click();
     await settle();
@@ -160,7 +168,7 @@ describe('the Settings page', () => {
 
   it('saves nothing if the chooser is cancelled', async () => {
     const { view, calls } = await renderPage();
-    button(view, 'Browse…').click();
+    button(namedSection(view, 'Paths'), 'Browse…').click();
     await settle();
     button(document.querySelector('dialog.confirm'), 'Cancel').click();
     await settle();
@@ -177,14 +185,14 @@ describe('the Settings page', () => {
 
   it('offers a way to pick a folder rather than only typing one', async () => {
     const { view } = await renderPage();
-    assert.doesNotThrow(() => button(view, 'Browse…'));
+    assert.doesNotThrow(() => button(namedSection(view, 'Paths'), 'Browse…'));
   });
 
   it('lists the folders on the server when browsing', async () => {
     // The browser cannot open a dialog on the machine the server runs on, so
     // the server has to offer the listing.
     const { view } = await renderPage();
-    button(view, 'Browse…').click();
+    button(namedSection(view, 'Paths'), 'Browse…').click();
     await settle();
     const dialog = document.querySelector('dialog.confirm');
     assert.ok(dialog, 'no chooser appeared');
@@ -209,7 +217,7 @@ describe('the Settings page', () => {
   it('puts every heading above its panel, so they line up', async () => {
     const { view } = await renderPage();
     const headings = [...view.querySelectorAll('h3')];
-    assert.equal(headings.length, 3);
+    assert.equal(headings.length, 4);
     headings.forEach((heading) => {
       assert.ok(heading.parentElement.classList.contains('section'),
                 `"${heading.textContent}" is inside a panel instead of above one`);
@@ -246,21 +254,17 @@ describe('the Settings page', () => {
     assert.match(fold.textContent, /Built target llama-app/);
   });
 
-  it('separates what is worked on from what this machine is', async () => {
-    // On the left the things that get updated and pointed somewhere else. On
-    // the right what the machine is, which is read far more often than it is
-    // changed and has exactly one setting in it.
+  it('stacks engine paths under Engines and model paths under Machine', async () => {
     const { view } = await renderPage();
-    const columns = view.querySelector('.columns');
+    const columns = view.querySelector('.settings-columns');
     assert.ok(columns, 'no two-column layout');
     const [left, right] = columns.children;
     assert.match(left.textContent, /Engines/);
-    assert.match(left.textContent, /Paths/);
+    assert.match(left.textContent, /Engine paths/);
     assert.match(right.textContent, /Machine/);
-    // Every path is on the left, with the things that get worked on.
-    // Every path is on the left, with the things that get worked on.
-    assert.match(left.textContent, /\/models\/gguf/);
-    assert.equal(right.textContent.includes('/models'), false);
+    assert.match(right.textContent, /Paths/);
+    assert.equal(left.textContent.includes('/models'), false);
+    assert.match(right.textContent, /\/models\/gguf/);
   });
 
   it('does not repeat the page name, which the tab already shows', async () => {
@@ -307,8 +311,7 @@ describe('the Settings page', () => {
     // An engine at its newest version has nothing to say on a second line, so
     // there is not one.
     const { view } = await renderPage();
-    const engine = [...view.querySelectorAll('.card')]
-      .find((card) => card.textContent.includes('llama.cpp · '));
+    const engine = engineEntry(view, 'llama.cpp');
     assert.ok(engine, 'no card for the engine');
     assert.equal(engine.querySelectorAll(':scope > .row').length, 1);
     assert.match(engine.textContent, /b10398/, 'the version belongs beside the name');
@@ -318,8 +321,7 @@ describe('the Settings page', () => {
 
   it('says plainly when a managed engine has no update', async () => {
     const { view } = await renderPage();
-    const engine = [...view.querySelectorAll('.card')]
-      .find((card) => card.textContent.includes('llama.cpp · '));
+    const engine = engineEntry(view, 'llama.cpp');
     assert.match(engine.textContent, /No update available/);
   });
 
@@ -328,16 +330,14 @@ describe('the Settings page', () => {
     const unknown = { ...base, engines: [{ ...base.engines[0],
       source: { ...base.engines[0].source, latest: '', update_available: false } }] };
     const { view } = await renderPage({ '/api/settings': unknown });
-    const engine = [...view.querySelectorAll('.card')]
-      .find((card) => card.textContent.includes('llama.cpp · '));
+    const engine = engineEntry(view, 'llama.cpp');
     assert.match(engine.textContent, /Update status unavailable/);
     assert.doesNotMatch(engine.textContent, /No update available/);
   });
 
   it('still says when an engine cannot run here', async () => {
     const { view } = await renderPage();
-    const vllm = [...view.querySelectorAll('.card')]
-      .find((card) => card.textContent.includes('vLLM'));
+    const vllm = engineEntry(view, 'vLLM');
     assert.match(vllm.textContent, /Requires an NVIDIA GPU/);
   });
 
@@ -377,16 +377,14 @@ describe('the Settings page', () => {
     // this page cannot act on. The model list says it better, by only offering
     // an entry the formats its engine can read.
     const { view } = await renderPage();
-    const engine = [...view.querySelectorAll('.card')]
-      .find((card) => card.textContent.includes('llama.cpp'));
+    const engine = engineEntry(view, 'llama.cpp');
     const heading = engine.querySelector(':scope > .row');
     assert.equal(heading.textContent.includes('gguf'), false, heading.textContent);
   });
 
   it('offers no update controls for an engine that is not installed', async () => {
     const { view } = await renderPage();
-    const cards = [...view.querySelectorAll('.card')];
-    const vllm = cards.find((card) => card.textContent.includes('vLLM'));
+    const vllm = engineEntry(view, 'vLLM');
     assert.match(vllm.textContent, /Requires an NVIDIA GPU/);
     assert.equal(vllm.querySelectorAll('button').length, 0,
                  'buttons for something that cannot run here');
