@@ -1,22 +1,5 @@
 # AI-Lab
 
-## OCR and image workflows
-
-OCR is exposed at `POST /v1/images/ocr` and uses an isolated PaddleOCR 3.x
-runtime. Image generation and editing are exposed at
-`POST /v1/images/generations` and `POST /v1/images/edits`. Callers select an
-operator-defined profile; arbitrary ComfyUI graphs are never accepted.
-
-Set `async: true` to receive a durable job immediately. Poll
-`GET /api/image-jobs/{id}`, list with `GET /api/image-jobs`, and cancel with
-`DELETE /api/image-jobs/{id}`. Unfinished jobs are explicitly failed after a
-manager restart. Prompts and uploaded image bytes are not written to job
-metadata, and temporary inputs are removed after completion.
-
-ComfyUI runs behind a private adapter and is deliberately single-concurrency:
-its interrupt endpoint affects the current global execution. Workflow files
-must be exported in API format and stored below `images.workflow_root`.
-
 > **Built for personal use.** This is a home-lab tool that runs on one
 > particular pair of machines. It is public because the measurements and the
 > approach may be useful to someone; it is not a product and has no support.
