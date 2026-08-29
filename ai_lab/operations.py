@@ -14,6 +14,11 @@ belongs in this file.
 from __future__ import annotations
 
 import os
+import hashlib
+import json
+import shutil
+import time
+import uuid
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -30,14 +35,24 @@ from . import budget
 from .capabilities import IMAGES, TOOLS
 from .catalog import Catalog
 from .changes import Reader, counted
-from .config import INSTANCE_ID, ConfigStore, Instance
+from .config import INSTANCE_ID, ConfigStore, Instance, validate_distinct_roots
 from .downloads import DownloadManager, HuggingFaceClient
+from .downloads import bundles
 from .engines.base import validate
 from .hosts.base import Host
 from .runtime import Operation, Runtime
 from .types import ChangeEvent, Interests, LogEvent, Task
 from .settings import Settings
 from .storage import Storage
+
+
+class _MoveCancelled(Exception):
+    """Raised inside `move_model` when a cancellation was requested.
+
+    Caught in the same method, right after being raised — it exists only so
+    the generic `except Exception` branch there can tell "asked to stop" from
+    "actually went wrong" and record a different job status for each.
+    """
 
 
 class Operations:
@@ -71,6 +86,7 @@ class Operations:
         # back. Optional: a test that does not care about it passes nothing,
         # and nothing is remembered.
         self.last_loaded = last_loaded
+        self.image_jobs = None
 
     def _changed(self, topic: str) -> None:
         """Tell whoever is watching that this kind of thing has moved.
@@ -108,7 +124,19 @@ class Operations:
             tasks = engine.tasks()
             models = [item for item in models
                       if item.format in formats and item.task in tasks]
-        return [self._model(item) for item in models]
+        rows = []
+        for item in models:
+            row = self._model(item)
+            try:
+                row["storage_tier"] = config.repository(
+                    item.id.split("/", 1)[0]).root_id
+            except KeyError:
+                # The prefix always comes from a configured repository's own
+                # id (see `Catalog.scan`), so this cannot happen today — but
+                # the listing itself must not fail if it ever does.
+                row["storage_tier"] = ""
+            rows.append(row)
+        return rows
 
     def configured(self) -> list[dict]:
         """Every entry, without asking what any of them is doing.
@@ -533,6 +561,13 @@ class Operations:
             latest = status.get("latest") or ""
         except KeyError:
             pass                       # not built from source; notes still apply
+        if not installed or not latest:
+            try:
+                managed = self._installs().get(engine_id).status()
+                installed = installed or managed.get("installed", "")
+                latest = latest or managed.get("latest", "")
+            except KeyError:
+                pass
         # For an engine installed as packages there is no build to ask, so the
         # versions come from the environment and from what the package manager
         # says it would do. Asked before the notes are fetched, because the
@@ -630,6 +665,13 @@ class Operations:
         judgement a timer can make.
         """
         return self._installs().get(engine_id).remove(name)
+
+    def update_install_component(self, engine_id: str, name: str) -> dict:
+        self._nothing_running("The engine and its extensions are being replaced.")
+        install = self._installs().get(engine_id)
+        if not hasattr(install, "update_component"):
+            raise ValueError(f"{engine_id} has no separately managed components")
+        return install.update_component(name)
 
     def activate_build(self, engine_id: str, name: str) -> dict:
         """Select a compiled source version without rebuilding it."""
@@ -768,8 +810,42 @@ class Operations:
             raise ValueError(f"{root} is not a directory")
         with self.store.mutate() as config:
             config.models_root = str(root.resolve())
+            config.model_root("core").path = config.models_root
+            validate_distinct_roots(config.model_roots)
         self._changed("models")
         return {"models_root": self.store.load().models_root}
+
+    def update_model_root(self, root_id: str, changes: dict) -> dict:
+        allowed = {"path", "enabled", "writable", "download_default"}
+        unknown = set(changes) - allowed
+        if unknown:
+            raise ValueError(
+                f"Unknown model-root settings: {', '.join(sorted(unknown))}")
+        with self.store.mutate() as config:
+            model_root = config.model_root(root_id)
+            if "path" in changes:
+                path = Path(str(changes["path"])).expanduser()
+                if not path.is_dir():
+                    raise ValueError(f"{path} is not a directory")
+                model_root.path = str(path.resolve())
+                if root_id == "core":
+                    config.models_root = model_root.path
+            if "enabled" in changes:
+                model_root.enabled = bool(changes["enabled"])
+            if "writable" in changes:
+                model_root.writable = bool(changes["writable"])
+            if changes.get("download_default"):
+                if not model_root.enabled:
+                    raise ValueError(
+                        "A disabled model root cannot receive downloads")
+                config.download_root = root_id
+            elif changes.get("download_default") is False \
+                    and config.download_root == root_id:
+                config.download_root = "core"
+            validate_distinct_roots(config.model_roots)
+        self._changed("settings")
+        self._changed("models")
+        return self.settings_view()
 
     def update_repository(self, repository_id: str, changes: dict) -> dict:
         """Rename a repository, or say whether it may be written to.
@@ -857,6 +933,359 @@ class Operations:
         self._changed("models")
         return {"deleted": model.name, "files": len(paths), "freed_bytes": freed}
 
+    def move_model(self, model_id: str, target_root_id: str) -> dict:
+        """Copy, verify and only then remove a model from its current tier.
+
+        A durable job record is written before anything is touched, and
+        updated at every phase (`copying`, `verifying`, `publishing`,
+        `completed`/`failed`/`cancelled`). If the process dies partway, that
+        record is still on disk — `recover_moves()` sweeps it at the next
+        startup and marks it failed, rather than leaving a job that claims to
+        still be running with no thread behind it. A move can also be
+        stopped in flight with `cancel_move(job_id)`, which is checked
+        between chunks while a file copies and at each phase boundary.
+        """
+        config = self.store.load()
+        model = self.catalog.find(config.repositories, model_id)
+        source_repository = config.repository(model_id.split("/", 1)[0])
+        if source_repository.root_id == target_root_id:
+            return {"model_id": model_id, "storage_tier": target_root_id,
+                    "moved": False}
+        self._reject_if_busy(config, model_id)
+        active = [job for job in self.move_jobs()
+                  if job.get("model_id") == model_id
+                  and job.get("status") in self.UNFINISHED_MOVE_STATUSES]
+        if active:
+            raise ValueError(
+                f"{model_id} is already being moved (job {active[0]['id']})")
+        target_root = config.model_root(target_root_id)
+        if not target_root.enabled:
+            raise ValueError(f"{target_root.name} storage is disabled")
+        candidates = [item for item in config.repositories
+                      if item.root_id == target_root_id
+                      and item.base_id == source_repository.base_id]
+        if not candidates:
+            raise ValueError(
+                f"No {target_root.name} repository matches "
+                f"{source_repository.name}")
+        target_repository = self._writable_in_root(candidates[0], target_root)
+        source_root = Path(source_repository.path).resolve()
+        target_path = Path(target_repository.path).resolve()
+        if source_root == target_path:
+            raise ValueError(
+                "Source and destination are the same location; refusing to "
+                "move a model onto itself")
+        sources = [Path(item.path).resolve() for item in model.files]
+        relatives = [path.relative_to(source_root) for path in sources]
+        destinations = [target_path / relative for relative in relatives]
+        existing = [path for path in destinations if path.exists()]
+        if existing:
+            raise ValueError(f"Destination already contains {existing[0]}")
+        free = shutil.disk_usage(target_path).free
+        if free < model.size_bytes:
+            raise ValueError(
+                f"{target_root.name} does not have enough free space: "
+                f"needs {model.size_bytes} bytes, has {free}")
+
+        job_id = uuid.uuid4().hex
+        # A sibling of the format directories, not inside one — the catalog
+        # only scans each configured repository's own path (see
+        # `Catalog.scan`), so a directory here never appears as a half-copied
+        # model in the Library while a move is in flight or after one fails.
+        staging_root = Path(target_root.path) / ".ai-lab-staging"
+        staging = staging_root / job_id
+        staging_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(staging_root, 0o700)
+        job = {"id": job_id, "model_id": model_id,
+               "target_model_id": model_id.replace(
+                   source_repository.id, target_repository.id, 1),
+               "source_tier": source_repository.root_id,
+               "target_tier": target_root_id,
+               "bytes": model.size_bytes, "files": len(sources),
+               "staging": str(staging), "status": "pending",
+               "error": "", "started_at": time.time(),
+               "updated_at": time.time()}
+        self._write_job(job)
+
+        try:
+            self._move_phase(job, "copying")
+            staging.mkdir(parents=True, exist_ok=True)
+            os.chmod(staging, 0o700)
+            for source, relative in zip(sources, relatives):
+                self._check_cancelled(job)
+                staged = staging / relative
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                self._copy_checking_cancellation(source, staged, job)
+                if self._sha256(source) != self._sha256(staged):
+                    raise ValueError(
+                        f"Checksum mismatch while copying {source.name}")
+            self._move_phase(job, "verifying")
+            self._check_cancelled(job)
+            # Re-checked here, not only at entry: the copy above can run for
+            # a long time, and nothing before this point stops a new
+            # instance being pointed at the model, or it being loaded, while
+            # the copy is in flight.
+            self._reject_if_busy(self.store.load(), model_id)
+            self._move_phase(job, "publishing")
+            self._publish(staging, target_path, relatives, destinations)
+            # A stopped model entry can follow the weights safely. Keeping the
+            # assignment is the point of moving storage; forcing somebody to
+            # delete and recreate it turns a physical move into configuration
+            # loss. This happens only after the verified copy is visible and
+            # before the source is removed, so a failed config write leaves
+            # both copies rather than a broken entry.
+            with self.store.mutate() as live:
+                for instance in live.instances:
+                    if instance.model_id == model_id:
+                        instance.model_id = job["target_model_id"]
+        except _MoveCancelled:
+            # A cancellation is an operator decision that succeeded, not a
+            # failure — the spec requires temporary files gone "on success,
+            # cancellation, timeout and recovery after restart", so the
+            # staged bytes are removed here rather than left as a phantom
+            # entry (a failure, below, keeps them for inspection instead).
+            shutil.rmtree(staging, ignore_errors=True)
+            job["status"] = "cancelled"
+            job["error"] = "Cancelled"
+            job["updated_at"] = time.time()
+            self._write_job(job)
+            return {"model_id": model_id, "job_id": job_id,
+                    "moved": False, "cancelled": True}
+        except Exception as error:
+            # Deliberately does not delete `staging`, published or not: a
+            # half-finished move is a resumable-failure state, not garbage.
+            # Deleting it here was what turned an interruption into data
+            # that existed nowhere — neither at the source, which this
+            # method never touches before the whole copy is verified, nor at
+            # the destination. It now lives outside the scanned tree (see
+            # `staging_root` above), so it stays inspectable without also
+            # appearing in the Library as a broken model.
+            job["status"] = "failed"
+            job["error"] = str(error)
+            job["updated_at"] = time.time()
+            self._write_job(job)
+            raise
+
+        # Everything named in the job is now published under its real name;
+        # the staging directory has nothing left in it worth keeping.
+        shutil.rmtree(staging, ignore_errors=True)
+
+        # Only once every file is verified in the staging area and published
+        # does the source get touched. A companion file (e.g. a tokenizer)
+        # can belong to more than one GGUF model in the same directory — see
+        # `Catalog._classify` — so one still needed by a sibling that has not
+        # moved is left where it is.
+        protected = self._companions_still_needed(config, model, sources)
+        for source in sources:
+            if source not in protected:
+                source.unlink()
+        self._prune_empty([s for s in sources if s not in protected],
+                          [source_root])
+
+        record = {"at": time.time(), "source_model_id": model_id,
+                  "target_model_id": job["target_model_id"],
+                  "source_tier": source_repository.root_id,
+                  "target_tier": target_root_id,
+                  "bytes": model.size_bytes, "files": len(sources)}
+        history = self.host.state_dir() / "model-moves.jsonl"
+        with history.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+        job["status"] = "completed"
+        job["updated_at"] = time.time()
+        self._write_job(job)
+        self._changed("models")
+        return {**record, "moved": True, "job_id": job_id}
+
+    def _reject_if_busy(self, config, model_id: str) -> None:
+        """Refuse a model that is loaded or loading.
+
+        Called both before the copy starts and again right before publish,
+        since the copy can take long enough for that to become true in between.
+        Stopped entries are repointed after the verified copy is published.
+        """
+        loaded = [item.id for item in config.instances
+                  if item.model_id == model_id and self.host.status(item.id).running]
+        if loaded:
+            raise ValueError(
+                "This model is currently loaded by " + ", ".join(loaded)
+                + ". Unload that entry in Models, then try the move again.")
+
+    @staticmethod
+    def _publish(staging: Path, target_path: Path,
+                relatives: list[Path], destinations: list[Path]) -> None:
+        """Make the staged copy visible, as close to one atomic act as the
+        filesystem allows.
+
+        When every file sits under one shared top-level folder — the
+        ordinary case, a model in its own directory — the whole folder is
+        renamed into place in a single `os.replace`, so a crash mid-publish
+        either has not happened yet or has already finished; there is no
+        state where the destination holds half a model under its real name.
+
+        When files sit loose (no shared folder — the GGUF-in-the-repository-
+        root case), there is no single directory to rename, so each file is
+        renamed on its own. An interruption there can leave a partial set,
+        which is exactly why the job record above exists: to say so rather
+        than pretend it did not happen.
+        """
+        tops = {relative.parts[0] if len(relative.parts) > 1 else None
+                for relative in relatives}
+        if len(tops) == 1 and None not in tops:
+            top = tops.pop()
+            final_dir = target_path / top
+            if not final_dir.exists():
+                os.replace(staging / top, final_dir)
+                return
+        for relative, destination in zip(relatives, destinations):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            (staging / relative).replace(destination)
+
+    def _companions_still_needed(self, config, model, sources: list[Path]) -> set[Path]:
+        """Companion files this move must not remove from the source.
+
+        A tokenizer or config file sitting in a GGUF directory is attached by
+        the catalog to *every* model in that directory, not just the one
+        being moved (`Catalog._classify` groups by directory, not by model).
+        Moving one model must not delete a file a sibling still needs to
+        load.
+        """
+        siblings = [item for item in self.catalog.scan(config.repositories)
+                    if item.id != model.id]
+        source_set = set(sources)
+        needed: set[Path] = set()
+        for sibling in siblings:
+            sibling_paths = {Path(item.path).resolve() for item in sibling.files}
+            needed |= sibling_paths & source_set
+        return needed
+
+    # -- move job records: durable, so a crash can be reported rather than --
+    # -- silently losing the move -------------------------------------------
+
+    def _move_job_dir(self) -> Path:
+        directory = self.host.state_dir() / "moves"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def _job_path(self, job_id: str) -> Path:
+        return self._move_job_dir() / f"{job_id}.json"
+
+    def _write_job(self, job: dict) -> None:
+        path = self._job_path(job["id"])
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(job, sort_keys=True))
+        temporary.replace(path)
+        self._changed("models")
+
+    def _read_job(self, job_id: str) -> dict:
+        return json.loads(self._job_path(job_id).read_text())
+
+    def _move_phase(self, job: dict, status: str) -> None:
+        job["status"] = status
+        job["updated_at"] = time.time()
+        self._write_job(job)
+
+    def _check_cancelled(self, job: dict) -> None:
+        """Whether someone asked for this move to stop.
+
+        Reading the job file back, rather than an in-memory flag, is what
+        lets `cancel_move` be called from a different request than the one
+        running the move.
+        """
+        try:
+            current = self._read_job(job["id"])
+        except FileNotFoundError:
+            return
+        if current.get("status") == "cancelling":
+            raise _MoveCancelled()
+
+    def move_jobs(self) -> list[dict]:
+        """Every move job on record, most recently updated first.
+
+        Read after a restart to find one that never reached `completed` — a
+        resumable failure to report, not a move that vanished without a
+        trace.
+        """
+        directory = self._move_job_dir()
+        jobs = []
+        for path in directory.glob("*.json"):
+            try:
+                jobs.append(json.loads(path.read_text()))
+            except (json.JSONDecodeError, OSError):
+                continue
+        jobs.sort(key=lambda item: item.get("updated_at", 0), reverse=True)
+        return jobs
+
+    UNFINISHED_MOVE_STATUSES = ("pending", "copying", "verifying",
+                                "publishing", "cancelling")
+
+    def recover_moves(self) -> list[dict]:
+        """Sweep move jobs left mid-flight by a process that did not exit cleanly.
+
+        Called once at startup, before anything else touches the move job
+        directory. A job still marked `copying` etc. has no thread behind it
+        any more — the process that was running it is the one that just
+        restarted — so it is explicitly marked failed rather than left to
+        claim, forever, that a move is still in progress. Its staged bytes,
+        which live outside the scanned tree (see `move_model`), are removed:
+        recovery is one of the four cases the spec names for cleaning up
+        temporary files, the other three being success, cancellation and
+        timeout.
+        """
+        recovered = []
+        for job in self.move_jobs():
+            if job.get("status") not in self.UNFINISHED_MOVE_STATUSES:
+                continue
+            staging = job.get("staging")
+            if staging:
+                shutil.rmtree(staging, ignore_errors=True)
+            job["status"] = "failed"
+            job["error"] = "Interrupted by a service restart"
+            job["updated_at"] = time.time()
+            self._write_job(job)
+            recovered.append(job)
+        return recovered
+
+    def cancel_move(self, job_id: str) -> dict:
+        """Ask an in-progress move to stop at the next file or phase boundary.
+
+        Does not touch the staged copy — the files already verified stay on
+        disk, so the same job can be inspected or cleaned up rather than the
+        work simply disappearing.
+        """
+        job = self._read_job(job_id)
+        if job["status"] in ("completed", "failed", "cancelled"):
+            return job
+        job["status"] = "cancelling"
+        job["updated_at"] = time.time()
+        self._write_job(job)
+        return job
+
+    # Checked between chunks during the copy itself, not only once per file —
+    # a single-file GGUF, the common case, previously had exactly one
+    # cancellation check (before any bytes moved) and could not be stopped
+    # once copying began.
+    _COPY_CHUNK = 64 * 1024 * 1024
+
+    def _copy_checking_cancellation(self, source: Path, destination: Path,
+                                    job: dict) -> None:
+        with source.open("rb") as read_from, destination.open("wb") as write_to:
+            while True:
+                self._check_cancelled(job)
+                chunk = read_from.read(self._COPY_CHUNK)
+                if not chunk:
+                    break
+                write_to.write(chunk)
+        shutil.copystat(source, destination)
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
     @staticmethod
     def _prune_empty(paths: list[Path], roots: list[Path]) -> None:
         """Take away the directory too, if the model was the only thing in it.
@@ -892,12 +1321,23 @@ class Operations:
         return {"results": usable, "hidden": len(results) - len(usable)}
 
     def remote_sets(self, repo: str) -> list[dict]:
-        """What a repository holds that this machine can run."""
+        """What a repository holds that this machine can run.
+
+        Any bundle declared under this repository is listed too, first, because
+        the individual parts below it cannot be used on their own.
+        """
         supported = set(self.supported_formats())
-        return [item.json() for item in self.huggingface.sets(repo)
+        return [item.json()
+                for item in self.huggingface.sets(repo, self._bundles())
                 if item.format in supported]
 
-    def download(self, repo: str, name: str, repository_id: str | None = None) -> dict:
+    def _bundles(self):
+        """The declared bundles, refused now if any of them is unsafe."""
+        return bundles.parse(self.store.load().downloads.get("bundles", []))
+
+    def download(self, repo: str, name: str,
+                 repository_id: str | None = None,
+                 storage_tier: str | None = None) -> dict:
         """Queue a complete model, into the repository that holds its format.
 
         The destination is worked out rather than asked for. A GGUF model
@@ -910,28 +1350,50 @@ class Operations:
         written to should not cost a round trip to Hugging Face to discover.
         """
         config = self.store.load()
+        selected_tier = storage_tier or config.download_root
+        config.model_root(selected_tier)
 
         if repository_id:
-            destination = self._writable(config.repository(repository_id))
+            repository = config.repository(repository_id)
+            if storage_tier and repository.root_id != storage_tier:
+                raise ValueError(
+                    f"{repository.name} is a {repository.root_id} repository; "
+                    f"it cannot receive a {storage_tier} download. Choose a "
+                    f"repository on the {storage_tier} tier, or drop the "
+                    "explicit tier and let the repository decide.")
+            destination = self._writable(repository)
             remote = self._remote_set(repo, name)
         else:
             remote = self._remote_set(repo, name)
-            destination = self._repository_for(config, remote.format)
+            destination = self._repository_for(
+                config, remote.format, selected_tier, remote.task)
 
         target = Path(destination.path) / Path(name).name
-        return self.downloads.enqueue(remote, target).json()
+        return self.downloads.enqueue(
+            remote, target, storage_tier=destination.root_id).json()
 
     def _remote_set(self, repo: str, name: str):
-        remote = next((item for item in self.huggingface.sets(repo)
+        remote = next((item for item in self.huggingface.sets(repo, self._bundles())
                        if item.name == name), None)
         if remote is None:
             raise KeyError(f"{name} is not in {repo}")
         return remote
 
-    def _repository_for(self, config, format_name: str):
-        """The repository that holds this format and can be written to."""
+    def _repository_for(self, config, format_name: str,
+                        root_id: str = "core", task: str = ""):
+        """The repository that holds this format and can be written to.
+
+        One format can have more than one repository when the same engine does
+        more than one job — ComfyUI generation and ComfyUI editing read the
+        same kind of file and are kept apart. A set that says which job it is
+        for picks the matching one instead of whichever comes first.
+        """
         candidates = [item for item in config.repositories
-                      if item.format == format_name]
+                      if item.format == format_name
+                      and item.root_id == root_id]
+        if task:
+            preferred = [item for item in candidates if item.task == task]
+            candidates = preferred or candidates
         if not candidates:
             raise ValueError(
                 f"No repository is configured for {format_name} models. "
@@ -939,7 +1401,7 @@ class Operations:
         errors = []
         for item in candidates:
             try:
-                return self._writable(item)
+                return self._writable_in_root(item, config.model_root(root_id))
             except ValueError as error:
                 errors.append(str(error))
         raise ValueError(errors[0])
@@ -962,6 +1424,44 @@ class Operations:
                 f"{repository.name} is not writable by the manager. "
                 f"Give it ownership of {path}.")
         return repository
+
+    def _writable_in_root(self, repository, model_root):
+        """Create a derived repository directory inside a valid model root.
+
+        Format/task directories are consequences of the configured root, not
+        operator-managed mount points. A first audio or image move should make
+        its own subdirectory. The root itself is never created here: a missing
+        mount must remain a visible error rather than silently writing to the
+        container's underlying disk.
+        """
+        path = Path(repository.path)
+        if path.is_dir():
+            return self._writable(repository)
+        root = Path(model_root.path)
+        if not model_root.enabled:
+            raise ValueError(f"{model_root.name} storage is disabled")
+        if not model_root.writable:
+            raise ValueError(f"{model_root.name} storage is marked read-only")
+        if not root.is_dir():
+            raise ValueError(
+                f"{model_root.name} storage is not mounted at {root}. "
+                "Connect or configure that storage, then try again.")
+        resolved_root = root.resolve()
+        candidate = path.resolve(strict=False)
+        if not candidate.is_relative_to(resolved_root):
+            raise ValueError(
+                f"Refusing to create a model directory outside {resolved_root}")
+        if not os.access(resolved_root, os.W_OK | os.X_OK):
+            raise ValueError(
+                f"{model_root.name} storage is not writable by the manager at "
+                f"{resolved_root}")
+        try:
+            path.mkdir(parents=True)
+        except OSError as error:
+            raise ValueError(
+                f"Could not prepare {model_root.name} storage for "
+                f"{repository.name}: {error}") from None
+        return self._writable(repository)
 
     def transfers(self) -> list[dict]:
         return self.downloads.list()

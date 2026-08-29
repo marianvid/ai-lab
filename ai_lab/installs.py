@@ -40,6 +40,7 @@ from collections import deque
 from pathlib import Path
 
 from .events import EventBus
+from .gitapps import GitApplicationInstall
 from .types import ChangeEvent, LogEvent
 
 # The link the engine is launched through. Everything else is a sibling of it.
@@ -111,7 +112,8 @@ class PackageInstall:
                  modules: list[str] | None = None,
                  requirements: list[str] | None = None,
                  requires_cuda: bool = False,
-                 pip_args: list[str] | None = None) -> None:
+                 pip_args: list[str] | None = None,
+                 minimum_versions: dict[str, str] | None = None) -> None:
         self.engine_id = engine_id
         self.root = Path(root)
         self.package = package
@@ -123,6 +125,7 @@ class PackageInstall:
         self.requirements = list(requirements or [])
         self.requires_cuda = requires_cuda
         self.pip_args = list(pip_args or [])
+        self.minimum_versions = dict(minimum_versions or {})
         self.bus = bus
         self.uv = uv
         self.python = python          # which Python to build a new one from
@@ -256,6 +259,10 @@ class PackageInstall:
             if not landed:
                 raise ValueError(f"Could not determine which {self.package} version to install")
             wanted = _pin(self.install_spec, landed)
+            # A newly configured engine has no root yet. `uv venv` creates the
+            # environment itself, but not an absent parent directory; failing
+            # here made every first package install stop before downloading.
+            self.root.mkdir(parents=True, exist_ok=True)
             target = self.root / f"{PREFIX}{landed}"
             if target.exists():
                 raise ValueError(
@@ -329,10 +336,21 @@ class PackageInstall:
         """Refuse to hand the engine something that will not start."""
         imports = ";".join(
             f"importlib.import_module({module!r})" for module in self.modules)
-        cuda = (";import torch;assert torch.cuda.is_available(),"
+        versions = ";".join(
+            "assert Version(meta.version(%r)) >= Version(%r), "
+            "%r" % (package, minimum,
+                     f"{package} must be at least {minimum}")
+            for package, minimum in self.minimum_versions.items())
+        cuda = ("import torch;assert torch.cuda.is_available(),"
                 "'CUDA is not available'" if self.requires_cuda else "")
-        program = ("import importlib, importlib.metadata as meta;"
-                   f"{imports}{cuda};print('ok', meta.version({self.package!r}))")
+        program = ";".join(part for part in (
+            "import importlib, importlib.metadata as meta",
+            "from packaging.version import Version",
+            imports,
+            versions,
+            cuda,
+            f"print('ok', meta.version({self.package!r}))",
+        ) if part)
         result = subprocess.run([str(environment / "bin" / "python"), "-c", program],
                                 capture_output=True, text=True,
                                 timeout=CHECK_TIMEOUT_S)
@@ -433,6 +451,9 @@ class Installs:
         self._stop = threading.Event()
         for engine_id, engine_settings in (settings or {}).items():
             source = (engine_settings or {}).get("source") or {}
+            if source.get("kind") == "git-app":
+                self._installs[engine_id] = GitApplicationInstall(engine_id, engine_settings, bus)
+                continue
             package = source.get("package")
             root = source.get("root") or _root_of(engine_settings.get("binary", ""))
             if package and root:
@@ -443,7 +464,8 @@ class Installs:
                     modules=source.get("modules"),
                     requirements=source.get("requirements"),
                     requires_cuda=bool(source.get("requires_cuda", False)),
-                    pip_args=source.get("pip_args"))
+                    pip_args=source.get("pip_args"),
+                    minimum_versions=source.get("minimum_versions"))
 
     def all(self) -> list[dict]:
         return [item.status() for item in self._installs.values()]
@@ -480,7 +502,7 @@ class Installs:
             if self._stop.wait(interval_s):
                 return
 
-    def get(self, engine_id: str) -> PackageInstall:
+    def get(self, engine_id: str):
         install = self._installs.get(engine_id)
         if install is None:
             raise KeyError(f"{engine_id} is not installed as packages")

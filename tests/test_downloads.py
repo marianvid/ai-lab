@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ai_lab.downloads.huggingface import RemoteFile, RemoteSet
-from ai_lab.downloads.transfers import DownloadManager, State
+from ai_lab.downloads.transfers import WORKING, DownloadManager, State
 
 
 class FakeResponse(io.BytesIO):
@@ -77,8 +77,18 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual([item.name for item in self.destination.iterdir()], ["a.gguf"])
 
     def test_an_interrupted_file_resumes_instead_of_restarting(self):
-        self.destination.mkdir(parents=True)
-        (self.destination / "a.gguf.part").write_bytes(b"x" * 5)
+        """Bytes already fetched are kept — and they were never on show.
+
+        The half of a file that arrived before the connection dropped sits in
+        the working folder beside the repository, not in the repository, so
+        the library never had a chance to see it. Asking again continues from
+        where it stopped rather than fetching those bytes twice.
+        """
+        working = self.destination.parent / WORKING / "org_model_model"
+        working.mkdir(parents=True)
+        (working / "a.gguf.part").write_bytes(b"x" * 5)
+        self.assertFalse(self.destination.exists(),
+                         "a partial download must not create the model's folder")
         manager = DownloadManager(opener=self.opener())
         transfer = manager.enqueue(remote_set(), self.destination)
         self.wait(manager, transfer)

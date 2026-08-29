@@ -18,8 +18,11 @@ from dataclasses import asdict
 from ..types import Capabilities, Task
 from .base import Engine
 from .llamacpp import LlamaCppEngine
+from .mlxwhisper import MlxWhisperEngine
 from .nemo import NemoEngine
 from .onnx import OnnxEngine
+from .paddleocr import PaddleOcrEngine
+from .comfyui import ComfyUiEngine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -35,6 +38,9 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
     return {
         LlamaCppEngine.id: LlamaCppEngine(
             binary=settings.get(LlamaCppEngine.id, {}).get("binary")),
+        MlxWhisperEngine.id: MlxWhisperEngine(
+            binary=settings.get(MlxWhisperEngine.id, {}).get("binary"),
+            server=settings.get(MlxWhisperEngine.id, {}).get("server")),
         VllmEngine.id: VllmEngine(
             binary=settings.get(VllmEngine.id, {}).get("binary")),
         NemoEngine.id: NemoEngine(
@@ -46,6 +52,14 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         PyannoteEngine.id: PyannoteEngine(
             binary=settings.get(PyannoteEngine.id, {}).get("binary"),
             server=settings.get(PyannoteEngine.id, {}).get("server")),
+        PaddleOcrEngine.id: PaddleOcrEngine(
+            binary=settings.get(PaddleOcrEngine.id, {}).get("binary"),
+            server=settings.get(PaddleOcrEngine.id, {}).get("server")),
+        ComfyUiEngine.id: ComfyUiEngine(
+            binary=settings.get(ComfyUiEngine.id, {}).get("binary"),
+            server=settings.get(ComfyUiEngine.id, {}).get("server"),
+            comfyui=settings.get(ComfyUiEngine.id, {}).get("comfyui"),
+            model_paths=settings.get(ComfyUiEngine.id, {}).get("model_paths", [])),
     }
 
 
@@ -76,7 +90,10 @@ class Registry:
         when two are installed.
         """
         rows = []
+        supported = capabilities.supported_engines or frozenset(self._engines)
         for key, engine in self._engines.items():
+            if key not in supported:
+                continue
             usable = key in capabilities.engines
             rows.append({
                 "id": key,
@@ -100,6 +117,7 @@ def _reason(engine_id: str, capabilities: Capabilities) -> str:
         return "Requires an NVIDIA GPU"
     if engine_id == "nemo" and capabilities.accelerator_kind != "cuda":
         return "Requires an NVIDIA GPU"
-    if engine_id in ("vllm", "nemo", "onnx", "pyannote"):
+    if engine_id in ("vllm", "nemo", "mlxwhisper", "onnx", "pyannote",
+                     "paddleocr", "comfyui"):
         return "Not installed"
     return "Binary not found"

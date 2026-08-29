@@ -1,5 +1,20 @@
 # Model storage layout
 
+## Core and benchmark tiers
+
+AI-Lab uses two explicit storage tiers. "core" is the production library on
+the internal Lexar. "benchmark" is disposable test capacity on the external
+Corsair. A missing benchmark disk never redirects a download to core.
+
+| Tier | Host | LXC | Purpose |
+|---|---|---|---|
+| core | /mnt/ai-models | /models | production models |
+| benchmark | /mnt/corsair-4tb/test_models | /test_models | downloads and benchmarks |
+
+Library can promote or demote a model. AI-Lab copies into a temporary path,
+verifies every file by SHA-256, commits the destination, and only then removes
+the source. Models referenced by an instance cannot move.
+
 This document describes how model weights are organised on the AI-Lab host and
 why. The layout was chosen before multiple engines arrived, and now lets
 llama.cpp, vLLM, NeMo and ONNX-backed audio services coexist without moving or
@@ -113,6 +128,33 @@ Two consequences that caused real bugs:
 
 So a directory holding five weight files plus a tokenizer is **one** thing to
 show in the interface, not six.
+
+### An image model is several files, and still one model
+
+The directory-is-the-model rule does the work here too, but the files arrive
+from further apart. A ComfyUI image model is assembled from parts that live in
+different folders of a repository, and sometimes in different repositories:
+the diffusion model, the text encoder that reads the prompt, and the VAE that
+turns the result into a picture.
+
+They are stored **flat, in one directory**, under their own upstream file
+names:
+
+```
+/test_models/images/generation/qwen-image-2512-nvfp4/
+├── qwen_image_nvfp4.safetensors          the diffusion model
+├── qwen_2.5_vl_7b_nvfp4.safetensors      the text encoder
+└── qwen_image_vae.safetensors            the VAE
+```
+
+The folders they sat in upstream are not recreated, because ComfyUI is pointed
+at this one directory for every category it looks a file up under, and it finds
+each part by name. Which parts belong together is declared in configuration
+rather than guessed; see [the Library](docs/library.md#models-that-are-made-of-parts).
+
+A part used by two models is stored once per model. The alternative — one copy
+with links to it — makes deleting either model a question about the other, and
+the disk this is kept on has room.
 
 ### A projector is weights, but it is not a model
 

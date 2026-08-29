@@ -18,7 +18,7 @@ from ai_lab.gateway import (CardBusy, CouldNotLoad, Gateway, NotConfigured,
                             ShapeNotServed)
 from ai_lab.scheduler import WillNotFit
 from ai_lab.runtime import Operation
-from ai_lab.types import AcceleratorSnapshot
+from ai_lab.types import AcceleratorSnapshot, Task
 
 
 
@@ -1381,3 +1381,30 @@ class RefusingWhatCannotFit(unittest.TestCase):
             gateway.acquire("reviewer")
         self.assertEqual(caught.exception.kind, "insufficient_memory")
         self.assertEqual(caught.exception.code, "model_does_not_fit")
+
+
+class TaskTimeoutTests(unittest.TestCase):
+    """A slow image or OCR job must not force a text client onto its clock."""
+
+    def test_an_unconfigured_task_gets_the_machine_defaults(self):
+        gateway = Gateway(two_models(), first_byte_s=120.0, between_bytes_s=30.0)
+        self.assertEqual(gateway.timeouts_for(Task.TEXT_GENERATION), (120.0, 30.0))
+
+    def test_a_configured_task_overrides_the_defaults(self):
+        gateway = Gateway(two_models(), first_byte_s=120.0, between_bytes_s=30.0,
+                          task_timeouts={"ocr": {"first_byte_s": 60.0,
+                                                 "between_bytes_s": 15.0}})
+        self.assertEqual(gateway.timeouts_for(Task.OCR), (60.0, 15.0))
+        # Unrelated tasks are unaffected by another task's override.
+        self.assertEqual(gateway.timeouts_for(Task.TEXT_GENERATION), (120.0, 30.0))
+
+    def test_a_partial_override_falls_back_for_the_missing_half(self):
+        gateway = Gateway(two_models(), first_byte_s=120.0, between_bytes_s=30.0,
+                          task_timeouts={"ocr": {"first_byte_s": 60.0}})
+        self.assertEqual(gateway.timeouts_for(Task.OCR), (60.0, 30.0))
+
+    def test_apply_settings_replaces_task_timeouts_at_once(self):
+        gateway = quick(two_models())
+        gateway.apply_settings({"task_timeouts": {"ocr": {"first_byte_s": 45.0,
+                                                           "between_bytes_s": 20.0}}})
+        self.assertEqual(gateway.timeouts_for(Task.OCR), (45.0, 20.0))

@@ -18,16 +18,26 @@ def current_host(engines: dict | None = None) -> Host:
     only for vLLM: it is installed in a virtual environment, so PATH cannot be
     used to tell whether it is there.
     """
+    settings = engines or {}
     if sys.platform == "darwin":
         from .darwin import DarwinHost
 
-        return DarwinHost()
+        return DarwinHost(
+            llamacpp_binary=settings.get("llamacpp", {}).get("binary"),
+            mlxwhisper_binary=settings.get("mlxwhisper", {}).get("binary"),
+            onnx_binary=settings.get("onnx", {}).get("binary"),
+            pyannote_binary=settings.get("pyannote", {}).get("binary"),
+            paddleocr_binary=settings.get("paddleocr", {}).get("binary"),
+            comfyui_binary=settings.get("comfyui", {}).get("binary"),
+            comfyui_main=settings.get("comfyui", {}).get("comfyui"),
+        )
     from .linux import LinuxHost
 
-    settings = engines or {}
     return LinuxHost(
         vllm_binary=settings.get("vllm", {}).get("binary"),
         nemo_binary=settings.get("nemo", {}).get("binary"),
         onnx_binary=settings.get("onnx", {}).get("binary"),
         pyannote_binary=settings.get("pyannote", {}).get("binary"),
+        paddleocr_binary=settings.get("paddleocr", {}).get("binary"),
+        comfyui_binary=settings.get("comfyui", {}).get("binary"),
     )

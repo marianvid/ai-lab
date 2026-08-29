@@ -64,6 +64,19 @@ class Repository:
     # shorter.
     path: str = ""
     writable: bool = True
+    root_id: str = "core"
+    base_id: str = ""
+
+
+@dataclass(slots=True)
+class ModelRoot:
+    """One storage tier holding the same format-first repository tree."""
+
+    id: str
+    name: str
+    path: str
+    enabled: bool = True
+    writable: bool = True
 
 
 # What an id may be made of. Letters, digits and hyphens, which is what fits in
@@ -118,14 +131,35 @@ class Config:
     # Explicit allow-list of caches and leftovers that may be removed from the
     # Storage page. Models are never listed here; Library owns them.
     storage: dict = field(default_factory=dict)
+    # Named, operator-owned image workflows and their durable job state.
+    # Public callers select a profile; they never submit a ComfyUI graph.
+    images: dict = field(default_factory=dict)
+    # Settings for fetching models. Today the only one is `bundles`: models
+    # assembled from named upstream files rather than downloaded as a whole
+    # directory. See `downloads/bundles.py` for why they have to be declared.
+    downloads: dict = field(default_factory=dict)
     # The one directory every model lives under. Each repository is a
     # folder in it, named after the format.
     models_root: str = ""
+    model_roots: list[ModelRoot] = field(default_factory=list)
+    download_root: str = "core"
+
+    def __post_init__(self) -> None:
+        if not self.model_roots:
+            self.model_roots = [
+                ModelRoot(id="core", name="Core", path=self.models_root)
+            ]
 
     def repository(self, repository_id: str) -> Repository:
         found = next((item for item in self.repositories if item.id == repository_id), None)
         if found is None:
             raise KeyError(f"Unknown repository: {repository_id}")
+        return found
+
+    def model_root(self, root_id: str) -> ModelRoot:
+        found = next((item for item in self.model_roots if item.id == root_id), None)
+        if found is None:
+            raise KeyError(f"Unknown model root: {root_id}")
         return found
 
     def instance(self, instance_id: str) -> Instance:
@@ -146,12 +180,31 @@ class ConfigStore:
         with self._lock:
             raw = json.loads(self.path.read_text())
         root = raw.get("models_root") or _root_of(raw.get("repositories", []))
+        roots = [ModelRoot(**item) for item in raw.get("model_roots", [])]
+        if not roots:
+            roots = [ModelRoot(id="core", name="Core", path=root)]
+        elif not any(item.id == "core" for item in roots):
+            roots.insert(0, ModelRoot(id="core", name="Core", path=root))
+        core = next(item for item in roots if item.id == "core")
+        core.path = root or core.path
+        validate_distinct_roots(roots)
+        root_map = {item.id: item for item in roots}
+        stored = [item for item in raw.get("repositories", [])
+                  if item.get("root_id", "core") == "core"]
+        repositories = [_under(root_map, item) for item in stored]
+        for model_root in roots:
+            if model_root.id == "core":
+                continue
+            for item in stored:
+                clone = {**item, "id": f"{model_root.id}-{item['id']}",
+                         "root_id": model_root.id, "base_id": item["id"]}
+                repositories.append(_under(root_map, clone))
         return Config(
             title=raw.get("title", "AI-Lab"),
             host=raw.get("host", "0.0.0.0"),
             port=int(raw.get("port", 8090)),
             models_root=root,
-            repositories=[_under(root, item) for item in raw.get("repositories", [])],
+            repositories=repositories,
             # `name` is dropped rather than rejected: a configuration written
             # before the label was removed still loads, and loses only the
             # label.
@@ -162,13 +215,22 @@ class ConfigStore:
             gateway=raw.get("gateway", {}),
             memory=raw.get("memory", {}),
             storage=raw.get("storage", {}),
+            images=raw.get("images", {}),
+            downloads=raw.get("downloads", {}),
+            model_roots=roots,
+            download_root=raw.get("download_root", "core"),
         )
 
     def save(self, config: Config) -> None:
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_name(self.path.name + ".tmp")
-            temporary.write_text(json.dumps(asdict(config), indent=2) + "\n")
+            payload = asdict(config)
+            payload["repositories"] = [
+                asdict(item) for item in config.repositories
+                if item.root_id == "core"
+            ]
+            temporary.write_text(json.dumps(payload, indent=2) + "\n")
             temporary.replace(self.path)
 
     @contextmanager
@@ -184,7 +246,7 @@ class ConfigStore:
             self.save(config)
 
 
-def _under(root: str, stored: dict) -> Repository:
+def _under(roots: dict[str, ModelRoot], stored: dict) -> Repository:
     """A repository, pointed at its folder under the models root.
 
     Whatever path was stored is ignored: there is one root now, and the rest
@@ -193,9 +255,39 @@ def _under(root: str, stored: dict) -> Repository:
     """
     fields = {key: value for key, value in stored.items() if key != "path"}
     repository = Repository(**fields)
+    model_root = roots.get(repository.root_id)
     relative = repository.subpath or repository.format
+    root = model_root.path if model_root and model_root.enabled else ""
+    repository.base_id = repository.base_id or repository.id
+    repository.writable = bool(repository.writable and model_root
+                               and model_root.writable)
     return replace(repository,
                    path=str(Path(root) / relative) if root else "")
+
+
+def validate_distinct_roots(roots: list[ModelRoot]) -> None:
+    """Refuse two enabled storage tiers that are actually the same place.
+
+    A duplicated path, or one root symlinked onto another, would make a move
+    between tiers copy a file onto itself — or worse, "complete" without
+    moving anything at all. Compared by the real, resolved path rather than
+    the string that was typed, so a symlink or a trailing slash cannot slip
+    past this.
+    """
+    seen: dict[str, str] = {}
+    for root in roots:
+        if not root.enabled or not root.path:
+            continue
+        try:
+            resolved = str(Path(root.path).resolve())
+        except OSError:
+            continue
+        if resolved in seen and seen[resolved] != root.id:
+            raise ValueError(
+                f"Storage roots {seen[resolved]!r} and {root.id!r} both point "
+                f"at {resolved}. Each storage tier must be a distinct "
+                f"location.")
+        seen[resolved] = root.id
 
 
 def _root_of(stored: list) -> str:

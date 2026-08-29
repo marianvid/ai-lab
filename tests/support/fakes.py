@@ -8,6 +8,9 @@ deterministically instead of waited for.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from ai_lab.types import (AcceleratorSnapshot, Capabilities, ProcessSpec,
                           ProcessStatus)
 
@@ -29,6 +32,13 @@ class FakeHost:
         self.total_mb = total_mb
         self._curve = list(memory_curve or [0.0])
         self._reading = 0
+        # A private directory rather than the real host's — a test must not
+        # write move-job records or history into whatever machine happens to
+        # run it.
+        self._state_dir = Path(tempfile.mkdtemp(prefix="ai-lab-fakehost-"))
+
+    def state_dir(self) -> Path:
+        return self._state_dir
 
     def capabilities(self) -> Capabilities:
         return Capabilities(supervisor="fake", engines=frozenset({"llamacpp"}),

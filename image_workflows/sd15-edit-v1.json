@@ -1,0 +1,46 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {"ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors"}
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "", "clip": ["1", 1]}
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "", "clip": ["1", 1]}
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "__AI_LAB_INPUT__"}
+  },
+  "5": {
+    "class_type": "VAEEncode",
+    "inputs": {"pixels": ["4", 0], "vae": ["1", 2]}
+  },
+  "6": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 16,
+      "cfg": 7.0,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.55,
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["5", 0]
+    }
+  },
+  "7": {
+    "class_type": "VAEDecode",
+    "inputs": {"samples": ["6", 0], "vae": ["1", 2]}
+  },
+  "8": {
+    "class_type": "SaveImage",
+    "inputs": {"filename_prefix": "ai-lab-edit-smoke", "images": ["7", 0]}
+  }
+}
+

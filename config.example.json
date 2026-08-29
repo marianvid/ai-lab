@@ -2,6 +2,23 @@
   "title": "AI-Lab",
   "host": "0.0.0.0",
   "port": 8090,
+  "model_roots": [
+    {
+      "id": "core",
+      "name": "Core",
+      "path": "/models",
+      "enabled": true,
+      "writable": true
+    },
+    {
+      "id": "benchmark",
+      "name": "Benchmark",
+      "path": "/test_models",
+      "enabled": true,
+      "writable": true
+    }
+  ],
+  "download_root": "benchmark",
   "models_root": "/models",
   "engines": {
     "llamacpp": {
@@ -10,7 +27,10 @@
         "path": "/opt/ai/llama.cpp",
         "builds": "/opt/ai/llama.cpp-builds",
         "legacy_build": "/opt/ai/llama.cpp/build",
-        "cmake_args": ["-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"],
+        "cmake_args": [
+          "-DGGML_CUDA=ON",
+          "-DCMAKE_CUDA_ARCHITECTURES=native"
+        ],
         "line": "stable",
         "releases": "ggml-org/llama.cpp"
       }
@@ -30,7 +50,9 @@
       "source": {
         "package": "nemo_toolkit",
         "install": "nemo_toolkit[asr]",
-        "modules": ["nemo.collections.asr"],
+        "modules": [
+          "nemo.collections.asr"
+        ],
         "requires_cuda": true,
         "root": "/opt/ai/nemo",
         "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
@@ -42,8 +64,15 @@
       "server": "/opt/ai-lab/ai_lab/audio/server.py",
       "source": {
         "package": "onnxruntime",
-        "modules": ["onnxruntime", "torch", "soundfile"],
-        "requirements": ["torch", "soundfile"],
+        "modules": [
+          "onnxruntime",
+          "torch",
+          "soundfile"
+        ],
+        "requirements": [
+          "torch",
+          "soundfile"
+        ],
         "root": "/opt/ai/silero",
         "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
         "uv": "/usr/local/bin/uv"
@@ -54,11 +83,114 @@
       "server": "/opt/ai-lab/ai_lab/audio/server.py",
       "source": {
         "package": "pyannote.audio",
-        "modules": ["pyannote.audio"],
+        "modules": [
+          "pyannote.audio"
+        ],
         "requires_cuda": true,
         "root": "/opt/ai/pyannote",
         "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
         "uv": "/usr/local/bin/uv"
+      }
+    },
+    "paddleocr": {
+      "binary": "/opt/ai/paddleocr/current/bin/python",
+      "server": "/opt/ai-lab/ai_lab/images/server.py",
+      "source": {
+        "package": "paddleocr",
+        "modules": [
+          "paddleocr"
+        ],
+        "root": "/opt/ai/paddleocr",
+        "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
+        "uv": "/usr/local/bin/uv"
+      }
+    },
+    "comfyui": {
+      "binary": "/opt/ai/comfyui/current/.venv/bin/python",
+      "server": "/opt/ai-lab/ai_lab/images/comfyui_server.py",
+      "comfyui": "/opt/ai/comfyui/current/ComfyUI/main.py",
+      "model_paths": [
+        "/models",
+        "/test_models"
+      ],
+      "source": {
+        "kind": "git-app",
+        "root": "/opt/ai/comfyui",
+        "repository": "https://github.com/Comfy-Org/ComfyUI.git",
+        "application": "ComfyUI",
+        "python": "/opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12",
+        "uv": "/usr/local/bin/uv",
+        "requires_cuda": true,
+        "verify_module": "server"
+      }
+    }
+  },
+  "images": {
+    "workflow_root": "/etc/ai-lab/image-workflows",
+    "state_dir": "/var/lib/ai-lab/image-jobs",
+    "client_wait_s": 1800,
+    "result_ttl_s": 86400,
+    "profiles": {
+      "comic-character": {
+        "description": "Character-consistent comic panel generation",
+        "version": "1",
+        "task": "generation",
+        "model": "image-comic",
+        "workflow": "comic-character-api.json",
+        "inputs": {
+          "prompt": [
+            "6",
+            "text"
+          ],
+          "negative_prompt": [
+            "7",
+            "text"
+          ],
+          "seed": [
+            "3",
+            "seed"
+          ],
+          "width": [
+            "5",
+            "width"
+          ],
+          "height": [
+            "5",
+            "height"
+          ]
+        }
+      },
+      "comic-edit": {
+        "description": "Reference-guided comic panel edit",
+        "version": "1",
+        "task": "edit",
+        "model": "image-comic-edit",
+        "workflow": "comic-edit-api.json",
+        "inputs": {
+          "prompt": [
+            "6",
+            "text"
+          ],
+          "image": [
+            "10",
+            "image"
+          ],
+          "seed": [
+            "3",
+            "seed"
+          ]
+        }
+      }
+    }
+  },
+  "gateway": {
+    "max_upload_bytes": 26214400,
+    "max_upload_pixels": 50000000,
+    "max_upload_dimension": 8000,
+    "task_timeouts": {
+      "ocr": {
+        "first_byte_s": 60,
+        "between_bytes_s": 30
       }
     }
   },
@@ -121,6 +253,27 @@
       "format": "pyannote",
       "task": "diarization",
       "subpath": "audio/diarization/pyannote"
+    },
+    {
+      "id": "images-paddleocr",
+      "name": "PaddleOCR",
+      "format": "paddleocr",
+      "task": "ocr",
+      "subpath": "images/ocr"
+    },
+    {
+      "id": "images-comfyui-generation",
+      "name": "ComfyUI generation models",
+      "format": "comfyui",
+      "task": "image-generation",
+      "subpath": "images/generation"
+    },
+    {
+      "id": "images-comfyui-edit",
+      "name": "ComfyUI editing models",
+      "format": "comfyui",
+      "task": "image-edit",
+      "subpath": "images/edit"
     }
   ],
   "instances": [
@@ -149,6 +302,86 @@
         "cache_type_v": "q4_0",
         "flash_attention": true
       }
+    },
+    {
+      "id": "ocr",
+      "engine": "paddleocr",
+      "model_id": "images-paddleocr/pp-ocrv5",
+      "port": 8092,
+      "params": {}
+    },
+    {
+      "id": "image-comic",
+      "engine": "comfyui",
+      "model_id": "images-comfyui-generation/comic-model",
+      "port": 8093,
+      "params": {}
     }
-  ]
+  ],
+  "downloads": {
+    "bundles": [
+      {
+        "name": "qwen-image-2512-nvfp4",
+        "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+        "format": "comfyui",
+        "task": "image-generation",
+        "components": [
+          {
+            "role": "diffusion_model",
+            "path": "split_files/diffusion_models/qwen_image_nvfp4.safetensors"
+          },
+          {
+            "role": "text_encoder",
+            "path": "split_files/text_encoders/qwen_2.5_vl_7b_nvfp4.safetensors"
+          },
+          {
+            "role": "vae",
+            "path": "split_files/vae/qwen_image_vae.safetensors"
+          }
+        ]
+      },
+      {
+        "name": "qwen-image-edit-2511-fp8mixed",
+        "repo": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+        "format": "comfyui",
+        "task": "image-edit",
+        "components": [
+          {
+            "role": "diffusion_model",
+            "path": "split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors"
+          },
+          {
+            "role": "text_encoder",
+            "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+            "path": "split_files/text_encoders/qwen_2.5_vl_7b_nvfp4.safetensors"
+          },
+          {
+            "role": "vae",
+            "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+            "path": "split_files/vae/qwen_image_vae.safetensors"
+          }
+        ]
+      },
+      {
+        "name": "flux2-dev-fp8mixed",
+        "repo": "Comfy-Org/flux2-dev",
+        "format": "comfyui",
+        "task": "image-generation",
+        "components": [
+          {
+            "role": "diffusion_model",
+            "path": "split_files/diffusion_models/flux2_dev_fp8mixed.safetensors"
+          },
+          {
+            "role": "text_encoder",
+            "path": "split_files/text_encoders/mistral_3_small_flux2_fp4_mixed.safetensors"
+          },
+          {
+            "role": "vae",
+            "path": "split_files/vae/flux2-vae.safetensors"
+          }
+        ]
+      }
+    ]
+  }
 }

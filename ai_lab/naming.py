@@ -22,6 +22,7 @@ WEIGHT_SUFFIXES = {
     ".safetensors": "safetensors",
     ".nemo": "nemo",
     ".onnx": "onnx",
+    ".pdiparams": "paddleocr",
 }
 
 # Files that belong to a model without holding weights.
@@ -29,6 +30,7 @@ COMPANION_NAMES = frozenset({
     "config.json", "generation_config.json", "special_tokens_map.json",
     "vocab.json", "merges.txt", "preprocessor_config.json",
     "chat_template.jinja", "model.safetensors.index.json",
+    "inference.json", "inference.yml",
 })
 COMPANION_PREFIXES = ("tokenizer",)
 

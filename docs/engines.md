@@ -99,6 +99,22 @@ entries to unload. The engine is about to be launched from somewhere else, and
 a model already on the card would keep running the old one while the page said
 otherwise.
 
+### ComfyUI core and custom nodes
+
+ComfyUI is managed as a complete Git application rather than updated inside
+its live checkout. Each release contains a pinned ComfyUI commit, an isolated
+Python environment, and pinned copies of every Git-based custom node. AI-Lab
+installs all requirements and verifies CUDA plus the ComfyUI server import
+before atomically moving `/opt/ai/comfyui/current`. A failed candidate is
+removed and the active release is never touched.
+
+Custom-node updates use the same mechanism: AI-Lab copies the active set of
+nodes into a new release, updates only the selected clean repository, creates a
+fresh environment, and verifies the complete result. A node with local changes
+is not overwritten. Settings reports the core and node revisions, while
+Storage retains prior complete releases for explicit rollback. Updates are
+manual and are refused while an inference instance is loaded.
+
 ### Speech runtimes are isolated capabilities
 
 NeMo ASR, pyannote.audio and the Silero ONNX adapter are installed in separate

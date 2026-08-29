@@ -22,6 +22,7 @@ from .gateway import (BETWEEN_BYTES_S, FIRST_BYTE_S, MAX_WAITING,
                       Gateway)
 from .hosts import current_host
 from .installs import Installs
+from .images.jobs import ImageJobs
 from .lastloaded import LastLoaded
 from .operations import Operations
 from .runtime import Runtime
@@ -86,8 +87,17 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     # come from the configuration, because the right numbers differ between the
     # two machines this runs on.
     front_door = store.load().gateway
-    return operations, bus, store, Gateway(
+    model_gateway = Gateway(
         operations,
         first_byte_s=float(front_door.get("first_byte_s", FIRST_BYTE_S)),
         between_bytes_s=float(front_door.get("between_bytes_s", BETWEEN_BYTES_S)),
-        max_waiting=int(front_door.get("max_waiting", MAX_WAITING)))
+        max_waiting=int(front_door.get("max_waiting", MAX_WAITING)),
+        # Per-task overrides — a slow image or OCR job must not force a text
+        # client to wait on the same clock. See `Gateway.timeouts_for`.
+        task_timeouts=front_door.get("task_timeouts", {}),
+        max_upload_bytes=int(front_door.get("max_upload_bytes", 0)),
+        max_upload_pixels=int(front_door.get("max_upload_pixels", 0)),
+        max_upload_dimension=int(front_door.get("max_upload_dimension", 0)))
+    operations.image_jobs = ImageJobs(
+        model_gateway, store.load().images, host.state_dir(), bus)
+    return operations, bus, store, model_gateway

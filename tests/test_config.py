@@ -41,12 +41,30 @@ class ConfigStoreTests(unittest.TestCase):
         original = Config(
             models_root="/models",
             repositories=[Repository(id="a", name="A", format="gguf",
-                                     path="/models/gguf")],
+                                     path="/models/gguf", base_id="a")],
             instances=[Instance(id="i", engine="llamacpp",
                                 model_id="a/m", port=9000, params={"x": 1})],
         )
         store.save(original)
         self.assertEqual(store.load(), original)
+
+    def test_benchmark_root_derives_namespaced_repositories(self):
+        config = self.write({
+            "models_root": "/models",
+            "model_roots": [
+                {"id": "core", "name": "Core", "path": "/models"},
+                {"id": "benchmark", "name": "Benchmark",
+                 "path": "/test_models"},
+            ],
+            "repositories": [
+                {"id": "gguf", "name": "GGUF", "format": "gguf"}
+            ],
+        }).load()
+        self.assertEqual(config.repository("gguf").path, "/models/gguf")
+        self.assertEqual(config.repository("benchmark-gguf").path,
+                         "/test_models/gguf")
+        self.assertEqual(config.repository("benchmark-gguf").root_id,
+                         "benchmark")
 
     def test_a_repository_path_is_recomputed_rather_than_remembered(self):
         # Whatever was written down is ignored: there is one root, and each
@@ -129,6 +147,57 @@ class ConfigStoreTests(unittest.TestCase):
         store.save(Config())
         self.assertEqual([item.name for item in self.path.parent.iterdir()],
                          ["config.json"])
+
+    def test_two_storage_roots_at_the_same_real_path_are_refused(self):
+        # A duplicated path, typed twice by mistake, would let a "move"
+        # between tiers appear to succeed while copying a file onto itself.
+        with TemporaryDirectory() as directory:
+            self.path.write_text(json.dumps({
+                "models_root": directory,
+                "model_roots": [
+                    {"id": "core", "name": "Core", "path": directory},
+                    {"id": "benchmark", "name": "Benchmark", "path": directory},
+                ],
+                "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
+            }))
+            with self.assertRaises(ValueError) as caught:
+                ConfigStore(self.path).load()
+            self.assertIn("core", str(caught.exception))
+            self.assertIn("benchmark", str(caught.exception))
+
+    def test_a_root_reached_through_a_symlink_counts_as_the_same_place(self):
+        with TemporaryDirectory() as directory:
+            real = Path(directory) / "real"
+            real.mkdir()
+            link = Path(directory) / "link"
+            link.symlink_to(real)
+            self.path.write_text(json.dumps({
+                "models_root": str(real),
+                "model_roots": [
+                    {"id": "core", "name": "Core", "path": str(real)},
+                    {"id": "benchmark", "name": "Benchmark", "path": str(link)},
+                ],
+                "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
+            }))
+            with self.assertRaises(ValueError):
+                ConfigStore(self.path).load()
+
+    def test_a_disabled_duplicate_root_is_not_flagged(self):
+        # A root that is turned off cannot be moved into, so a stale
+        # duplicate left behind while it is disabled is not a live hazard.
+        with TemporaryDirectory() as directory:
+            self.path.write_text(json.dumps({
+                "models_root": directory,
+                "model_roots": [
+                    {"id": "core", "name": "Core", "path": directory},
+                    {"id": "benchmark", "name": "Benchmark", "path": directory,
+                     "enabled": False},
+                ],
+                "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
+            }))
+            config = ConfigStore(self.path).load()   # must not raise
+            self.assertEqual(config.repository("gguf").path,
+                             str(Path(directory) / "gguf"))
 
 
 if __name__ == "__main__":

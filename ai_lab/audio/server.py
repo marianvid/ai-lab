@@ -69,6 +69,24 @@ class NemoBackend:
         return str(text or "")
 
 
+class MlxWhisperBackend:
+    owner = "mlx-whisper"
+    path = "/v1/audio/transcriptions"
+
+    def __init__(self, model_path: str, _precision: str = "") -> None:
+        import mlx_whisper
+        self.mlx_whisper = mlx_whisper
+        self.model_path = model_path
+        self.lock = Lock()
+
+    def transcribe(self, audio_path: str, language: str | None = None) -> str:
+        options = {"path_or_hf_repo": self.model_path}
+        if language:
+            options["language"] = language
+        with self.lock:
+            return self.mlx_whisper.transcribe(audio_path, **options)["text"]
+
+
 class SortformerBackend:
     owner = "nemo-sortformer"
     path = "/v1/audio/diarizations"
@@ -193,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
             with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
                 temporary.write(audio)
                 temporary.flush()
-                if isinstance(self.backend, NemoBackend):
+                if isinstance(self.backend, (NemoBackend, MlxWhisperBackend)):
                     language_part = fields.get("language")
                     language = (language_part[1].decode("utf-8")
                                 if language_part is not None else None)
@@ -248,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend",
-                        choices=("nemo", "sortformer", "pyannote", "silero"),
+                        choices=("nemo", "mlx-whisper", "sortformer", "pyannote", "silero"),
                         required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--name", required=True)
@@ -257,7 +275,8 @@ def main() -> None:
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"),
                         default="bf16")
     args = parser.parse_args()
-    backends = {"nemo": NemoBackend, "sortformer": SortformerBackend,
+    backends = {"nemo": NemoBackend, "mlx-whisper": MlxWhisperBackend,
+                "sortformer": SortformerBackend,
                 "pyannote": PyannoteBackend, "silero": SileroBackend}
     backend = backends[args.backend]
     Handler.backend = backend(args.model, args.precision)

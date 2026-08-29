@@ -25,6 +25,14 @@ class MultipartBody:
         _, _, content = found
         return content.removesuffix(b"\r\n").decode("utf-8")
 
+    def raw(self, name: str) -> bytes | None:
+        """The part's bytes, undecoded — for a file upload rather than text."""
+        found = self._part(name)
+        if found is None:
+            return None
+        _, _, content = found
+        return content.removesuffix(b"\r\n")
+
     def replace(self, name: str, value: str) -> bytes:
         found = self._part(name)
         if found is None:

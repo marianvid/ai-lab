@@ -7,26 +7,30 @@ import { installDom, button, settle } from './support/dom.js';
 
 const REPOSITORY = {
   id: 'gguf', name: 'GGUF models', path: '/models/gguf', format: 'gguf',
+  root_id: 'core',
   writable: true, exists: true, free_bytes: 3.4 * 1024 ** 4, total_bytes: 4 * 1024 ** 4,
 };
 const NVFP4 = {
   id: 'nvfp4', name: 'NVFP4', path: '/models/nvfp4', format: 'nvfp4',
+  root_id: 'core',
   writable: true, exists: true, free_bytes: 3.4 * 1024 ** 4, total_bytes: 4 * 1024 ** 4,
 };
 const AUDIO_REPOSITORIES = [
   { id: 'audio-asr', name: 'Audio transcription', path: '/models/audio/asr',
-    format: 'safetensors', task: 'transcription', writable: true, exists: true },
+    format: 'safetensors', task: 'transcription', root_id: 'core',
+    writable: true, exists: true },
   { id: 'audio-nemo-asr', name: 'NeMo audio transcription', path: '/models/audio/asr',
-    format: 'nemo', task: 'transcription', writable: true, exists: true },
+    format: 'nemo', task: 'transcription', root_id: 'core',
+    writable: true, exists: true },
   { id: 'audio-vad', name: 'Voice activity detection',
     path: '/models/audio/vad/silero-vad/src/silero_vad/data',
-    format: 'onnx', task: 'vad', writable: true, exists: true },
+    format: 'onnx', task: 'vad', root_id: 'core', writable: true, exists: true },
   { id: 'audio-nemo-diarization', name: 'NeMo speaker diarization',
     path: '/models/audio/diarization', format: 'nemo', task: 'diarization',
-    writable: true, exists: true },
+    root_id: 'core', writable: true, exists: true },
   { id: 'audio-pyannote-diarization', name: 'Pyannote speaker diarization',
     path: '/models/audio/diarization/pyannote', format: 'pyannote',
-    task: 'diarization', writable: true, exists: true },
+    task: 'diarization', root_id: 'core', writable: true, exists: true },
 ];
 
 function responses(overrides = {}) {

@@ -26,6 +26,8 @@ class Format(str, Enum):
     NEMO = "nemo"
     ONNX = "onnx"
     PYANNOTE = "pyannote"
+    PADDLEOCR = "paddleocr"
+    COMFYUI = "comfyui"
 
 
 class Task(str, Enum):
@@ -36,6 +38,9 @@ class Task(str, Enum):
     ALIGNMENT = "alignment"
     VAD = "vad"
     DIARIZATION = "diarization"
+    OCR = "ocr"
+    IMAGE_GENERATION = "image-generation"
+    IMAGE_EDIT = "image-edit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +97,7 @@ class Capabilities:
     accelerator_kind: str         # "cuda", "metal" or "none"
     can_configure_accelerator: bool = False
     operating_system: str = "unknown"
+    supported_engines: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)

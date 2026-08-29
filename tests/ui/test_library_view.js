@@ -13,6 +13,12 @@ const REPOSITORY = {
   id: 'gguf', name: 'GGUF models', path: '/models/gguf', format: 'gguf',
   writable: true, exists: true, free_bytes: 3.4 * 1024 ** 4, total_bytes: 4 * 1024 ** 4,
 };
+const ROOTS = [
+  { id: 'core', name: 'Core', path: '/models', enabled: true, writable: true,
+    exists: true, free_bytes: 600 * 1024 ** 3 },
+  { id: 'benchmark', name: 'Benchmark', path: '/test_models', enabled: true,
+    writable: true, exists: true, free_bytes: 3.4 * 1024 ** 4 },
+];
 const SEARCH_RESULT = { repo: 'unsloth/Qwen3-GGUF', downloads: 91123, likes: 4, updated: '' };
 const VARIANT = {
   repo: 'unsloth/Qwen3-GGUF', name: 'Qwen3-Q4_K_M', format: 'gguf',
@@ -29,6 +35,7 @@ function responses(overrides = {}) {
   return {
     '/api/models': [MODEL],
     '/api/settings': { title: 'AI-Lab', engines: [], repositories: [REPOSITORY],
+                       model_roots: ROOTS,
                        accelerator: {}, host: {} },
     '/api/downloads': [],
     'POST /api/downloads': TRANSFER,
@@ -117,12 +124,20 @@ describe('the Library page', () => {
     assert.equal(context.view.querySelector('.variants'), null);
   });
 
-  it('downloads without asking where to put it', async () => {
+  it('asks where to put each download and sends that exact tier', async () => {
     const context = await renderPage();
     await searchFor(context, 'qwen');
     button(context.view, 'Show models').click();
     await settle();
-    button(context.view, 'Download').click();
+    button(context.view, 'Download…').click();
+    await settle();
+
+    const dialog = document.querySelector('dialog.download-destination');
+    assert.ok(dialog, 'destination dialog did not open');
+    assert.match(dialog.textContent, /Temporary \/ benchmark/);
+    assert.match(dialog.textContent, /Production/);
+    dialog.querySelector('input[value="core"]').click();
+    button(dialog, 'Start download').click();
     await settle();
 
     const posted = context.calls.find((call) => call.method === 'POST'
@@ -131,7 +146,7 @@ describe('the Library page', () => {
     const body = JSON.parse(posted.body);
     assert.equal(body.repo, 'unsloth/Qwen3-GGUF');
     assert.equal(body.name, 'Qwen3-Q4_K_M');
-    assert.equal('repository_id' in body, false, 'it should work the destination out');
+    assert.equal(body.storage_tier, 'core');
   });
 
   it('shows a running download beside the variant it belongs to', async () => {
@@ -155,7 +170,7 @@ describe('the Library page', () => {
 
     const variant = context.view.querySelector('.variant');
     assert.match(variant.textContent, /cancelled/);
-    assert.ok(button(variant, 'Resume'));
+    assert.ok(button(variant, 'Resume…'));
   });
 
   it('asks before deleting from disk, with Cancel holding the focus', async () => {

@@ -15,7 +15,8 @@ class RegistryTests(unittest.TestCase):
 
     def test_every_engine_is_known_everywhere(self):
         self.assertEqual(set(self.registry.known()),
-                         {"llamacpp", "vllm", "nemo", "onnx", "pyannote"})
+                         {"llamacpp", "mlxwhisper", "vllm", "nemo", "onnx",
+                          "pyannote", "paddleocr", "comfyui"})
 
     def test_only_installed_engines_are_available(self):
         self.assertEqual(set(self.registry.available(capabilities())), {"llamacpp"})
@@ -39,6 +40,9 @@ class RegistryTests(unittest.TestCase):
                          ["diarization", "transcription"])
         self.assertEqual(rows["onnx"]["tasks"], ["vad"])
         self.assertEqual(rows["pyannote"]["tasks"], ["diarization"])
+        self.assertEqual(rows["paddleocr"]["tasks"], ["ocr"])
+        self.assertEqual(rows["comfyui"]["tasks"],
+                         ["image-edit", "image-generation"])
         transcription = rows["vllm"]["task_params"]["transcription"]
         self.assertNotIn("context_size", {item["key"] for item in transcription})
 

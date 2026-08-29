@@ -17,18 +17,37 @@ points at.
 
 from __future__ import annotations
 
-from ...engines.base import (ANTHROPIC_PATHS, DIARIZATION_PATHS, OPENAI_PATHS,
-                             TRANSCRIPTION_PATHS, VAD_PATHS)
+from ...engines.base import (ANTHROPIC_PATHS, DIARIZATION_PATHS, OCR_PATHS,
+                             OPENAI_PATHS, TRANSCRIPTION_PATHS, VAD_PATHS)
 from ...gateway import Gateway
+from ...types import Task
 from ..multipart import MultipartBody
 from ..passthrough import forward
+from ..uploads import UploadRejected, validate_image
 
 # Every shape any engine here can answer. Registered as routes whatever is
 # configured: a path that exists and explains why this model cannot serve it is
 # more use than one that does not exist at all.
 FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
                                 + TRANSCRIPTION_PATHS + VAD_PATHS
-                                + DIARIZATION_PATHS))
+                                + DIARIZATION_PATHS + OCR_PATHS))
+
+# Which task a request path belongs to, for per-task timeouts (see
+# `Gateway.timeouts_for`) and for which uploads get image validation. Paths
+# that answer more than one task (`/v1/chat/completions` also transcribes)
+# are not ambiguous in practice: this map is only consulted for the paths
+# that are unique to a task.
+_TASK_OF_PATH = {
+    **{path: Task.TEXT_GENERATION for path in OPENAI_PATHS + ANTHROPIC_PATHS},
+    "/v1/audio/transcriptions": Task.TRANSCRIPTION,
+    **{path: Task.VAD for path in VAD_PATHS},
+    **{path: Task.DIARIZATION for path in DIARIZATION_PATHS},
+    **{path: Task.OCR for path in OCR_PATHS},
+}
+
+# Paths whose upload is an image and must pass the configured byte/pixel/
+# dimension limits with a content-sniffed MIME type before it is forwarded.
+_IMAGE_UPLOAD_PATHS = frozenset(OCR_PATHS)
 
 
 def register(router, operations, gateway: Gateway) -> None:
@@ -81,6 +100,19 @@ def _forwarder(gateway: Gateway, path: str):
         if not wanted:
             raise ValueError("the request must name a model")
 
+        if path in _IMAGE_UPLOAD_PATHS and isinstance(payload, MultipartBody):
+            uploaded = payload.raw("file")
+            if uploaded is None:
+                raise ValueError("the request must contain an image file")
+            try:
+                validate_image(
+                    uploaded,
+                    max_bytes=gateway.max_upload_bytes,
+                    max_pixels=gateway.max_upload_pixels,
+                    max_dimension=gateway.max_upload_dimension)
+            except UploadRejected as error:
+                raise ValueError(str(error)) from None
+
         # Settings that decide how the model starts — context size and the
         # rest — cannot be part of the request the engine sees: the engine does
         # not know them, and would ignore them without a word. They travel in a
@@ -125,9 +157,11 @@ def _forwarder(gateway: Gateway, path: str):
                          else bool(payload.get("stream")))
             timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
                      if streaming else None)
+            task = _TASK_OF_PATH.get(path, Task.TEXT_GENERATION)
+            first_byte_s, between_bytes_s = gateway.timeouts_for(task)
             return forward(url, outgoing, on_close=lease.release,
-                           first_byte_s=gateway.first_byte_s,
-                           between_bytes_s=gateway.between_bytes_s,
+                           first_byte_s=first_byte_s,
+                           between_bytes_s=between_bytes_s,
                            on_first_chunk=timed, content_type=content_type)
         except BaseException:
             lease.release()

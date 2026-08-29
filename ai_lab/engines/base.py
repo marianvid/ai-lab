@@ -102,6 +102,12 @@ ANTHROPIC_PATHS = ("/v1/messages", "/v1/messages/count_tokens")
 TRANSCRIPTION_PATHS = ("/v1/audio/transcriptions", "/v1/chat/completions")
 VAD_PATHS = ("/v1/audio/speech-segments",)
 DIARIZATION_PATHS = ("/v1/audio/diarizations",)
+OCR_PATHS = ("/v1/images/ocr",)
+
+# Image generation and editing are separate public request shapes. ComfyUI
+# serves both; the selected workflow profile determines the operation.
+IMAGE_GENERATION_PATHS = ("/v1/images/generations",)
+IMAGE_EDIT_PATHS = ("/v1/images/edits",)
 
 
 @dataclass(frozen=True, slots=True)

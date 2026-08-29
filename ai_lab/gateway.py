@@ -290,13 +290,25 @@ class Gateway:
                  poll_s: float = QUIET_POLL_S,
                  first_byte_s: float = FIRST_BYTE_S,
                  between_bytes_s: float = BETWEEN_BYTES_S,
-                 max_waiting: int = MAX_WAITING) -> None:
+                 max_waiting: int = MAX_WAITING,
+                 task_timeouts: dict | None = None,
+                 max_upload_bytes: int = 0,
+                 max_upload_pixels: int = 0,
+                 max_upload_dimension: int = 0) -> None:
         self.operations = operations
         self.quiet_mb = quiet_mb
         self.quiet_timeout_s = quiet_timeout_s
         self.poll_s = poll_s
         self.first_byte_s = first_byte_s
         self.between_bytes_s = between_bytes_s
+        # Per-task overrides of the two waits above, keyed by `Task.value`.
+        # A slow image workflow and a fast text completion share one gateway
+        # but must not share one timeout: the default alone is sized for text.
+        # Missing keys, or a task with no override, fall back to the defaults.
+        self.task_timeouts = dict(task_timeouts or {})
+        self.max_upload_bytes = max_upload_bytes
+        self.max_upload_pixels = max_upload_pixels
+        self.max_upload_dimension = max_upload_dimension
         # What the last card reading said, per pool. Refreshed around every
         # load, never from inside the scheduler's lock.
         self._budget_pools: dict = {}
@@ -710,6 +722,20 @@ class Gateway:
         """What the scheduler believes is loaded."""
         return [item["shape"] for item in self.scheduler.state()["loaded"]]
 
+    # -- how long to wait, per kind of request --------------------------
+
+    def timeouts_for(self, task: Task) -> tuple[float, float]:
+        """(first_byte_s, between_bytes_s) for this task.
+
+        An override for `task.value` in `task_timeouts` wins; anything not
+        named there gets the machine's default pair. Text generation is not
+        given its own entry — it *is* the default, since every number above
+        was sized against it — but a caller may still add one.
+        """
+        override = self.task_timeouts.get(task.value, {})
+        return (float(override.get("first_byte_s", self.first_byte_s)),
+                float(override.get("between_bytes_s", self.between_bytes_s)))
+
     # -- what the buttons on the page have to tell us -----------------------
 
     def apply_settings(self, settings: dict) -> None:
@@ -725,6 +751,8 @@ class Gateway:
             self.between_bytes_s = float(settings["between_bytes_s"])
         if "max_waiting" in settings:
             self.scheduler.max_waiting = int(settings["max_waiting"])
+        if "task_timeouts" in settings:
+            self.task_timeouts = dict(settings["task_timeouts"])
 
     def card_changed(self) -> None:
         """Something outside loaded or unloaded a model.

@@ -245,6 +245,27 @@ dialog.notice .detail {
 }
 dialog.confirm p { margin: 0 0 1rem; }
 dialog.confirm .buttons { justify-content: flex-end; gap: 0.5rem; }
+dialog.download-destination { width: min(34rem, 92vw); max-width: 34rem; }
+dialog.download-destination .download-model {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.7rem 0.8rem; margin: 0.75rem 0 1rem;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+dialog.download-destination h4 { margin: 0 0 0.55rem; font-size: 0.9rem; }
+.destination-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+.destination {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.7rem;
+  align-items: start; padding: 0.75rem 0.8rem;
+  border: 1px solid var(--border); border-radius: 7px; cursor: pointer;
+}
+.destination:has(input:checked) { border-color: var(--accent); }
+.destination.unavailable { opacity: 0.6; cursor: not-allowed; }
+.destination input { margin-top: 0.2rem; }
+.destination-copy { display: flex; flex-direction: column; gap: 0.16rem; min-width: 0; }
+.destination-title { font-weight: 650; }
+.destination-copy .path { font-size: 0.82rem; }
+.destination-copy > :last-child { font-size: 0.8rem; }
 button.action.danger { border-color: var(--error); color: var(--error); }
 button.action.danger:hover { background: var(--error); color: var(--bg); }
 
@@ -278,6 +299,32 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
 @media (max-width: 42rem) {
   .variant-main { grid-template-columns: 1fr; }
   .variant-actions { justify-content: flex-start; }
+}
+
+/* Every repository is a separate semantic section, but all of their model
+   tables share one visual grid. Fixed columns stop Format, Task and Storage
+   jumping horizontally when a section happens to contain shorter names. */
+table.model-library { width: 100%; table-layout: fixed; }
+table.model-library col.model-column { width: 28%; }
+table.model-library col.format-column { width: 8%; }
+table.model-library col.task-column { width: 13%; }
+table.model-library col.storage-column { width: 9%; }
+table.model-library col.size-column { width: 8%; }
+table.model-library col.files-column { width: 5%; }
+table.model-library col.state-column { width: 9%; }
+table.model-library col.actions-column { width: 20%; }
+table.model-library th,
+table.model-library td { text-align: left; }
+table.model-library .model-actions {
+  display: grid;
+  grid-template-columns: 13.5rem 6rem;
+  justify-content: start;
+}
+table.model-library .model-actions .action { width: 100%; }
+@media (max-width: 74rem) {
+  table.model-library { min-width: 68rem; }
+  table.model-library col.model-column { width: 25%; }
+  table.model-library col.actions-column { width: 23%; }
 }
 
 /* An action that is not part of the everyday flow: present, not shouting.

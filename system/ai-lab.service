@@ -15,7 +15,7 @@ ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-ReadWritePaths=/etc/ai-lab /var/lib/ai-lab /models
+ReadWritePaths=/etc/ai-lab /var/lib/ai-lab /models /test_models
 
 [Install]
 WantedBy=multi-user.target

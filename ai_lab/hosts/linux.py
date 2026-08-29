@@ -47,7 +47,9 @@ class LinuxHost:
                  vllm_binary: str | None = None,
                  nemo_binary: str | None = None,
                  onnx_binary: str | None = None,
-                 pyannote_binary: str | None = None) -> None:
+                 pyannote_binary: str | None = None,
+                 paddleocr_binary: str | None = None,
+                 comfyui_binary: str | None = None) -> None:
         self.control_helper = control_helper
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
@@ -55,6 +57,8 @@ class LinuxHost:
         self.nemo_binary = nemo_binary
         self.onnx_binary = onnx_binary
         self.pyannote_binary = pyannote_binary
+        self.paddleocr_binary = paddleocr_binary
+        self.comfyui_binary = comfyui_binary
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -76,12 +80,18 @@ class LinuxHost:
             engines.add("onnx")
         if self.pyannote_binary:
             engines.add("pyannote")
+        if self.paddleocr_binary:
+            engines.add("paddleocr")
+        if self.comfyui_binary:
+            engines.add("comfyui")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),
             accelerator_kind=self._accelerator_kind(),
             can_configure_accelerator=False,
             operating_system="Linux",
+            supported_engines=frozenset({"llamacpp", "vllm", "nemo", "onnx",
+                                         "pyannote", "paddleocr", "comfyui"}),
         )
 
     def _accelerator_kind(self) -> str:

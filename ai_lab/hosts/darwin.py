@@ -39,7 +39,22 @@ USED_PAGES = ("Pages active", "Pages wired down", "Pages occupied by compressor"
 class DarwinHost:
     """See `base.Host` for what each method promises."""
 
-    def __init__(self) -> None:
+    def __init__(self, llamacpp_binary: str | None = None,
+                 mlxwhisper_binary: str | None = None,
+                 onnx_binary: str | None = None,
+                 pyannote_binary: str | None = None,
+                 paddleocr_binary: str | None = None,
+                 comfyui_binary: str | None = None,
+                 comfyui_main: str | None = None) -> None:
+        self.engine_binaries = {
+            "llamacpp": llamacpp_binary,
+            "mlxwhisper": mlxwhisper_binary,
+            "onnx": onnx_binary,
+            "pyannote": pyannote_binary,
+            "paddleocr": paddleocr_binary,
+            "comfyui": comfyui_binary,
+        }
+        self.comfyui_main = comfyui_main
         self._processes: dict[str, subprocess.Popen] = {}
         # Engine output goes to a file rather than being discarded: when a load
         # fails, the reason is in there and nowhere else.
@@ -58,15 +73,29 @@ class DarwinHost:
     # -- capabilities ------------------------------------------------------
 
     def capabilities(self) -> Capabilities:
-        """Only llama.cpp. vLLM needs CUDA and cannot run here at all."""
-        engines = {"llamacpp"} if which("llama-server") else set()
+        """Portable and Metal-native engines; CUDA-only engines are absent."""
+        supported = frozenset({"llamacpp", "mlxwhisper", "onnx", "pyannote",
+                               "paddleocr", "comfyui"})
+        engines = {key for key, binary in self.engine_binaries.items()
+                   if self._installed(binary)}
+        if "llamacpp" not in engines and which("llama-server"):
+            engines.add("llamacpp")
+        if "comfyui" in engines and not self._installed(self.comfyui_main):
+            engines.remove("comfyui")
         return Capabilities(
             supervisor="subprocess",
             engines=frozenset(engines),
             accelerator_kind="metal",
             can_configure_accelerator=False,
             operating_system="macOS",
+            supported_engines=supported,
         )
+
+    @staticmethod
+    def _installed(program: str | None) -> bool:
+        if not program:
+            return False
+        return Path(program).is_file() or bool(which(program))
 
     # -- processes ---------------------------------------------------------
 

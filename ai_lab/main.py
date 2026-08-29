@@ -32,6 +32,7 @@ def main() -> None:
 
     _install_shutdown(operations)
 
+    operations.recover_moves()
     _restore_last_model(operations)
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)

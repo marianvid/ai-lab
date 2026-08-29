@@ -53,6 +53,8 @@ class Settings:
             "memory": budget.of(self.host, self.reserve_mb(config),
                                 card=card).json(),
             "models_root": config.models_root,
+            "model_roots": [self._model_root(item) for item in config.model_roots],
+            "download_root": config.download_root,
             "repositories": [self._repository(item) for item in config.repositories],
             "engines": self.engines.describe(capabilities),
         }
@@ -88,6 +90,20 @@ class Settings:
         row = {**asdict(repository), "exists": exists,
                "free_bytes": 0, "total_bytes": 0,
                "writable": bool(repository.writable and exists
+                                and os.access(path, os.W_OK | os.X_OK))}
+        if exists:
+            usage = shutil.disk_usage(path)
+            row["free_bytes"] = usage.free
+            row["total_bytes"] = usage.total
+        return row
+
+    @staticmethod
+    def _model_root(model_root) -> dict:
+        path = Path(model_root.path) if model_root.path else None
+        exists = bool(model_root.enabled and path and path.is_dir())
+        row = {**asdict(model_root), "exists": exists,
+               "free_bytes": 0, "total_bytes": 0,
+               "writable": bool(model_root.writable and exists
                                 and os.access(path, os.W_OK | os.X_OK))}
         if exists:
             usage = shutil.disk_usage(path)

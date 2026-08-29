@@ -248,6 +248,23 @@ class Installing(unittest.TestCase):
             self.install._thread.join(timeout=10)
         self.assertEqual(self.install.status()["state"], "done")
 
+    def test_configured_minimum_versions_are_checked_before_activation(self):
+        install = PackageInstall(
+            "paddleocr", str(self.root), "paddleocr", EventBus(),
+            minimum_versions={"paddlepaddle-gpu": "3.3.0"})
+        commands = []
+
+        def run(command, **kwargs):
+            commands.append(command)
+            return type("Result", (), {"returncode": 0, "stdout": "ok\n",
+                                        "stderr": ""})()
+
+        with patch("ai_lab.installs.subprocess.run", run):
+            install._verify(self.working, lambda: 0)
+        program = commands[0][2]
+        self.assertIn("paddlepaddle-gpu", program)
+        self.assertIn("3.3.0", program)
+
 
 class WhichEnginesHaveOne(unittest.TestCase):
     def test_only_an_engine_configured_as_packages_gets_one(self):
@@ -261,6 +278,16 @@ class WhichEnginesHaveOne(unittest.TestCase):
         self.assertNotIn("llamacpp", installs)
         with self.assertRaises(KeyError):
             installs.get("llamacpp")
+
+    def test_package_version_requirements_are_wired_from_configuration(self):
+        installs = Installs({
+            "paddleocr": {
+                "binary": "/opt/ai/paddleocr/current/bin/python",
+                "source": {"package": "paddleocr",
+                           "minimum_versions": {"paddlepaddle-gpu": "3.3.0"}},
+            }}, EventBus())
+        self.assertEqual(installs.get("paddleocr").minimum_versions,
+                         {"paddlepaddle-gpu": "3.3.0"})
 
     def test_the_folder_is_worked_out_from_the_launch_path(self):
         installs = Installs({"vllm": {"binary": "/opt/ai/vllm/current/bin/vllm",

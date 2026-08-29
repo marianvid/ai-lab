@@ -16,6 +16,7 @@ let sets = [];           // downloadable models in the opened repository
 let openRepo = null;
 let lastQuery = '';
 let currentTransfers = [];
+let downloadRoots = [];
 let redraw = () => {};
 
 // Built once and reused on every render. The page refreshes itself every few
@@ -41,7 +42,29 @@ async function remove(model) {
     await showNotice({ title: `Could not delete ${model.name}`,
                        body: error.message });
   }
-  redraw();
+  await redraw();
+}
+
+async function move(model) {
+  const target = model.storage_tier === 'core' ? 'benchmark' : 'core';
+  try {
+    await api.moveModel(model.id, target);
+  } catch (error) {
+    await showNotice({ title: 'Could not move ' + model.name,
+                       body: error.message });
+  }
+  await redraw();
+}
+
+async function refreshLibrary(button) {
+  await whileWorking(button, 'Scanning…', async () => {
+    try {
+      await redraw();
+    } catch (error) {
+      await showNotice({ title: 'Could not refresh the library',
+                         body: error.message });
+    }
+  });
 }
 
 function modelRow(model) {
@@ -60,29 +83,48 @@ function modelRow(model) {
     ])),
     element('td', { class: 'muted', text: model.format }),
     element('td', { class: 'muted', text: model.task || 'text-generation' }),
-    element('td', { class: 'number', text: bytes(model.size_bytes) }),
-    element('td', { class: 'number muted', text: String(model.file_count) }),
+    element('td', {}, element('span', {
+      class: 'pill', text: model.storage_tier || 'core',
+    })),
+    element('td', { text: bytes(model.size_bytes) }),
+    element('td', { class: 'muted', text: String(model.file_count) }),
     element('td', {}, state),
-    element('td', { class: 'number' },
+    element('td', {}, element('span', { class: 'inline model-actions' }, [
+      element('button', { class: 'action',
+                          text: model.storage_tier === 'core'
+                            ? 'Move to benchmark' : 'Move to core',
+                          onclick: (event) => whileWorking(
+                            event.target, 'Moving…', () => move(model)) }),
       element('button', { class: 'action danger', text: 'Delete',
                           onclick: (event) => whileWorking(
-                            event.target, 'Deleting…', () => remove(model)) })),
+                            event.target, 'Deleting…', () => remove(model)) }),
+    ])),
   ]);
 }
 
 function repositorySection(repository, models) {
-  const heading = `${repository.name} · ${repository.format} · `
-                  + `${bytes(repository.free_bytes)} free`;
+  const heading = `${repository.name} · ${repository.format}`;
   return element('section', {}, [
     element('h3', { text: heading }),
     models.length
-      ? element('table', {}, [
+      ? element('table', { class: 'model-library' }, [
+          element('colgroup', {}, [
+            element('col', { class: 'model-column' }),
+            element('col', { class: 'format-column' }),
+            element('col', { class: 'task-column' }),
+            element('col', { class: 'storage-column' }),
+            element('col', { class: 'size-column' }),
+            element('col', { class: 'files-column' }),
+            element('col', { class: 'state-column' }),
+            element('col', { class: 'actions-column' }),
+          ]),
           element('thead', {}, element('tr', {}, [
             element('th', { text: 'Model' }),
             element('th', { text: 'Format' }),
             element('th', { text: 'Task' }),
-            element('th', { class: 'number', text: 'Size' }),
-            element('th', { class: 'number', text: 'Files' }),
+            element('th', { text: 'Storage' }),
+            element('th', { text: 'Size' }),
+            element('th', { text: 'Files' }),
             element('th', { text: '' }),
             element('th', { text: '' }),
           ])),
@@ -188,10 +230,11 @@ function clearButton() {
 }
 
 async function startDownload(set, button) {
+  const storageTier = await chooseDownloadDestination(set);
+  if (!storageTier) return;
   await whileWorking(button, 'Preparing…', async () => {
     try {
-      // No destination: the server puts it where that format lives.
-      const transfer = await api.download(set.repo, set.name);
+      const transfer = await api.download(set.repo, set.name, storageTier);
       currentTransfers = [
         ...currentTransfers.filter((item) => item.id !== transfer.id), transfer,
       ];
@@ -203,6 +246,86 @@ async function startDownload(set, button) {
     }
   });
   await redraw();
+}
+
+function chooseDownloadDestination(set) {
+  return new Promise((resolve) => {
+    const roots = downloadRoots.map((root) => {
+      const unavailable = root.enabled === false || root.exists === false
+        || root.writable === false;
+      const tooSmall = Number.isFinite(root.free_bytes)
+        && root.free_bytes < set.size_bytes;
+      return { ...root, unavailable, tooSmall, usable: !unavailable && !tooSmall };
+    });
+    const preferred = roots.find((root) => root.id === 'benchmark' && root.usable)
+      || roots.find((root) => root.id === 'core' && root.usable)
+      || roots.find((root) => root.usable);
+    let answer = null;
+    let selected = preferred?.id || '';
+
+    const options = roots.map((root) => destination(root, set, () => {
+      selected = root.id;
+    }, root.id === selected));
+    const cancel = element('button', {
+      class: 'action', autofocus: 'autofocus', text: 'Cancel',
+      onclick: () => dialog.close(),
+    });
+    const proceed = element('button', {
+      class: 'action primary', text: 'Start download',
+      ...(!preferred ? { disabled: 'disabled' } : {}),
+      onclick: () => { answer = selected; dialog.close(); },
+    });
+    const dialog = element('dialog', { class: 'confirm download-destination' }, [
+      element('h3', { text: 'Download model' }),
+      element('div', { class: 'download-model' }, [
+        element('strong', { text: set.repo }),
+        element('div', { text: set.name }),
+        element('span', { class: 'muted',
+                          text: `${bytes(set.size_bytes)} · ${set.files.length} file`
+                            + `${set.files.length === 1 ? '' : 's'}` }),
+      ]),
+      element('h4', { text: 'Where should it be stored?' }),
+      element('div', { class: 'destination-list' }, options.length ? options : [
+        element('p', { class: 'error', text: 'No model storage is configured.' }),
+      ]),
+      element('div', { class: 'row buttons' }, [cancel, proceed]),
+    ]);
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      resolve(answer);
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
+function destination(root, set, select, checked) {
+  const production = root.id === 'core';
+  let reason = production
+    ? 'For approved models used by AI-Lab.'
+    : 'Recommended for models that have not been evaluated.';
+  if (root.enabled === false) reason = 'This storage is disabled.';
+  else if (root.exists === false) reason = 'The storage path is not mounted.';
+  else if (root.writable === false) reason = 'The storage path is read-only.';
+  else if (root.tooSmall) reason = `Needs ${bytes(set.size_bytes)}, but only ${bytes(root.free_bytes)} is free.`;
+  return element('label', {
+    class: `destination${root.usable ? '' : ' unavailable'}`,
+  }, [
+    element('input', {
+      type: 'radio', name: 'download-destination', value: root.id,
+      ...(checked ? { checked: 'checked' } : {}),
+      ...(!root.usable ? { disabled: 'disabled' } : {}),
+      onchange: select,
+    }),
+    element('span', { class: 'destination-copy' }, [
+      element('span', { class: 'destination-title',
+                        text: production ? 'Production' : 'Temporary / benchmark' }),
+      element('span', { class: 'path muted',
+                        text: `${root.path || 'No path'} · ${bytes(root.free_bytes || 0)} available` }),
+      element('span', { class: root.usable ? 'muted' : 'error', text: reason }),
+    ]),
+  ]);
 }
 
 async function cancelDownload(transfer) {
@@ -274,8 +397,8 @@ function variantRow(set) {
               ? element('span', { class: 'pill on', text: transfer.state })
               : element('button', {
                 class: 'action',
-                text: transfer?.state === 'failed' ? 'Retry'
-                  : transfer?.state === 'cancelled' ? 'Resume' : 'Download',
+                text: transfer?.state === 'failed' ? 'Retry…'
+                  : transfer?.state === 'cancelled' ? 'Resume…' : 'Download…',
                 onclick: (event) => startDownload(set, event.currentTarget),
               }),
       ]),
@@ -355,22 +478,38 @@ export async function render(container) {
   const [models, settings, transfers] = await Promise.all([
     api.models(), api.settings(), api.transfers(),
   ]);
+  downloadRoots = settings.model_roots || [{
+    id: 'core', name: 'Core', path: settings.models_root || '',
+    enabled: true, writable: true, exists: true,
+    free_bytes: Math.max(0, ...(settings.repositories || []).map(
+      (repository) => repository.free_bytes || 0)),
+  }];
   currentTransfers = transfers;
 
-  const byRepository = new Map(settings.repositories.map((item) => [item.id, []]));
+  // Core and benchmark are physical locations, not different kinds of model.
+  // Pair their cloned repositories into one visible section and let each row's
+  // storage badge say where that particular model lives.
+  const repositoryGroups = new Map();
+  const groupByRepository = new Map();
+  settings.repositories.forEach((repository) => {
+    const key = [repository.name, repository.format, repository.task || ''].join('\u0000');
+    if (!repositoryGroups.has(key)) {
+      repositoryGroups.set(key, { repository, models: [] });
+    }
+    groupByRepository.set(repository.id, repositoryGroups.get(key));
+  });
   models.forEach((model) => {
-    const key = model.id.split('/')[0];
-    if (!byRepository.has(key)) byRepository.set(key, []);
-    byRepository.get(key).push(model);
+    const repositoryId = model.id.split('/')[0];
+    const group = groupByRepository.get(repositoryId);
+    if (group) group.models.push(model);
   });
 
-  const sections = [...byRepository.entries()]
-    .filter(([, entries]) => entries.length > 0)
-    .map(([id, entries]) => {
-      const repository = settings.repositories.find((item) => item.id === id);
-      return repository ? repositorySection(repository, entries) : null;
-    })
-    .filter(Boolean);
+  const sections = [...repositoryGroups.values()]
+    .filter((group) => group.models.length > 0)
+    .map((group) => repositorySection(
+      group.repository,
+      group.models.sort((left, right) => left.name.localeCompare(right.name)),
+    ));
 
   // Getting models comes first, then what you already have.
   //
@@ -387,6 +526,19 @@ export async function render(container) {
       ['queued', 'running', 'failed'].includes(transfer.state)
       && transfer.repo !== openRepo)),
     element('hr', {}),
+    element('div', { class: 'row' }, [
+      element('div', { class: 'grow' }, [
+        element('h2', { text: 'Installed models' }),
+        element('p', { class: 'muted',
+                       text: `${models.length} found across core and benchmark storage` }),
+      ]),
+      element('button', {
+        class: 'action',
+        text: 'Refresh library',
+        title: 'Scan core and benchmark storage again',
+        onclick: (event) => refreshLibrary(event.currentTarget),
+      }),
+    ]),
     ...sections,
   ].filter(Boolean);
   container.replaceChildren(...children);

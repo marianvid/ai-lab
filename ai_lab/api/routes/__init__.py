@@ -11,9 +11,9 @@ Both work without it — a router built for a test has no gateway, and then
 nothing is guarded because nothing is being served.
 """
 
-from . import catalog, downloads, gateway, huggingface, runtime, settings, storage
+from . import catalog, downloads, gateway, huggingface, images, runtime, settings, storage
 
-MODULES = (settings, storage, catalog, downloads, huggingface)
+MODULES = (settings, storage, catalog, downloads, huggingface, images)
 
 
 def register_all(router, operations, model_gateway=None) -> None:

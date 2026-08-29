@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -387,6 +388,388 @@ class DeleteModelTests(unittest.TestCase):
         self.assertTrue((self.root / "gguf").is_dir())
 
 
+class MoveModelTests(unittest.TestCase):
+    """Moving a model between storage tiers must never lose the source."""
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.root = Path(self._temporary.name)
+        self.addCleanup(self._temporary.cleanup)
+        self.core = self.root / "core"
+        self.benchmark = self.root / "benchmark"
+        make_files(self.core / "gguf" / "qwen", "qwen.gguf", size=100)
+        (self.benchmark / "gguf").mkdir(parents=True, exist_ok=True)
+        self.path = self.root / "config.json"
+        self.path.write_text(json.dumps({
+            "models_root": str(self.core),
+            "model_roots": [
+                {"id": "core", "name": "Core", "path": str(self.core)},
+                {"id": "benchmark", "name": "Benchmark",
+                 "path": str(self.benchmark)},
+            ],
+            "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
+            "instances": [{"id": "qwen", "name": "Coding", "engine": "llamacpp",
+                           "model_id": "gguf/qwen/qwen", "port": 8080, "params": {}}],
+        }))
+        self.store = ConfigStore(self.path)
+        self.host = FakeHost()
+        self.operations = Operations(
+            store=self.store, catalog=Catalog(),
+            runtime=Runtime(self.host, EventBus(), sample_interval_s=0),
+            settings=Settings(self.store, self.host, Registry()),
+            downloads=DownloadManager(), huggingface=offline_huggingface(),
+            host=self.host, engines=FakeRegistry(self.host),
+        )
+
+    def test_a_model_is_copied_verified_and_removed_from_the_source(self):
+        self.operations.delete_instance("qwen")
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertTrue(result["moved"])
+        self.assertTrue((self.benchmark / "gguf" / "qwen" / "qwen.gguf").exists())
+        self.assertFalse((self.core / "gguf" / "qwen").exists(),
+                         "source must be gone once the copy is verified")
+
+    def test_a_loaded_model_is_refused(self):
+        self.host.running.add("qwen")
+        with self.assertRaises(ValueError) as caught:
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertIn("loaded", str(caught.exception))
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_a_stopped_configured_entry_follows_the_model(self):
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertTrue(result["moved"])
+        configured = self.store.load().instance("qwen")
+        self.assertEqual(configured.model_id, "benchmark-gguf/qwen/qwen")
+
+    def test_a_missing_derived_destination_directory_is_created(self):
+        self.operations.delete_instance("qwen")
+        target = self.benchmark / "gguf"
+        target.rmdir()
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertTrue(result["moved"])
+        self.assertTrue(target.is_dir())
+
+    def test_a_disabled_destination_root_is_refused(self):
+        self.operations.delete_instance("qwen")
+        self.path.write_text(json.dumps({
+            "models_root": str(self.core),
+            "model_roots": [
+                {"id": "core", "name": "Core", "path": str(self.core)},
+                {"id": "benchmark", "name": "Benchmark",
+                 "path": str(self.benchmark), "enabled": False},
+            ],
+            "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
+            "instances": [],
+        }))
+        with self.assertRaises(ValueError) as caught:
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertIn("disabled", str(caught.exception))
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_not_enough_free_space_is_refused_and_source_kept(self):
+        self.operations.delete_instance("qwen")
+        import shutil as shutil_module
+        original = shutil_module.disk_usage
+
+        def fake_disk_usage(path):
+            usage = original(path)
+            return usage._replace(free=1)
+
+        shutil_module.disk_usage = fake_disk_usage
+        try:
+            with self.assertRaises(ValueError) as caught:
+                self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        finally:
+            shutil_module.disk_usage = original
+        self.assertIn("free space", str(caught.exception))
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_a_checksum_failure_during_copy_leaves_the_source_intact(self):
+        self.operations.delete_instance("qwen")
+        import ai_lab.operations as operations_module
+        # Read the descriptor straight out of the class `__dict__`, not
+        # through the class itself: `Operations._sha256` unwraps the
+        # `staticmethod` and hands back a plain function. Restoring *that*
+        # later would leave `_sha256` bound to `self` on every instance call
+        # after this test — exactly the bug that broke every other move test
+        # once this one ran first.
+        original = operations_module.Operations.__dict__["_sha256"]
+        calls = {"n": 0}
+
+        def flaky_sha256(path):
+            calls["n"] += 1
+            return f"bad-{calls['n']}"
+
+        operations_module.Operations._sha256 = staticmethod(flaky_sha256)
+        try:
+            with self.assertRaises(ValueError) as caught:
+                self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        finally:
+            operations_module.Operations._sha256 = original
+        self.assertIn("Checksum", str(caught.exception))
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
+                        "source must survive a failed copy")
+        self.assertFalse((self.benchmark / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_sha256_survives_the_checksum_failure_tests_patch_and_restore(self):
+        """A move right after the checksum-failure test must still work.
+
+        That test above swaps `Operations._sha256` for a fake and puts the
+        real one back afterwards. If the restore ever again hands back a bare
+        function instead of a `staticmethod`, every instance would call
+        `_sha256(self, path)` from here on — one argument too many — and this
+        move would fail with a `TypeError` instead of succeeding.
+        """
+        self.operations.delete_instance("qwen")
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertTrue(result["moved"])
+        self.assertTrue((self.benchmark / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_same_tier_move_is_a_no_op(self):
+        self.operations.delete_instance("qwen")
+        result = self.operations.move_model("gguf/qwen/qwen", "core")
+        self.assertFalse(result["moved"])
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_a_move_can_go_the_other_way_too(self):
+        """Benchmark to core, not just core to benchmark."""
+        self.operations.delete_instance("qwen")
+        make_files(self.benchmark / "gguf" / "other", "other.gguf", size=40)
+        result = self.operations.move_model("benchmark-gguf/other/other", "core")
+        self.assertTrue(result["moved"])
+        self.assertTrue((self.core / "gguf" / "other" / "other.gguf").exists())
+        self.assertFalse((self.benchmark / "gguf" / "other").exists())
+
+    def test_a_shared_companion_is_kept_for_the_sibling_left_behind(self):
+        """Two GGUF models in one directory can share a companion file.
+
+        Moving only one of them must not delete the tokenizer the other one
+        still needs — `Catalog._classify` attaches every companion in a
+        directory to every model in it, so `move_model` has to work out for
+        itself which companions are still spoken for before it deletes
+        anything from the source.
+        """
+        self.operations.delete_instance("qwen")
+        directory = self.core / "gguf" / "qwen"
+        (directory / "tokenizer.json").write_text("{}")
+        make_files(directory, "sibling.gguf", size=10)
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertTrue(result["moved"])
+        # The companion travelled with the model that moved...
+        self.assertTrue((self.benchmark / "gguf" / "qwen" / "tokenizer.json").exists())
+        # ...but the sibling left behind can still find it.
+        self.assertTrue((self.core / "gguf" / "qwen" / "tokenizer.json").exists(),
+                        "a companion still needed by a sibling must not be deleted")
+        self.assertTrue((self.core / "gguf" / "qwen" / "sibling.gguf").exists())
+
+    def test_a_failure_during_publishing_leaves_a_resumable_staging_state(self):
+        """An interruption after copying must not delete published files
+        or the staging area — it must leave something a retry can find.
+        """
+        self.operations.delete_instance("qwen")
+        import ai_lab.operations as operations_module
+        # Read the descriptor straight out of the class `__dict__`, not
+        # through the class itself: see the identical note on the
+        # `_sha256` patch above — the same unwrap-and-rebind trap applies
+        # to `_publish`, and it is what broke every move test that ran
+        # after this one.
+        original = operations_module.Operations.__dict__["_publish"]
+
+        def failing_publish(*args, **kwargs):
+            raise OSError("disk pulled mid-rename")
+
+        operations_module.Operations._publish = staticmethod(failing_publish)
+        try:
+            with self.assertRaises(OSError):
+                self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        finally:
+            operations_module.Operations._publish = original
+        # The source must not have been touched: publishing never finished.
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+        jobs = self.operations.move_jobs()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["status"], "failed")
+        self.assertIn("disk pulled", jobs[0]["error"])
+        self.assertTrue(Path(jobs[0]["staging"]).exists(),
+                        "the staged copy must survive a failed publish")
+
+    def test_a_crashed_move_is_readable_after_restart(self):
+        """A durable job record, not silence, is what a crash leaves behind.
+
+        Nothing here actually crashes the process — that cannot be done
+        deterministically — but the same guarantee is what matters: the job
+        record written before the copy started must still be on disk and
+        must still say what it was doing.
+        """
+        self.operations.delete_instance("qwen")
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        jobs = self.operations.move_jobs()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["id"], result["job_id"])
+        self.assertEqual(jobs[0]["status"], "completed")
+        self.assertEqual(jobs[0]["source_tier"], "core")
+        self.assertEqual(jobs[0]["target_tier"], "benchmark")
+
+    def test_a_move_can_be_cancelled_between_files(self):
+        """Cancellation is checked between files, not only at the end.
+
+        A cancellation is an operator decision that succeeded, not an error:
+        `move_model` reports it as a plain result rather than raising, so the
+        HTTP request that happened to be running the move does not come back
+        looking like a failure.
+        """
+        self.operations.delete_instance("qwen")
+        directory = self.core / "gguf" / "qwen"
+        # A companion file so this model has two sources to copy, not one —
+        # otherwise there is no "between files" to check cancellation at.
+        (directory / "config.json").write_text("{}")
+
+        import ai_lab.operations as operations_module
+        original = operations_module.Operations._check_cancelled
+        state = {"n": 0}
+
+        def cancel_after_first(self, job):
+            state["n"] += 1
+            if state["n"] == 2:
+                self.cancel_move(job["id"])
+            original(self, job)
+
+        operations_module.Operations._check_cancelled = cancel_after_first
+        try:
+            result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        finally:
+            operations_module.Operations._check_cancelled = original
+        self.assertFalse(result["moved"])
+        self.assertTrue(result["cancelled"])
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
+                        "source must survive a cancelled move")
+        jobs = self.operations.move_jobs()
+        self.assertEqual(jobs[0]["status"], "cancelled")
+        self.assertFalse(Path(jobs[0]["staging"]).exists(),
+                         "the staged copy must be cleaned up on cancellation")
+
+    def test_a_single_file_move_can_be_cancelled_mid_copy(self):
+        """Even a one-file model — the common GGUF case — must be stoppable
+        once copying has started, not only before the first byte moves."""
+        self.operations.delete_instance("qwen")
+        make_files(self.core / "gguf" / "qwen", "qwen.gguf", size=8 * 1024 * 1024)
+
+        import ai_lab.operations as operations_module
+        original = operations_module.Operations._check_cancelled
+        state = {"n": 0}
+
+        def cancel_after_first(self, job):
+            state["n"] += 1
+            if state["n"] == 2:
+                self.cancel_move(job["id"])
+            original(self, job)
+
+        operations_module.Operations._check_cancelled = cancel_after_first
+        operations_module.Operations._COPY_CHUNK = 1024
+        try:
+            result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        finally:
+            operations_module.Operations._check_cancelled = original
+            operations_module.Operations._COPY_CHUNK = 64 * 1024 * 1024
+        self.assertTrue(result["cancelled"])
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+        self.assertFalse((self.benchmark / "gguf" / "qwen").exists(),
+                         "no phantom model must appear at the destination")
+
+    def test_staged_files_do_not_appear_as_a_model_while_moving(self):
+        """The catalog must never see the in-flight staging directory.
+
+        Checked by inspecting the catalog mid-copy via a `_check_cancelled`
+        patch: at that point the staging directory holds a real (partial)
+        file, which is exactly the state that used to show up as a broken
+        model called `.ai-lab-move-<job-id>`.
+        """
+        self.operations.delete_instance("qwen")
+        seen = {}
+
+        import ai_lab.operations as operations_module
+        original = operations_module.Operations._check_cancelled
+
+        def inspect(self, job):
+            config = self.store.load()
+            seen["ids"] = [item.id for item in self.catalog.scan(config.repositories)]
+            original(self, job)
+
+        operations_module.Operations._check_cancelled = inspect
+        try:
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        finally:
+            operations_module.Operations._check_cancelled = original
+        self.assertNotIn("benchmark-gguf/.ai-lab-staging", "".join(seen.get("ids", [])))
+        for model_id in seen.get("ids", []):
+            self.assertNotIn(".ai-lab-staging", model_id)
+
+    def test_staging_root_is_created_privately(self):
+        self.operations.delete_instance("qwen")
+        self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        staging_root = self.benchmark / "gguf" / ".ai-lab-staging"
+        # Removed after a clean move, so recreate it the same way to check
+        # the mode a live one would have had.
+        staging_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(staging_root, 0o700)
+        self.assertEqual(oct(staging_root.stat().st_mode)[-3:], "700")
+
+    def test_recover_moves_fails_jobs_left_mid_flight_and_cleans_their_staging(self):
+        """What `recover_moves()` finds at startup after a crash."""
+        self.operations.delete_instance("qwen")
+        job_id = "crashed-job"
+        staging = self.benchmark / "gguf" / ".ai-lab-staging" / job_id
+        staging.mkdir(parents=True)
+        (staging / "partial.gguf").write_text("half")
+        job = {"id": job_id, "model_id": "gguf/qwen/qwen",
+               "target_model_id": "benchmark-gguf/qwen/qwen",
+               "source_tier": "core", "target_tier": "benchmark",
+               "bytes": 100, "files": 1, "staging": str(staging),
+               "status": "copying", "error": "", "started_at": 0.0,
+               "updated_at": 0.0}
+        self.operations._write_job(job)
+
+        recovered = self.operations.recover_moves()
+
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0]["id"], job_id)
+        jobs = self.operations.move_jobs()
+        self.assertEqual(jobs[0]["status"], "failed")
+        self.assertIn("restart", jobs[0]["error"].lower())
+        self.assertFalse(staging.exists(),
+                         "a crashed move's staged bytes must be cleaned up")
+        # The source, which a crashed copy never touches, must be untouched.
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_recover_moves_leaves_finished_jobs_alone(self):
+        self.operations.delete_instance("qwen")
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        recovered = self.operations.recover_moves()
+        self.assertEqual(recovered, [])
+        jobs = self.operations.move_jobs()
+        self.assertEqual(jobs[0]["status"], "completed")
+
+    def test_a_second_move_of_the_same_model_is_refused_while_one_is_active(self):
+        self.operations.delete_instance("qwen")
+        job = {"id": "already-running", "model_id": "gguf/qwen/qwen",
+               "target_model_id": "benchmark-gguf/qwen/qwen",
+               "source_tier": "core", "target_tier": "benchmark",
+               "bytes": 100, "files": 1, "staging": "",
+               "status": "copying", "error": "", "started_at": 0.0,
+               "updated_at": 0.0}
+        self.operations._write_job(job)
+        with self.assertRaises(ValueError) as caught:
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertIn("already being moved", str(caught.exception))
+
+    def test_cancel_is_a_no_op_once_a_move_has_finished(self):
+        self.operations.delete_instance("qwen")
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        job = self.operations.cancel_move(result["job_id"])
+        self.assertEqual(job["status"], "completed")
+
+
 class SupportedFormatTests(unittest.TestCase):
     """Downloads are filtered to what something here can actually run."""
 
@@ -536,6 +919,23 @@ class WritabilityTests(unittest.TestCase):
         return build()
 
 
+def drain(operations, timeout=5.0):
+    """Wait for the download worker to stop touching the temporary directory.
+
+    The queue runs on a thread of its own, so a test that asks for a download
+    and then returns can have its temporary directory removed underneath a
+    worker still writing into it. That shows up as a cleanup error in whatever
+    test happens to run next, which is a miserable thing to chase.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        busy = [item for item in operations.transfers()
+                if item["state"] in ("queued", "running")]
+        if not busy:
+            return
+        time.sleep(0.01)
+
+
 class DownloadDestinationTests(unittest.TestCase):
     """The destination is worked out, not asked for.
 
@@ -572,6 +972,7 @@ class DownloadDestinationTests(unittest.TestCase):
             ]),
             host=host, engines=FakeRegistry(host),
         )
+        self.addCleanup(drain, self.operations)
 
     def test_a_gguf_model_goes_to_the_gguf_repository(self):
         transfer = self.operations.download("org/model", "thing-Q4_K_M")
@@ -608,6 +1009,146 @@ class DownloadDestinationTests(unittest.TestCase):
             finally:
                 self.path.write_text(original)
         return build()
+
+
+class DownloadTierConflictTests(unittest.TestCase):
+    """A repository named explicitly and a storage tier named explicitly
+    can disagree, and that must be a refusal, not a silent tier fallback.
+    """
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.root = Path(self._temporary.name)
+        self.addCleanup(self._temporary.cleanup)
+        self.core = self.root / "core"
+        self.benchmark = self.root / "benchmark"
+        (self.core / "gguf").mkdir(parents=True)
+        (self.benchmark / "gguf").mkdir(parents=True)
+        self.path = self.root / "config.json"
+        self.path.write_text(json.dumps({
+            "models_root": str(self.core),
+            "model_roots": [
+                {"id": "core", "name": "Core", "path": str(self.core)},
+                {"id": "benchmark", "name": "Benchmark",
+                 "path": str(self.benchmark)},
+            ],
+            "repositories": [{"id": "gguf", "name": "GGUF", "format": "gguf"}],
+            "instances": [],
+        }))
+        store = ConfigStore(self.path)
+        host = FakeHost()
+        self.operations = Operations(
+            store=store, catalog=Catalog(),
+            runtime=Runtime(host, EventBus(), sample_interval_s=0),
+            settings=Settings(store, host, Registry()),
+            downloads=DownloadManager(),
+            huggingface=HuggingFaceClient(opener=lambda url: [
+                {"type": "file", "path": "thing-Q4_K_M.gguf", "size": 8},
+            ]),
+            host=host, engines=FakeRegistry(host),
+        )
+        self.addCleanup(drain, self.operations)
+
+    def test_a_repository_and_tier_that_disagree_are_refused(self):
+        # "gguf" is a core repository (its root_id defaults to "core"), so
+        # asking for it while also asking for the benchmark tier is a
+        # contradiction that must be reported, not quietly resolved one way.
+        with self.assertRaises(ValueError) as caught:
+            self.operations.download("org/model", "thing-Q4_K_M",
+                                     repository_id="gguf",
+                                     storage_tier="benchmark")
+        self.assertIn("benchmark", str(caught.exception))
+        self.assertEqual(self.operations.transfers(), [])
+
+    def test_a_repository_and_its_own_tier_agree_and_proceed(self):
+        self.operations.download("org/model", "thing-Q4_K_M",
+                                 repository_id="gguf", storage_tier="core")
+        self.assertEqual(len(self.operations.transfers()), 1)
+
+
+class BundleDownloadTests(unittest.TestCase):
+    """A declared bundle is downloaded like any other model, into the tier asked
+    for. A test download must never end up in the production library because
+    the test disk was busy or the request was ambiguous.
+    """
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.root = Path(self._temporary.name)
+        self.addCleanup(self._temporary.cleanup)
+        self.core = self.root / "core"
+        self.benchmark = self.root / "benchmark"
+        for tier in (self.core, self.benchmark):
+            (tier / "images" / "generation").mkdir(parents=True)
+            (tier / "images" / "edit").mkdir(parents=True)
+        self.path = self.root / "config.json"
+        self.path.write_text(json.dumps({
+            "models_root": str(self.core),
+            "model_roots": [
+                {"id": "core", "name": "Core", "path": str(self.core)},
+                {"id": "benchmark", "name": "Benchmark",
+                 "path": str(self.benchmark)},
+            ],
+            "repositories": [
+                {"id": "images-comfyui-generation", "name": "Generation",
+                 "format": "comfyui", "task": "image-generation",
+                 "subpath": "images/generation"},
+                {"id": "images-comfyui-edit", "name": "Editing",
+                 "format": "comfyui", "task": "image-edit",
+                 "subpath": "images/edit"},
+            ],
+            "instances": [],
+            "downloads": {"bundles": [
+                {"name": "qwen-image", "repo": "org/qwen", "format": "comfyui",
+                 "task": "image-generation",
+                 "components": [{"role": "diffusion_model",
+                                 "path": "split_files/diffusion_models/q.safetensors"}]},
+                {"name": "qwen-edit", "repo": "org/qwen", "format": "comfyui",
+                 "task": "image-edit",
+                 "components": [{"role": "diffusion_model",
+                                 "path": "split_files/diffusion_models/e.safetensors"}]},
+            ]},
+        }))
+        store = ConfigStore(self.path)
+        host = FakeHost()
+        self.operations = Operations(
+            store=store, catalog=Catalog(),
+            runtime=Runtime(host, EventBus(), sample_interval_s=0),
+            settings=Settings(store, host, Registry()),
+            downloads=DownloadManager(opener=lambda url, resume: None),
+            huggingface=HuggingFaceClient(opener=lambda url: [
+                {"type": "file", "size": 8,
+                 "path": "split_files/diffusion_models/q.safetensors"},
+                {"type": "file", "size": 8,
+                 "path": "split_files/diffusion_models/e.safetensors"},
+            ]),
+            host=host, engines=FakeRegistry(host),
+        )
+        self.addCleanup(drain, self.operations)
+
+    def test_a_benchmark_download_stays_on_the_benchmark_disk(self):
+        self.operations.download("org/qwen", "qwen-image",
+                                 storage_tier="benchmark")
+        transfer = self.operations.transfers()[0]
+        self.assertEqual(transfer["storage_tier"], "benchmark")
+        self.assertNotIn(str(self.core), transfer.get("destination", ""))
+
+    def test_an_editing_bundle_goes_to_the_editing_repository(self):
+        """Two repositories hold the same format; the job it is for decides."""
+        self.operations.download("org/qwen", "qwen-edit", storage_tier="benchmark")
+        working = [path for path in (self.benchmark / "images").rglob("*")
+                   if path.is_dir() and path.name.startswith(".")]
+        self.assertTrue(any("edit" in str(path) for path in working), working)
+
+    def test_a_declaration_that_is_unsafe_is_refused_rather_than_obeyed(self):
+        payload = json.loads(self.path.read_text())
+        payload["downloads"]["bundles"][0]["name"] = "../escape"
+        self.path.write_text(json.dumps(payload))
+        with self.assertRaises(ValueError) as caught:
+            self.operations.download("org/qwen", "qwen-image",
+                                     storage_tier="benchmark")
+        self.assertIn("name", str(caught.exception))
+        self.assertEqual(self.operations.transfers(), [])
 
 
 class BrowseTests(unittest.TestCase):
@@ -703,6 +1244,41 @@ class RepositoryEditingTests(unittest.TestCase):
             self.operations.update_models_root("/nowhere/at/all")
         self.assertIn("not a directory", str(caught.exception))
         self.assertEqual(self.store.load().models_root, str(self.root / "old"))
+
+    def test_moving_core_onto_an_existing_benchmark_root_is_refused(self):
+        """`update_models_root` must not write a config `load()` then refuses.
+
+        Every route calls `store.load()`, so a config the app cannot load
+        again is a full outage from one bad folder pick, discoverable only
+        by hand-editing config.json. The check has to happen before `save()`.
+        """
+        benchmark = self.root / "benchmark"
+        benchmark.mkdir()
+        with self.store.mutate() as config:
+            from ai_lab.config import ModelRoot
+            config.model_roots.append(
+                ModelRoot(id="benchmark", name="Benchmark", path=str(benchmark)))
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_models_root(str(benchmark))
+        self.assertIn("both point at", str(caught.exception))
+        # The config must still load after the refusal.
+        self.store.load()
+        self.assertEqual(self.store.load().models_root, str(self.root / "old"))
+
+    def test_pointing_a_model_root_at_another_ones_path_is_refused(self):
+        benchmark = self.root / "benchmark"
+        benchmark.mkdir()
+        with self.store.mutate() as config:
+            from ai_lab.config import ModelRoot
+            config.model_roots.append(
+                ModelRoot(id="benchmark", name="Benchmark", path=str(benchmark)))
+        with self.assertRaises(ValueError) as caught:
+            self.operations.update_model_root(
+                "benchmark", {"path": str(self.root / "old")})
+        self.assertIn("both point at", str(caught.exception))
+        self.store.load()  # must still load after the refusal
+        self.assertEqual(self.store.load().model_root("benchmark").path,
+                         str(benchmark))
 
     def test_a_repository_cannot_be_pointed_somewhere_of_its_own(self):
         # Setting them one at a time let GGUF sit on one disk and NVFP4 on

@@ -72,7 +72,12 @@ echo "[3/6] Installing configuration, helper and units"
 # the repository is the starting point for a fresh machine, not the truth about
 # a running one.
 remote "sh -lc '\
-  install -d -o ai-lab-manager -g ai-lab-manager -m 0755 /etc/ai-lab /var/lib/ai-lab /var/lib/ai-lab/launch && \
+  install -d -o ai-lab-manager -g ai-lab-manager -m 0755 \
+    /etc/ai-lab /etc/ai-lab/image-workflows /var/lib/ai-lab \
+    /var/lib/ai-lab/launch /var/lib/ai-lab/image-jobs \
+    /opt/ai/paddleocr /opt/ai/comfyui \
+    /models/images/ocr /models/images/generation /models/images/edit \
+    /test_models/images/ocr /test_models/images/generation /test_models/images/edit && \
   test -f /etc/ai-lab/config.json || \
     install -o ai-lab-manager -g ai-lab-manager -m 0644 ${runtime_dir}/config.json /etc/ai-lab/config.json && \
   install -o root -g root -m 0755 ${runtime_dir}/system/ai-lab-control /usr/local/sbin/ai-lab-control && \
@@ -82,6 +87,18 @@ remote "sh -lc '\
   visudo -cf /etc/sudoers.d/ai-lab && \
   usermod -aG systemd-journal ai-lab-manager && \
   systemctl daemon-reload'"
+
+# Add new completion-phase keys without replacing the operator's existing
+# instances, limits or paths. The migration is idempotent and keeps one backup.
+remote "${runtime_dir}/.venv/bin/python ${runtime_dir}/scripts/migrate-completion-config.py /etc/ai-lab/config.json"
+remote "sh -lc 'install -o ai-lab-manager -g ai-lab-manager -m 0644 \
+  ${runtime_dir}/image_workflows/*.json /etc/ai-lab/image-workflows/'"
+
+# ComfyUI uses a versioned checkout and environment. The installer exits
+# immediately when a managed release already exists; on the first deployment
+# after this feature it creates and verifies one before configuration starts
+# pointing the engine at `current`.
+"${project_dir}/scripts/install-comfyui-linux.sh"
 
 # Read-only access to the journal, so that when an engine fails to load the
 # manager can quote its own error instead of reporting that a process exited.

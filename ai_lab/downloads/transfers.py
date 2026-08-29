@@ -4,15 +4,34 @@ One background worker at a time, on purpose: several parallel downloads of
 multi-gigabyte files compete for the same disk and finish no sooner, while
 making progress harder to read.
 
-Two habits keep an interrupted transfer from turning into a broken model.
-Files are written to `<name>.part` and renamed only once complete, so the
-catalog never sees a half-written file and calls it a model. And a restarted
-transfer resumes with a Range request instead of starting over, because losing
-20 GB to a dropped connection is not acceptable.
+Three habits keep an interrupted transfer from turning into a broken model.
+
+A model is assembled out of sight. Everything is written into a working folder
+whose name begins with a dot, beside the repository it is bound for, and the
+library does not look inside folders named that way. Only when every file has
+arrived and been checked is the folder moved into place, which on one
+filesystem is a single rename: either the model is there or it is not, and
+there is no moment where it is half there under its real name. This matters
+most for a model made of several files, where the old behaviour would have
+shown the two that had arrived as models of their own while the third was
+still coming.
+
+Every file is checked before that move. The size must match the listing, and
+where Hugging Face publishes a SHA-256 — which it does for every large file —
+the bytes on disk are hashed and compared. A truncated download that ends in a
+clean-looking file is caught here rather than by an engine failing to load it
+a week later.
+
+A restarted transfer resumes rather than starting over. Each file is written
+to `<name>.part` and renamed within the working folder once complete, and the
+working folder is named after the transfer, so a cancelled 20 GB download
+continues from where it stopped instead of beginning again.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import threading
 import time
 import urllib.error
@@ -29,6 +48,11 @@ from .huggingface import RemoteFile, RemoteSet
 
 CHUNK = 1024 * 1024
 USER_AGENT = "AI-Lab/0.2"
+# Where a model is assembled before it is published. It sits beside the
+# repository the model is bound for, so the move into place is a rename on one
+# filesystem rather than a copy across two. The leading dot is what keeps it
+# out of the library: `Catalog` does not look inside folders named this way.
+WORKING = ".ai-lab-downloads"
 # How often a running transfer says it has moved. Announcing every chunk would
 # redraw the page dozens of times a second to show a number that changes by a
 # percent.
@@ -57,6 +81,11 @@ class Transfer:
     files_done: int = 0
     files_total: int = 0
     error: str = ""
+    storage_tier: str = "core"
+    # What the check before publication actually proved, so a report can say
+    # so instead of implying every file was hashed.
+    checked_hash: int = 0
+    checked_size: int = 0
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
 
     @property
@@ -71,7 +100,9 @@ class Transfer:
                 "received_bytes": self.received_bytes,
                 "total_bytes": self.total_bytes,
                 "files_done": self.files_done, "files_total": self.files_total,
-                "error": self.error}
+                "error": self.error, "storage_tier": self.storage_tier,
+                "checked_hash": self.checked_hash,
+                "checked_size": self.checked_size}
 
 
 class DownloadManager:
@@ -97,7 +128,8 @@ class DownloadManager:
 
     # -- queue -------------------------------------------------------------
 
-    def enqueue(self, remote: RemoteSet, destination: Path) -> Transfer:
+    def enqueue(self, remote: RemoteSet, destination: Path,
+                storage_tier: str = "core") -> Transfer:
         """Queue a whole model. Never a single file — see the package docstring."""
         if not remote.complete:
             raise ValueError(
@@ -106,6 +138,7 @@ class DownloadManager:
             id=f"{remote.repo}/{remote.name}".replace("/", "_"),
             repo=remote.repo, name=remote.name, destination=str(destination),
             total_bytes=remote.size_bytes, files_total=len(remote.files),
+            storage_tier=storage_tier,
         )
         with self._lock:
             if transfer.id in self._transfers and \
@@ -164,14 +197,27 @@ class DownloadManager:
     def _download(self, transfer: Transfer, remote: RemoteSet, destination: Path) -> None:
         transfer.state = State.RUNNING
         self._announce(force=True)
+        working = _working(destination, transfer.id)
         try:
-            destination.mkdir(parents=True, exist_ok=True)
+            working.mkdir(parents=True, exist_ok=True)
+            os.chmod(working, 0o700)
+            staged = []
             for item in remote.files:
                 if transfer._cancel.is_set():
                     transfer.state = State.CANCELLED
                     return
-                self._file(transfer, remote.repo, item, destination)
+                # A file already sitting at its final name, the right size, is
+                # one somebody has already waited for. Asking for the same
+                # model again should not fetch twenty gigabytes a second time.
+                if _already_there(destination, item):
+                    transfer.received_bytes += item.size_bytes
+                    transfer.files_done += 1
+                    continue
+                self._file(transfer, remote.repo, item, working)
+                staged.append(item)
                 transfer.files_done += 1
+            _verify(transfer, remote, working, destination, staged)
+            _publish(working, destination, staged)
             transfer.state = State.DONE
         except Exception as error:
             if transfer._cancel.is_set():
@@ -180,6 +226,9 @@ class DownloadManager:
             else:
                 transfer.state = State.FAILED
                 transfer.error = str(error) or error.__class__.__name__
+        # The working folder is deliberately left behind on anything but
+        # success. It holds the bytes already fetched, and asking for the same
+        # model again continues from them.
         # A finished transfer also means a new model on disk.
         self._announce(force=True)
         if transfer.state is State.DONE:
@@ -196,6 +245,13 @@ class DownloadManager:
 
     def _file(self, transfer: Transfer, repo: str, item: RemoteFile,
               destination: Path) -> None:
+        """Fetch one file into the working folder.
+
+        Every file lands flat, under its own name and not the folders it sat
+        in upstream. That is what a ComfyUI model needs — it looks a part up by
+        file name in the directory it is pointed at — and it is why two parts
+        of one bundle may not share a name.
+        """
         target = destination / Path(item.path).name
         if target.exists() and target.stat().st_size == item.size_bytes:
             transfer.received_bytes += item.size_bytes
@@ -229,3 +285,81 @@ def _open_range(url: str, resume_from: int):
         raise ValueError(f"Download failed with HTTP {error.code}") from None
     except OSError as error:
         raise ValueError(f"Download failed: {error}") from None
+
+
+def _working(destination: Path, transfer_id: str) -> Path:
+    """The folder a model is assembled in, beside the repository it belongs to."""
+    return destination.parent / WORKING / _safe(transfer_id)
+
+
+def _safe(name: str) -> str:
+    """A transfer id reduced to something that is only ever a folder name."""
+    return "".join(character if character.isalnum() or character in "-._"
+                   else "_" for character in name).lstrip(".") or "transfer"
+
+
+def _already_there(destination: Path, item: RemoteFile) -> bool:
+    final = destination / Path(item.path).name
+    return bool(item.size_bytes) and final.is_file() \
+        and final.stat().st_size == item.size_bytes
+
+
+def _verify(transfer: Transfer, remote: RemoteSet, working: Path,
+            destination: Path, staged: list) -> None:
+    """Check every file before any of it becomes visible.
+
+    Size is checked always. The hash is checked wherever upstream published
+    one, and how many files got which check is recorded on the transfer, so
+    nothing here has to be taken on trust afterwards.
+
+    Files that were already in place are checked where they are. They are part
+    of the model about to be published, so saying nothing about them would
+    make the count above a half-truth.
+    """
+    transfer.checked_hash = transfer.checked_size = 0
+    for item in remote.files:
+        folder = working if item in staged else destination
+        path = folder / Path(item.path).name
+        if not path.is_file():
+            raise ValueError(f"{path.name} did not arrive")
+        actual = path.stat().st_size
+        if item.size_bytes and actual != item.size_bytes:
+            raise ValueError(
+                f"{path.name} is {actual} bytes; upstream says {item.size_bytes}")
+        transfer.checked_size += 1
+        if not item.sha256:
+            continue
+        if _sha256(path) != item.sha256:
+            raise ValueError(
+                f"{path.name} arrived complete but its contents do not match "
+                "the checksum upstream publishes for it")
+        transfer.checked_hash += 1
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _publish(working: Path, destination: Path, staged: list) -> None:
+    """Make the finished model visible, in one act where the filesystem allows.
+
+    Nothing has been downloaded to this name before, which is the ordinary
+    case, so the whole working folder is renamed into place and the model
+    appears complete or not at all. When something is already there — the same
+    model fetched again, or a repository root that holds loose files — the
+    files are moved one at a time into it, which is the best a filesystem
+    offers for merging into a directory that exists.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.exists():
+        os.replace(working, destination)
+        return
+    for item in staged:
+        name = Path(item.path).name
+        os.replace(working / name, destination / name)
+    shutil.rmtree(working, ignore_errors=True)

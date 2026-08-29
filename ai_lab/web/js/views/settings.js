@@ -50,12 +50,32 @@ function section(title, children) {
 // listing of what is actually there. The rest follow from it, or are where an
 // engine was installed.
 function paths(settings, refresh) {
+  const roots = settings.model_roots || [
+    { id: 'core', name: 'Core', path: settings.models_root, enabled: true },
+  ];
   const rows = [
-    chosen(settings.models_root, refresh),
+    ...roots.map((item) => chosenRoot(item, refresh)),
     ...displayRepositories(settings).map((item) =>
       readOnly(item.name, item.path, trouble(item))),
   ];
   return section('Paths', rows);
+}
+
+function chosenRoot(root, refresh) {
+  const isCore = root.id === 'core';
+  return pathRow(isCore ? 'Production models' : 'Temporary / benchmark models', root.path, {
+    help: isCore ? 'Approved models used by AI-Lab.'
+                 : 'Models being evaluated before promotion to production.',
+    choose: () => chooseFolder(root.path || null),
+    // Core keeps the original endpoint: it is the one root every existing
+    // deployment already has, and it can never be disabled, so it does not
+    // need the newer per-root PATCH the benchmark tier uses.
+    save: (picked) => isCore
+      ? api.updateModelsRoot(picked)
+      : api.updateModelRoot(root.id, { path: picked, enabled: true }),
+    trouble: 'Could not configure ' + root.name + ' storage',
+    refresh,
+  });
 }
 
 
@@ -67,14 +87,16 @@ function paths(settings, refresh) {
 function displayRepositories(settings) {
   const repositories = settings.repositories || [];
   const visible = repositories.filter((item) =>
-    !item.task || item.task === 'text-generation');
+    item.root_id === 'core'
+    && (!item.task || item.task === 'text-generation'));
   const audio = [
     ['transcription', 'Audio transcription', 'audio/asr'],
     ['vad', 'Voice activity detection', 'audio/vad'],
     ['diarization', 'Speaker diarization', 'audio/diarization'],
   ];
   audio.forEach(([task, name, subpath]) => {
-    const members = repositories.filter((item) => item.task === task);
+    const members = repositories.filter((item) =>
+      item.root_id === 'core' && item.task === task);
     if (!members.length) return;
     visible.push({
       name,
@@ -103,21 +125,6 @@ function enginePaths(settings, refresh) {
   const found = section('Engine paths', rows);
   found.classList.add('engine-paths');
   return found;
-}
-
-
-// The one path that is chosen rather than typed or followed. A folder, and a
-// typo in it empties every screen, so it is picked from a listing of what is
-// actually on the machine — and saved as soon as it is picked, because there
-// is nothing half-typed to confirm.
-function chosen(root, refresh) {
-  return pathRow('Models root', root, {
-    help: 'Every weight format is a folder in here.',
-    choose: () => chooseFolder(root || null),
-    save: (picked) => api.updateModelsRoot(picked),
-    trouble: 'Could not move the model store',
-    refresh,
-  });
 }
 
 
@@ -341,8 +348,17 @@ function updateControls(engine, source, refresh, waiting) {
 // waiting, upstream was checked and there is nothing, or upstream could not
 // yet be read. Engines whose installation is not managed say that explicitly.
 function updateState(engine, source, refresh) {
-  if (!engine.available) return [];
   const installed = byEngine.get(engine.id);
+  if (!engine.available && installed && !installed.installed) {
+    return [element('button', {
+      class: 'action', text: 'Install…',
+      onclick: (event) => whileWorking(event.target, 'Reading…', async () => {
+        await reviewUpdate(engine, take(engine, false, true, refresh));
+        await refresh();
+      }),
+    })];
+  }
+  if (!engine.available) return [];
   const waiting = updateWaiting(engine);
   if (waiting) return updateControls(engine, source, refresh, waiting);
   const managed = Boolean((source && source.exists) || installed);
@@ -385,8 +401,36 @@ function engineEntry(engine, refresh) {
   if (source && source.error) rows.push(element('div', { class: 'error', text: source.error }));
   const building = Boolean(source && source.state === 'running');
   if (stored.length || building) rows.push(buildLog(engine, stored, building));
+  const managed = byEngine.get(engine.id);
+  if (managed && managed.components && managed.components.length) {
+    rows.push(componentList(engine, managed.components, refresh));
+  }
 
   return element('div', { class: 'engine-entry' }, rows);
+}
+
+function componentList(engine, components, refresh) {
+  return element('details', { class: 'fold components' }, [
+    element('summary', { text: `${components.length} managed custom node${components.length === 1 ? '' : 's'}` }),
+    ...components.map((item) => element('div', { class: 'row tight' }, [
+      element('span', { class: 'grow', text: item.name }),
+      element('span', { class: 'muted', text: item.installed || 'unknown' }),
+      item.dirty ? element('span', { class: 'pill warn', text: 'local changes' }) : null,
+      item.update_available ? element('button', {
+        class: 'action', text: `Update to ${item.latest}`,
+        ...(item.dirty ? { disabled: 'disabled' } : {}),
+        onclick: (event) => whileWorking(event.target, 'Building…', async () => {
+          try {
+            await api.updateInstallComponent(engine.id, item.name);
+            logs.set(engine.id, []);
+          } catch (error) {
+            await showNotice({ title: `Could not update ${item.name}`, body: error.message });
+          }
+          refresh();
+        }),
+      }) : null,
+    ].filter(Boolean))),
+  ]);
 }
 
 // What a build said, while it says it and afterwards.

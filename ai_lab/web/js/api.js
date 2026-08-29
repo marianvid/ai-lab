@@ -25,6 +25,17 @@ async function request(method, path, body) {
   return payload;
 }
 
+async function requestForm(method, path, body) {
+  const response = await fetch(path, { method, body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `${method} ${path} failed`);
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
 export const api = {
   settings: () => request('GET', '/api/settings'),
   models: (engine) => request('GET', '/api/models' + (engine ? `?engine=${engine}` : '')),
@@ -34,9 +45,14 @@ export const api = {
   // One root; every format is a folder in it. Repositories have no path of
   // their own to set.
   updateModelsRoot: (path) => request('PATCH', '/api/models-root', { path }),
+  updateModelRoot: (id, changes) =>
+    request('PATCH', '/api/model-roots/' + encodeURIComponent(id), changes),
   updateEngineBinary: (engine, path) =>
     request('PATCH', `/api/engines/${encodeURIComponent(engine)}/binary`, { path }),
   deleteModel: (id) => request('DELETE', `/api/models/${encodeURIComponent(id)}`),
+  moveModel: (id, storageTier) => request(
+    'POST', '/api/models/' + encodeURIComponent(id) + '/move',
+    { storage_tier: storageTier }),
   instances: () => request('GET', '/api/instances'),
   // `force` goes ahead even though a request is being answered on the card.
   // The server refuses without it; only the person looking at the screen can
@@ -61,7 +77,8 @@ export const api = {
   deleteInstance: (id) => request('DELETE', `/api/instances/${encodeURIComponent(id)}`),
   transfers: () => request('GET', '/api/downloads'),
   // No destination: the server puts a model where its format lives.
-  download: (repo, name) => request('POST', '/api/downloads', { repo, name }),
+  download: (repo, name, storageTier) => request(
+    'POST', '/api/downloads', { repo, name, storage_tier: storageTier }),
   cancelDownload: (id) => request('POST', `/api/downloads/${encodeURIComponent(id)}/cancel`),
   builds: () => request('GET', '/api/builds'),
   checkBuild: (engine) => request('POST', `/api/builds/${encodeURIComponent(engine)}/check`),
@@ -87,6 +104,8 @@ export const api = {
     request('POST', `/api/installs/${encodeURIComponent(engine)}/${encodeURIComponent(name)}/activate`),
   removeInstall: (engine, name) =>
     request('DELETE', `/api/installs/${encodeURIComponent(engine)}/${encodeURIComponent(name)}`),
+  updateInstallComponent: (engine, name) => request(
+    'POST', `/api/installs/${encodeURIComponent(engine)}/components/${encodeURIComponent(name)}/update`),
   storage: () => request('GET', '/api/storage'),
   clearStorage: (id) =>
     request('DELETE', `/api/storage/${encodeURIComponent(id)}`),
@@ -95,4 +114,10 @@ export const api = {
   search: (q) => request('GET', `/api/hf/search?q=${encodeURIComponent(q)}`),
   remoteSets: (repo) =>
     request('GET', `/api/hf/sets?repo=${encodeURIComponent(repo)}`),
+  imageProfiles: () => request('GET', '/api/image-profiles'),
+  imageJobs: () => request('GET', '/api/image-jobs'),
+  imageJob: (id) => request('GET', `/api/image-jobs/${encodeURIComponent(id)}`),
+  generateImage: (payload) => request('POST', '/v1/images/generations', payload),
+  editImage: (payload) => requestForm('POST', '/v1/images/edits', payload),
+  cancelImageJob: (id) => request('DELETE', `/api/image-jobs/${encodeURIComponent(id)}`),
 };

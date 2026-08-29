@@ -45,6 +45,17 @@ class GroupTests(unittest.TestCase):
     def test_readme_and_licence_are_not_models(self):
         self.assertEqual(group("org/model", self.files(("README.md", 1), (".gitattributes", 1))), [])
 
+    def test_an_official_paddleocr_package_is_one_downloadable_set(self):
+        sets = group("PaddlePaddle/PP-OCRv5_mobile_det", self.files(
+            ("inference.pdiparams", 100), ("inference.json", 5),
+            ("inference.yml", 2), ("config.json", 1)))
+        self.assertEqual(len(sets), 1)
+        self.assertEqual(sets[0].format, "paddleocr")
+        self.assertEqual(sets[0].name, "PP-OCRv5_mobile_det")
+        self.assertEqual({item.path for item in sets[0].files},
+                         {"inference.pdiparams", "inference.json",
+                          "inference.yml", "config.json"})
+
     def test_download_url_is_escaped(self):
         item = RemoteFile(path="folder/my model.gguf", size_bytes=1)
         self.assertEqual(item.url("org/repo"),

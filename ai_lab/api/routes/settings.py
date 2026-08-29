@@ -20,6 +20,9 @@ def register(router, operations) -> None:
     router.add("PATCH", "/api/models-root",
                lambda body=None, **_: operations.update_models_root(
                    (body or {}).get("path", "")))
+    router.add("PATCH", "/api/model-roots/{id}",
+               lambda id, body=None, **_: operations.update_model_root(
+                   id, body or {}))
     router.add("GET", "/api/memory", lambda **_: operations.memory_budget())
     router.add("PATCH", "/api/memory",
                lambda body=None, **_: operations.update_memory(body or {}))
@@ -33,6 +36,8 @@ def register(router, operations) -> None:
                lambda engine, name, **_: operations.activate_install(engine, name))
     router.add("DELETE", "/api/installs/{engine}/{name}",
                lambda engine, name, **_: operations.remove_install(engine, name))
+    router.add("POST", "/api/installs/{engine}/components/{name}/update",
+               lambda engine, name, **_: operations.update_install_component(engine, name))
     router.add("GET", "/api/builds/{engine}/changes",
                lambda engine, **_: operations.what_would_change(engine))
     router.add("POST", "/api/builds/{engine}/check",

@@ -134,7 +134,17 @@ class Catalog:
 
     @staticmethod
     def _directories(root: Path) -> list[Path]:
-        return [root, *(path for path in sorted(root.rglob("*")) if path.is_dir())]
+        """Every folder in a repository, except the ones that are not models.
+
+        A folder whose name begins with a dot is working space — a model being
+        downloaded, or one being copied between tiers — and what is inside it
+        is by definition not finished. Looking in would show half a model as a
+        model, which is exactly what the working folder exists to prevent.
+        """
+        return [root, *(path for path in sorted(root.rglob("*"))
+                        if path.is_dir()
+                        and not any(part.startswith(".")
+                                    for part in path.relative_to(root).parts))]
 
     @staticmethod
     def _classify(directory: Path) -> tuple[list[Path], list[Path]]:

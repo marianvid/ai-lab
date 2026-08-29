@@ -358,10 +358,16 @@ class SettingsFieldTests(unittest.TestCase):
 
         first_byte_s = 5.0
         between_bytes_s = 1.0
+        max_upload_bytes = 0
+        max_upload_pixels = 0
+        max_upload_dimension = 0
 
         def acquire(self, wanted, shape=None, settings=None, still_wanted=None):
             self.asked.append((wanted, shape, settings, still_wanted))
             return SettingsFieldTests.Lease(self)
+
+        def timeouts_for(self, task):
+            return self.first_byte_s, self.between_bytes_s
 
         def stats(self):
             return {}
@@ -447,6 +453,62 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertEqual(sent.field("model"), "qwen-real")
         self.assertIn(b"\x00\x01audio\xff", forwarded["payload"])
         self.assertEqual(forwarded["kwargs"]["content_type"], body.content_type)
+
+    def _ocr_upload(self, image: bytes) -> "MultipartBody":
+        from ai_lab.api.multipart import MultipartBody
+        boundary = "----ai-lab-ocr-test"
+        data = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="model"\r\n\r\n'
+            "ocr\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="scan.png"\r\n'
+            "Content-Type: image/png\r\n\r\n"
+        ).encode() + image + f"\r\n--{boundary}--\r\n".encode()
+        return MultipartBody(f"multipart/form-data; boundary={boundary}", data)
+
+    def test_an_ocr_upload_within_the_limits_is_forwarded(self):
+        import struct
+
+        from ai_lab.api.routes.gateway import _forwarder
+        png = (b"\x89PNG\r\n\x1a\n"
+              + struct.pack(">I", 13) + b"IHDR"
+              + struct.pack(">II", 10, 10) + bytes(5)
+              + struct.pack(">I", 0))
+        gateway = self.Gateway()
+        gateway.max_upload_bytes = 1_000_000
+        gateway.max_upload_pixels = 1_000_000
+        gateway.max_upload_dimension = 1000
+
+        def fake_forward(url, payload, on_close=None, **_):
+            if on_close:
+                on_close()
+            return None
+
+        import ai_lab.api.routes.gateway as module
+        original, module.forward = module.forward, fake_forward
+        try:
+            _forwarder(gateway, "/v1/images/ocr")(body=self._ocr_upload(png))
+        finally:
+            module.forward = original
+        self.assertEqual(gateway.asked[0][0], "ocr")
+
+    def test_an_oversized_ocr_upload_is_rejected_before_forwarding(self):
+        from ai_lab.api.routes.gateway import _forwarder
+        gateway = self.Gateway()
+        gateway.max_upload_bytes = 4     # smaller than any real image
+        with self.assertRaises(ValueError) as caught:
+            _forwarder(gateway, "/v1/images/ocr")(body=self._ocr_upload(b"\x89PNGfiller"))
+        self.assertIn("byte", str(caught.exception))
+        self.assertEqual(gateway.asked, [], "a rejected upload must never reach acquire()")
+
+    def test_a_renamed_non_image_upload_is_rejected(self):
+        from ai_lab.api.routes.gateway import _forwarder
+        gateway = self.Gateway()
+        with self.assertRaises(ValueError):
+            _forwarder(gateway, "/v1/images/ocr")(
+                body=self._ocr_upload(b"not an image at all, just text"))
+        self.assertEqual(gateway.asked, [])
 
 
 class NoGatewayTests(unittest.TestCase):
