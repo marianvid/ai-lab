@@ -18,7 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import Repository
-from .naming import base_name, is_companion, is_part, is_weight, missing_shards
+from .naming import (base_name, is_companion, is_part, is_weight_for_format,
+                     missing_shards)
 from .types import Format, ModelFile, ModelSet, Task
 
 
@@ -75,7 +76,7 @@ class Catalog:
             return self._scan_pyannote(repository, root)
         models: list[ModelSet] = []
         for directory in self._directories(root):
-            weights, companions = self._classify(directory)
+            weights, companions = self._classify(directory, repository.format)
             if not weights:
                 continue
             if self._directory_is_the_model(repository):
@@ -147,7 +148,8 @@ class Catalog:
                                     for part in path.relative_to(root).parts))]
 
     @staticmethod
-    def _classify(directory: Path) -> tuple[list[Path], list[Path]]:
+    def _classify(directory: Path,
+                  repository_format: str) -> tuple[list[Path], list[Path]]:
         weights, companions = [], []
         for path in sorted(directory.iterdir()):
             if not path.is_file():
@@ -155,7 +157,8 @@ class Catalog:
             # A part is weights, but not a model: it goes with whatever else
             # is in the directory rather than becoming an entry of its own.
             # The order matters — a vision projector passes `is_weight`.
-            if is_weight(path.name) and not is_part(path.name):
+            if (is_weight_for_format(path.name, repository_format)
+                    and not is_part(path.name)):
                 weights.append(path)
             elif is_companion(path.name) or is_part(path.name):
                 companions.append(path)

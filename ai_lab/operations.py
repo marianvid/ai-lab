@@ -976,6 +976,7 @@ class Operations:
                 "Source and destination are the same location; refusing to "
                 "move a model onto itself")
         sources = [Path(item.path).resolve() for item in model.files]
+        self._reject_unremovable_sources(sources)
         relatives = [path.relative_to(source_root) for path in sources]
         destinations = [target_path / relative for relative in relatives]
         existing = [path for path in destinations if path.exists()]
@@ -1075,21 +1076,31 @@ class Operations:
         # can belong to more than one GGUF model in the same directory — see
         # `Catalog._classify` — so one still needed by a sibling that has not
         # moved is left where it is.
-        protected = self._companions_still_needed(config, model, sources)
-        for source in sources:
-            if source not in protected:
-                source.unlink()
-        self._prune_empty([s for s in sources if s not in protected],
-                          [source_root])
+        try:
+            protected = self._companions_still_needed(config, model, sources)
+            for source in sources:
+                if source not in protected:
+                    source.unlink()
+            self._prune_empty([s for s in sources if s not in protected],
+                              [source_root])
 
-        record = {"at": time.time(), "source_model_id": model_id,
-                  "target_model_id": job["target_model_id"],
-                  "source_tier": source_repository.root_id,
-                  "target_tier": target_root_id,
-                  "bytes": model.size_bytes, "files": len(sources)}
-        history = self.host.state_dir() / "model-moves.jsonl"
-        with history.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+            record = {"at": time.time(), "source_model_id": model_id,
+                      "target_model_id": job["target_model_id"],
+                      "source_tier": source_repository.root_id,
+                      "target_tier": target_root_id,
+                      "bytes": model.size_bytes, "files": len(sources)}
+            history = self.host.state_dir() / "model-moves.jsonl"
+            with history.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+        except Exception as error:
+            # Publishing may already have succeeded.  Keep both complete
+            # copies, but never leave the durable record claiming that a
+            # worker is still active when the request has actually failed.
+            job["status"] = "failed"
+            job["error"] = str(error)
+            job["updated_at"] = time.time()
+            self._write_job(job)
+            raise
 
         job["status"] = "completed"
         job["updated_at"] = time.time()
@@ -1110,6 +1121,22 @@ class Operations:
             raise ValueError(
                 "This model is currently loaded by " + ", ".join(loaded)
                 + ". Unload that entry in Models, then try the move again.")
+
+    @staticmethod
+    def _reject_unremovable_sources(sources: list[Path]) -> None:
+        """Refuse before copying when the manager cannot remove the source.
+
+        A manually installed model may be readable while its directory is
+        owned by root.  Discovering that only after copying and checksumming
+        tens of gigabytes leaves two complete copies and a failed move.
+        """
+        blocked = sorted({path.parent for path in sources
+                          if not os.access(path.parent, os.W_OK)})
+        if blocked:
+            raise ValueError(
+                "The model is readable but cannot be moved because the "
+                f"manager cannot remove files from {blocked[0]}. Correct its "
+                "ownership or permissions, then try again.")
 
     @staticmethod
     def _publish(staging: Path, target_path: Path,

@@ -485,6 +485,27 @@ class MoveModelTests(unittest.TestCase):
         self.assertIn("free space", str(caught.exception))
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
 
+    def test_a_readable_but_unremovable_source_is_refused_before_copying(self):
+        self.operations.delete_instance("qwen")
+        import ai_lab.operations as operations_module
+        original = operations_module.os.access
+        source_directory = (self.core / "gguf" / "qwen").resolve()
+
+        def access(path, mode):
+            if Path(path) == source_directory and mode == os.W_OK:
+                return False
+            return original(path, mode)
+
+        operations_module.os.access = access
+        try:
+            with self.assertRaises(ValueError) as caught:
+                self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        finally:
+            operations_module.os.access = original
+        self.assertIn("cannot remove", str(caught.exception))
+        self.assertFalse((self.benchmark / "gguf" / "qwen").exists())
+        self.assertEqual(self.operations.move_jobs(), [])
+
     def test_a_checksum_failure_during_copy_leaves_the_source_intact(self):
         self.operations.delete_instance("qwen")
         import ai_lab.operations as operations_module

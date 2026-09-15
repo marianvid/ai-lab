@@ -25,6 +25,13 @@ WEIGHT_SUFFIXES = {
     ".pdiparams": "paddleocr",
 }
 
+# These repository formats describe how safetensors weights are encoded or
+# consumed, not a different file container. They all live in `.safetensors`
+# files on disk.
+SAFETENSORS_FORMATS = frozenset({
+    "safetensors", "fp8", "nvfp4", "awq", "gptq", "comfyui",
+})
+
 # Files that belong to a model without holding weights.
 COMPANION_NAMES = frozenset({
     "config.json", "generation_config.json", "special_tokens_map.json",
@@ -60,6 +67,27 @@ def is_part(name: str) -> bool:
 
 def is_weight(name: str) -> bool:
     return any(name.lower().endswith(suffix) for suffix in WEIGHT_SUFFIXES)
+
+
+def is_weight_for_format(name: str, repository_format: str) -> bool:
+    """Whether a weight file belongs in a repository's logical format.
+
+    Repositories may intentionally share a directory, as the Hugging Face and
+    NeMo ASR repositories do. A plain `is_weight` check would make every
+    checkpoint appear once under each repository, labelled with whichever
+    format happened to scan it. Match the actual file container as well.
+    """
+    lowered = name.lower()
+    container = next((kind for suffix, kind in WEIGHT_SUFFIXES.items()
+                      if lowered.endswith(suffix)), None)
+    # ComfyUI bundles may deliberately mix a GGUF diffusion model with
+    # safetensors text encoders and VAEs in the same model directory.  The
+    # directory is the runnable unit, so both containers belong to it.
+    if repository_format == "comfyui":
+        return container in {"safetensors", "gguf"}
+    if container == "safetensors":
+        return repository_format in SAFETENSORS_FORMATS
+    return container == repository_format
 
 
 def is_companion(name: str) -> bool:

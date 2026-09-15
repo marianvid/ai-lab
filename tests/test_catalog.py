@@ -94,6 +94,42 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(models[0].entrypoint, str(self.root / "parakeet"))
         self.assertEqual(models[0].format, Format.NEMO)
 
+    def test_shared_audio_directory_is_filtered_by_actual_weight_format(self):
+        make_files(self.root / "whisper", "model.safetensors", "config.json")
+        make_files(self.root / "parakeet", "parakeet.nemo", "config.json")
+        repositories = [
+            Repository(id="audio-asr", name="Audio transcription",
+                       path=str(self.root), format="safetensors",
+                       task="transcription"),
+            Repository(id="audio-nemo-asr", name="NeMo audio transcription",
+                       path=str(self.root), format="nemo",
+                       task="transcription"),
+        ]
+
+        models = Catalog().scan(repositories)
+
+        self.assertEqual([model.id for model in models], [
+            "audio-asr/whisper",
+            "audio-nemo-asr/parakeet",
+        ])
+        self.assertEqual([model.format for model in models], [
+            Format.SAFETENSORS,
+            Format.NEMO,
+        ])
+
+    def test_comfyui_bundle_keeps_gguf_and_safetensors_components_together(self):
+        make_files(self.root / "flux-q8", "flux-Q8_0.gguf",
+                   "text-encoder.safetensors", "vae.safetensors")
+
+        models = self.scan(format="comfyui")
+
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0].id, "repo/flux-q8")
+        self.assertEqual(
+            {Path(item.path).name for item in models[0].files},
+            {"flux-Q8_0.gguf", "text-encoder.safetensors", "vae.safetensors"},
+        )
+
     def test_an_onnx_directory_is_one_model_even_with_several_exports(self):
         make_files(self.root / "silero", "silero.onnx", "silero-fp16.onnx")
         models = self.scan(format="onnx")
