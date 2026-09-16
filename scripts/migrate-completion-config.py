@@ -86,38 +86,7 @@ def merge(config: dict) -> dict:
         "result_ttl_s": 86400,
         "profiles": {},
     })
-    images.setdefault("profiles", {}).setdefault("sd15-smoke", {
-        "description": "Controlled SD 1.5 generation smoke profile",
-        "version": "1",
-        "task": "generation",
-        "model": "image-smoke",
-        "workflow": "sd15-generation-v1.json",
-        "inputs": {
-            "prompt": ["2", "text"],
-            "negative_prompt": ["3", "text"],
-            "seed": ["5", "seed"],
-            "steps": ["5", "steps"],
-            "cfg_scale": ["5", "cfg"],
-            "width": ["4", "width"],
-            "height": ["4", "height"],
-        },
-    })
-    images["profiles"].setdefault("sd15-edit-smoke", {
-        "description": "Controlled SD 1.5 image-edit smoke profile",
-        "version": "1",
-        "task": "edit",
-        "model": "image-smoke",
-        "workflow": "sd15-edit-v1.json",
-        "inputs": {
-            "prompt": ["2", "text"],
-            "negative_prompt": ["3", "text"],
-            "image": ["4", "image"],
-            "seed": ["6", "seed"],
-            "steps": ["6", "steps"],
-            "cfg_scale": ["6", "cfg"],
-        },
-    })
-    images["profiles"].setdefault("qwen-image-benchmark", {
+    images.setdefault("profiles", {}).setdefault("qwen-image-benchmark", {
         "description": "Qwen Image NVFP4 deterministic benchmark profile",
         "version": "1",
         "task": "generation",

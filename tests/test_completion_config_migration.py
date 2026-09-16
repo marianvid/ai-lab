@@ -22,12 +22,8 @@ class CompletionConfigMigrationTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in second["repositories"]].count(
             "images-paddleocr"), 1)
         self.assertIn("comfyui", second["engines"])
-        profile = second["images"]["profiles"]["sd15-smoke"]
-        self.assertEqual(profile["model"], "image-smoke")
-        self.assertEqual(profile["task"], "generation")
-        edit = second["images"]["profiles"]["sd15-edit-smoke"]
-        self.assertEqual(edit["task"], "edit")
-        self.assertEqual(edit["inputs"]["image"], ["4", "image"])
+        self.assertNotIn("sd15-smoke", second["images"]["profiles"])
+        self.assertNotIn("sd15-edit-smoke", second["images"]["profiles"])
         self.assertEqual(second["images"]["profiles"]["qwen-image-benchmark"]
                          ["model"], "image-qwen")
         self.assertEqual(second["images"]["profiles"]["flux2-benchmark"]
