@@ -52,6 +52,17 @@ async function renderPage(overrides = {}) {
 }
 
 describe('the Models page', () => {
+  it('shows the curated use directly below the model name', async () => {
+    const model = {
+      ...MODEL, summary: 'Fast multilingual drafts',
+      description: 'Excels at quick multilingual drafting and translation.',
+    };
+    const { view } = await renderPage({ '/api/models': [model] });
+    const note = view.querySelector('.model-summary');
+    assert.equal(note.textContent, 'Fast multilingual drafts');
+    assert.match(note.title, /translation/);
+  });
+
   it('never puts the word null on the page', async () => {
     // replaceChildren turns a null child into a text node reading "null".
     const { view } = await renderPage();

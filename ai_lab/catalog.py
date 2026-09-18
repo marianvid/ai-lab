@@ -15,6 +15,7 @@ hidden, so an interrupted download is visible instead of mysterious.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .config import Repository
@@ -74,8 +75,13 @@ class Catalog:
         """
         if repository.format == Format.PYANNOTE.value:
             return self._scan_pyannote(repository, root)
-        models: list[ModelSet] = []
+        declared, declared_roots = self._declared_models(repository, root)
+        models: list[ModelSet] = list(declared)
         for directory in self._directories(root):
+            if any(directory == declared_root
+                   or directory.is_relative_to(declared_root)
+                   for declared_root in declared_roots):
+                continue
             weights, companions = self._classify(directory, repository.format)
             if not weights:
                 continue
@@ -87,6 +93,56 @@ class Catalog:
             for base, shards in self._group(weights).items():
                 models.append(self._build(repository, root, directory, base, shards, companions))
         return models
+
+    @staticmethod
+    def _declared_models(repository: Repository, root: Path) -> tuple[list[ModelSet], list[Path]]:
+        """Read model trees whose pieces live in several nested folders.
+
+        ComfyUI video stacks and a few application caches are one usable model
+        even though their transformer, text encoder and VAEs sit in different
+        subdirectories. A tiny manifest at the model root makes that boundary
+        explicit instead of exposing each component as a separate model.
+        """
+        manifests = [path for path in root.rglob(".ai-lab-model.json")
+                     if not any(part.startswith(".") and part != ".ai-lab-model.json"
+                                for part in path.relative_to(root).parts)]
+        models, roots = [], []
+        for manifest in sorted(manifests):
+            directory = manifest.parent
+            raw = json.loads(manifest.read_text())
+            name = str(raw.get("name") or directory.name)
+            entrypoint = directory / str(raw.get("entrypoint") or "")
+            files = Catalog._physical_files(directory)
+            relative = directory.relative_to(root)
+            parts = [repository.id, *relative.parts[:-1], name] if relative.parts \
+                else [repository.id, name]
+            models.append(ModelSet(
+                id="/".join(parts), name=name, format=Format(repository.format),
+                entrypoint=str(entrypoint), files=files,
+                task=Task(repository.task), complete=True,
+            ))
+            roots.append(directory)
+        return models, roots
+
+    @staticmethod
+    def _physical_files(directory: Path) -> tuple[ModelFile, ...]:
+        """Count cached weights once when snapshots symlink back to blobs.
+
+        Hugging Face application caches keep a content-addressed blob and a
+        friendly snapshot symlink to the same inode.  Both paths belong to the
+        declared model, but summing both reports twice the disk actually used.
+        """
+        files, seen = [], set()
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file():
+                continue
+            stat = path.stat()
+            physical = (stat.st_dev, stat.st_ino)
+            if physical in seen:
+                continue
+            seen.add(physical)
+            files.append(ModelFile(path=str(path), size_bytes=stat.st_size))
+        return tuple(files)
 
     def _scan_pyannote(self, repository: Repository, root: Path) -> list[ModelSet]:
         """A downloaded pyannote pipeline is one directory tree.

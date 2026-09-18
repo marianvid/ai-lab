@@ -77,7 +77,10 @@ function modelRow(model) {
   return element('tr', {}, [
     // On disk there is no entry and so nothing to switch anything off: these
     // are what the weights themselves can do.
-    element('td', {}, element('span', { class: 'inline ident' }, [
+    element('td', {
+      title: model.description || model.summary || '',
+      class: model.description || model.summary ? 'model-curated' : '',
+    }, element('span', { class: 'inline ident' }, [
       element('strong', { text: model.name }),
       ...capabilities(model.capabilities),
     ])),

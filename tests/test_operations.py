@@ -151,6 +151,17 @@ class OperationsTests(unittest.TestCase):
         names = sorted(item["name"] for item in self.operations.models())
         self.assertEqual(names, ["big", "gemma", "qwen"])
 
+    def test_models_carry_operator_curation_by_stable_model_name(self):
+        with self.store.mutate() as config:
+            config.model_notes["qwen"] = {
+                "short": "Fast drafts",
+                "detail": "Excels at low-latency multilingual drafts.",
+            }
+        qwen = next(item for item in self.operations.models()
+                    if item["name"] == "qwen")
+        self.assertEqual(qwen["summary"], "Fast drafts")
+        self.assertIn("multilingual", qwen["description"])
+
     def test_models_can_be_filtered_to_what_an_engine_can_load(self):
         """llama.cpp reads GGUF, so the safetensors model must not appear."""
         names = sorted(item["name"] for item in self.operations.models("llamacpp"))

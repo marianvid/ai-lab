@@ -19,6 +19,16 @@ from pathlib import Path
 from threading import Lock
 
 
+def _torch_device(torch):
+    """Use the accelerator present on this host, with CPU as a safe floor."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    mps = getattr(getattr(torch, "backends", None), "mps", None)
+    if mps is not None and mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def _checkpoint(directory: str) -> str:
     path = Path(directory)
     if path.is_file():
@@ -133,7 +143,7 @@ class PyannoteBackend:
 
         self.torch = torch
         self.pipeline = Pipeline.from_pretrained(model_path)
-        self.pipeline.to(torch.device("cuda"))
+        self.pipeline.to(_torch_device(torch))
         self.lock = Lock()
 
     def diarize(self, audio_path: str) -> list[dict]:

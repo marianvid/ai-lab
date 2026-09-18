@@ -127,6 +127,16 @@ class Operations:
         rows = []
         for item in models:
             row = self._model(item)
+            note = config.model_notes.get(item.id, config.model_notes.get(item.name, {}))
+            if isinstance(note, str):
+                note = {"short": note, "detail": note}
+            if isinstance(note, dict):
+                short = str(note.get("short", "")).strip()
+                detail = str(note.get("detail", short)).strip()
+                if short:
+                    row["summary"] = short
+                if detail:
+                    row["description"] = detail
             try:
                 row["storage_tier"] = config.repository(
                     item.id.split("/", 1)[0]).root_id

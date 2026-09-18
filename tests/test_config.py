@@ -40,6 +40,7 @@ class ConfigStoreTests(unittest.TestCase):
         store = ConfigStore(self.path)
         original = Config(
             models_root="/models",
+            model_notes={"qwen": {"short": "Fast drafts", "detail": "Best for drafts."}},
             repositories=[Repository(id="a", name="A", format="gguf",
                                      path="/models/gguf", base_id="a")],
             instances=[Instance(id="i", engine="llamacpp",

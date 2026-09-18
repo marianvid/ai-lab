@@ -87,6 +87,38 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(models[0].entrypoint, str(self.root / "gemma"))
         self.assertEqual(models[0].format, Format.SAFETENSORS)
 
+    def test_a_declared_nested_stack_is_one_model(self):
+        model = self.root / "ltx-2.5"
+        make_files(model / "diffusion_models", "transformer.safetensors", size=100)
+        make_files(model / "vae", "video-vae.safetensors", "audio-vae.safetensors",
+                   size=20)
+        (model / ".ai-lab-model.json").write_text(
+            '{"name":"ltx-2.5-nvfp4","entrypoint":"diffusion_models/transformer.safetensors"}')
+
+        models = self.scan(format="comfyui")
+
+        self.assertEqual([item.name for item in models], ["ltx-2.5-nvfp4"])
+        self.assertEqual(models[0].id, "repo/ltx-2.5-nvfp4")
+        self.assertEqual(len(models[0].files), 4)
+        self.assertEqual(models[0].size_bytes, 140 + model.joinpath(
+            ".ai-lab-model.json").stat().st_size)
+        self.assertTrue(models[0].entrypoint.endswith("diffusion_models/transformer.safetensors"))
+
+    def test_a_declared_cache_does_not_count_snapshot_symlinks_twice(self):
+        model = self.root / "cached-model"
+        blob = model / "blobs" / "weight"
+        make_files(blob.parent, blob.name, size=100)
+        snapshot = model / "snapshots" / "main"
+        snapshot.mkdir(parents=True)
+        (snapshot / "model.safetensors").symlink_to(blob)
+        (model / ".ai-lab-model.json").write_text(
+            '{"name":"cached-model","entrypoint":"snapshots/main"}')
+
+        found = self.scan(format="safetensors")[0]
+
+        expected = 100 + (model / ".ai-lab-model.json").stat().st_size
+        self.assertEqual(found.size_bytes, expected)
+
     def test_a_nemo_checkpoint_is_a_directory_model(self):
         make_files(self.root / "parakeet", "parakeet.nemo", "config.json")
         models = self.scan(format="nemo")

@@ -9,9 +9,10 @@ from ai_lab.images.comfyui_server import Backend
 class ComfyUiServerTests(unittest.TestCase):
     def command(self, mode):
         with tempfile.TemporaryDirectory() as directory, \
-             patch.object(Backend, "_wait_ready"), \
+            patch.object(Backend, "_wait_ready"), \
              patch("ai_lab.images.comfyui_server.subprocess.Popen") as popen:
             Backend("python", "main.py", ["/models"], Path(directory),
+                    18114,
                     vram_mode=mode)
             return popen.call_args.args[0]
 
@@ -22,6 +23,10 @@ class ComfyUiServerTests(unittest.TestCase):
         command = self.command("normal")
         self.assertNotIn("--lowvram", command)
         self.assertNotIn("--cpu", command)
+
+    def test_private_backend_uses_its_assigned_port(self):
+        command = self.command("normal")
+        self.assertEqual(command[command.index("--port") + 1], "18114")
 
 
 if __name__ == "__main__":

@@ -61,6 +61,17 @@ async function searchFor(context, query) {
 }
 
 describe('the Library page', () => {
+  it('puts the detailed curation in a discoverable model tooltip', async () => {
+    const curated = {
+      ...MODEL, summary: 'Fast drafts',
+      description: 'Excels at low-latency prototyping and multilingual drafts.',
+    };
+    const { view } = await renderPage({ '/api/models': [curated] });
+    const cell = view.querySelector('td.model-curated');
+    assert.match(cell.title, /low-latency prototyping/);
+    assert.equal(cell.textContent.includes('low-latency'), false);
+  });
+
   it('never puts the word null on the page', async () => {
     const { view } = await renderPage();
     assert.equal(view.textContent.includes('null'), false, view.textContent);

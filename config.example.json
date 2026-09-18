@@ -318,6 +318,20 @@
       "params": {}
     }
   ],
+  "model_notes": {
+    "chatterbox-turbo": {
+      "short": "Fast natural speech for drafts and previews",
+      "detail": "Excels at low-latency English speech generation. Use it for script previews, timing checks and rapid radio prototyping."
+    },
+    "qwen3-tts-1.7b-voicedesign": {
+      "short": "Highest-quality expressive voices and character direction",
+      "detail": "Excels at natural English delivery, accents, emotion and described character voices. This is the quality TTS choice for finished programmes."
+    },
+    "qwen3-tts-1.7b-customvoice": {
+      "short": "Repeatable presenter voices across episodes",
+      "detail": "Excels when the same built-in voice identity must recur across separate programmes. Use it for stable hosts and recurring contributors."
+    }
+  },
   "downloads": {
     "bundles": [
       {

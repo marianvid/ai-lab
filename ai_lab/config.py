@@ -138,6 +138,11 @@ class Config:
     # assembled from named upstream files rather than downloaded as a whole
     # directory. See `downloads/bundles.py` for why they have to be declared.
     downloads: dict = field(default_factory=dict)
+    # Human curation attached to model names. ``short`` is the one-line reason
+    # to choose a configured model; ``detail`` is the fuller Library tooltip.
+    # Names, rather than repository-qualified ids, deliberately survive moving
+    # a model between benchmark and core storage.
+    model_notes: dict = field(default_factory=dict)
     # The one directory every model lives under. Each repository is a
     # folder in it, named after the format.
     models_root: str = ""
@@ -217,6 +222,7 @@ class ConfigStore:
             storage=raw.get("storage", {}),
             images=raw.get("images", {}),
             downloads=raw.get("downloads", {}),
+            model_notes=raw.get("model_notes", {}),
             model_roots=roots,
             download_root=raw.get("download_root", "core"),
         )

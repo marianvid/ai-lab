@@ -14,6 +14,23 @@ fails to load with an unhelpful message.
 once there is something to clear, because a button that does nothing is one
 people press once and stop trusting.
 
+## Curation
+
+An installation can attach operator-owned guidance to a model in `config.json`
+under `model_notes`, keyed by the model's on-disk name. `short` is shown beneath
+a configured entry on **Models**; `detail` is the tooltip on its name in
+**Library**. The name stays the same when a model moves between benchmark and
+core storage, so its guidance moves with it.
+
+```json
+"model_notes": {
+  "qwen3-tts-1.7b-voicedesign": {
+    "short": "Highest-quality expressive voices and character direction",
+    "detail": "Excels at natural English delivery, accents, emotion and described character voices."
+  }
+}
+```
+
 A download goes to the folder for its format, decided by the server rather than
 chosen. Deleting a model is refused while a configured entry points at it, and
 that refusal sends you to Models to remove the entry first — two actions on two

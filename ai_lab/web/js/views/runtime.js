@@ -202,6 +202,15 @@ function modelName(instance, models) {
   return model ? model.name : instance.model_id;
 }
 
+function modelSummary(instance, models) {
+  const model = models.find((item) => item.id === instance.model_id);
+  if (!model?.summary) return null;
+  return element('span', {
+    class: 'model-summary', text: model.summary,
+    title: model.description || model.summary,
+  });
+}
+
 // How long the last load took, on the row rather than in a line at the foot of
 // the page. A load runs from four seconds to a minute, so you look away and
 // come back — and a footer message is gone by then, wiped by whatever was
@@ -365,11 +374,14 @@ function card(instance, models, engines) {
     // a person reads — there used to be a label as well, and it became a
     // second way of saying the same thing that had to be kept in step with the
     // first.
-    element('div', { class: 'inline ident' }, [
-      element('strong', { text: instance.id,
-                          title: 'The name to send as "model" in a request' }),
-      element('span', { class: 'muted model', text: modelName(instance, models) }),
-      lastLoad(instance),
+    element('div', { class: 'ident' }, [
+      element('div', { class: 'inline model-heading' }, [
+        element('strong', { text: instance.id,
+                            title: 'The name to send as "model" in a request' }),
+        element('span', { class: 'muted model', text: modelName(instance, models) }),
+        lastLoad(instance),
+      ].filter(Boolean)),
+      modelSummary(instance, models),
     ].filter(Boolean)),
     // Right: what will actually run it, then the things you press. Format and
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay

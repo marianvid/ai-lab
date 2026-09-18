@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import base64
 import copy
 import json
+import signal
 import subprocess
 import tempfile
 import time
@@ -19,9 +21,9 @@ from threading import Lock
 
 class Backend:
     def __init__(self, python: str, comfyui: str, model_roots: list[str],
-                 state: Path, timeout: float = 1800,
+                 state: Path, port: int, timeout: float = 1800,
                  vram_mode: str = "normal") -> None:
-        self.base = "http://127.0.0.1:8189"
+        self.base = f"http://127.0.0.1:{port}"
         self.timeout = timeout
         self.lock = Lock()
         state.mkdir(parents=True, exist_ok=True)
@@ -35,7 +37,7 @@ class Backend:
                 "  text_encoders: .\n  vae: .\n  loras: .\n"
                 "  controlnet: .\n  clip_vision: .\n")
         extra.write_text("".join(sections))
-        command = [python, comfyui, "--listen", "127.0.0.1", "--port", "8189",
+        command = [python, comfyui, "--listen", "127.0.0.1", "--port", str(port),
                    "--extra-model-paths-config", str(extra),
                    "--output-directory", str(state / "output"),
                    "--temp-directory", str(state / "temp")]
@@ -45,6 +47,17 @@ class Backend:
             command.append("--cpu")
         self.process = subprocess.Popen(command)
         self._wait_ready()
+
+    def close(self) -> None:
+        """Stop the private ComfyUI process owned by this bridge."""
+        if self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
 
     def _wait_ready(self) -> None:
         deadline = time.monotonic() + 180
@@ -188,9 +201,21 @@ def main() -> None:
     args = parser.parse_args()
     state = Path(tempfile.gettempdir()) / f"ai-lab-comfyui-{args.port}"
     vram_mode = "low" if args.lowvram else "cpu" if args.cpu else "normal"
+    # Each bridge gets its own private ComfyUI port.  A fixed port left a
+    # previous model's child process answering the next model after a switch.
+    backend_port = args.port + 10_000
     Handler.backend = Backend(__import__("sys").executable, args.comfyui,
                               [args.model_root, *args.extra_model_root], state,
+                              backend_port,
                               vram_mode=vram_mode)
+    atexit.register(Handler.backend.close)
+
+    def stop(_signum, _frame):
+        Handler.backend.close()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     Handler.model_name = args.name
     ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
 
