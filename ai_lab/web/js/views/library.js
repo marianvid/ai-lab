@@ -81,9 +81,16 @@ function modelRow(model) {
       title: model.description || model.summary || '',
       class: model.description || model.summary ? 'model-curated' : '',
     }, element('span', { class: 'inline ident' }, [
-      element('strong', { text: model.name }),
+      element('strong', { text: model.name,
+                          title: model.description || model.summary || '' }),
+      model.description || model.summary
+        ? element('span', {
+            class: 'model-info', text: 'ⓘ',
+            title: model.description || model.summary,
+            'aria-label': `About ${model.name}: ${model.description || model.summary}`,
+          }) : null,
       ...capabilities(model.capabilities),
-    ])),
+    ].filter(Boolean))),
     element('td', { class: 'muted', text: model.format }),
     element('td', { class: 'muted', text: model.task || 'text-generation' }),
     element('td', {}, element('span', {

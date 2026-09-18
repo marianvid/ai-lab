@@ -70,6 +70,10 @@ describe('the Library page', () => {
     const cell = view.querySelector('td.model-curated');
     assert.match(cell.title, /low-latency prototyping/);
     assert.equal(cell.textContent.includes('low-latency'), false);
+    const marker = cell.querySelector('.model-info');
+    assert.equal(marker.textContent, 'ⓘ');
+    assert.match(marker.title, /low-latency prototyping/);
+    assert.match(marker.getAttribute('aria-label'), /About qwen/);
   });
 
   it('never puts the word null on the page', async () => {

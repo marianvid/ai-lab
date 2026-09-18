@@ -145,6 +145,10 @@ table.model-library td.model-curated > .ident > strong {
   text-decoration: underline dotted var(--border);
   text-underline-offset: 3px;
 }
+.model-info {
+  color: var(--muted); font-size: 0.82rem; cursor: help;
+  line-height: 1; flex: none;
+}
 
 /* Format and engine sit in the right-hand group, before the buttons. The model
    name on the left is what gives way when the row is narrow, never these. */
