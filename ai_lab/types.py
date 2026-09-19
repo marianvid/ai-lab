@@ -39,6 +39,7 @@ class Task(str, Enum):
     VAD = "vad"
     DIARIZATION = "diarization"
     SPEECH_SYNTHESIS = "speech-synthesis"
+    MUSIC_GENERATION = "music-generation"
     OCR = "ocr"
     IMAGE_GENERATION = "image-generation"
     IMAGE_EDIT = "image-edit"
