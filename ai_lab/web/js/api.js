@@ -17,7 +17,8 @@ async function request(method, path, body) {
     // busy" is one: the caller can offer to go ahead anyway, but only if it
     // knows that is why the request failed. The message alone cannot be
     // tested for without matching on its words.
-    const error = new Error(payload.error || `${method} ${path} failed`);
+    const error = new Error(payload.error?.message || payload.error
+      || `${method} ${path} failed`);
     error.status = response.status;
     if (payload.busy) error.busy = payload.busy;
     throw error;
@@ -29,7 +30,8 @@ async function requestForm(method, path, body) {
   const response = await fetch(path, { method, body });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload.error || `${method} ${path} failed`);
+    const error = new Error(payload.error?.message || payload.error
+      || `${method} ${path} failed`);
     error.status = response.status;
     throw error;
   }
@@ -115,6 +117,17 @@ export const api = {
   remoteSets: (repo) =>
     request('GET', `/api/hf/sets?repo=${encodeURIComponent(repo)}`),
   imageProfiles: () => request('GET', '/api/image-profiles'),
+  chat: (model, messages) => request('POST', '/v1/chat/completions',
+    { model, messages, stream: false }),
+  analyzeFile: (path, model, file, fields = {}) => {
+    const body = new FormData();
+    body.append('model', model);
+    body.append('file', file);
+    Object.entries(fields).forEach(([name, value]) => {
+      if (value !== '' && value !== undefined) body.append(name, String(value));
+    });
+    return requestForm('POST', path, body);
+  },
   imageJobs: () => request('GET', '/api/image-jobs'),
   imageJob: (id) => request('GET', `/api/image-jobs/${encodeURIComponent(id)}`),
   generateImage: (payload) => request('POST', '/v1/images/generations', payload),

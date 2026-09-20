@@ -13,8 +13,8 @@ ai-lab-run = "ai_lab.hosts.launch:main"
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["ai_lab", "ai_lab.hosts", "ai_lab.engines", "ai_lab.downloads", "ai_lab.images", "ai_lab.api", "ai_lab.api.routes"]
+[tool.setuptools.packages.find]
+include = ["ai_lab*"]
 
 [tool.setuptools.package-data]
-ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*"]
+ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*", "web/js/workbench/*"]

@@ -71,6 +71,13 @@ class ComfyUiEngine:
 
     def needs_mb(self, model: ModelSet, params: dict,
                  card_total_mb: float) -> float:
+        # With offload enabled the full file size is not a lower bound for
+        # GPU memory. ComfyUI moves weights between GPU and system RAM as it
+        # works; the amount resident on the card cannot be known in advance.
+        # Zero tells the gateway to empty the card conservatively and let the
+        # runtime's explicit CPU-split plan decide whether startup succeeds.
+        if validate(PARAMS, params)["vram_mode"] != "normal":
+            return 0.0
         return model.size_bytes / (1024 * 1024)
 
     def api_paths(self, task: Task = Task.IMAGE_GENERATION) -> tuple[str, ...]:

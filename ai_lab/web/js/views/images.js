@@ -1,8 +1,17 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
 
-export async function render(target) {
-  const [profiles, jobs] = await Promise.all([api.imageProfiles(), api.imageJobs()]);
+export async function render(target, model = null) {
+  const [allProfiles, allJobs] = await Promise.all([api.imageProfiles(), api.imageJobs()]);
+  const profiles = model ? allProfiles.filter((profile) => profile.model === model)
+                         : allProfiles;
+  const jobs = model ? allJobs.filter((job) => job.model === model) : allJobs;
+  if (!profiles.length) {
+    target.replaceChildren(element('p', { class: 'muted',
+      text: model ? `No image workflow is configured for ${model}.`
+                  : 'No image workflows are configured.' }));
+    return;
+  }
   const select = element('select', { name: 'profile' }, profiles.map((profile) =>
     element('option', { value: profile.id, text: `${profile.id} · ${profile.model}` })));
   const prompt = element('textarea', { name: 'prompt', rows: '5',
@@ -39,7 +48,7 @@ export async function render(target) {
                                        prompt: prompt.value, async: true});
       }
       status.textContent = `Queued ${job.id}`;
-      await render(target);
+      await render(target, model);
     } catch (error) {
       status.textContent = error.message;
       status.className = 'error';
@@ -68,7 +77,7 @@ export async function render(target) {
     element('td', { text: job.status }),
     element('td', {}, job.status === 'queued' || job.status === 'running'
       ? element('button', { text: 'Cancel', onclick: async () => {
-          await api.cancelImageJob(job.id); await render(target);
+          await api.cancelImageJob(job.id); await render(target, model);
         }})
       : job.status === 'succeeded'
         ? element('button', { text: 'View', onclick: () => showResult(job) })

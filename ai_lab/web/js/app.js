@@ -12,6 +12,7 @@ import { installTheme } from './theme.js';
 import { render as renderSettings } from './views/settings.js';
 import { render as renderLibrary } from './views/library.js';
 import { render as renderRuntime } from './views/runtime.js';
+import { render as renderImages } from './views/images.js';
 import { render as renderGateway,
          stopRefreshing as stopGatewayRefreshing } from './views/gateway.js';
 import { render as renderStorage } from './views/storage.js';
@@ -28,6 +29,8 @@ import { render as renderStorage } from './views/storage.js';
 const VIEWS = [
   { id: 'runtime', label: 'Models', render: renderRuntime,
     topics: ['instances', 'models'] },
+  { id: 'images', label: 'Images', render: renderImages,
+    topics: ['instances', 'image-jobs'] },
   { id: 'library', label: 'Library', render: renderLibrary,
     topics: ['models', 'downloads'] },
   // The one address an agent talks to. Its numbers come from traffic the

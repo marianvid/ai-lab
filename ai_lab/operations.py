@@ -14,11 +14,6 @@ belongs in this file.
 from __future__ import annotations
 
 import os
-import hashlib
-import json
-import shutil
-import time
-import uuid
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -30,6 +25,9 @@ FIRST_PORT = 8080
 # refused rather than ignored.
 CHANGEABLE = frozenset({"params", "model_id", "port"})
 
+from .application.instances import InstanceService
+from .application.model_storage import ModelStorageService
+from .application.downloads import ModelDownloadService
 from .builds import Builds
 from . import budget
 from .capabilities import IMAGES, TOOLS
@@ -37,22 +35,12 @@ from .catalog import Catalog
 from .changes import Reader, counted
 from .config import INSTANCE_ID, ConfigStore, Instance, validate_distinct_roots
 from .downloads import DownloadManager, HuggingFaceClient
-from .downloads import bundles
 from .engines.base import validate
 from .hosts.base import Host
 from .runtime import Operation, Runtime
 from .types import ChangeEvent, Interests, LogEvent, Task
 from .settings import Settings
 from .storage import Storage
-
-
-class _MoveCancelled(Exception):
-    """Raised inside `move_model` when a cancellation was requested.
-
-    Caught in the same method, right after being raised — it exists only so
-    the generic `except Exception` branch there can tell "asked to stop" from
-    "actually went wrong" and record a different job status for each.
-    """
 
 
 class Operations:
@@ -87,6 +75,14 @@ class Operations:
         # and nothing is remembered.
         self.last_loaded = last_loaded
         self.image_jobs = None
+        self.model_downloads = ModelDownloadService(
+            store, downloads, huggingface, host, self.engines)
+        self.model_storage = ModelStorageService(
+            store, catalog, host, self._changed,
+            self.model_downloads._writable_in_root)
+        self.instance_service = InstanceService(
+            store, catalog, runtime, host, self.engines, self._changed,
+            self.models, bus=bus, last_loaded=last_loaded)
 
     def _changed(self, topic: str) -> None:
         """Tell whoever is watching that this kind of thing has moved.
@@ -148,321 +144,59 @@ class Operations:
             rows.append(row)
         return rows
 
-    def configured(self) -> list[dict]:
-        """Every entry, without asking what any of them is doing.
+    def configured(self):
+        return self.instance_service.configured()
 
-        `instances` asks the supervisor about all of them and probes each one
-        that is up: 73 ms on the container with eleven configured, nearly all
-        of it the one command to systemd. Most questions are not about that —
-        which entry answers to a name, which engine runs it, what settings it
-        has — and those are the configuration, which costs 0.05 ms to read.
-        """
-        config = self.store.load()
-        rows = []
-        for item in config.instances:
-            engine = self.engines.get(item.engine)
-            rows.append({"id": item.id, "engine": item.engine,
-                         "model_id": item.model_id, "port": item.port,
-                         "task": self._task(config, item.model_id),
-                         "params": self._effective(
-                             engine, item.params,
-                             Task(self._task(config, item.model_id)))})
-        return rows
+    def instances(self):
+        return self.instance_service.instances()
 
-    def instances(self) -> list[dict]:
-        """Every configured model, with the settings that will actually apply.
+    def instance(self, instance_id: str):
+        return self.instance_service.instance(instance_id)
 
-        Stored settings are filled in with the engine's defaults before being
-        reported. An entry written before a setting existed has no value for
-        it, and showing that as blank would be a lie: the engine will use its
-        default, and that is what the interface should say.
-        """
-        config = self.store.load()
-        # One question to the supervisor for the whole list rather than one per
-        # entry. On systemd that was three commands each: eleven instances cost
-        # 152 ms, which was the entire cost of this call, and the gateway asks
-        # it twice on every request.
-        processes = self.host.statuses([item.id for item in config.instances])
-        rows = []
-        for item in config.instances:
-            engine = self.engines.get(item.engine)
-            row = self.runtime.status(item, engine, processes.get(item.id))
-            task = Task(self._task(config, item.model_id))
-            row["params"] = self._effective(engine, item.params, task)
-            row["task"] = task.value
-            rows.append(row)
-        return rows
+    def model_for(self, instance_id: str):
+        return self.instance_service.model_for(instance_id)
 
-    def instance(self, instance_id: str) -> dict:
-        """One configured entry, without asking what it is doing. See `configured`."""
-        config = self.store.load()
-        item = config.instance(instance_id)     # raises if unknown
-        engine = self.engines.get(item.engine)
-        return {"id": item.id, "engine": item.engine,
-                "model_id": item.model_id, "port": item.port,
-                "task": self._task(config, item.model_id),
-                "params": self._effective(
-                    engine, item.params,
-                    Task(self._task(config, item.model_id)))}
+    def load(self, instance_id: str, settings: dict | None = None):
+        return self.instance_service.load(instance_id, settings)
+
+    def effective_params(self, instance_id: str, settings: dict):
+        return self.instance_service.effective_params(instance_id, settings)
+
+    def unload(self, instance_id: str):
+        return self.instance_service.unload(instance_id)
+
+    def restore_last(self):
+        return self.instance_service.restore_last()
+
+    def logs(self, instance_id: str, lines: int = 200):
+        return self.instance_service.logs(instance_id, lines)
+
+    def suggest_port(self):
+        return self.instance_service.suggest_port()
+
+    def new_instance_form(self):
+        return self.instance_service.new_instance_form()
+
+    def create_instance(self, payload: dict):
+        return self.instance_service.create_instance(payload)
+
+    def update_instance(self, instance_id: str, changes: dict):
+        return self.instance_service.update_instance(instance_id, changes)
+
+    def apply_and_reload(self, instance_id: str, changes: dict):
+        return self.instance_service.apply_and_reload(instance_id, changes)
+
+    def delete_instance(self, instance_id: str):
+        return self.instance_service.delete_instance(instance_id)
 
     @staticmethod
     def _task(config, model_id: str) -> str:
-        """The job of a model without walking its files."""
-        repository_id = model_id.split("/", 1)[0]
-        return config.repository(repository_id).task
-
-    def model_for(self, instance_id: str):
-        """The model an entry points at, for asking how big it is.
-
-        Walks the model directories, so it is not on the path of a request that
-        is going straight through — only of one that is about to cause a load,
-        where a few milliseconds against a forty-second load is nothing.
-        """
-        config = self.store.load()
-        instance = config.instance(instance_id)
-        return self.catalog.find(config.repositories, instance.model_id)
+        return InstanceService._task(config, model_id)
 
     @staticmethod
     def _effective(engine, stored: dict,
                    task: Task = Task.TEXT_GENERATION) -> dict:
-        try:
-            specs = engine.params(task)
-            return validate(specs, {key: value for key, value in stored.items()
-                                    if key in {spec.key for spec in specs}})
-        except ValueError:
-            return dict(stored)
-
-    # -- moving models on and off the accelerator --------------------------
-
-    def load(self, instance_id: str, settings: dict | None = None) -> Operation:
-        """Start this model, replacing whatever this entry was running.
-
-        One entry is one model, so there is no separate "swap": reloading with
-        different settings and starting for the first time are the same act
-        from the outside.
-
-        `settings` starts it with something other than what it is configured
-        with, **without saving them**. A request can ask for a bigger context
-        than the entry was set up for, and it would be wrong for that one
-        request to quietly rewrite what somebody chose in the page. The running
-        model differs from its configuration until it is unloaded, and says so.
-        """
-        instance, model = self._resolve(instance_id)
-        engine = self.engines.get(instance.engine)
-        if settings:
-            instance = replace(instance,
-                               params=self.effective_params(instance_id, settings))
-        if self.host.status(instance_id).running:
-            operation = self.runtime.swap(instance, model, engine)
-        else:
-            operation = self.runtime.load(instance, model, engine)
-        if operation.ok and self.last_loaded:
-            self.last_loaded.remember(instance_id, settings)
-        return operation
-
-    def effective_params(self, instance_id: str, settings: dict) -> dict:
-        """The entry's settings with these laid over them, checked.
-
-        Raises ValueError naming what is wrong, so a caller can refuse a
-        request before anything is loaded rather than after. The engine's own
-        rules do the checking, so a setting it does not have is refused here
-        for the same reason it would be refused in the page.
-        """
-        # Not `_resolve`: that also finds the model on disk, which means
-        # walking every model directory — 11 ms on the container, for an answer
-        # made entirely of the configuration and the engine's own rules. This
-        # is asked on every request through the front door.
-        config = self.store.load()
-        instance = config.instance(instance_id)
-        engine = self.engines.get(instance.engine)
-        task = Task(self._task(config, instance.model_id))
-        return validate(engine.params(task), {**instance.params, **settings})
-
-    def unload(self, instance_id: str) -> Operation:
-        operation = self.runtime.unload(instance_id)
-        if operation.ok and self.last_loaded:
-            # Named, so unloading a stray from beside the model that stays is
-            # not read as the card having been emptied.
-            self.last_loaded.forget(instance_id)
-        return operation
-
-    def restore_last(self) -> Operation | None:
-        """Put back whatever was on the card before the manager stopped.
-
-        Does nothing while something is already running. On Linux systemd owns
-        the engines and they survive a manager restart — that is the reason for
-        using it — so a manager coming back finds its model still answering.
-        Only a machine that rebooted has anything to put back.
-
-        Returns the operation, or None when there was nothing to do. Never
-        raises: this runs while the manager is starting, and a model that
-        cannot be restored must not stop the manager from serving.
-        """
-        if not self.last_loaded:
-            return None
-        remembered = self.last_loaded.all()
-        if not remembered:
-            return None
-        config = self.store.load()
-        if any(self.host.status(item.id).running for item in config.instances):
-            return None
-        # In the order they were loaded, stopping at the first that will not
-        # go on. A machine given less memory than it had, or a reserve raised
-        # since, must not be filled past what it can hold just because it once
-        # held it — and the oldest was there first, so it is the one to keep.
-        last = None
-        for item in remembered:
-            try:
-                last = self.load(item["instance_id"], item["settings"] or None)
-            except Exception as error:                  # reported, not raised
-                self._log(f"Could not restore {item['instance_id']}: {error}")
-                break
-        return last
-
-    def _log(self, text: str) -> None:
-        self.bus.publish(LogEvent(source="restore", stream="err", text=text))
-
-    def logs(self, instance_id: str, lines: int = 200) -> dict:
-        """What the engine has printed about itself.
-
-        Read only while the model is running. A stopped instance has a log on
-        Linux, where systemd keeps the journal after the unit exits, and none
-        on macOS, where the file belongs to a process that is gone — so a page
-        offering it for a stopped model would work on one machine and not the
-        other. Whether it *would not start* is a different question, answered
-        by the sentence a failed load already carries.
-        """
-        instance = self.store.load().instance(instance_id)   # raises if unknown
-        if not self.host.status(instance.id).running:
-            return {"id": instance_id, "running": False, "lines": []}
-        return {"id": instance_id, "running": True,
-                "lines": self.host.logs(instance_id, lines=lines)}
-
-    # -- configuring instances ---------------------------------------------
-
-    def suggest_port(self) -> int:
-        """The first free port at or above 8080.
-
-        Offered when adding a model so there is one less thing to think about,
-        and still editable, because a port sometimes has to match what a client
-        already expects.
-        """
-        config = self.store.load()
-        # The manager's own port counts as taken. An engine started on it would
-        # find the port already held and refuse, which is a confusing way to
-        # learn that the number was never free — and it is the number this
-        # method hands out as soon as the instances reach it.
-        taken = {item.port for item in config.instances} | {config.port}
-        port = FIRST_PORT
-        while port in taken:
-            port += 1
-        return port
-
-    def new_instance_form(self) -> dict:
-        """Everything the Add form needs, in one call.
-
-        Which models are on disk, which engines can read them, what each engine
-        can be tuned with, and a free port.
-        """
-        capabilities = self.host.capabilities()
-        return {
-            "port": self.suggest_port(),
-            "engines": self.engines.describe(capabilities),
-            "models": self.models(),
-        }
-
-    def create_instance(self, payload: dict) -> dict:
-        """Add an entry. The id is given rather than worked out.
-
-        It used to be made from a label by lowercasing it and turning
-        everything else into hyphens, which meant the name a request had to
-        carry was decided by a sentence somebody wrote for reading. Now it is
-        typed, checked, and is the only name the entry has.
-        """
-        config = self.store.load()
-        engine = self.engines.get(payload["engine"])
-        model = self.catalog.find(config.repositories, payload["model_id"])
-        params = validate(engine.params(model.task), payload.get("params", {}))
-        identifier = str(payload.get("id", "")).strip()
-        if not INSTANCE_ID.match(identifier):
-            raise ValueError(
-                "A name may hold lower-case letters, digits and hyphens, and "
-                "must start with a letter or a digit. It is what a request "
-                f"carries, so it has no spaces in it. {identifier!r} does not "
-                "fit.")
-        instance = Instance(
-            id=identifier, engine=payload["engine"],
-            model_id=payload["model_id"],
-            port=int(payload["port"]), params=params,
-        )
-        with self.store.mutate() as config:
-            if any(item.id == instance.id for item in config.instances):
-                raise ValueError(
-                    f"There is already a model called {instance.id}. The name "
-                    f"is what a request asks for, so two cannot share one.")
-            if any(item.port == instance.port for item in config.instances):
-                raise ValueError(f"Port {instance.port} is already in use")
-            config.instances.append(instance)
-        self._changed("instances")
-        return asdict(instance)
-
-    def update_instance(self, instance_id: str, changes: dict) -> dict:
-        """Change the settings of an instance. Does not restart it.
-
-        Saving and applying are separate acts, because applying means
-        restarting, and restarting unloads a model somebody may be using.
-        """
-        unknown = set(changes) - CHANGEABLE
-        if unknown:
-            # Silence here is worse than a refusal. Ignoring a field and still
-            # answering "applied" tells the caller the change was made when
-            # nothing happened.
-            raise ValueError(
-                f"Cannot change {', '.join(sorted(unknown))}. "
-                f"Changeable: {', '.join(sorted(CHANGEABLE))}")
-        with self.store.mutate() as config:
-            instance = config.instance(instance_id)
-            engine = self.engines.get(instance.engine)
-            target_model_id = str(changes.get("model_id", instance.model_id))
-            model = self.catalog.find(config.repositories, target_model_id)
-            if "params" in changes:
-                instance.params = validate(engine.params(model.task), changes["params"])
-            if "model_id" in changes:
-                instance.model_id = str(changes["model_id"])
-            if "port" in changes:
-                port = int(changes["port"])
-                if any(item.id != instance_id and item.port == port
-                       for item in config.instances):
-                    raise ValueError(f"Port {port} is already taken by another model")
-                if port == config.port:
-                    raise ValueError(f"Port {port} is the manager's own port")
-                instance.port = port
-        self._changed("instances")
-        running = self.host.status(instance_id).running
-        return {"id": instance_id, "applied": not running,
-                "note": "" if not running
-                        else "Reload to apply the new settings"}
-
-    def apply_and_reload(self, instance_id: str, changes: dict) -> dict:
-        """Save the settings and restart the model with them.
-
-        The two halves are one action here because that is what the user
-        means: the settings decide how much is reserved on the accelerator, so
-        they only take effect when the model starts again.
-        """
-        self.update_instance(instance_id, changes)
-        operation = self.load(instance_id)
-        return {"id": instance_id, "applied": operation.ok,
-                "operation": operation.json()}
-
-    def delete_instance(self, instance_id: str) -> None:
-        if self.host.status(instance_id).running:
-            raise ValueError("Stop the instance before deleting it")
-        with self.store.mutate() as config:
-            config.instance(instance_id)                # raises if unknown
-            config.instances = [item for item in config.instances
-                                if item.id != instance_id]
-        self._changed("instances")
+        return InstanceService._effective(engine, stored, task)
 
     # -- keeping the engines up to date ------------------------------------
 
@@ -898,621 +632,45 @@ class Operations:
     # -- the library -------------------------------------------------------
 
     def supported_formats(self) -> list[str]:
-        """Formats something on this machine can actually run.
-
-        Used to filter what is offered for download: there is no point pulling
-        30 GB of safetensors onto a machine with no engine that reads them.
-        """
-        capabilities = self.host.capabilities()
-        formats: set[str] = set()
-        for engine in self.engines.available(capabilities).values():
-            formats.update(item.value for item in engine.formats())
-        return sorted(formats)
+        return self.model_downloads.supported_formats()
 
     def delete_model(self, model_id: str) -> dict:
-        """Remove a model's files from disk.
-
-        Refused while any configured entry points at it — deleting the files
-        under a running model would leave a process serving weights that no
-        longer exist, and under a stopped one an entry that can never start.
-        Removing the entry first is one click, and it makes the order of events
-        the user's decision rather than a surprise.
-
-        Every path is checked against the configured repositories before
-        anything is unlinked. The model id arrives over HTTP, and this is the
-        one operation in the application that destroys data.
-        """
-        config = self.store.load()
-        model = self.catalog.find(config.repositories, model_id)
-        users = [item.id for item in config.instances if item.model_id == model_id]
-        if users:
-            raise ValueError(
-                "Remove the entry from the Models tab first: "
-                + ", ".join(users) + " still points at this model.")
-
-        roots = [Path(item.path).resolve() for item in config.repositories]
-        paths = [Path(item.path).resolve() for item in model.files]
-        for path in paths:
-            if not any(path.is_relative_to(root) for root in roots):
-                raise ValueError(f"Refusing to delete outside the repositories: {path}")
-
-        freed = sum(item.size_bytes for item in model.files)
-        for path in paths:
-            path.unlink(missing_ok=True)
-        self._prune_empty(paths, roots)
-        self._changed("models")
-        return {"deleted": model.name, "files": len(paths), "freed_bytes": freed}
+        return self.model_storage.delete_model(model_id)
 
     def move_model(self, model_id: str, target_root_id: str) -> dict:
-        """Copy, verify and only then remove a model from its current tier.
-
-        A durable job record is written before anything is touched, and
-        updated at every phase (`copying`, `verifying`, `publishing`,
-        `completed`/`failed`/`cancelled`). If the process dies partway, that
-        record is still on disk — `recover_moves()` sweeps it at the next
-        startup and marks it failed, rather than leaving a job that claims to
-        still be running with no thread behind it. A move can also be
-        stopped in flight with `cancel_move(job_id)`, which is checked
-        between chunks while a file copies and at each phase boundary.
-        """
-        config = self.store.load()
-        model = self.catalog.find(config.repositories, model_id)
-        source_repository = config.repository(model_id.split("/", 1)[0])
-        if source_repository.root_id == target_root_id:
-            return {"model_id": model_id, "storage_tier": target_root_id,
-                    "moved": False}
-        self._reject_if_busy(config, model_id)
-        active = [job for job in self.move_jobs()
-                  if job.get("model_id") == model_id
-                  and job.get("status") in self.UNFINISHED_MOVE_STATUSES]
-        if active:
-            raise ValueError(
-                f"{model_id} is already being moved (job {active[0]['id']})")
-        target_root = config.model_root(target_root_id)
-        if not target_root.enabled:
-            raise ValueError(f"{target_root.name} storage is disabled")
-        candidates = [item for item in config.repositories
-                      if item.root_id == target_root_id
-                      and item.base_id == source_repository.base_id]
-        if not candidates:
-            raise ValueError(
-                f"No {target_root.name} repository matches "
-                f"{source_repository.name}")
-        target_repository = self._writable_in_root(candidates[0], target_root)
-        source_root = Path(source_repository.path).resolve()
-        target_path = Path(target_repository.path).resolve()
-        if source_root == target_path:
-            raise ValueError(
-                "Source and destination are the same location; refusing to "
-                "move a model onto itself")
-        sources = [Path(item.path).resolve() for item in model.files]
-        self._reject_unremovable_sources(sources)
-        relatives = [path.relative_to(source_root) for path in sources]
-        destinations = [target_path / relative for relative in relatives]
-        existing = [path for path in destinations if path.exists()]
-        if existing:
-            raise ValueError(f"Destination already contains {existing[0]}")
-        free = shutil.disk_usage(target_path).free
-        if free < model.size_bytes:
-            raise ValueError(
-                f"{target_root.name} does not have enough free space: "
-                f"needs {model.size_bytes} bytes, has {free}")
-
-        job_id = uuid.uuid4().hex
-        # A sibling of the format directories, not inside one — the catalog
-        # only scans each configured repository's own path (see
-        # `Catalog.scan`), so a directory here never appears as a half-copied
-        # model in the Library while a move is in flight or after one fails.
-        staging_root = Path(target_root.path) / ".ai-lab-staging"
-        staging = staging_root / job_id
-        staging_root.mkdir(parents=True, exist_ok=True)
-        os.chmod(staging_root, 0o700)
-        job = {"id": job_id, "model_id": model_id,
-               "target_model_id": model_id.replace(
-                   source_repository.id, target_repository.id, 1),
-               "source_tier": source_repository.root_id,
-               "target_tier": target_root_id,
-               "bytes": model.size_bytes, "files": len(sources),
-               "staging": str(staging), "status": "pending",
-               "error": "", "started_at": time.time(),
-               "updated_at": time.time()}
-        self._write_job(job)
-
-        try:
-            self._move_phase(job, "copying")
-            staging.mkdir(parents=True, exist_ok=True)
-            os.chmod(staging, 0o700)
-            for source, relative in zip(sources, relatives):
-                self._check_cancelled(job)
-                staged = staging / relative
-                staged.parent.mkdir(parents=True, exist_ok=True)
-                self._copy_checking_cancellation(source, staged, job)
-                if self._sha256(source) != self._sha256(staged):
-                    raise ValueError(
-                        f"Checksum mismatch while copying {source.name}")
-            self._move_phase(job, "verifying")
-            self._check_cancelled(job)
-            # Re-checked here, not only at entry: the copy above can run for
-            # a long time, and nothing before this point stops a new
-            # instance being pointed at the model, or it being loaded, while
-            # the copy is in flight.
-            self._reject_if_busy(self.store.load(), model_id)
-            self._move_phase(job, "publishing")
-            self._publish(staging, target_path, relatives, destinations)
-            # A stopped model entry can follow the weights safely. Keeping the
-            # assignment is the point of moving storage; forcing somebody to
-            # delete and recreate it turns a physical move into configuration
-            # loss. This happens only after the verified copy is visible and
-            # before the source is removed, so a failed config write leaves
-            # both copies rather than a broken entry.
-            with self.store.mutate() as live:
-                for instance in live.instances:
-                    if instance.model_id == model_id:
-                        instance.model_id = job["target_model_id"]
-        except _MoveCancelled:
-            # A cancellation is an operator decision that succeeded, not a
-            # failure — the spec requires temporary files gone "on success,
-            # cancellation, timeout and recovery after restart", so the
-            # staged bytes are removed here rather than left as a phantom
-            # entry (a failure, below, keeps them for inspection instead).
-            shutil.rmtree(staging, ignore_errors=True)
-            job["status"] = "cancelled"
-            job["error"] = "Cancelled"
-            job["updated_at"] = time.time()
-            self._write_job(job)
-            return {"model_id": model_id, "job_id": job_id,
-                    "moved": False, "cancelled": True}
-        except Exception as error:
-            # Deliberately does not delete `staging`, published or not: a
-            # half-finished move is a resumable-failure state, not garbage.
-            # Deleting it here was what turned an interruption into data
-            # that existed nowhere — neither at the source, which this
-            # method never touches before the whole copy is verified, nor at
-            # the destination. It now lives outside the scanned tree (see
-            # `staging_root` above), so it stays inspectable without also
-            # appearing in the Library as a broken model.
-            job["status"] = "failed"
-            job["error"] = str(error)
-            job["updated_at"] = time.time()
-            self._write_job(job)
-            raise
-
-        # Everything named in the job is now published under its real name;
-        # the staging directory has nothing left in it worth keeping.
-        shutil.rmtree(staging, ignore_errors=True)
-
-        # Only once every file is verified in the staging area and published
-        # does the source get touched. A companion file (e.g. a tokenizer)
-        # can belong to more than one GGUF model in the same directory — see
-        # `Catalog._classify` — so one still needed by a sibling that has not
-        # moved is left where it is.
-        try:
-            protected = self._companions_still_needed(config, model, sources)
-            for source in sources:
-                if source not in protected:
-                    source.unlink()
-            self._prune_empty([s for s in sources if s not in protected],
-                              [source_root])
-
-            record = {"at": time.time(), "source_model_id": model_id,
-                      "target_model_id": job["target_model_id"],
-                      "source_tier": source_repository.root_id,
-                      "target_tier": target_root_id,
-                      "bytes": model.size_bytes, "files": len(sources)}
-            history = self.host.state_dir() / "model-moves.jsonl"
-            with history.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, sort_keys=True) + "\n")
-        except Exception as error:
-            # Publishing may already have succeeded.  Keep both complete
-            # copies, but never leave the durable record claiming that a
-            # worker is still active when the request has actually failed.
-            job["status"] = "failed"
-            job["error"] = str(error)
-            job["updated_at"] = time.time()
-            self._write_job(job)
-            raise
-
-        job["status"] = "completed"
-        job["updated_at"] = time.time()
-        self._write_job(job)
-        self._changed("models")
-        return {**record, "moved": True, "job_id": job_id}
-
-    def _reject_if_busy(self, config, model_id: str) -> None:
-        """Refuse a model that is loaded or loading.
-
-        Called both before the copy starts and again right before publish,
-        since the copy can take long enough for that to become true in between.
-        Stopped entries are repointed after the verified copy is published.
-        """
-        loaded = [item.id for item in config.instances
-                  if item.model_id == model_id and self.host.status(item.id).running]
-        if loaded:
-            raise ValueError(
-                "This model is currently loaded by " + ", ".join(loaded)
-                + ". Unload that entry in Models, then try the move again.")
-
-    @staticmethod
-    def _reject_unremovable_sources(sources: list[Path]) -> None:
-        """Refuse before copying when the manager cannot remove the source.
-
-        A manually installed model may be readable while its directory is
-        owned by root.  Discovering that only after copying and checksumming
-        tens of gigabytes leaves two complete copies and a failed move.
-        """
-        blocked = sorted({path.parent for path in sources
-                          if not os.access(path.parent, os.W_OK)})
-        if blocked:
-            raise ValueError(
-                "The model is readable but cannot be moved because the "
-                f"manager cannot remove files from {blocked[0]}. Correct its "
-                "ownership or permissions, then try again.")
-
-    @staticmethod
-    def _publish(staging: Path, target_path: Path,
-                relatives: list[Path], destinations: list[Path]) -> None:
-        """Make the staged copy visible, as close to one atomic act as the
-        filesystem allows.
-
-        When every file sits under one shared top-level folder — the
-        ordinary case, a model in its own directory — the whole folder is
-        renamed into place in a single `os.replace`, so a crash mid-publish
-        either has not happened yet or has already finished; there is no
-        state where the destination holds half a model under its real name.
-
-        When files sit loose (no shared folder — the GGUF-in-the-repository-
-        root case), there is no single directory to rename, so each file is
-        renamed on its own. An interruption there can leave a partial set,
-        which is exactly why the job record above exists: to say so rather
-        than pretend it did not happen.
-        """
-        tops = {relative.parts[0] if len(relative.parts) > 1 else None
-                for relative in relatives}
-        if len(tops) == 1 and None not in tops:
-            top = tops.pop()
-            final_dir = target_path / top
-            if not final_dir.exists():
-                os.replace(staging / top, final_dir)
-                return
-        for relative, destination in zip(relatives, destinations):
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            (staging / relative).replace(destination)
-
-    def _companions_still_needed(self, config, model, sources: list[Path]) -> set[Path]:
-        """Companion files this move must not remove from the source.
-
-        A tokenizer or config file sitting in a GGUF directory is attached by
-        the catalog to *every* model in that directory, not just the one
-        being moved (`Catalog._classify` groups by directory, not by model).
-        Moving one model must not delete a file a sibling still needs to
-        load.
-        """
-        siblings = [item for item in self.catalog.scan(config.repositories)
-                    if item.id != model.id]
-        source_set = set(sources)
-        needed: set[Path] = set()
-        for sibling in siblings:
-            sibling_paths = {Path(item.path).resolve() for item in sibling.files}
-            needed |= sibling_paths & source_set
-        return needed
-
-    # -- move job records: durable, so a crash can be reported rather than --
-    # -- silently losing the move -------------------------------------------
-
-    def _move_job_dir(self) -> Path:
-        directory = self.host.state_dir() / "moves"
-        directory.mkdir(parents=True, exist_ok=True)
-        return directory
-
-    def _job_path(self, job_id: str) -> Path:
-        return self._move_job_dir() / f"{job_id}.json"
-
-    def _write_job(self, job: dict) -> None:
-        path = self._job_path(job["id"])
-        temporary = path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(job, sort_keys=True))
-        temporary.replace(path)
-        self._changed("models")
-
-    def _read_job(self, job_id: str) -> dict:
-        return json.loads(self._job_path(job_id).read_text())
-
-    def _move_phase(self, job: dict, status: str) -> None:
-        job["status"] = status
-        job["updated_at"] = time.time()
-        self._write_job(job)
-
-    def _check_cancelled(self, job: dict) -> None:
-        """Whether someone asked for this move to stop.
-
-        Reading the job file back, rather than an in-memory flag, is what
-        lets `cancel_move` be called from a different request than the one
-        running the move.
-        """
-        try:
-            current = self._read_job(job["id"])
-        except FileNotFoundError:
-            return
-        if current.get("status") == "cancelling":
-            raise _MoveCancelled()
+        return self.model_storage.move_model(model_id, target_root_id)
 
     def move_jobs(self) -> list[dict]:
-        """Every move job on record, most recently updated first.
-
-        Read after a restart to find one that never reached `completed` — a
-        resumable failure to report, not a move that vanished without a
-        trace.
-        """
-        directory = self._move_job_dir()
-        jobs = []
-        for path in directory.glob("*.json"):
-            try:
-                jobs.append(json.loads(path.read_text()))
-            except (json.JSONDecodeError, OSError):
-                continue
-        jobs.sort(key=lambda item: item.get("updated_at", 0), reverse=True)
-        return jobs
-
-    UNFINISHED_MOVE_STATUSES = ("pending", "copying", "verifying",
-                                "publishing", "cancelling")
+        return self.model_storage.move_jobs()
 
     def recover_moves(self) -> list[dict]:
-        """Sweep move jobs left mid-flight by a process that did not exit cleanly.
-
-        Called once at startup, before anything else touches the move job
-        directory. A job still marked `copying` etc. has no thread behind it
-        any more — the process that was running it is the one that just
-        restarted — so it is explicitly marked failed rather than left to
-        claim, forever, that a move is still in progress. Its staged bytes,
-        which live outside the scanned tree (see `move_model`), are removed:
-        recovery is one of the four cases the spec names for cleaning up
-        temporary files, the other three being success, cancellation and
-        timeout.
-        """
-        recovered = []
-        for job in self.move_jobs():
-            if job.get("status") not in self.UNFINISHED_MOVE_STATUSES:
-                continue
-            staging = job.get("staging")
-            if staging:
-                shutil.rmtree(staging, ignore_errors=True)
-            job["status"] = "failed"
-            job["error"] = "Interrupted by a service restart"
-            job["updated_at"] = time.time()
-            self._write_job(job)
-            recovered.append(job)
-        return recovered
+        return self.model_storage.recover_moves()
 
     def cancel_move(self, job_id: str) -> dict:
-        """Ask an in-progress move to stop at the next file or phase boundary.
-
-        Does not touch the staged copy — the files already verified stay on
-        disk, so the same job can be inspected or cleaned up rather than the
-        work simply disappearing.
-        """
-        job = self._read_job(job_id)
-        if job["status"] in ("completed", "failed", "cancelled"):
-            return job
-        job["status"] = "cancelling"
-        job["updated_at"] = time.time()
-        self._write_job(job)
-        return job
-
-    # Checked between chunks during the copy itself, not only once per file —
-    # a single-file GGUF, the common case, previously had exactly one
-    # cancellation check (before any bytes moved) and could not be stopped
-    # once copying began.
-    _COPY_CHUNK = 64 * 1024 * 1024
-
-    def _copy_checking_cancellation(self, source: Path, destination: Path,
-                                    job: dict) -> None:
-        with source.open("rb") as read_from, destination.open("wb") as write_to:
-            while True:
-                self._check_cancelled(job)
-                chunk = read_from.read(self._COPY_CHUNK)
-                if not chunk:
-                    break
-                write_to.write(chunk)
-        shutil.copystat(source, destination)
-
-    @staticmethod
-    def _sha256(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-
-    @staticmethod
-    def _prune_empty(paths: list[Path], roots: list[Path]) -> None:
-        """Take away the directory too, if the model was the only thing in it.
-
-        A model usually lives in its own directory, and leaving empty ones
-        behind makes the library look like it still holds something.
-        """
-        for directory in {path.parent for path in paths}:
-            if directory in roots:
-                continue
-            if any(directory.iterdir()):
-                continue
-            if any(directory.is_relative_to(root) for root in roots):
-                directory.rmdir()
+        return self.model_storage.cancel_move(job_id)
 
     # -- downloads ---------------------------------------------------------
 
     def search(self, query: str) -> dict:
-        """Repositories holding something this machine can run.
-
-        Only those. There was a switch to see the rest, and no answer to what
-        it was for: a machine with no engine that reads safetensors cannot be
-        helped by a list of them.
-
-        `hidden` is what the filter took away, and it is the one thing the
-        switch was good for. Nothing found and nothing *usable* found are
-        different answers, and a list of length zero cannot tell them apart.
-        """
-        results = self.huggingface.search(query)
-        supported = set(self.supported_formats())
-        usable = [item for item in results
-                  if supported.intersection(item["formats"])]
-        return {"results": usable, "hidden": len(results) - len(usable)}
+        return self.model_downloads.search(query)
 
     def remote_sets(self, repo: str) -> list[dict]:
-        """What a repository holds that this machine can run.
+        return self.model_downloads.remote_sets(repo)
 
-        Any bundle declared under this repository is listed too, first, because
-        the individual parts below it cannot be used on their own.
-        """
-        supported = set(self.supported_formats())
-        return [item.json()
-                for item in self.huggingface.sets(repo, self._bundles())
-                if item.format in supported]
-
-    def _bundles(self):
-        """The declared bundles, refused now if any of them is unsafe."""
-        return bundles.parse(self.store.load().downloads.get("bundles", []))
-
-    def download(self, repo: str, name: str,
-                 repository_id: str | None = None,
+    def download(self, repo: str, name: str, repository_id: str | None = None,
                  storage_tier: str | None = None) -> dict:
-        """Queue a complete model, into the repository that holds its format.
-
-        The destination is worked out rather than asked for. A GGUF model
-        belongs in the GGUF repository — the store is organised by format, and
-        the listing already says which format this is, so making someone
-        choose asks a question whose answer is already known. It can still be
-        given explicitly when more than one repository holds a format.
-
-        When it is given, it is checked first: a destination that cannot be
-        written to should not cost a round trip to Hugging Face to discover.
-        """
-        config = self.store.load()
-        selected_tier = storage_tier or config.download_root
-        config.model_root(selected_tier)
-
-        if repository_id:
-            repository = config.repository(repository_id)
-            if storage_tier and repository.root_id != storage_tier:
-                raise ValueError(
-                    f"{repository.name} is a {repository.root_id} repository; "
-                    f"it cannot receive a {storage_tier} download. Choose a "
-                    f"repository on the {storage_tier} tier, or drop the "
-                    "explicit tier and let the repository decide.")
-            destination = self._writable(repository)
-            remote = self._remote_set(repo, name)
-        else:
-            remote = self._remote_set(repo, name)
-            destination = self._repository_for(
-                config, remote.format, selected_tier, remote.task)
-
-        target = Path(destination.path) / Path(name).name
-        return self.downloads.enqueue(
-            remote, target, storage_tier=destination.root_id).json()
-
-    def _remote_set(self, repo: str, name: str):
-        remote = next((item for item in self.huggingface.sets(repo, self._bundles())
-                       if item.name == name), None)
-        if remote is None:
-            raise KeyError(f"{name} is not in {repo}")
-        return remote
-
-    def _repository_for(self, config, format_name: str,
-                        root_id: str = "core", task: str = ""):
-        """The repository that holds this format and can be written to.
-
-        One format can have more than one repository when the same engine does
-        more than one job — ComfyUI generation and ComfyUI editing read the
-        same kind of file and are kept apart. A set that says which job it is
-        for picks the matching one instead of whichever comes first.
-        """
-        candidates = [item for item in config.repositories
-                      if item.format == format_name
-                      and item.root_id == root_id]
-        if task:
-            preferred = [item for item in candidates if item.task == task]
-            candidates = preferred or candidates
-        if not candidates:
-            raise ValueError(
-                f"No repository is configured for {format_name} models. "
-                f"Add one in the configuration first.")
-        errors = []
-        for item in candidates:
-            try:
-                return self._writable_in_root(item, config.model_root(root_id))
-            except ValueError as error:
-                errors.append(str(error))
-        raise ValueError(errors[0])
-
-    @staticmethod
-    def _writable(repository):
-        """Return the repository, or explain why it cannot be written to.
-
-        Writability is checked against the filesystem rather than the flag in
-        the configuration: the flag records what was intended, and a download
-        that starts and then dies on a permission error has wasted the wait.
-        """
-        path = Path(repository.path)
-        if not repository.writable:
-            raise ValueError(f"{repository.name} is marked read-only")
-        if not path.is_dir():
-            raise ValueError(f"{repository.name} does not exist at {path}")
-        if not os.access(path, os.W_OK | os.X_OK):
-            raise ValueError(
-                f"{repository.name} is not writable by the manager. "
-                f"Give it ownership of {path}.")
-        return repository
-
-    def _writable_in_root(self, repository, model_root):
-        """Create a derived repository directory inside a valid model root.
-
-        Format/task directories are consequences of the configured root, not
-        operator-managed mount points. A first audio or image move should make
-        its own subdirectory. The root itself is never created here: a missing
-        mount must remain a visible error rather than silently writing to the
-        container's underlying disk.
-        """
-        path = Path(repository.path)
-        if path.is_dir():
-            return self._writable(repository)
-        root = Path(model_root.path)
-        if not model_root.enabled:
-            raise ValueError(f"{model_root.name} storage is disabled")
-        if not model_root.writable:
-            raise ValueError(f"{model_root.name} storage is marked read-only")
-        if not root.is_dir():
-            raise ValueError(
-                f"{model_root.name} storage is not mounted at {root}. "
-                "Connect or configure that storage, then try again.")
-        resolved_root = root.resolve()
-        candidate = path.resolve(strict=False)
-        if not candidate.is_relative_to(resolved_root):
-            raise ValueError(
-                f"Refusing to create a model directory outside {resolved_root}")
-        if not os.access(resolved_root, os.W_OK | os.X_OK):
-            raise ValueError(
-                f"{model_root.name} storage is not writable by the manager at "
-                f"{resolved_root}")
-        try:
-            path.mkdir(parents=True)
-        except OSError as error:
-            raise ValueError(
-                f"Could not prepare {model_root.name} storage for "
-                f"{repository.name}: {error}") from None
-        return self._writable(repository)
+        return self.model_downloads.download(repo, name, repository_id, storage_tier)
 
     def transfers(self) -> list[dict]:
-        return self.downloads.list()
+        return self.model_downloads.transfers()
 
     def cancel_download(self, transfer_id: str) -> None:
-        self.downloads.cancel(transfer_id)
+        self.model_downloads.cancel_download(transfer_id)
 
     # -- internals ---------------------------------------------------------
 
     def _resolve(self, instance_id: str):
-        config = self.store.load()
-        instance = config.instance(instance_id)
-        model = self.catalog.find(config.repositories, instance.model_id)
-        return instance, model
+        return self.instance_service._resolve(instance_id)
 
     @staticmethod
     def _model(model) -> dict:

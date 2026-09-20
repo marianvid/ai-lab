@@ -46,7 +46,7 @@ unsupported engine stays visible but disabled, with the reason.
 Each part has its own document. Every one of them says what the thing is for
 before it says how it works.
 
-**The five pages**
+**The pages**
 
 | | |
 |---|---|
@@ -55,12 +55,14 @@ before it says how it works.
 | [Gateway](docs/gateway.md) | The address an agent talks to. What is loaded, what is queued, and **the rules by which models are loaded and unloaded** — the part nobody can guess. |
 | [Storage](docs/storage.md) | Cache, incomplete files and inactive engine versions whose space can be reclaimed. Model deletion stays in Library. |
 | [Settings](docs/settings.md) | What this machine is, how much of its memory models may use, engine updates, and where the model store lives. |
+| [Images](docs/images.md) | Run configured ComfyUI workflows directly in the browser and view or download results. |
 
 **Using it**
 
 | | |
 |---|---|
 | [Writing a request](docs/requests.md) | Chat and multipart audio requests, the `ai_lab` field for startup settings, and what a refusal contains so a client can correct itself. |
+| [Using a model directly](docs/direct-use.md) | Browser actions for chat, images, audio analysis and OCR; current limits for TTS and music. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
 | [Audio](docs/audio.md) | Speech-to-text, VAD and speaker diarization, their endpoints, and the public Data-Lab method used to prepare this personal project's Romanian evaluation audio. |
 
@@ -71,6 +73,7 @@ before it says how it works.
 | [Working on it](docs/development.md) | What each module is for, running it locally, and deploying. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The one dependency rule every module follows, and the reason for it. **Read this before changing anything.** |
 | [`MODEL_STORAGE.md`](MODEL_STORAGE.md) | How the model store is laid out on disk, and what each weight format is. |
+| [Refactoring plan](docs/refactoring-plan.md) | Audit findings, target package boundaries, migration stages and tests. |
 
 ## What it looks like
 

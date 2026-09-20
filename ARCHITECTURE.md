@@ -38,6 +38,8 @@ there is exactly one place to look.
 | `changes/` | What an update would bring, read before anything is pressed: commits waiting, notes written upstream, packages that would be replaced | Doing the update — it only reads |
 | `installs.py` | The installed versions of an engine that arrives as packages: adding one beside the others, choosing between them, dropping one | Compiling anything, or deciding when an old version stops being needed |
 | `operations.py` | Joining the services into whole actions | Anything a single service could do alone |
+| `application/model_storage.py` | Deletion, verified moves and durable move jobs | HTTP and engine startup |
+| `application/downloads.py` | Finding download candidates and safe destinations | Model scheduling and HTTP |
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
 | `lastloaded.py` | One fact on disk: which model was on the card and how it was started | Deciding anything — it remembers and is read |

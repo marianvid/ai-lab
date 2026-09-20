@@ -34,11 +34,14 @@ class ComfyUiEngineTests(unittest.TestCase):
         plan = self.engine.plan(self.model, 8093, {"vram_mode": "low"})
         self.assertIn("--lowvram", plan.argv)
         self.assertTrue(plan.splits_across_cpu)
+        self.assertEqual(self.engine.needs_mb(self.model, {"vram_mode": "low"}, 32000), 0)
+        self.assertEqual(self.engine.needs_mb(self.model, {"vram_mode": "cpu"}, 32000), 0)
 
     def test_normal_vram_keeps_the_admission_check(self):
         plan = self.engine.plan(self.model, 8093, {})
         self.assertNotIn("--lowvram", plan.argv)
         self.assertFalse(plan.splits_across_cpu)
+        self.assertGreater(self.engine.needs_mb(self.model, {}, 32000), 0)
 
     def test_wrong_format_is_rejected(self):
         wrong = ModelSet(id="x", name="x", format=Format.GGUF,

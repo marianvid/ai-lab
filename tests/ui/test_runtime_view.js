@@ -173,21 +173,20 @@ describe('the Models page', () => {
     assert.equal(chat.getAttribute('target'), '_blank');
   });
 
-  it('offers no chat link before the model answers', async () => {
-    // A link to a blank tab is worse than no link.
+  it('uses the gateway when the model has not loaded yet', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, ready: false }],
     });
-    assert.equal(view.querySelector('.chat-link'), null);
+    assert.equal(view.querySelector('.chat-link').getAttribute('href'),
+                 '/workbench.html?model=qwen-coder');
   });
 
-  it('offers no chat link when the engine serves no page', async () => {
-    // vLLM serves an API and nothing to look at, and llama.cpp built without
-    // node is the same. A link that could never work is worse than none.
+  it('uses AI-Lab chat when the engine serves no page', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, web_ui: false }],
     });
-    assert.equal(view.querySelector('.chat-link'), null);
+    assert.equal(view.querySelector('.chat-link').getAttribute('href'),
+                 '/workbench.html?model=qwen-coder');
   });
 
   it('builds the chat address from the page, not from the server', async () => {
@@ -706,27 +705,23 @@ describe('the buttons line up down the page', () => {
     assert.match(chat(view).getAttribute('href'), /:8080\//);
   });
 
-  it('offers nothing for a model that is not running', async () => {
+  it('offers the gateway for a model that is not running', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
     });
-    assert.equal(chat(view), null);
+    assert.equal(chat(view).getAttribute('href'),
+                 '/workbench.html?model=qwen-coder');
   });
 
-  it('offers nothing for a running vLLM model, which has no page to offer', async () => {
-    // The reason for taking the greyed-out button away: it sat on every vLLM
-    // row promising something none of them could ever do, however long you
-    // waited.
+  it('offers AI-Lab chat for a running vLLM model', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...VLLM, running: true, ready: true }],
     });
-    assert.equal(chat(view), null);
+    assert.equal(chat(view).getAttribute('href'),
+                 '/workbench.html?model=coder-fast');
   });
 
-  it('comes first, so its absence moves nothing after it', async () => {
-    // The right-hand group sits against the right edge and is only as wide as
-    // its contents, so removing something moves whatever is to its left. First
-    // means nothing moves at all.
+  it('puts the direct-use link before settings and controls', async () => {
     const { view } = await renderPage();
     const group = view.querySelector('.row.instance > .inline:not(.ident)');
     assert.ok(group.firstElementChild.classList.contains('chat-link'),
@@ -742,6 +737,20 @@ describe('the buttons line up down the page', () => {
   it('keeps the same buttons for a vLLM row as for a llama.cpp one', async () => {
     const { view } = await renderPage({ '/api/instances': [INSTANCE, VLLM] });
     assert.deepEqual(slots(view, 0), slots(view, 1));
+  });
+
+  it('uses the task to name each direct workflow', async () => {
+    const cases = [
+      ['image-generation', 'Create'], ['image-edit', 'Edit'],
+      ['transcription', 'Transcribe'], ['vad', 'Speech'],
+      ['diarization', 'Speakers'], ['ocr', 'Read'],
+    ];
+    for (const [task, label] of cases) {
+      const { view } = await renderPage({ '/api/instances': [
+        { ...INSTANCE, task, web_ui: false },
+      ] });
+      assert.equal(view.querySelector('.chat-link').textContent, label);
+    }
   });
 });
 

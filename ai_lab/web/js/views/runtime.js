@@ -12,6 +12,8 @@ import { onProgress } from '../events.js';
 import { settingsForm } from '../form.js';
 import { bytes, element, seconds } from '../format.js';
 import { onPanelChange, toggleLogs, watching } from '../logpane.js';
+import { modelPicker } from '../model-picker.js';
+import { TASK_ACTIONS } from '../workbench/tasks.js';
 
 const progress = new Map();     // instance id -> latest event
 const open = new Set();         // rows with their settings expanded
@@ -262,14 +264,13 @@ function card(instance, models, engines) {
                       element('span', {}));
   if (instance.running && latest) paint(bar, latest); else paintFromState(bar, instance);
 
-  const chooser = element('select', { 'data-model': instance.id },
-    models
-      .filter((item) => !engine || (engine.formats.includes(item.format)
-        && tasksOf(engine).includes(taskOf(item))))
-      .map((item) => element('option', {
-        value: item.id, text: `${item.name} · ${bytes(item.size_bytes)}`,
-        ...(item.id === instance.model_id ? { selected: 'selected' } : {}),
-      })));
+  const picker = modelPicker(models
+    .filter((item) => !engine || (engine.formats.includes(item.format)
+      && tasksOf(engine).includes(taskOf(item))))
+    .map((item) => ({ id: item.id,
+      label: `${item.name} · ${bytes(item.size_bytes)}` })),
+    instance.model_id, { 'data-model': instance.id });
+  const chooser = picker.select;
 
   // Settings are configuration, and configuration can be written down whether
   // or not anything is running. Without this the only ways to save a setting
@@ -387,7 +388,7 @@ function card(instance, models, engines) {
     // engine are a pair — nvfp4 on vLLM, gguf on llama.cpp — so they stay
     // together, at the end, out of the middle of the name.
     element('div', { class: 'inline' }, [
-      chatLink(instance),
+      useLink(instance),
       ...canDo(instance, models),
       formatOf(instance, models)
         ? element('span', { class: 'pill format', text: formatOf(instance, models) })
@@ -403,7 +404,7 @@ function card(instance, models, engines) {
     expanded
       ? element('div', { class: 'settings-open' }, [
           element('label', { class: 'field' }, [
-            element('span', { text: 'Model' }), chooser,
+            element('span', { text: 'Model' }), picker.node,
           ]),
           form.node,
         ])
@@ -412,39 +413,21 @@ function card(instance, models, engines) {
   ].filter(Boolean));
 }
 
-// llama.cpp serves a chat page of its own, on the model's own port.
-//
-// Shown only when there is something on the other end, and first in the row's
-// right-hand group so that it can be. That group sits against the right edge
-// and is only as wide as its contents, so removing something from it moves
-// whatever is to its *left* and nothing to its right. First means nothing
-// moves at all — which is why the format pill, the other thing here that comes
-// and goes, is also at that end.
-//
-// Greying it out instead was worse. vLLM serves no page and never will, so a
-// disabled button sat on eleven rows out of eleven promising something six of
-// them could never do.
-//
-// Shaped like the pills it sits beside rather than like the buttons after
-// them, because it belongs with the pills: they describe the model, and this
-// one says the model is answering and here is the door. It borrows their rules
-// outright — same size, same round ends — and differs only in colour: the
-// green a finished load ends on, which is the state this link exists in.
-//
-// No arrow on it. The convention for one is "opens elsewhere", which is true,
-// but the two pills beside it are grey and do nothing, and green among them
-// already reads as the one you can press.
-//
-// The address is built from the page you are looking at, not from the server's
-// idea of itself: the manager may be reached by name, by address, or through a
-// tunnel, and the engine sits on the same host under a different port.
-function chatLink(instance) {
-  if (!instance.ready || !instance.web_ui) return null;
+// Keep llama.cpp's native page when it is ready. Other configured tasks use
+// AI-Lab's gateway, which can load a stopped model before serving a request.
+function useLink(instance) {
+  const task = instance.task || 'text-generation';
+  const action = TASK_ACTIONS[task];
+  if (!action) return null;
+  const native = task === 'text-generation' && instance.ready && instance.web_ui;
   return element('a', {
     class: 'pill chat-link', target: '_blank', rel: 'noopener',
-    href: `${window.location.protocol}//${window.location.hostname}:${instance.port}/`,
-    title: 'Open the chat page this engine serves, on its own port',
-    text: 'Chat',
+    href: native
+      ? `${window.location.protocol}//${window.location.hostname}:${instance.port}/`
+      : `/workbench.html?model=${encodeURIComponent(instance.id)}`,
+    title: native ? 'Open the chat page served by llama.cpp'
+                  : 'Use this model directly through AI-Lab',
+    text: action.label,
   });
 }
 
@@ -466,11 +449,11 @@ function addCard(form) {
     ]);
   }
 
-  const chooser = element('select', {},
-    usable.map((model) => element('option', {
-      value: model.id,
-      text: `${model.name} · ${taskOf(model)} · ${model.format} · ${bytes(model.size_bytes)}`,
-    })));
+  const picker = modelPicker(usable.map((model) => ({
+    id: model.id,
+    label: `${model.name} · ${taskOf(model)} · ${model.format} · ${bytes(model.size_bytes)}`,
+  })));
+  const chooser = picker.select;
   const name = element('input', {
     placeholder: 'e.g. gemma-31b-nvfp4', size: 28,
     pattern: '[a-z0-9][a-z0-9-]*',
@@ -499,7 +482,7 @@ function addCard(form) {
 
   return element('div', { class: 'card' }, [
     element('h3', { text: 'Add a model' }),
-    element('label', { class: 'field' }, [element('span', { text: 'Model' }), chooser]),
+    element('label', { class: 'field' }, [element('span', { text: 'Model' }), picker.node]),
     // The rules where the name is typed, not in a message after it is refused.
     // This is the only name the entry has: a request carries it and a person
     // reads it, so it cannot hold spaces and it cannot be changed later.
@@ -529,6 +512,7 @@ function addCard(form) {
         element('button', {
           class: 'action', text: 'Add',
           onclick: async () => {
+            if (chooser.disabled) return;
             const chosen = name.value.trim();
             await run(`Adding ${chosen || 'a model'}`, () => api.createInstance({
               id: chosen,

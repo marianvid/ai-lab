@@ -498,7 +498,7 @@ class MoveModelTests(unittest.TestCase):
 
     def test_a_readable_but_unremovable_source_is_refused_before_copying(self):
         self.operations.delete_instance("qwen")
-        import ai_lab.operations as operations_module
+        import ai_lab.application.model_storage as operations_module
         original = operations_module.os.access
         source_directory = (self.core / "gguf" / "qwen").resolve()
 
@@ -519,26 +519,26 @@ class MoveModelTests(unittest.TestCase):
 
     def test_a_checksum_failure_during_copy_leaves_the_source_intact(self):
         self.operations.delete_instance("qwen")
-        import ai_lab.operations as operations_module
+        import ai_lab.application.model_storage as operations_module
         # Read the descriptor straight out of the class `__dict__`, not
-        # through the class itself: `Operations._sha256` unwraps the
+        # through the class itself: `ModelStorageService._sha256` unwraps the
         # `staticmethod` and hands back a plain function. Restoring *that*
         # later would leave `_sha256` bound to `self` on every instance call
         # after this test — exactly the bug that broke every other move test
         # once this one ran first.
-        original = operations_module.Operations.__dict__["_sha256"]
+        original = operations_module.ModelStorageService.__dict__["_sha256"]
         calls = {"n": 0}
 
         def flaky_sha256(path):
             calls["n"] += 1
             return f"bad-{calls['n']}"
 
-        operations_module.Operations._sha256 = staticmethod(flaky_sha256)
+        operations_module.ModelStorageService._sha256 = staticmethod(flaky_sha256)
         try:
             with self.assertRaises(ValueError) as caught:
                 self.operations.move_model("gguf/qwen/qwen", "benchmark")
         finally:
-            operations_module.Operations._sha256 = original
+            operations_module.ModelStorageService._sha256 = original
         self.assertIn("Checksum", str(caught.exception))
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
                         "source must survive a failed copy")
@@ -547,7 +547,7 @@ class MoveModelTests(unittest.TestCase):
     def test_sha256_survives_the_checksum_failure_tests_patch_and_restore(self):
         """A move right after the checksum-failure test must still work.
 
-        That test above swaps `Operations._sha256` for a fake and puts the
+        That test above swaps `ModelStorageService._sha256` for a fake and puts the
         real one back afterwards. If the restore ever again hands back a bare
         function instead of a `staticmethod`, every instance would call
         `_sha256(self, path)` from here on — one argument too many — and this
@@ -600,23 +600,23 @@ class MoveModelTests(unittest.TestCase):
         or the staging area — it must leave something a retry can find.
         """
         self.operations.delete_instance("qwen")
-        import ai_lab.operations as operations_module
+        import ai_lab.application.model_storage as operations_module
         # Read the descriptor straight out of the class `__dict__`, not
         # through the class itself: see the identical note on the
         # `_sha256` patch above — the same unwrap-and-rebind trap applies
         # to `_publish`, and it is what broke every move test that ran
         # after this one.
-        original = operations_module.Operations.__dict__["_publish"]
+        original = operations_module.ModelStorageService.__dict__["_publish"]
 
         def failing_publish(*args, **kwargs):
             raise OSError("disk pulled mid-rename")
 
-        operations_module.Operations._publish = staticmethod(failing_publish)
+        operations_module.ModelStorageService._publish = staticmethod(failing_publish)
         try:
             with self.assertRaises(OSError):
                 self.operations.move_model("gguf/qwen/qwen", "benchmark")
         finally:
-            operations_module.Operations._publish = original
+            operations_module.ModelStorageService._publish = original
         # The source must not have been touched: publishing never finished.
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
         jobs = self.operations.move_jobs()
@@ -657,8 +657,8 @@ class MoveModelTests(unittest.TestCase):
         # otherwise there is no "between files" to check cancellation at.
         (directory / "config.json").write_text("{}")
 
-        import ai_lab.operations as operations_module
-        original = operations_module.Operations._check_cancelled
+        import ai_lab.application.model_storage as operations_module
+        original = operations_module.ModelStorageService._check_cancelled
         state = {"n": 0}
 
         def cancel_after_first(self, job):
@@ -667,11 +667,11 @@ class MoveModelTests(unittest.TestCase):
                 self.cancel_move(job["id"])
             original(self, job)
 
-        operations_module.Operations._check_cancelled = cancel_after_first
+        operations_module.ModelStorageService._check_cancelled = cancel_after_first
         try:
             result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
         finally:
-            operations_module.Operations._check_cancelled = original
+            operations_module.ModelStorageService._check_cancelled = original
         self.assertFalse(result["moved"])
         self.assertTrue(result["cancelled"])
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
@@ -687,8 +687,8 @@ class MoveModelTests(unittest.TestCase):
         self.operations.delete_instance("qwen")
         make_files(self.core / "gguf" / "qwen", "qwen.gguf", size=8 * 1024 * 1024)
 
-        import ai_lab.operations as operations_module
-        original = operations_module.Operations._check_cancelled
+        import ai_lab.application.model_storage as operations_module
+        original = operations_module.ModelStorageService._check_cancelled
         state = {"n": 0}
 
         def cancel_after_first(self, job):
@@ -697,13 +697,13 @@ class MoveModelTests(unittest.TestCase):
                 self.cancel_move(job["id"])
             original(self, job)
 
-        operations_module.Operations._check_cancelled = cancel_after_first
-        operations_module.Operations._COPY_CHUNK = 1024
+        operations_module.ModelStorageService._check_cancelled = cancel_after_first
+        operations_module.ModelStorageService._COPY_CHUNK = 1024
         try:
             result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
         finally:
-            operations_module.Operations._check_cancelled = original
-            operations_module.Operations._COPY_CHUNK = 64 * 1024 * 1024
+            operations_module.ModelStorageService._check_cancelled = original
+            operations_module.ModelStorageService._COPY_CHUNK = 64 * 1024 * 1024
         self.assertTrue(result["cancelled"])
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
         self.assertFalse((self.benchmark / "gguf" / "qwen").exists(),
@@ -720,19 +720,19 @@ class MoveModelTests(unittest.TestCase):
         self.operations.delete_instance("qwen")
         seen = {}
 
-        import ai_lab.operations as operations_module
-        original = operations_module.Operations._check_cancelled
+        import ai_lab.application.model_storage as operations_module
+        original = operations_module.ModelStorageService._check_cancelled
 
         def inspect(self, job):
             config = self.store.load()
             seen["ids"] = [item.id for item in self.catalog.scan(config.repositories)]
             original(self, job)
 
-        operations_module.Operations._check_cancelled = inspect
+        operations_module.ModelStorageService._check_cancelled = inspect
         try:
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
         finally:
-            operations_module.Operations._check_cancelled = original
+            operations_module.ModelStorageService._check_cancelled = original
         self.assertNotIn("benchmark-gguf/.ai-lab-staging", "".join(seen.get("ids", [])))
         for model_id in seen.get("ids", []):
             self.assertNotIn(".ai-lab-staging", model_id)
@@ -760,7 +760,7 @@ class MoveModelTests(unittest.TestCase):
                "bytes": 100, "files": 1, "staging": str(staging),
                "status": "copying", "error": "", "started_at": 0.0,
                "updated_at": 0.0}
-        self.operations._write_job(job)
+        self.operations.model_storage._write_job(job)
 
         recovered = self.operations.recover_moves()
 
@@ -790,7 +790,7 @@ class MoveModelTests(unittest.TestCase):
                "bytes": 100, "files": 1, "staging": "",
                "status": "copying", "error": "", "started_at": 0.0,
                "updated_at": 0.0}
-        self.operations._write_job(job)
+        self.operations.model_storage._write_job(job)
         with self.assertRaises(ValueError) as caught:
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertIn("already being moved", str(caught.exception))

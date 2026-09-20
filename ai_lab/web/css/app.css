@@ -154,14 +154,8 @@ table.model-library td.model-curated > .ident > strong {
    name on the left is what gives way when the row is narrow, never these. */
 .pill.format { flex: none; }
 .row.instance > .inline { flex: none; }
-/* The way in to a model that is answering.
-
-   A pill, like the format and engine beside it — it takes their rules rather
-   than restating them, so the three keep the same size and shape however those
-   change. It differs in colour only: the green a finished load ends on. That
-   is not decoration — the bar turns green when a model is ready, and ready is
-   exactly and only when this link exists. Blue is the colour of loading, and
-   while a model loads there is nothing here to press. */
+/* Direct use of a configured model. The gateway loads a stopped entry on the
+   first request; llama.cpp's native chat page is linked only while ready. */
 .chat-link {
   color: var(--ok); border-color: var(--ok);
   text-decoration: none; white-space: nowrap;
@@ -174,6 +168,9 @@ table.model-library td.model-curated > .ident > strong {
 .chat-link:hover, .chat-link:focus-visible {
   background: var(--ok); color: var(--bg);
 }
+.chat-message { border-bottom: 1px solid var(--border); padding: 0.5rem 0; }
+.chat-message p { white-space: pre-wrap; margin: 0.35rem 0; }
+#view pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Which engine runs this entry. Not a state, so it never takes the colours the
    state pills use. */
@@ -243,6 +240,9 @@ pre.log {
   cursor: help;
 }
 .field input[type="number"], .field select, .field input[type="text"] { min-width: 6rem; }
+.model-picker { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.model-picker input[type="search"] { min-width: 12rem; }
+.model-picker select { min-width: min(26rem, 75vw); max-width: 100%; }
 
 /* Confirmation for anything irreversible. */
 dialog.confirm {

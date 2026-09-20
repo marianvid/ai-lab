@@ -54,7 +54,9 @@ COPYFILE_DISABLE=1 tar \
   --exclude=.git --exclude=.venv --exclude=.pytest_cache \
   --exclude='*.egg-info' --exclude='__pycache__' \
   --exclude='.DS_Store' --exclude='._*' --exclude=tmp \
-  --exclude=opts --exclude=node_modules --exclude=research \
+  --exclude=opts --exclude=benchmark --exclude=node_modules \
+  --exclude=build --exclude=dist --exclude=.claude \
+  --exclude=package-lock.json --exclude=research \
   -C "${project_dir}" -cf - . \
   | ssh -i "${ssh_key}" "${target_host}" \
       "pct exec '${container_id}' -- tar -C '${runtime_dir}' -xf -"
@@ -79,7 +81,7 @@ remote "sh -lc '\
     /models/images/ocr /models/images/generation /models/images/edit \
     /test_models/images/ocr /test_models/images/generation /test_models/images/edit && \
   test -f /etc/ai-lab/config.json || \
-    install -o ai-lab-manager -g ai-lab-manager -m 0644 ${runtime_dir}/config.json /etc/ai-lab/config.json && \
+    install -o ai-lab-manager -g ai-lab-manager -m 0644 ${runtime_dir}/config.example.json /etc/ai-lab/config.json && \
   install -o root -g root -m 0755 ${runtime_dir}/system/ai-lab-control /usr/local/sbin/ai-lab-control && \
   install -o root -g root -m 0440 ${runtime_dir}/system/ai-lab-manager.sudoers /etc/sudoers.d/ai-lab && \
   install -o root -g root -m 0644 ${runtime_dir}/system/ai-lab.service /etc/systemd/system/ai-lab.service && \
@@ -88,9 +90,9 @@ remote "sh -lc '\
   usermod -aG systemd-journal ai-lab-manager && \
   systemctl daemon-reload'"
 
-# Add new completion-phase keys without replacing the operator's existing
-# instances, limits or paths. The migration is idempotent and keeps one backup.
-remote "${runtime_dir}/.venv/bin/python ${runtime_dir}/scripts/migrate-completion-config.py /etc/ai-lab/config.json"
+# Existing configuration is owned by the private opts snapshot. Migrations
+# are explicit operations: rerunning a historical migration on every deploy
+# can reintroduce obsolete profiles and create drift from the active snapshot.
 remote "sh -lc 'install -o ai-lab-manager -g ai-lab-manager -m 0644 \
   ${runtime_dir}/image_workflows/*.json /etc/ai-lab/image-workflows/'"
 
@@ -113,5 +115,11 @@ echo "[6/6] Restarting the manager"
 remote "systemctl restart ai-lab.service"
 sleep 2
 remote "systemctl is-active --quiet ai-lab.service"
+
+# The operator's active files and the private snapshots must remain identical.
+# This verifier prints only status and counts, never configuration values.
+if [ -f "${project_dir}/opts/verify_sync.py" ]; then
+  python3 "${project_dir}/opts/verify_sync.py"
+fi
 
 echo "Deployment completed. Inference instances were not touched."

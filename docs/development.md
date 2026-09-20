@@ -24,6 +24,7 @@ ai_lab/builds.py        Engine source versions, and updating them from git
 ai_lab/installs.py      Engines that arrive as packages: versions side by side
 ai_lab/storage.py       Explicitly allowed caches and leftovers that may be reclaimed
 ai_lab/operations.py    Joining the services into whole actions
+ai_lab/application/    Focused use cases for model storage and downloads
 ai_lab/config.py        Reading and writing config.json
 ai_lab/naming.py        Rules about model file names
 ai_lab/types.py         Shared data structures
@@ -46,7 +47,7 @@ dependency direction the modules follow and the reason for it.
 Runtime data is intentionally separate:
 
 - application configuration: `/etc/ai-lab/config.json`, edited through the
-  interface. The `config.json` in this repository seeds a fresh machine and is
+  interface. The public `config.example.json` seeds a fresh machine and is
   never copied over a running one, because instances created from the interface
   live in that file
 - application state: `/var/lib/ai-lab`
@@ -110,7 +111,7 @@ The full UI depends on Linux services, NVIDIA tooling and the model filesystem. 
 and restarts the manager. It has no address built into it — say which machine:
 
 ```sh
-AI_LAB_HOST=root@proxmox.lan AI_LAB_CTID=102 ./scripts/deploy.sh
+AI_LAB_HOST=root@proxmox.lan AI_LAB_SSH_KEY=~/.ssh/ai-lab AI_LAB_CTID=102 ./scripts/deploy.sh
 ```
 
 ## Deployment
@@ -124,10 +125,12 @@ AI_LAB_HOST=root@proxmox.lan AI_LAB_CTID=102 ./scripts/deploy.sh
 5. runs the same tests inside the container;
 6. restarts the web manager only after both test stages pass and checks that it is active.
 
-Defaults target Proxmox host `mv` and LXC `102`. They can be overridden without editing the script:
+The deploy script reads the private `opts/deploy.env` when available. Otherwise
+set `AI_LAB_HOST` and `AI_LAB_SSH_KEY` explicitly. Only the container ID
+defaults to `102`:
 
 ```bash
-AI_LAB_HOST=root@proxmox-host AI_LAB_CTID=102 scripts/deploy.sh
+AI_LAB_HOST=root@proxmox-host AI_LAB_SSH_KEY=~/.ssh/ai-lab AI_LAB_CTID=102 scripts/deploy.sh
 ```
 
 Downloaded models, mutable application state and active inference services are preserved during deployment.
