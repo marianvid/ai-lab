@@ -103,6 +103,7 @@ from dataclasses import dataclass, field
 
 from . import budget
 from .operations import Operations
+from .eviction import EvictionPlanner
 from .scheduler import Abandoned, Scheduler, WillNotFit
 from .types import Task
 
@@ -312,6 +313,7 @@ class Gateway:
         # What the last card reading said, per pool. Refreshed around every
         # load, never from inside the scheduler's lock.
         self._budget_pools: dict = {}
+        self.eviction = EvictionPlanner()
         self.scheduler = Scheduler(self._put_on_card, self._places,
                                    self._make_room,
                                    max_waiting=max_waiting)
@@ -537,59 +539,10 @@ class Gateway:
     # -- deciding who has to go --------------------------------------------
 
     def _make_room(self, shape: "Shape", loaded: list[dict]) -> "list | None":
-        """Which loaded shapes have to come off for this one to fit.
-
-        Empty means it fits beside them. `None` means it never will, whatever
-        is unloaded — said now rather than discovered by emptying the machine
-        and failing anyway.
-
-        **Order matters and it is not about size.** An idle model costs nothing
-        to take off; one still answering costs however long it has left, and
-        everything waits for it. So idle ones go first, longest-unused first
-        within each group, and one that is answering is only touched when the
-        idle ones do not free enough.
-
-        Called while the scheduler holds its lock, so nothing here asks the
-        machine anything: it works from the reading taken at the last load and
-        from what each engine says its settings need. Reading the card here
-        would stop the page that is asking what is going on, which is exactly
-        when somebody wants to know.
-        """
-        needed = self._needs_mb(shape)
-        free = self._free_mb()
-        known = bool(needed and free)
-        if known and needed <= free:
-            return []                           # it fits beside them
-
-        # Ordered by what it costs to take them off, not by what they free. An
-        # idle model costs nothing; one still answering costs whatever it has
-        # left, and everything waits for it. Longest-unused first within each
-        # group, because that is the one nobody has wanted.
-        idle = sorted((item for item in loaded if not item["in_flight"]),
-                      key=lambda item: item["last_used"])
-        busy = sorted((item for item in loaded if item["in_flight"]),
-                      key=lambda item: item["last_used"])
-
-        victims: list = []
-        for item in idle + busy:
-            if item["shape"] == shape:
-                continue
-            victims.append(item["shape"])
-            if not known:
-                continue                        # cannot tell: take them all
-            free += self._needs_mb(item["shape"])
-            if needed <= free:
-                return victims
-
-        # Everything is off and it still does not fit, by our own arithmetic.
-        # Said now rather than found out by emptying the machine and failing.
-        if known and needed > self._capacity_mb():
-            return None
-        # Otherwise: cannot tell how much anything holds, so take it all off
-        # and let the load find out. That is exactly what this did before there
-        # was a budget, and it is the safe answer when the arithmetic is
-        # unavailable — "no opinion" must never read as "yes, they all fit".
-        return victims
+        """Choose victims from cached memory figures under the scheduler lock."""
+        return self.eviction.choose(
+            shape, loaded, needs_mb=self._needs_mb,
+            free_mb=self._free_mb(), capacity_mb=self._capacity_mb())
 
     def _why_it_does_not_fit(self, instance_id: str, asked_for: dict) -> dict:
         """The numbers behind a refusal, for a client to act on.

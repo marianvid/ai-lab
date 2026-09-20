@@ -106,6 +106,11 @@ request never unloads a useful model; a busy model is not forcibly stopped
 without the explicit path. Gate: deterministic concurrency tests with fake
 clocks and hosts, plus Linux and macOS smoke tests against existing entries.
 
+The eviction choice is now isolated in a pure planner. It prioritizes idle
+models, refuses an impossible request before unloading anything, and has
+focused tests. Gateway still owns memory readings, leases, scheduling
+coordination and telemetry; those boundaries need separate follow-up work.
+
 ### 5. Add a first-class media studio
 
 Give image and music jobs a common lifecycle contract (submit, inspect,
