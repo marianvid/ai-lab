@@ -72,6 +72,7 @@ before it says how it works.
 
 | | |
 |---|---|
+| [Direct model interfaces](docs/direct-interfaces.md) | How reusable native and external UIs attach to managed models on each host. |
 | [Working on it](docs/development.md) | What each module is for, running it locally, and deploying. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The one dependency rule every module follows, and the reason for it. **Read this before changing anything.** |
 | [`MODEL_STORAGE.md`](MODEL_STORAGE.md) | How the model store is laid out on disk, and what each weight format is. |
