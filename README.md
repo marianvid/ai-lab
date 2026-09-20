@@ -56,7 +56,6 @@ before it says how it works.
 | [Gateway](docs/gateway.md) | The address an agent talks to. What is loaded, what is queued, and **the rules by which models are loaded and unloaded** — the part nobody can guess. |
 | [Storage](docs/storage.md) | Cache, incomplete files and inactive engine versions whose space can be reclaimed. Model deletion stays in Library. |
 | [Settings](docs/settings.md) | What this machine is, how much of its memory models may use, engine updates, and where the model store lives. |
-| [Images](docs/images.md) | Run configured ComfyUI workflows directly in the browser and view or download results. |
 
 **Using it**
 

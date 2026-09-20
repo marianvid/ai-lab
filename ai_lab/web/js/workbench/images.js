@@ -1,15 +1,13 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
 
-export async function render(target, model = null) {
+export async function render(target, model) {
   const [allProfiles, allJobs] = await Promise.all([api.imageProfiles(), api.imageJobs()]);
-  const profiles = model ? allProfiles.filter((profile) => profile.model === model)
-                         : allProfiles;
-  const jobs = model ? allJobs.filter((job) => job.model === model) : allJobs;
+  const profiles = allProfiles.filter((profile) => profile.model === model);
+  const jobs = allJobs.filter((job) => job.model === model);
   if (!profiles.length) {
     target.replaceChildren(element('p', { class: 'muted',
-      text: model ? `No image workflow is configured for ${model}.`
-                  : 'No image workflows are configured.' }));
+      text: `No image workflow is configured for ${model}.` }));
     return;
   }
   const select = element('select', { name: 'profile' }, profiles.map((profile) =>

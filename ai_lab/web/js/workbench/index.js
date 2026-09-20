@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
 import { onChange, startEventStream } from '../events.js';
-import { render as renderImages } from '../views/images.js';
+import { render as renderImages } from './images.js';
 import { renderChat } from './chat.js';
 import { renderMusic } from './music.js';
 import { renderVideo } from './video.js';

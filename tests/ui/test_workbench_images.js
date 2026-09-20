@@ -7,7 +7,7 @@ const PROFILES = [
   { id: 'generate', task: 'generation', model: 'image' },
 ];
 
-describe('the Images page', () => {
+describe('image model workbench', () => {
   let dom;
   before(() => { dom = installDom({}); });
   after(() => dom.restore && dom.restore());
@@ -15,16 +15,16 @@ describe('the Images page', () => {
 
   it('asks for a source image when an edit profile is selected', async () => {
     const context = installDom({ '/api/image-profiles': PROFILES, '/api/image-jobs': [] });
-    const { render } = await import(`../../ai_lab/web/js/views/images.js?${Math.random()}`);
-    await render(context.view);
+    const { render } = await import(`../../ai_lab/web/js/workbench/images.js?${Math.random()}`);
+    await render(context.view, 'image');
     assert.equal(context.view.querySelector('input[type="file"]').required, true);
     assert.equal(context.view.querySelector('button[type="submit"]').textContent, 'Queue edit');
   });
 
   it('removes the source-image requirement for generation', async () => {
     const context = installDom({ '/api/image-profiles': PROFILES, '/api/image-jobs': [] });
-    const { render } = await import(`../../ai_lab/web/js/views/images.js?${Math.random()}`);
-    await render(context.view);
+    const { render } = await import(`../../ai_lab/web/js/workbench/images.js?${Math.random()}`);
+    await render(context.view, 'image');
     const select = context.view.querySelector('select');
     select.value = 'generate';
     select.dispatchEvent(new context.window.Event('change'));
@@ -37,8 +37,8 @@ describe('the Images page', () => {
     const context = installDom({ '/api/image-profiles': PROFILES, '/api/image-jobs': [],
       'POST /v1/images/edits': { id: 'job-1' } });
     global.FormData = context.window.FormData;
-    const { render } = await import(`../../ai_lab/web/js/views/images.js?${Math.random()}`);
-    await render(context.view);
+    const { render } = await import(`../../ai_lab/web/js/workbench/images.js?${Math.random()}`);
+    await render(context.view, 'image');
     const input = context.view.querySelector('input[type="file"]');
     const file = new context.window.File(['pixels'], 'source.png', { type: 'image/png' });
     Object.defineProperty(input, 'files', { value: [file] });
@@ -54,14 +54,14 @@ describe('the Images page', () => {
   });
 
   it('loads a successful result only when View is pressed', async () => {
-    const job = { id: 'job-1', profile: 'generate', status: 'succeeded' };
+    const job = { id: 'job-1', model: 'image', profile: 'generate', status: 'succeeded' };
     const context = installDom({ '/api/image-profiles': PROFILES,
       '/api/image-jobs': [job],
       '/api/image-jobs/job-1': { ...job, result: { data: [
         { mime_type: 'image/png', b64_json: 'cGl4ZWxz' },
       ] } } });
-    const { render } = await import(`../../ai_lab/web/js/views/images.js?${Math.random()}`);
-    await render(context.view);
+    const { render } = await import(`../../ai_lab/web/js/workbench/images.js?${Math.random()}`);
+    await render(context.view, 'image');
     assert.equal(context.calls.some((item) => item.path === '/api/image-jobs/job-1'), false);
     [...context.view.querySelectorAll('button')]
       .find((item) => item.textContent === 'View').click();
