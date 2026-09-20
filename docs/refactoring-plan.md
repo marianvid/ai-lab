@@ -151,6 +151,10 @@ runtime derives length from the composition. A gateway run returned a 92.08-seco
 the result reached its generation limit, which the browser now surfaces.
 An edited ABC was submitted through the same gateway and produced a second
 91.44-second WAV, confirming the composition editing path.
+MiniMax Music 3 now uses the existing supervised ComfyUI lifecycle through
+a separate audio workflow adapter. Workflow input markers, component paths and
+memory reservation are private configuration. The Linux gateway returned both
+instrumental and lyric-conditioned 11.99-second PCM16 WAVs at 44.1 kHz.
 Higgs TTS now uses the installed SGLang-Omni worker behind the common speech
 contract on Linux; a 24 kHz WAV was checked through the gateway. Its measured
 GPU requirement is reserved in private configuration. Near-full-card requests

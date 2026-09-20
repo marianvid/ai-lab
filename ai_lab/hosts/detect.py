@@ -51,4 +51,5 @@ def current_host(engines: dict | None = None) -> Host:
         higgs_binary=settings.get("higgs", {}).get("binary"),
         heartmula_binary=settings.get("heartmula", {}).get("binary"),
         yue2_binary=settings.get("yue2", {}).get("binary"),
+        comfy_music_binary=settings.get("comfy_music", {}).get("binary"),
     )

@@ -54,7 +54,8 @@ class LinuxHost:
                  qwentts_binary: str | None = None,
                  higgs_binary: str | None = None,
                  heartmula_binary: str | None = None,
-                 yue2_binary: str | None = None) -> None:
+                 yue2_binary: str | None = None,
+                 comfy_music_binary: str | None = None) -> None:
         self.control_helper = control_helper
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
@@ -69,6 +70,7 @@ class LinuxHost:
         self.higgs_binary = higgs_binary
         self.heartmula_binary = heartmula_binary
         self.yue2_binary = yue2_binary
+        self.comfy_music_binary = comfy_music_binary
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -104,6 +106,8 @@ class LinuxHost:
             engines.add("heartmula")
         if self.yue2_binary:
             engines.add("yue2")
+        if self.comfy_music_binary:
+            engines.add("comfy_music")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),
@@ -112,7 +116,7 @@ class LinuxHost:
             operating_system="Linux",
             supported_engines=frozenset({"llamacpp", "vllm", "nemo", "onnx",
                                          "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
-                                         "higgs", "heartmula", "yue2"}),
+                                         "higgs", "heartmula", "yue2", "comfy_music"}),
         )
 
     def _accelerator_kind(self) -> str:
