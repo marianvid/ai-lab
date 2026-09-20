@@ -22,14 +22,15 @@ which is what makes the whole lifecycle testable on a laptop with no GPU.
 
 from __future__ import annotations
 
-import re
 import time
-from dataclasses import dataclass, field
 from threading import RLock
 
 from .config import Instance
 from .engines.base import Engine
 from .events import EventBus
+from .runtime_diagnostics import RuntimeDiagnostics
+from .runtime_state import (Operation, RuntimeProgress, Step, LOAD_SPAN,
+                            UNLOAD_SPAN, SWAP_UNLOAD_SPAN, SWAP_LOAD_SPAN)
 from .hosts.base import Host
 from .types import (ChangeEvent, ModelSet, Phase, ProcessSpec, ProcessStatus,
                     RuntimeEvent)
@@ -45,150 +46,6 @@ UNLOAD_TIMEOUT_S = 120.0
 # consecutive samples. Drivers free asynchronously, so the process exiting is
 # not the same moment as the memory coming back.
 SETTLED_SAMPLES = 3
-# How far back to read when a load fails. The sentence naming the cause sits a
-# long way above the end of a Python traceback — measured on the container, 99
-# lines for a context that would not fit and 163 for a missing package.
-LOG_LINES_FOR_CAUSE = 300
-
-# A line where something was actually raised: "ValueError: ...", "RuntimeError:
-# ...", "torch.cuda.OutOfMemoryError: ...". The message after the colon is the
-# part worth showing.
-RAISED = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Exit)\s*:\s*\S")
-
-# Lines that mention trouble and explain none of it.
-NOISE = (
-    "see root cause above",
-    "traceback (most recent call last)",
-    "for more info",
-    "engine core initialization failed",
-    "engine process failed to start",
-    "see stack trace",
-)
-
-
-def _without_prefix(line: str) -> str:
-    """Strip what the supervisor and the engine put in front of their output.
-
-    systemd prefixes nothing, but vLLM prefixes every line with the process it
-    came from — `(EngineCore pid=829699) ` — and its logger adds a level and a
-    source: `ERROR 08-21 20:42:04 [core.py:1346] `. Neither is part of the
-    sentence, and both stop it being recognised as a raised exception.
-    """
-    text = line.strip()
-    if text.startswith("("):
-        closing = text.find(") ")
-        if closing != -1:
-            text = text[closing + 2:].strip()
-    text = LOG_PREFIX.sub("", text, count=1).strip()
-    return text
-
-
-LOG_PREFIX = re.compile(
-    r"^(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL)\s+[\d:\- ]*\[[^\]]+\]\s*")
-
-
-def _is_noise(text: str) -> bool:
-    lowered = text.lower()
-    return (not text
-            or ".service:" in lowered
-            or lowered.startswith(("file \"", "raise ", "self.", "return ",
-                                   "await ", "with ", "yield "))
-            or any(marker in lowered for marker in NOISE))
-
-
-@dataclass(frozen=True, slots=True)
-class Step:
-    phase: Phase
-    elapsed_ms: int
-
-
-@dataclass(slots=True)
-class Operation:
-    """The record of one load, unload or swap."""
-
-    instance_id: str
-    kind: str                       # "load", "unload" or "swap"
-    ok: bool = False
-    total_ms: int = 0
-    steps: list[Step] = field(default_factory=list)
-    error: str = ""
-
-    def json(self) -> dict:
-        return {
-            "instance_id": self.instance_id,
-            "kind": self.kind,
-            "ok": self.ok,
-            "total_ms": self.total_ms,
-            "steps": [{"phase": step.phase.value, "elapsed_ms": step.elapsed_ms}
-                      for step in self.steps],
-            "error": self.error,
-        }
-
-
-# How the phases divide up the bar. A swap is an unload followed by a load, so
-# its two halves share the range rather than each running 0 to 100.
-LOAD_SPAN = (0.0, 1.0)
-UNLOAD_SPAN = (0.0, 1.0)
-SWAP_UNLOAD_SPAN = (0.0, 0.4)
-SWAP_LOAD_SPAN = (0.4, 1.0)
-
-
-class _Progress:
-    """Turns phases and memory readings into a bar that runs 0 to 1.
-
-    The long part of a load is the weights arriving, and that has a known
-    destination — the size of the model — so it can be reported as a real
-    fraction rather than a guess. The short phases either side get small fixed
-    slices, because a bar that sits at zero and then jumps is worse than one
-    that moves a little while a process starts.
-    """
-
-    def __init__(self) -> None:
-        self.span = LOAD_SPAN
-        self.target_mb = 0.0
-        self.baseline_mb = 0.0
-        self._last = 0.0
-
-    def value(self, phase: Phase, process_mb: float, completed: bool = False) -> float:
-        """`completed` marks the end of a phase rather than a sample inside it.
-
-        The distinction matters at the end: while memory is still being handed
-        back the bar should sit just short of full, and only the step that
-        declares the phase finished may show 100%.
-        """
-        low, high = self.span
-        fraction = 1.0 if completed and phase in (Phase.READY, Phase.MEMORY_RELEASED) \
-            else self._fraction(phase, process_mb)
-        self._last = low + (high - low) * fraction
-        return self._last
-
-    def _fraction(self, phase: Phase, process_mb: float) -> float:
-        if phase is Phase.STARTING:
-            return 0.02
-        if phase is Phase.PROCESS_UP:
-            return 0.05
-        if phase is Phase.WEIGHTS_LOADING:
-            share = process_mb / self.target_mb if self.target_mb else 0.0
-            return 0.05 + 0.90 * min(1.0, max(0.0, share))
-        if phase is Phase.READY:
-            return 1.0
-        if phase is Phase.STOPPING:
-            if not self.baseline_mb:
-                return 0.05
-            gone = 1.0 - (process_mb / self.baseline_mb)
-            return 0.05 + 0.60 * min(1.0, max(0.0, gone))
-        if phase is Phase.PROCESS_GONE:
-            return 0.75
-        if phase is Phase.MEMORY_RELEASED:
-            return 0.90
-        return self._fraction_when_failed()
-
-    def _fraction_when_failed(self) -> float:
-        """A failure leaves the bar where it stopped rather than completing it."""
-        low, high = self.span
-        return (self._last - low) / (high - low) if high > low else 0.0
-
-
 class Timeout(RuntimeError):
     pass
 
@@ -203,6 +60,7 @@ class Runtime:
                  start_timeout_s: float = START_TIMEOUT_S,
                  load_timeout_s: float = LOAD_TIMEOUT_S) -> None:
         self.host = host
+        self.diagnostics = RuntimeDiagnostics(host)
         self.bus = bus
         self.sample_interval_s = sample_interval_s
         self.start_timeout_s = start_timeout_s
@@ -211,7 +69,7 @@ class Runtime:
         self._guard = RLock()
         self._last: dict[str, Operation] = {}
         self._pids: dict[str, int | None] = {}
-        self._progress: dict[str, _Progress] = {}
+        self._progress: dict[str, RuntimeProgress] = {}
         # What each running instance was actually started with. Usually its
         # stored settings, but not always: a request may ask for a model with
         # a bigger context than the entry is configured for, and then the two
@@ -475,77 +333,16 @@ class Runtime:
             time.sleep(self.sample_interval_s)
 
     def _why(self, instance_id: str) -> str:
-        """Explain a death using the engine's own words.
+        return self.diagnostics.why(instance_id)
 
-        The engine knows exactly why it died — not enough memory, a context
-        that will not fit, a missing package — and that sentence is worth far
-        more than "the process exited". Getting at it takes some care, because
-        an engine that dies inside Python prints a great deal around it.
-
-        **The first exception, not the last.** A traceback ends with a summary
-        that says something failed and nothing about what. vLLM's literally
-        reads "Engine core initialization failed. See root cause above." The
-        cause is above, and taking the last line reported the one line that
-        was no use.
-
-        **Far enough back.** Measured on the container: the sentence naming a
-        context that would not fit sat 99 lines above the end, and a missing
-        package 163. Reading forty found neither.
-        """
-        try:
-            lines = self.host.logs(instance_id, lines=LOG_LINES_FOR_CAUSE)
-        except Exception:
-            lines = []
-        if not lines:
-            return ("The engine stopped while loading, and its output could not "
-                    "be read. On Linux the manager needs to be in the "
-                    "systemd-journal group to see it.")
-        detail = self._cause(lines)
-        return f"The engine stopped while loading: {detail}" if detail else (
-            "The engine stopped while loading, and said nothing about why. "
-            "Its full output is in the journal.")
+    @staticmethod
+    def _cause(lines: list[str]) -> str:
+        # Kept for callers that used Runtime's original diagnostic helper.
+        return RuntimeDiagnostics.cause(lines)
 
     @staticmethod
     def _this_run(lines: list[str]) -> list[str]:
-        """Only what this attempt printed.
-
-        Reading three hundred lines back reaches over the end of the previous
-        run, and an exception from *that* one reads exactly as convincingly.
-        It happened while this was being written: the message named a context
-        limit from a request answered a minute before the load even started.
-
-        systemd writes one line when it starts a unit, which is the boundary.
-        Without it — a log truncated, or a host that writes no such line —
-        everything is searched, which is what happened before.
-        """
-        for index in range(len(lines) - 1, -1, -1):
-            text = lines[index].strip()
-            if text.startswith("Started ") and ".service" in text:
-                return lines[index + 1:]
-        return lines
-
-    @classmethod
-    def _cause(cls, lines: list[str]) -> str:
-        """The one sentence out of a few hundred that says what went wrong."""
-        lines = cls._this_run(lines)
-        candidates = []
-        for line in lines:
-            text = _without_prefix(line)
-            if not text or _is_noise(text):
-                continue
-            if RAISED.match(text):
-                candidates.append(text)
-        if candidates:
-            return candidates[0]
-        # Nothing that looks like a raised exception. Fall back to the last
-        # line that at least mentions trouble, which is what this used to do
-        # for every case.
-        mentions = [_without_prefix(line) for line in lines
-                    if any(marker in line.lower()
-                           for marker in ("error", "failed", "cannot",
-                                          "out of memory", "unable"))
-                    and not _is_noise(_without_prefix(line))]
-        return mentions[-1] if mentions else ""
+        return RuntimeDiagnostics.this_run(lines)
 
     def _await_settled(self, instance_id: str, clock: "_Clock", timeout_s: float) -> None:
         """Wait for memory to stop falling.
@@ -578,7 +375,7 @@ class Runtime:
         The memory figures are per instance rather than per card, since with
         two models resident the card total says nothing about either.
         """
-        bar = self._progress.get(instance_id) or _Progress()
+        bar = self._progress.get(instance_id) or RuntimeProgress()
         return RuntimeEvent(
             instance_id=instance_id, phase=phase, elapsed_ms=clock.elapsed_ms(),
             progress=round(bar.value(phase, snapshot.process_memory_mb, completed), 4),
@@ -590,7 +387,7 @@ class Runtime:
 
     def _begin(self, instance_id: str, span: tuple[float, float],
                target_mb: float = 0.0, baseline_mb: float = 0.0) -> None:
-        bar = _Progress()
+        bar = RuntimeProgress()
         bar.span = span
         bar.target_mb = target_mb
         bar.baseline_mb = baseline_mb

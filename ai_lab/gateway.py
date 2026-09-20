@@ -1,155 +1,23 @@
-"""One address for an agent workflow that uses several models.
+"""Model routing, admission and load coordination for agent requests.
 
-An agent asks the researcher model to read, the developer model to write, the
-reviewer model to check. Each is a separate entry here on its own port, and only
-one of them can be on the card. An agent that names a model which is not running
-gets a refused connection, and the workflow stops there.
-
-This removes that. A request names a model; if it is already loaded the request
-goes through, and if it is not, room is made and that model is loaded first.
-The agent waits longer for that one request and sees nothing else.
-
-## As many models as fit. Many requests to each.
-
-How many is not a decision here, it is the machine: whatever the memory budget
-allows, which is what is free less what is held back for the machine itself.
-Measured on the container, a 3.5 GB model and a 17 GB one sit together and both
-answer without reloading; a second vLLM model at its default share of the card
-does not, and never will.
-
-Requests to a model that is loaded run together — up to the number the engine was started to serve. vLLM interleaves
-them in the same pass, which is where its throughput comes from: measured on
-this machine at up to seventeen times as concurrency rises, against about 1.4
-for llama.cpp. Making them take turns threw that away.
-
-The number is the engine's own, per entry: slots for llama.cpp, sequences for
-vLLM. Ask the engine, do not guess from a setting name.
-
-Requests wanting a different model wait, and the queueing rules are in
-`scheduler.py`. In one line: **the queue is served in order, and requests next
-to each other wanting the same model go in together.**
-
-Nothing younger is served first, ever — not even when it wants the model that
-is already loaded and would cost nothing. It arrived after the request that is
-waiting, and a workflow can be held up by exactly that one.
-
-The guard that makes it work: the moment anybody waits, the door closes for the
-model on the card. Without it a busy model never goes idle, the switch never
-happens, and the other request waits for ever.
-
-Which leads to the one thing to design workflows around: **a request must not
-wait, inside itself, on another request to this same gateway.** Fill every
-place with things that cannot finish and nothing finishes.
-
-A model plus the settings it was started with is one "shape". Two requests for
-the same model wanting different context sizes are not requests for the same
-thing: one of them needs a reload.
-
-## The buttons on the page are the other way in
-
-Requests here are safe from each other: they queue. The Load and Unload buttons
-are not part of that. They reach the engines directly and know nothing about
-who is mid-answer, so pressing Unload during a long answer would kill it in the
-middle of a sentence.
-
-`guard` is what the routes behind those buttons call first. It refuses while
-anything is running or waiting, and says what it found, so the page can offer
-to go ahead anyway. Going ahead means a clean slate: everything in flight dies,
-everyone waiting is turned away, the card is empty. Half-forced is worse than
-either.
-
-## Emptying the card properly
-
-Switching does not unload the outgoing model and start the next one straight
-away. The driver returns VRAM a moment after a process exits, and starting a
-model on top of memory that has not come back yet fails in a way that reads like
-the new model being too large.
-
-So a switch unloads everything running, waits for the card to actually go quiet,
-and only then loads. If it does not go quiet, the switch fails and says so,
-rather than loading into a mess.
-
-## How long to wait for an engine
-
-Two limits, and they are limits of safety rather than of patience: in normal
-work nothing comes near them.
-
-**To the first byte** covers connecting and reading the prompt — and, for a
-request that did not ask for streaming, the whole answer, because such an
-engine sends nothing until it has finished. Measured here: 8,400 tokens of
-prompt read in 0.78 s on the card. On a model split between card and system
-memory, or on Apple silicon, it is far slower — that is what this number is
-sized for.
-
-**Between bytes** catches an engine that starts answering and stops. At the
-slowest generation measured on either machine, 17 tokens a second, the gap
-between them is 59 milliseconds. Anything of the order of seconds means
-something is wrong, not slow.
-
-One number cannot do both jobs: their sane values are four orders of magnitude
-apart. The single hour-long timeout this replaced was absurd for one and
-useless for the other.
-
-There is no HTTP in this file. It decides which entry serves a name and makes
-sure it is the one on the card; forwarding the request is the web layer's job.
+Scheduling, memory accounting, request state and telemetry live in their
+respective modules. See docs/gateway-behavior.md for the operating contract.
 """
 
 from __future__ import annotations
 
-import threading
 import time
-from collections import deque
-from dataclasses import dataclass, field
 
 from . import budget
 from .operations import Operations
 from .eviction import EvictionPlanner
-from .gateway_stats import GatewayStats
+from .gateway_stats import GatewayCounters, GatewayStats
+from .gateway_state import Lease, Shape
+from .gateway_errors import CardBusy, CouldNotLoad, NotConfigured, ShapeNotServed
+from .gateway_resources import GatewayResources
+from .gateway_control import GatewayControl
 from .scheduler import Abandoned, Scheduler, WillNotFit
 from .types import Task
-
-
-class NotConfigured(KeyError):
-    """No entry serves that model name.
-
-    A KeyError so the web layer answers 404 without being told, since that is
-    already the rule for "no such thing".
-    """
-
-    def __str__(self) -> str:
-        # KeyError renders its argument with repr(), which wraps the whole
-        # sentence in quotes and escapes what is inside it. This message lists
-        # the names that would have worked, and it is read by a person
-        # debugging an agent, so it should arrive as a sentence.
-        return self.args[0] if self.args else ""
-
-
-class CouldNotLoad(RuntimeError):
-    """The entry exists but the card could not be made ready for it."""
-
-
-class ShapeNotServed(ValueError):
-    """The entry exists, but its engine does not answer that kind of request.
-
-    A request can arrive in more than one shape, and not every engine speaks
-    every shape. Refused here, with the entries that would have worked, rather
-    than forwarded to an engine that would answer 404 about a path the client
-    never chose.
-    """
-
-
-class CardBusy(RuntimeError):
-    """The card is serving a request, and the action asked for would cut it off.
-
-    Raised at the request of the interface, not by the gateway's own work: the
-    buttons on the page reach the engines directly, and this is how they find
-    out that somebody is mid-answer. It carries `detail` so the page can offer
-    to go ahead anyway rather than only printing a sentence.
-    """
-
-    def __init__(self, message: str, holder: dict) -> None:
-        super().__init__(message)
-        self.detail = {"busy": holder}
 
 
 # How quiet the card has to be before a new model is loaded, and how long to
@@ -166,113 +34,6 @@ QUIET_POLL_S = 0.5
 FIRST_BYTE_S = 120.0
 BETWEEN_BYTES_S = 30.0
 MAX_WAITING = 150
-
-
-@dataclass(slots=True)
-class Lease:
-    """A place on the card, held for the length of one request.
-
-    Taken before the request is forwarded and given back after the last byte of
-    the answer, including a streamed answer that takes a minute.
-
-    Each lease knows whether it has been given back, because several are held
-    at once now. A request that fails while being forwarded hands its place
-    back twice — once from the code that noticed, once from the reader's
-    cleanup — and without this the second would be taking a place from somebody
-    else.
-    """
-
-    gateway: "Gateway"
-    instance_id: str
-    port: int
-    # What the engine calls its own model. llama.cpp and vLLM are both started
-    # with an explicit name and both refuse a request naming anything else, so
-    # the name the client used has to be translated before forwarding. It is
-    # carried here because it was known when the lease was made: asking for it
-    # afterwards meant reading every instance's state a second time, which is
-    # the expensive question, for an answer that is pure configuration.
-    model_name: str = ""
-    # When the place was taken, so giving it back can say how long it was held.
-    started: float = 0.0
-    _given_back: bool = False
-
-    def release(self) -> None:
-        if self._given_back:
-            return
-        self._given_back = True
-        self.gateway.finished(time.perf_counter() - self.started
-                              if self.started else 0.0)
-
-    def __enter__(self) -> "Lease":
-        return self
-
-    def __exit__(self, *_exception) -> None:
-        self.release()
-
-
-@dataclass(frozen=True, slots=True)
-class Shape:
-    """A model, and the settings it has to be started with.
-
-    Two requests for the same entry wanting different context sizes are not
-    requests for the same thing — one of them needs a reload — so the settings
-    are part of what is being asked for, not a note attached to it. Frozen and
-    hashable, so equality is the whole test.
-    """
-
-    instance_id: str
-    settings: tuple = ()                # (key, value) pairs, sorted
-
-    @classmethod
-    def of(cls, instance_id: str, settings: dict | None) -> "Shape":
-        return cls(instance_id, tuple(sorted((settings or {}).items())))
-
-    def as_dict(self) -> dict:
-        return dict(self.settings)
-
-
-@dataclass(slots=True)
-class _Counters:
-    """What the page reports, and nothing that only ever goes up.
-
-    A lifetime total of requests says nothing: it grows while you watch it and
-    means the same at 40 as at 40,000. What is worth showing is a rate, an
-    average, and a share — figures that stay comparable to themselves.
-    """
-
-    requests: int = 0
-    switches: int = 0
-    # How many models were pushed off to make room. The number that hurts:
-    # a load beside what is there costs a load; a load that displaces
-    # something costs that too, and the next request for it.
-    evictions: int = 0
-    waited_s: float = 0.0
-    switch_s: float = 0.0
-    # Time spent actually answering, summed. The denominator for "how much of
-    # the working time went on loading models" — the wall clock is no use
-    # there, because a machine that sits idle overnight would report a
-    # flattering number for a workflow that spends its life swapping.
-    served_s: float = 0.0
-    # When each request arrived and which model it wanted, for a rate rather
-    # than a total. Pruned to the last minute whenever it is read.
-    #
-    # The model is kept because the total answers "how busy is this machine"
-    # and the split answers "which model is carrying it" — and the second is
-    # what decides which one is worth keeping loaded.
-    arrivals: deque = field(default_factory=lambda: deque(maxlen=4096))
-    # Time to the first token, over requests that asked for streaming. Only
-    # those: without streaming an engine sends nothing until the answer is
-    # finished, so its "first byte" is the whole generation and averaging the
-    # two together measures neither.
-    #
-    # Kept per model and never totalled. A 3B and a 35B have first-token times
-    # that differ by an order of magnitude, and one average across both is a
-    # figure that describes neither. With one model on the machine the average
-    # was right by accident.
-    first_token_s: dict = field(default_factory=dict)
-    first_tokens: dict = field(default_factory=dict)
-    last_error: str = ""
-    history: list[dict] = field(default_factory=list)
 
 
 class Gateway:
@@ -314,6 +75,8 @@ class Gateway:
         # What the last card reading said, per pool. Refreshed around every
         # load, never from inside the scheduler's lock.
         self._budget_pools: dict = {}
+        self.resources = GatewayResources(operations, quiet_mb,
+                                          quiet_timeout_s, poll_s)
         self.eviction = EvictionPlanner()
         self.scheduler = Scheduler(self._put_on_card, self._places,
                                    self._make_room,
@@ -323,7 +86,8 @@ class Gateway:
         # The next switch sweeps: one expensive read after an outside change
         # rather than one on every request.
         self._resweep = True
-        self.counters = _Counters()
+        self.control = GatewayControl(self.scheduler)
+        self.counters = GatewayCounters()
 
     # -- what a client can ask for -----------------------------------------
 
@@ -482,7 +246,7 @@ class Gateway:
     def first_token(self, seconds: float, instance_id: str = "") -> None:
         """How long that request waited for its first token.
 
-        Reported only for requests that asked for streaming — see `_Counters`.
+        Reported only for requests that asked for streaming — see `GatewayCounters`.
         Kept against the model that answered, because that is the only level at
         which the figure means anything.
         """
@@ -574,51 +338,22 @@ class Gateway:
         }
 
     def _needs_mb(self, shape: "Shape") -> float:
-        """What this shape's settings ask of the card. Nothing remembered.
-
-        Worked out from the request each time. How much a model took last time
-        is a fact about the past that whoever is making the requests should
-        know; this manager reports what it measures now and asks the engine
-        what these settings mean.
-        """
-        try:
-            instance = self.operations.instance(shape.instance_id)
-            engine = self.operations.engines.get(instance["engine"])
-            model = self.operations.model_for(shape.instance_id)
-            params = {**instance["params"], **shape.as_dict()}
-            return float(engine.needs_mb(model, params, self._card_total_mb()))
-        except Exception:
-            return 0.0
+        return self.resources.needs_mb(shape, self._card_total_mb())
 
     def _card_total_mb(self) -> float:
-        try:
-            return float(self.operations.host.accelerator().memory_total_mb)
-        except Exception:
-            return 0.0
+        return self.resources.card_total_mb()
 
     def _capacity_mb(self) -> float:
-        """The most a single model could ever have on this machine."""
-        pool = self._budget_pools.get(budget.CARD) or self._budget_pools.get(
-            budget.MACHINE)
-        return float(pool.get("for_models_mb", 0.0)) if pool else 0.0
+        return self.resources.capacity_mb(self._budget_pools)
 
     def _free_mb(self) -> float:
-        """Room for another model on the card, from the last reading taken."""
-        pool = self._budget_pools.get(budget.CARD) or self._budget_pools.get(
-            budget.MACHINE)
-        return float(pool.get("available_mb", 0.0)) if pool else 0.0
+        return self.resources.free_mb(self._budget_pools)
 
     def _read_the_card(self) -> None:
-        """Take a fresh memory reading. Outside the scheduler's lock, always.
-
-        Kept rather than asked for when needed, because the decision about what
-        has to come off is taken while the scheduler holds its lock, and reading
-        the card there would stop the page that is asking what is going on —
-        which is exactly when somebody wants to know.
-        """
+        # Never called while holding the scheduler lock. Keep the last good
+        # reading if the host probe fails during a model transition.
         try:
-            found = budget.of(self.operations.host, self.operations.reserve_mb())
-            self._budget_pools = {pool.name: pool.json() for pool in found.pools}
+            self._budget_pools = self.resources.read_pools()
         except Exception:
             pass
 
@@ -767,120 +502,16 @@ class Gateway:
     # -- what the buttons on the page have to respect -----------------------
 
     def busy(self) -> dict | None:
-        """What is on the card and what it is doing, or None if it is idle.
-
-        Idle means nothing running and nobody waiting. A queue with nothing in
-        flight still counts as busy: a switch is about to happen, and stopping
-        a model in that moment is as disruptive as stopping one mid-answer.
-        """
-        state = self.scheduler.state()
-        if not state["in_flight"] and not state["waiting"] and not state["switching"]:
-            return None
-        # Which one to name, when several are loaded: the busiest, because
-        # that is the one somebody stopping this would most regret. With one
-        # loaded it is the only answer there is.
-        busiest = max(state["loaded"], key=lambda item: item["in_flight"],
-                      default=None)
-        return {
-            "instance_id": busiest["shape"].instance_id if busiest else "",
-            "answering": bool(state["in_flight"]),
-            "in_flight": state["in_flight"],
-            "places": busiest["places"] if busiest else 0,
-            "waiting": len(state["waiting"]),
-            "switching": state["switching"],
-        }
+        return self.control.busy()
 
     def guard(self, action: str, instance_id: str) -> None:
-        """Refuse an action that would interrupt work in progress.
-
-        Requests here are safe from each other: they queue. This is for the
-        other way in — the Load and Unload buttons reach the engines directly
-        and know nothing about leases or queues. Without this, pressing Unload
-        during a long answer kills it mid sentence, and the agent sees a
-        connection that simply stopped.
-
-        It names what it found, because "busy" is not enough to decide with:
-        one answer being written is a different thing from forty requests
-        waiting for a model to load.
-        """
-        holder = self.busy()
-        if holder is None:
-            return
-        who = holder["instance_id"] or "a model"
-        parts = []
-        if holder["in_flight"]:
-            answers = holder["in_flight"]
-            parts.append(f"{who} is answering "
-                         f"{answers} request{'' if answers == 1 else 's'}")
-        elif holder["switching"]:
-            parts.append(f"{who} is being loaded")
-        if holder["waiting"]:
-            waiting = holder["waiting"]
-            parts.append(f"{waiting} more {'is' if waiting == 1 else 'are'} waiting")
-        raise CardBusy(
-            f"{' and '.join(parts) or 'The card is in use'}. Going ahead with "
-            f"'{action}' on {instance_id} cuts all of that off.", holder)
+        self.control.guard(action, instance_id)
 
     def _wait_until_quiet(self, stopped: list) -> None:
-        """Wait for the driver to hand back what those models held.
-
-        A process exits before its VRAM is released. Loading in that gap fails
-        with a message about the model being too large, which sends whoever
-        reads it looking in the wrong place entirely.
-
-        Waited for by name, not by watching the total fall to nothing: with a
-        memory budget, other models stay loaded and their memory is not coming
-        back. What has to be gone is the processes that were stopped, and that
-        is a question with an exact answer.
-        """
-        if not stopped:
-            return
-        snapshot = self.operations.host.accelerator()
-        if snapshot.memory_kind != "dedicated":
-            return                      # unified memory: nothing to wait for
-        deadline = time.perf_counter() + self.quiet_timeout_s
-        while True:
-            running = {item["id"] for item in self.operations.instances()
-                       if item["running"]}
-            still_up = [name for name in stopped if name in running]
-            if not still_up:
-                self._wait_for_release(deadline, keeping=bool(running))
-                return
-            if time.perf_counter() > deadline:
-                raise CouldNotLoad(
-                    f"{', '.join(still_up)} did not exit within "
-                    f"{self.quiet_timeout_s:.0f} seconds. The card is still "
-                    f"holding what it was using.")
-            time.sleep(self.poll_s)
+        self.resources._wait_until_quiet(stopped)
 
     def _wait_for_release(self, deadline: float, keeping: bool) -> None:
-        """Wait for the driver to hand back what those processes held.
-
-        A process exits before its memory does, and loading into that gap fails
-        with a message about the model being too large, which sends whoever
-        reads it looking in the wrong place entirely.
-
-        What to wait *for* depends on what is left. With nothing meant to be
-        loaded, the card should reach nothing, and anything else is a fault
-        worth naming — something outside this manager holding it, or an engine
-        that did not release. With other models still loaded, the card
-        legitimately holds their memory and there is no figure to wait for; the
-        question becomes whether there is room, which `_refuse_if_still_full`
-        asks precisely once the reading is fresh.
-        """
-        if keeping:
-            return
-        while True:
-            used = self.operations.host.accelerator().memory_used_mb
-            if used <= self.quiet_mb:
-                return
-            if time.perf_counter() > deadline:
-                raise CouldNotLoad(
-                    f"The card still holds {used:.0f} MB "
-                    f"{self.quiet_timeout_s:.0f} seconds after everything was "
-                    f"unloaded. Something outside AI-Lab is using it, or an "
-                    f"engine did not exit.")
-            time.sleep(self.poll_s)
+        self.resources._wait_for_release(deadline, keeping)
 
     def _refuse_if_still_full(self, shape: "Shape") -> None:
         """Say so before starting an engine that cannot fit.

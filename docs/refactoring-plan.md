@@ -10,8 +10,8 @@ contracts while changing the internals. The principal maintenance costs are:
 - `operations.py` (about 1,500 lines) owns unrelated use cases and is the
   shared dependency of most routes. `gateway.py` (about 1,200 lines) combines
   request admission, memory decisions, queue coordination and metrics.
-- `runtime.py`, `builds.py` and `installs.py` each combine policy with process
-  control. The browser's Models, Library and Settings views each exceed 490
+- `runtime.py`, `builds.py` and `installs.py` originally combined policy
+  with process control. The browser's Models, Library and Settings views each exceed 490
   lines. Small changes therefore have a wide review surface.
 - Configuration and API payloads move mostly as dictionaries. Validation and
   defaults are spread across constructors, services and views, so a new field
@@ -195,6 +195,10 @@ as separate changes, compare active state with private snapshots after each
 deployment, and record the exact public/private commits that were verified
 together. Gate: no private values in public diff, both repositories clean,
 Mac and Linux smoke checks passed, and rollback instructions tested.
+
+Runtime progress and operation records now live in `runtime_state.py`; log
+diagnosis lives in `runtime_diagnostics.py`. The runtime coordinator now
+focuses on process transitions and host supervision.
 
 ## Repository and deployment policy
 

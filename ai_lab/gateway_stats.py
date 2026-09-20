@@ -8,9 +8,54 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from dataclasses import dataclass, field
 
 from . import budget
 from .types import Task
+
+
+@dataclass(slots=True)
+class GatewayCounters:
+    """What the page reports, and nothing that only ever goes up.
+
+    A lifetime total of requests says nothing: it grows while you watch it and
+    means the same at 40 as at 40,000. What is worth showing is a rate, an
+    average, and a share — figures that stay comparable to themselves.
+    """
+
+    requests: int = 0
+    switches: int = 0
+    # How many models were pushed off to make room. The number that hurts:
+    # a load beside what is there costs a load; a load that displaces
+    # something costs that too, and the next request for it.
+    evictions: int = 0
+    waited_s: float = 0.0
+    switch_s: float = 0.0
+    # Time spent actually answering, summed. The denominator for "how much of
+    # the working time went on loading models" — the wall clock is no use
+    # there, because a machine that sits idle overnight would report a
+    # flattering number for a workflow that spends its life swapping.
+    served_s: float = 0.0
+    # When each request arrived and which model it wanted, for a rate rather
+    # than a total. Pruned to the last minute whenever it is read.
+    #
+    # The model is kept because the total answers "how busy is this machine"
+    # and the split answers "which model is carrying it" — and the second is
+    # what decides which one is worth keeping loaded.
+    arrivals: deque = field(default_factory=lambda: deque(maxlen=4096))
+    # Time to the first token, over requests that asked for streaming. Only
+    # those: without streaming an engine sends nothing until the answer is
+    # finished, so its "first byte" is the whole generation and averaging the
+    # two together measures neither.
+    #
+    # Kept per model and never totalled. A 3B and a 35B have first-token times
+    # that differ by an order of magnitude, and one average across both is a
+    # figure that describes neither. With one model on the machine the average
+    # was right by accident.
+    first_token_s: dict = field(default_factory=dict)
+    first_tokens: dict = field(default_factory=dict)
+    last_error: str = ""
+    history: list[dict] = field(default_factory=list)
 
 
 class GatewayStats:
