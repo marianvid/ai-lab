@@ -158,18 +158,14 @@ class ToolCallingTests(unittest.TestCase):
         argv = self.argv({"tool_parser": ""})
         self.assertNotIn("--enable-auto-tool-choice", argv)
 
-    def test_a_format_vllm_does_not_know_is_refused_when_typed(self):
-        # Rather than as an engine that will not start, minutes later, with a
-        # message about argument parsing.
-        with self.assertRaises(ValueError) as caught:
-            self.argv({"tool_parser": "qwen-coder"})
-        self.assertIn("Tool calling", str(caught.exception))
+    def test_a_new_parser_name_needs_no_ai_lab_release(self):
+        argv = self.argv({"tool_parser": "new_parser_2026"})
+        self.assertEqual(argv[argv.index("--tool-call-parser") + 1],
+                         "new_parser_2026")
 
-    def test_the_formats_this_machine_actually_uses_are_offered(self):
-        offered = dict((spec.key, spec) for spec in self.engine.params())
-        choices = offered["tool_parser"].choices
-        for name in ("qwen3_coder", "gemma4", "glm47"):
-            self.assertIn(name, choices)
+    def test_parser_name_cannot_be_a_path_or_command(self):
+        with self.assertRaisesRegex(ValueError, "Tool calling"):
+            self.argv({"tool_parser": "../parser"})
 
 
 class MemorySettingsTests(unittest.TestCase):
@@ -196,10 +192,14 @@ class MemorySettingsTests(unittest.TestCase):
         argv = self.argv({"kv_cache_dtype": "fp8"})
         self.assertEqual(argv[argv.index("--kv-cache-dtype") + 1], "fp8")
 
-    def test_a_precision_vllm_does_not_know_is_refused_when_typed(self):
-        with self.assertRaises(ValueError) as caught:
-            self.argv({"kv_cache_dtype": "fp4"})
-        self.assertIn("Cache precision", str(caught.exception))
+    def test_new_cache_precision_needs_no_ai_lab_release(self):
+        argv = self.argv({"kv_cache_dtype": "nvfp4_ds_mla"})
+        self.assertEqual(argv[argv.index("--kv-cache-dtype") + 1],
+                         "nvfp4_ds_mla")
+
+    def test_cache_precision_name_cannot_contain_shell_syntax(self):
+        with self.assertRaisesRegex(ValueError, "Cache precision"):
+            self.argv({"kv_cache_dtype": "fp8;rm"})
 
     def test_prefix_caching_is_a_switch(self):
         self.assertIn("--enable-prefix-caching", self.argv({"prefix_caching": True}))

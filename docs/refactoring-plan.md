@@ -81,6 +81,11 @@ The configuration loader now preserves unknown top-level fields during a
 save, and startup validates instance/engine/repository references, unique
 ports, and image profile tasks and workflow files. The private verifier
 compares active Mac and Linux bytes with `opts` snapshots after deployment.
+vLLM and llama.cpp option names that evolve with engine versions are now
+editable identifiers. New names accepted by an upgraded engine can be
+configured without an AI-Lab code change;
+the installed engine reports unsupported names at model load.
+
 The on-disk schema now has an explicit version and a migration from legacy
 unversioned files. Future schema versions fail before a save, and unknown fields
 within the current schema survive a round trip. Both active machines and

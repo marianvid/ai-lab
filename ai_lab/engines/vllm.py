@@ -30,35 +30,10 @@ from .probe import http_ok
 # Every one of these was arrived at by running it on this machine. The help
 # text says what it costs, because on a single 32 GB card these settings trade
 # against each other and the trade is not obvious.
-# How the context cache is stored, as vLLM names the choices. From
-# `vllm serve --help=all` on the installed build, same as the parser list
-# below: what is offered here has to exist there.
-KV_CACHE_TYPES = (
-    "auto", "bfloat16", "float16", "fp8", "fp8_ds_mla", "fp8_e4m3",
-    "fp8_e5m2", "fp8_inc", "fp8_per_token_head", "int4_per_token_head",
-    "int8_per_token_head", "nvfp4", "nvfp4_4over6", "turboquant_3bit_nc",
-    "turboquant_4bit_nc", "turboquant_k3v4_nc", "turboquant_k8v4",
-)
-
-# How a model writes a tool call, as vLLM names the formats it can read. Taken
-# from `vllm serve --help=all` on the installed build; the list grows with
-# every release, and a name added upstream has to be added here before it can
-# be chosen. Empty comes first and means tool calling is off.
-#
-# There is no free-text setting here on purpose. A parser name is checked
-# against this list, so a typo is refused when it is typed rather than
-# discovered as an engine that will not start.
-TOOL_PARSERS = (
-    "", "apertus", "cohere_command3", "cohere_command4", "deepseek_v3",
-    "deepseek_v31", "deepseek_v32", "deepseek_v4", "dots", "ernie45",
-    "functiongemma", "gemma4", "gigachat3", "glm45", "glm47", "granite",
-    "granite-20b-fc", "granite4", "hermes", "hunyuan_a13b", "hy_v3", "inkling",
-    "internlm", "jamba", "kimi_k2", "kimi_k3", "lfm2", "ling3", "llama3_json",
-    "llama4_json", "llama4_pythonic", "longcat", "mimo", "minicpm5",
-    "minimax_m2", "minimax_m3", "mistral", "muse_glimmer", "olmo3", "openai",
-    "phi4_mini_json", "poolside_v1", "pythonic", "qwen3_coder", "qwen3_xml",
-    "seed_oss", "step3", "step3p5", "xlam",
-)
+# Parser and cache names are passed through to the installed vLLM version.
+# Fixed lists here prevent a new engine release or a parser plugin from being
+# configured until AI-Lab itself is changed. The shared identifier validator
+# keeps these names bounded; vLLM validates its own supported choices at load.
 
 PARAMS = (
     ParamSpec("context_size", "Context size", "int", 32768,
@@ -87,8 +62,8 @@ PARAMS = (
                    "pure waste for text work. Measured on Gemma-4: startup "
                    "halved, from 117 seconds to about 50, with no loss of "
                    "throughput."),
-    ParamSpec("kv_cache_dtype", "Cache precision", "choice", "auto",
-              choices=KV_CACHE_TYPES, group="memory",
+    ParamSpec("kv_cache_dtype", "Cache precision", "identifier", "auto",
+              group="memory",
               help="How the context cache is stored. `auto` keeps it at the "
                    "model's own precision. Anything smaller fits more context "
                    "in the same memory — this is the setting to reach for when "
@@ -119,10 +94,12 @@ PARAMS = (
                    "start after a reinstall took 241 seconds and later ones "
                    "47, so the cost is paid once per model rather than each "
                    "time."),
-    ParamSpec("tool_parser", "Tool calling", "choice", "",
-              choices=TOOL_PARSERS, group="memory",
-              help="Empty means the model cannot call tools. Anything else "
-                   "turns tool calling on and says how this model writes a "
+    ParamSpec("tool_parser", "Tool calling", "identifier", "",
+              group="memory",
+              help="Empty means the model cannot call tools. Enter a parser name "
+                   "supported by the installed vLLM version. The engine "
+                   "checks it when loaded. A nonempty name turns tool calling "
+                   "on and says how this model writes a "
                    "call, which differs by model family: qwen3_coder for "
                    "Qwen3-Coder, gemma4 for Gemma-4, glm47 for GLM-4.7. "
                    "Needed by any agent that uses tools — Claude Code refuses "

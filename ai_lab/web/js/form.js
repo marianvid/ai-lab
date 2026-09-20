@@ -39,8 +39,9 @@ function input(spec, value) {
       })));
   }
   return element('input', {
-    type: 'number', 'data-key': spec.key, value: String(current), size: 10,
-    step: spec.kind === 'float' ? '0.01' : '1',
+    type: spec.kind === 'identifier' ? 'text' : 'number',
+    'data-key': spec.key, value: String(current), size: 10,
+    ...(spec.kind !== 'identifier' ? { step: spec.kind === 'float' ? '0.01' : '1' } : {}),
     ...(spec.minimum !== null ? { min: String(spec.minimum) } : {}),
     ...(spec.maximum !== null ? { max: String(spec.maximum) } : {}),
   });
@@ -91,7 +92,7 @@ export function settingsForm(specs, values = {}) {
       if (!spec) return;
       collected[spec.key] = spec.kind === 'bool'
         ? node.checked
-        : spec.kind === 'choice'
+        : spec.kind === 'choice' || spec.kind === 'identifier'
           ? node.value
           : spec.kind === 'float' ? parseFloat(node.value) : parseInt(node.value, 10);
     });

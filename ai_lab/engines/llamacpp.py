@@ -17,8 +17,6 @@ from ..hosts.command import which
 from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
 
-CACHE_TYPES = ("f16", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0")
-
 # Two kinds of setting, and mixing them would mislead. The "memory" group
 # decides how much is reserved on the accelerator when the model starts, so
 # changing one means reloading. The "generation" group only sets defaults for
@@ -34,12 +32,12 @@ PARAMS = (
               group="memory",
               help="How many requests can be served at once. Each slot gets its "
                    "own share of the context."),
-    ParamSpec("cache_type_k", "Key cache type", "choice", "q4_0",
-              choices=CACHE_TYPES, group="memory",
+    ParamSpec("cache_type_k", "Key cache type", "identifier", "q4_0",
+              group="memory",
               help="Quantisation of the attention key cache. Lower uses less "
                    "memory and costs a little quality."),
-    ParamSpec("cache_type_v", "Value cache type", "choice", "q4_0",
-              choices=CACHE_TYPES, group="memory",
+    ParamSpec("cache_type_v", "Value cache type", "identifier", "q4_0",
+              group="memory",
               help="Quantisation of the attention value cache."),
     ParamSpec("flash_attention", "Flash attention", "bool", True, group="memory",
               help="Faster attention kernel. Leave on unless it misbehaves."),
@@ -81,8 +79,7 @@ PARAMS = (
               choices=("auto", "on", "off"), group="generation",
               help="Whether the model thinks before answering. Auto follows "
                    "what the model's own template asks for."),
-    ParamSpec("reasoning_effort", "Thinking effort", "choice", "default",
-              choices=("default", "minimal", "low", "medium", "high", "xhigh", "max"),
+    ParamSpec("reasoning_effort", "Thinking effort", "identifier", "default",
               group="generation",
               help="How hard to think, for models that understand the "
                    "distinction. Default leaves it to the model."),
@@ -100,8 +97,7 @@ PARAMS = (
     ParamSpec("repeat_penalty", "Repeat penalty", "float", 1.0,
               minimum=0.0, maximum=2.0, group="generation",
               help="Discourage repeating the same tokens. 1.0 disables it."),
-    ParamSpec("reasoning_format", "Thinking format", "choice", "auto",
-              choices=("auto", "none", "deepseek", "deepseek-legacy"),
+    ParamSpec("reasoning_format", "Thinking format", "identifier", "auto",
               group="generation",
               help="Where the model's thoughts appear in the reply."),
 )

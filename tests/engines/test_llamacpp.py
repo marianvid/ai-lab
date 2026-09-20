@@ -28,6 +28,10 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(self.flag("--cache-type-k"), "q4_0")
         self.assertEqual(self.flag("--flash-attn"), "on")
 
+    def test_new_cache_type_can_be_used_after_an_engine_upgrade(self):
+        self.assertEqual(self.flag("--cache-type-k", {"cache_type_k": "iq4_nl"}),
+                         "iq4_nl")
+
     def test_settings_reach_the_command_line(self):
         self.assertEqual(self.flag("--ctx-size", {"context_size": 8192}), "8192")
         self.assertEqual(self.flag("--flash-attn", {"flash_attention": False}), "off")
@@ -178,6 +182,10 @@ class ReasoningTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--reasoning-budget") + 1], "512")
         self.assertNotIn("--reasoning", argv)
 
-    def test_a_nonsense_level_is_refused(self):
+    def test_future_effort_name_is_passed_to_an_upgraded_engine(self):
+        argv = self.argv({"reasoning_effort": "ultra"})
+        self.assertEqual(argv[argv.index("--reasoning-effort") + 1], "ultra")
+
+    def test_effort_name_cannot_be_a_path(self):
         with self.assertRaises(ValueError):
-            self.argv({"reasoning_effort": "enormous"})
+            self.argv({"reasoning_effort": "../level"})

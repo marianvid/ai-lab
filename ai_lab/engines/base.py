@@ -9,6 +9,7 @@ neither the configuration schema nor the front end.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Protocol
 
 from ..types import Format, ModelSet, Task
@@ -25,7 +26,7 @@ class ParamSpec:
 
     key: str
     label: str
-    kind: str                       # "int", "bool", "choice", "float"
+    kind: str                       # "int", "bool", "choice", "float", "identifier"
     default: object
     minimum: float | None = None
     maximum: float | None = None
@@ -59,6 +60,13 @@ class ParamSpec:
             if self.maximum is not None and number > self.maximum:
                 raise ValueError(f"{self.label} must be at most {self.maximum}")
             return number
+        if self.kind == "identifier":
+            if not isinstance(value, str):
+                raise ValueError(f"{self.label} must be a simple engine option name")
+            text = value.strip()
+            if text and not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}", text):
+                raise ValueError(f"{self.label} must be a simple engine option name")
+            return text
         if self.kind == "choice":
             text = str(value)
             if text not in self.choices:

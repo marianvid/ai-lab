@@ -21,6 +21,13 @@ class ParamSpecTests(unittest.TestCase):
             spec.coerce("plenty")
         self.assertIn("whole number", str(caught.exception))
 
+    def test_identifier_accepts_future_engine_options_but_rejects_paths(self):
+        spec = ParamSpec("parser", "Parser", "identifier", "")
+        self.assertEqual(spec.coerce("next_parser-2"), "next_parser-2")
+        self.assertEqual(spec.coerce(""), "")
+        with self.assertRaisesRegex(ValueError, "simple engine option"):
+            spec.coerce("../parser")
+
     def test_choice_is_restricted(self):
         spec = ParamSpec("k", "Key cache", "choice", "q4_0", choices=("f16", "q4_0"))
         self.assertEqual(spec.coerce("f16"), "f16")
