@@ -8,7 +8,8 @@ from .config import Config
 from .types import Task
 
 MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
-                    "kokoro": "model_options", "voxcpm": "model_options"}
+                    "kokoro": "model_options", "voxcpm": "model_options",
+                    "khala": "model_options"}
 
 
 def validate_configuration(config: Config, engine_ids: set[str],
@@ -57,6 +58,13 @@ def validate_configuration(config: Config, engine_ids: set[str],
                     type(options.get("inference_timesteps")) is int and
                     1 <= options["inference_timesteps"] <= 100):
                     errors.append(f"{item.id}: VoxCPM inference settings are invalid")
+            elif item.engine == "khala":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    type(options.get("default_bucket")) is int and
+                    type(options.get("maximum_bucket")) is int and
+                    0 <= options["default_bucket"] <= options["maximum_bucket"] <= 20):
+                    errors.append(f"{item.id}: Khala length buckets are invalid")
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")

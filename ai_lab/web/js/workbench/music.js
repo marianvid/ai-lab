@@ -1,15 +1,18 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
 
-export function renderMusic(target, model) {
+export function renderMusic(target, model, options = {}) {
+  const bucket = options?.duration_kind === 'bucket';
   const prompt = element('textarea', { rows: '4', required: 'required',
     placeholder: 'Describe the song, mood and instruments',
     'aria-label': 'Music description' });
   const lyrics = element('textarea', { rows: '5',
     placeholder: 'Optional lyrics; leave empty for instrumental music',
     'aria-label': 'Lyrics' });
-  const duration = element('input', { type: 'number', min: '5', max: '180',
-    value: '30', 'aria-label': 'Duration in seconds' });
+  const duration = element('input', { type: 'number', min: bucket ? '0' : '5',
+    max: bucket ? String(options.maximum_bucket) : '180',
+    value: bucket ? String(options.default_bucket) : '30',
+    'aria-label': bucket ? 'Length bucket' : 'Duration in seconds' });
   const seed = element('input', { type: 'number', min: '0', max: '4294967295',
     placeholder: 'Random', 'aria-label': 'Seed' });
   const status = element('p', { role: 'status', class: 'muted' });
@@ -22,8 +25,9 @@ export function renderMusic(target, model) {
     try {
       const request = {
         prompt: prompt.value.trim(), lyrics: lyrics.value.trim() || '[Instrumental]',
-        instrumental: !lyrics.value.trim(), duration: Number(duration.value),
+        instrumental: !lyrics.value.trim(),
       };
+      request[bucket ? 'length_bucket' : 'duration'] = Number(duration.value);
       if (seed.value !== '') request.seed = Number(seed.value);
       const response = await api.music(model, request);
       const audio = response.data?.[0]?.b64_wav;
@@ -39,7 +43,8 @@ export function renderMusic(target, model) {
     } catch (error) { status.textContent = error.message; }
     finally { submit.disabled = false; }
   }}, [prompt, lyrics,
-    element('label', {}, [element('span', { text: 'Duration (seconds)' }), duration]),
+    element('label', {}, [element('span', { text: bucket
+      ? 'Length bucket (0 is shortest; actual seconds vary)' : 'Duration (seconds)' }), duration]),
     element('label', {}, [element('span', { text: 'Seed' }), seed]),
     submit, status]);
   target.replaceChildren(element('h1', { text: `Music · ${model}` }), form, result);

@@ -134,6 +134,11 @@ VoxCPM uses that contract for direct multilingual speech and voice descriptions
 on macOS; reference-audio cloning remains a separate workflow to implement.
 Qwen forced alignment now accepts an audio file and transcript through the
 gateway and Workbench on macOS; word timestamps were checked on generated audio.
+Khala now uses its installed Metal generator through an isolated adapter and
+the music gateway on macOS. Its bucket control is shown as a bucket; the real
+generation returned a 47.97-second WAV in 219.11 seconds. The subprocess
+generator can later be replaced with a persistent worker without changing the
+agent or browser request contract.
 The gateway lease protects the whole generation. Checkpoint names, paths and
 speech modes come from private configuration; switching model versions does
 not require editing the adapter. Durable media jobs, cancellation, retention

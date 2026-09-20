@@ -56,6 +56,28 @@ describe('direct model use', () => {
       /^data:audio\/wav;base64,/);
   });
 
+  it('shows Khala length buckets instead of seconds', async () => {
+    const context = installDom({
+      'POST /v1/audio/music/generations': {
+        seed: 42, data: [{ b64_wav: 'UklGRg==' }],
+      },
+    });
+    renderMusic(context.view, 'new-music-checkpoint', {
+      duration_kind: 'bucket', default_bucket: 0, maximum_bucket: 4,
+    });
+    context.view.querySelector('textarea[aria-label="Music description"]').value =
+      'Warm piano';
+    context.view.querySelector('form').dispatchEvent(new context.window.Event(
+      'submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const call = context.calls.find((item) => item.path ===
+      '/v1/audio/music/generations');
+    const body = JSON.parse(call.body);
+    assert.equal(body.length_bucket, 0);
+    assert.equal('duration' in body, false);
+    assert.match(context.view.textContent, /Length bucket/);
+  });
+
   it('synthesizes speech and shows a WAV player', async () => {
     const context = installDom({
       'POST /v1/audio/speech/generations': {

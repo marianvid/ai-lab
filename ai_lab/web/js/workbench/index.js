@@ -44,7 +44,7 @@ export async function renderWorkbench() {
   document.getElementById('model-name').textContent = model;
   const surface = TASK_ACTIONS[task]?.surface;
   if (surface === 'chat') renderChat(target, model);
-  else if (surface === 'music') renderMusic(target, model);
+  else if (surface === 'music') renderMusic(target, model, instance.music_form);
   else if (surface === 'speech') renderSpeech(target, model, instance.speech_form);
   else if (surface === 'images') {
     await renderImages(target, model);

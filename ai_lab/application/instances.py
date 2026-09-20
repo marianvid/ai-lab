@@ -73,6 +73,9 @@ class InstanceService:
             if task is Task.SPEECH_SYNTHESIS and hasattr(engine, "speech_form"):
                 row["speech_form"] = engine.speech_form(
                     item.model_id.rsplit("/", 1)[-1])
+            if task is Task.MUSIC_GENERATION and hasattr(engine, "music_form"):
+                row["music_form"] = engine.music_form(
+                    item.model_id.rsplit("/", 1)[-1])
             rows.append(row)
         return rows
 
