@@ -93,9 +93,10 @@ tests for each route, fake-host tests for load/unload and cancellation, and a
 test that package imports work from an installed wheel. Delete old methods
 after callers move; avoid duplicate policy.
 
-Three extracted services now own configured instance lifecycle, model file
-moves/deletion and model download selection. `Operations` remains the
-API-facing facade until the remaining slices have moved.
+Four extracted services now own configured instance lifecycle, model file
+moves/deletion, model download selection, and engine build/package maintenance.
+`Operations` remains the API-facing facade for routes and settings while
+those services hold the corresponding policies.
 
 ### 4. Separate scheduling, resource admission and telemetry
 
