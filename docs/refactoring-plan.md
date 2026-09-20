@@ -81,7 +81,10 @@ The configuration loader now preserves unknown top-level fields during a
 save, and startup validates instance/engine/repository references, unique
 ports, and image profile tasks and workflow files. The private verifier
 compares active Mac and Linux bytes with `opts` snapshots after deployment.
-Schema versioning and typed nested sections remain to be implemented.
+The on-disk schema now has an explicit version and a migration from legacy
+unversioned files. Future schema versions fail before a save, and unknown fields
+within the current schema survive a round trip. Both active machines and
+private snapshots use schema 1. Typed nested sections remain to be implemented.
 
 ### 3. Split application use cases
 

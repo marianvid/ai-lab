@@ -29,6 +29,27 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(config.repository("gguf").format, "gguf")
         self.assertEqual(config.instance("qwen").params["context_size"], 4096)
 
+    def test_legacy_configuration_migrates_and_preserves_unknown_fields(self):
+        store = self.write({"title": "Legacy", "future_option": {"keep": True}})
+        self.assertEqual(store.load().schema_version, 1)
+        with store.mutate() as config:
+            config.title = "Updated"
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["schema_version"], 1)
+        self.assertEqual(saved["future_option"], {"keep": True})
+
+    def test_newer_schema_is_rejected_before_a_save(self):
+        store = self.write({"schema_version": 99, "title": "Future"})
+        with self.assertRaisesRegex(ValueError, "newer than this AI-Lab"):
+            store.load()
+        self.assertEqual(json.loads(self.path.read_text())["schema_version"], 99)
+
+    def test_invalid_schema_marker_is_rejected(self):
+        for value in (True, -1, "1"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "schema_version"):
+                    self.write({"schema_version": value}).load()
+
     def test_unknown_lookups_raise(self):
         config = self.write({}).load()
         with self.assertRaises(KeyError):

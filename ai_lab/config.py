@@ -33,6 +33,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Iterator
 
+from .config_migrations import SCHEMA_VERSION, migrate
+
 
 @dataclass(slots=True)
 class Repository:
@@ -108,6 +110,7 @@ class Instance:
 
 @dataclass(slots=True)
 class Config:
+    schema_version: int = SCHEMA_VERSION
     title: str = "AI-Lab"
     host: str = "0.0.0.0"
     port: int = 8090
@@ -187,6 +190,7 @@ class ConfigStore:
     def load(self) -> Config:
         with self._lock:
             raw = json.loads(self.path.read_text())
+        raw = migrate(raw)
         root = raw.get("models_root") or _root_of(raw.get("repositories", []))
         roots = [ModelRoot(**item) for item in raw.get("model_roots", [])]
         if not roots:
@@ -208,6 +212,7 @@ class ConfigStore:
                          "root_id": model_root.id, "base_id": item["id"]}
                 repositories.append(_under(root_map, clone))
         return Config(
+            schema_version=raw["schema_version"],
             title=raw.get("title", "AI-Lab"),
             host=raw.get("host", "0.0.0.0"),
             port=int(raw.get("port", 8090)),
@@ -233,6 +238,8 @@ class ConfigStore:
         )
 
     def save(self, config: Config) -> None:
+        if config.schema_version != SCHEMA_VERSION:
+            raise ValueError(f"Cannot save unsupported configuration schema {config.schema_version}")
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_name(self.path.name + ".tmp")
