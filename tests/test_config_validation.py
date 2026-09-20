@@ -37,6 +37,16 @@ class ConfigurationValidationTests(unittest.TestCase):
         self.assertEqual(policy.task_timeouts["music-generation"].first_byte_s, 1800)
         self.assertEqual(policy.max_waiting, 150)
 
+    def test_sections_must_be_objects_even_when_empty(self):
+        config = self.base()
+        config.gateway = []
+        with self.assertRaisesRegex(ValueError, "Gateway settings must be an object"):
+            validate_configuration(config, {'comfyui'})
+        config.gateway = {}
+        config.media = []
+        with self.assertRaisesRegex(ValueError, "Media settings must be an object"):
+            validate_configuration(config, {'comfyui'})
+
     def test_invalid_gateway_task_wait_fails_at_startup(self):
         config = self.base()
         config.gateway = {"task_timeouts": {

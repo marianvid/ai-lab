@@ -46,7 +46,7 @@ class GatewayPolicy:
 
     @classmethod
     def from_mapping(cls, raw: Mapping | None) -> GatewayPolicy:
-        raw = raw or {}
+        raw = {} if raw is None else raw
         if not isinstance(raw, Mapping):
             raise ValueError("Gateway settings must be an object")
         first = _number(raw, "first_byte_s", 120, minimum=1, maximum=86400)
@@ -95,7 +95,7 @@ class MediaPolicy:
 
     @classmethod
     def from_mapping(cls, raw: Mapping | None) -> MediaPolicy:
-        raw = raw or {}
+        raw = {} if raw is None else raw
         if not isinstance(raw, Mapping):
             raise ValueError("Media settings must be an object")
         unknown = set(raw) - set(cls.__dataclass_fields__)
