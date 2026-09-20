@@ -139,6 +139,10 @@ the music gateway on macOS. Its bucket control is shown as a bucket; the real
 generation returned a 47.97-second WAV in 219.11 seconds. The subprocess
 generator can later be replaced with a persistent worker without changing the
 agent or browser request contract.
+Higgs TTS now uses the installed SGLang-Omni worker behind the common speech
+contract on Linux; a 24 kHz WAV was checked through the gateway. Its measured
+GPU requirement is reserved in private configuration. Near-full-card requests
+evict all resident models to avoid trusting approximate memory estimates.
 The gateway lease protects the whole generation. Checkpoint names, paths and
 speech modes come from private configuration; switching model versions does
 not require editing the adapter. Durable media jobs, cancellation, retention

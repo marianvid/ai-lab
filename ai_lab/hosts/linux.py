@@ -51,7 +51,8 @@ class LinuxHost:
                  paddleocr_binary: str | None = None,
                  comfyui_binary: str | None = None,
                  acestep_binary: str | None = None,
-                 qwentts_binary: str | None = None) -> None:
+                 qwentts_binary: str | None = None,
+                 higgs_binary: str | None = None) -> None:
         self.control_helper = control_helper
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
@@ -63,6 +64,7 @@ class LinuxHost:
         self.comfyui_binary = comfyui_binary
         self.acestep_binary = acestep_binary
         self.qwentts_binary = qwentts_binary
+        self.higgs_binary = higgs_binary
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -92,6 +94,8 @@ class LinuxHost:
             engines.add("acestep")
         if self.qwentts_binary:
             engines.add("qwentts")
+        if self.higgs_binary:
+            engines.add("higgs")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),

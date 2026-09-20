@@ -19,13 +19,20 @@ class EvictionPlanner:
         known = bool(needed and free_mb)
         if known and capacity_mb and needed > capacity_mb:
             return None
-        if known and needed <= free_mb:
-            return []
 
         idle = sorted((item for item in loaded if not item["in_flight"]),
                       key=lambda item: item["last_used"])
         busy = sorted((item for item in loaded if item["in_flight"]),
                       key=lambda item: item["last_used"])
+        # A model reserving almost the entire card needs an empty card in
+        # practice. Other engines' estimates are approximations of their
+        # runtime allocations; adding them to an old free-memory reading can
+        # claim enough space while CUDA still cannot load the new model.
+        if known and capacity_mb and needed >= capacity_mb * 0.9:
+            return [item["shape"] for item in idle + busy
+                    if item["shape"] != wanted]
+        if known and needed <= free_mb:
+            return []
         victims = []
         for item in idle + busy:
             shape = item["shape"]

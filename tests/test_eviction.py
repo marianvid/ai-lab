@@ -31,6 +31,11 @@ class EvictionPlannerTests(unittest.TestCase):
         self.sizes['wanted'] = 0
         self.assertEqual(self.choose(), ['idle-old', 'idle-new', 'busy'])
 
+    def test_near_full_card_request_clears_all_residents(self):
+        self.sizes['wanted'] = 10
+        self.assertEqual(self.choose(free=8),
+                         ['idle-old', 'idle-new', 'busy'])
+
 
 if __name__ == '__main__':
     unittest.main()

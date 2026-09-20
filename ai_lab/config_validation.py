@@ -9,7 +9,7 @@ from .types import Task
 
 MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "kokoro": "model_options", "voxcpm": "model_options",
-                    "khala": "model_options"}
+                    "khala": "model_options", "higgs": "model_options"}
 
 
 def validate_configuration(config: Config, engine_ids: set[str],
@@ -65,6 +65,20 @@ def validate_configuration(config: Config, engine_ids: set[str],
                     type(options.get("maximum_bucket")) is int and
                     0 <= options["default_bucket"] <= options["maximum_bucket"] <= 20):
                     errors.append(f"{item.id}: Khala length buckets are invalid")
+            elif item.engine == "higgs":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    type(options.get("worker_port")) is int and
+                    1 <= options["worker_port"] <= 65535 and
+                    options["worker_port"] != item.port and
+                    options["worker_port"] not in ports and
+                    type(options.get("memory_reservation_mb")) in (int, float) and
+                    options["memory_reservation_mb"] > 0 and
+                    type(options.get("mem_fraction_static")) in (int, float) and
+                    0 < options["mem_fraction_static"] < 1):
+                    errors.append(f"{item.id}: Higgs worker settings are invalid")
+                else:
+                    ports.add(options["worker_port"])
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")

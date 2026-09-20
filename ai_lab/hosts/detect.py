@@ -48,4 +48,5 @@ def current_host(engines: dict | None = None) -> Host:
         comfyui_binary=settings.get("comfyui", {}).get("binary"),
         acestep_binary=settings.get("acestep", {}).get("binary"),
         qwentts_binary=settings.get("qwentts", {}).get("binary"),
+        higgs_binary=settings.get("higgs", {}).get("binary"),
     )

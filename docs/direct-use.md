@@ -17,7 +17,7 @@ working engine before it can be used.
 | OCR | Upload an image and read recognized text | `/v1/images/ocr` |
 | Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Music (Khala on macOS) | Music form with length bucket, player and WAV download | `/v1/audio/music/generations` through the gateway |
-| Speech (Qwen3-TTS VoiceDesign/CustomVoice, Kokoro, VoxCPM) | Speak form with engine-specific controls, player and WAV download | `/v1/audio/speech/generations` through the gateway |
+| Speech (Qwen3-TTS VoiceDesign/CustomVoice, Kokoro, VoxCPM, Higgs on Linux) | Speak form with engine-specific controls, player and WAV download | `/v1/audio/speech/generations` through the gateway |
 | Other installed music, speech, alignment and video models | No direct action until an engine and job contract are configured | Library only |
 
 The new chat workbench is deliberately small: it keeps the current
@@ -39,7 +39,7 @@ offers a full Gradio interface for music experiments and a separate REST API.
 web interface and documents an inference path through vLLM-Omni. These are
 viable direct experimentation surfaces for the corresponding models, but a
 standalone server would compete with AI-Lab for accelerator memory. AI-Lab
-provides controlled ACE-Step, Khala, Qwen3-TTS, Kokoro and VoxCPM adapters for configured checkpoints
+provides controlled ACE-Step, Khala, Qwen3-TTS, Kokoro, VoxCPM and Higgs adapters for configured checkpoints
 on Linux and macOS. Browser and agent requests use the same gateway lease,
 held until the WAV is returned. Add or replace a checkpoint in the private
 configuration; the adapter reads its mode from that configuration, not its
@@ -47,6 +47,8 @@ version or instance name. Other library models still require their own
 lifecycle adapter, result contract and resource checks before direct use.
 VoxCPM supports voice descriptions in the Speak form. Reference-audio cloning
 still needs an upload field and request contract; it is not offered by this form.
+Higgs supports inline style controls in the speech text; its installed
+SGLang-Omni worker is loaded and stopped with the AI-Lab instance.
 Khala accepts `length_bucket` instead of seconds. Its output duration varies;
 the browser displays that control using the runtime's actual unit.
 
