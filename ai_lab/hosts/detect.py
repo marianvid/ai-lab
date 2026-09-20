@@ -49,4 +49,5 @@ def current_host(engines: dict | None = None) -> Host:
         acestep_binary=settings.get("acestep", {}).get("binary"),
         qwentts_binary=settings.get("qwentts", {}).get("binary"),
         higgs_binary=settings.get("higgs", {}).get("binary"),
+        heartmula_binary=settings.get("heartmula", {}).get("binary"),
     )

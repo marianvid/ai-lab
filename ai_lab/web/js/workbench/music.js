@@ -7,7 +7,9 @@ export function renderMusic(target, model, options = {}) {
     placeholder: 'Describe the song, mood and instruments',
     'aria-label': 'Music description' });
   const lyrics = element('textarea', { rows: '5',
-    placeholder: 'Optional lyrics; leave empty for instrumental music',
+    ...(options?.lyrics_required ? { required: 'required' } : {}),
+    placeholder: options?.lyrics_required ? 'Lyrics required for this model'
+      : 'Optional lyrics; leave empty for instrumental music',
     'aria-label': 'Lyrics' });
   const duration = element('input', { type: 'number', min: bucket ? '0' : '5',
     max: bucket ? String(options.maximum_bucket) : '180',

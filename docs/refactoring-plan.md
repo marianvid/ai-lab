@@ -139,6 +139,11 @@ the music gateway on macOS. Its bucket control is shown as a bucket; the real
 generation returned a 47.97-second WAV in 219.11 seconds. The subprocess
 generator can later be replaced with a persistent worker without changing the
 agent or browser request contract.
+HeartMuLa now uses an isolated Linux music adapter and the same gateway
+contract as ACE-Step and Khala. The common HTTP host is shared by the Khala
+and HeartMuLa workers. A lyric-conditioned 20.08-second WAV at 48 kHz was
+checked through the Linux gateway. The checkpoint, bundle layout, sampling
+controls and memory reservation are configured privately.
 Higgs TTS now uses the installed SGLang-Omni worker behind the common speech
 contract on Linux; a 24 kHz WAV was checked through the gateway. Its measured
 GPU requirement is reserved in private configuration. Near-full-card requests

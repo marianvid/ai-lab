@@ -30,6 +30,7 @@ from .voxcpm import VoxCpmEngine
 from .qwenalign import QwenAlignEngine
 from .khala import KhalaEngine
 from .higgs import HiggsEngine
+from .heartmula import HeartMulaEngine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -74,6 +75,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         QwenAlignEngine.id: QwenAlignEngine(**settings.get(QwenAlignEngine.id, {})),
         KhalaEngine.id: KhalaEngine(**settings.get(KhalaEngine.id, {})),
         HiggsEngine.id: HiggsEngine(**settings.get(HiggsEngine.id, {})),
+        HeartMulaEngine.id: HeartMulaEngine(**settings.get(HeartMulaEngine.id, {})),
     }
 
 

@@ -78,6 +78,14 @@ describe('direct model use', () => {
     assert.match(context.view.textContent, /Length bucket/);
   });
 
+  it('requires lyrics when the music engine declares them mandatory', () => {
+    const context = installDom();
+    renderMusic(context.view, 'song-checkpoint', { lyrics_required: true });
+    const lyrics = context.view.querySelector('textarea[aria-label="Lyrics"]');
+    assert.equal(lyrics.required, true);
+    assert.match(lyrics.placeholder, /required/);
+  });
+
   it('synthesizes speech and shows a WAV player', async () => {
     const context = installDom({
       'POST /v1/audio/speech/generations': {
