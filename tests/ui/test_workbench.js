@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { installDom, settle } from './support/dom.js';
 import { renderChat } from '../../ai_lab/web/js/workbench/chat.js';
 import { renderMusic } from '../../ai_lab/web/js/workbench/music.js';
+import { renderSpeech } from '../../ai_lab/web/js/workbench/speech.js';
 import { renderFileTask } from '../../ai_lab/web/js/workbench/file-task.js';
 
 describe('direct model use', () => {
@@ -51,6 +52,28 @@ describe('direct model use', () => {
       model: 'music-xl', prompt: 'A short ambient cue',
       lyrics: '[Instrumental]', instrumental: true, duration: 30, seed: 42,
     });
+    assert.match(context.view.querySelector('audio').getAttribute('src'),
+      /^data:audio\/wav;base64,/);
+  });
+
+  it('synthesizes speech and shows a WAV player', async () => {
+    const context = installDom({
+      'POST /v1/audio/speech/generations': {
+        data: [{ b64_wav: 'UklGRg==' }],
+      },
+    });
+    renderSpeech(context.view, 'qwen-voice');
+    context.view.querySelector('textarea[aria-label="Text to speak"]').value =
+      'Hello there';
+    context.view.querySelector('textarea[aria-label="Voice instruction"]').value =
+      'Warm voice';
+    context.view.querySelector('form').dispatchEvent(new context.window.Event(
+      'submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const call = context.calls.find((item) => item.path ===
+      '/v1/audio/speech/generations');
+    assert.equal(JSON.parse(call.body).model, 'qwen-voice');
+    assert.equal(JSON.parse(call.body).text, 'Hello there');
     assert.match(context.view.querySelector('audio').getAttribute('src'),
       /^data:audio\/wav;base64,/);
   });

@@ -77,10 +77,11 @@ class Catalog:
             return self._scan_pyannote(repository, root)
         declared, declared_roots = self._declared_models(repository, root)
         models: list[ModelSet] = list(declared)
+        model_roots = list(declared_roots)
         for directory in self._directories(root):
-            if any(directory == declared_root
-                   or directory.is_relative_to(declared_root)
-                   for declared_root in declared_roots):
+            if any(directory == model_root
+                   or directory.is_relative_to(model_root)
+                   for model_root in model_roots):
                 continue
             weights, companions = self._classify(directory, repository.format)
             if not weights:
@@ -89,6 +90,7 @@ class Catalog:
                 models.append(self._build(repository, root, directory,
                                           self._directory_name(root, directory),
                                           weights, companions))
+                model_roots.append(directory)
                 continue
             for base, shards in self._group(weights).items():
                 models.append(self._build(repository, root, directory, base, shards, companions))
@@ -236,10 +238,10 @@ class Catalog:
                base: str, shards: list[Path], companions: list[Path]) -> ModelSet:
         shards = sorted(shards)
         complete, missing = missing_shards([path.name for path in shards])
-        files = tuple(
-            ModelFile(path=str(path), size_bytes=path.stat().st_size)
-            for path in (*shards, *companions)
-        )
+        files = (self._physical_files(directory)
+                 if self._directory_is_the_model(repository)
+                 else tuple(ModelFile(path=str(path), size_bytes=path.stat().st_size)
+                            for path in (*shards, *companions)))
         relative = directory.relative_to(root)
         # When the directory is the model, `base` is already the directory's
         # name, so listing the path as well would repeat it: nvfp4/gemma/gemma.

@@ -55,9 +55,9 @@ separate Data-Lab preparation step described above is outside this runtime.
 ## Input contract
 
 Transcription accepts the common audio files understood by the selected
-engine. Silero is the one AI-Lab-specific exception worth documenting here: it
-requires 16 kHz audio, converts stereo to mono, and refuses other sample rates
-with a clear error. Other preparation follows the selected model and endpoint.
+engine. The Silero adapter converts stereo to mono and resamples uploaded
+audio to the 16 kHz input its model requires. Other preparation follows the
+selected model and endpoint.
 
 ## Licensing and evaluation
 

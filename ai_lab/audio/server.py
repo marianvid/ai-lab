@@ -39,6 +39,23 @@ def _checkpoint(directory: str) -> str:
     return str(found[0])
 
 
+def _vad_samples(samples, sampling_rate: int):
+    """Convert an uploaded recording to the mono 16 kHz input Silero expects."""
+    import numpy as np
+
+    if not 0 < sampling_rate <= 192000:
+        raise ValueError("Invalid audio sampling rate")
+    if getattr(samples, "ndim", 1) == 2:
+        samples = samples.mean(axis=1)
+    if not len(samples):
+        raise ValueError("Audio is empty")
+    if sampling_rate == 16000:
+        return samples
+    count = max(1, round(len(samples) * 16000 / sampling_rate))
+    positions = np.arange(count, dtype=np.float64) * sampling_rate / 16000
+    return np.interp(positions, np.arange(len(samples)), samples).astype("float32")
+
+
 class NemoBackend:
     owner = "nemo"
     path = "/v1/audio/transcriptions"
@@ -180,11 +197,7 @@ class SileroBackend:
     def segments(self, audio_path: str, threshold: float = 0.5,
                  min_silence_ms: int = 100) -> list[dict]:
         samples, sampling_rate = self.soundfile.read(audio_path, dtype="float32")
-        if sampling_rate != 16000:
-            raise ValueError("Silero VAD expects audio normalized to 16 kHz")
-        if getattr(samples, "ndim", 1) == 2:
-            samples = samples.mean(axis=1)
-        audio = self.torch.from_numpy(samples)
+        audio = self.torch.from_numpy(_vad_samples(samples, sampling_rate))
         with self.lock:
             return self.get_speech_timestamps(
                 audio, self.model, sampling_rate=16000,

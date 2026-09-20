@@ -249,10 +249,13 @@ class InstanceService:
         engines = self.engines.describe(capabilities)
         for description in engines:
             engine = self.engines.get(description["id"])
-            if hasattr(engine, "model_configs"):
+            configured_names = getattr(engine, "model_configs", None)
+            if configured_names is None:
+                configured_names = getattr(engine, "model_modes", None)
+            if configured_names is not None:
                 description["supported_model_ids"] = [
                     model["id"] for model in models
-                    if model["name"] in engine.model_configs
+                    if model["name"] in configured_names
                     and model["format"] in description["formats"]
                     and model["task"] in description["tasks"]]
         return {"port": self.suggest_port(), "engines": engines,

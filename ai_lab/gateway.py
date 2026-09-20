@@ -434,9 +434,16 @@ class Gateway:
         # make them different — a reload for nothing, on every other request.
         asked_for = self.operations.effective_params(instance_id, settings or {})
         self._adopt_what_is_there()
+        requested = Shape.of(instance_id, asked_for)
+        # Some engines load weights only on their first inference. The card
+        # reading taken when the server started is then too optimistic for the
+        # next model. Refresh only for a switch; warm requests stay cheap.
+        if not any(item["shape"] == requested
+                   for item in self.scheduler.state()["loaded"]):
+            self._read_the_card()
 
         try:
-            self.scheduler.enter(Shape.of(instance_id, asked_for),
+            self.scheduler.enter(requested,
                                  still_wanted=still_wanted)
         except WillNotFit as error:
             # The scheduler knows the ordering and nothing about memory, so the

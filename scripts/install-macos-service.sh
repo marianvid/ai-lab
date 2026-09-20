@@ -90,6 +90,16 @@ PY
 
 # Remove the old two-service installation. The menu app now owns the manager.
 pkill -f "ai_lab.main --config ${config}" 2>/dev/null || true
+for _attempt in {1..30}; do
+  if ! pgrep -f "ai_lab.main --config ${config}" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+if pgrep -f "ai_lab.main --config ${config}" >/dev/null; then
+  echo "The previous manager did not stop." >&2
+  exit 1
+fi
 
 launchctl bootout "${domain}" "${manager_plist}" 2>/dev/null || true
 launchctl bootout "${domain}" "${menu_plist}" 2>/dev/null || true
@@ -104,7 +114,7 @@ print(("127.0.0.1" if host == "0.0.0.0" else host), config.get("port", 8090))
 ' "${config}")
 manager_url="http://${host}:${port}"
 ready=false
-for _attempt in {1..15}; do
+for _attempt in {1..60}; do
   if curl -fs --max-time 2 "${manager_url}/" >/dev/null; then
     ready=true
     break

@@ -87,6 +87,16 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(models[0].entrypoint, str(self.root / "gemma"))
         self.assertEqual(models[0].format, Format.SAFETENSORS)
 
+    def test_nested_checkpoint_components_belong_to_the_parent_model(self):
+        make_files(self.root / "voice", "model.safetensors", size=100)
+        make_files(self.root / "voice" / "speech_tokenizer",
+                   "model.safetensors", size=20)
+
+        models = self.scan(format="safetensors")
+
+        self.assertEqual([model.id for model in models], ["repo/voice"])
+        self.assertEqual(models[0].size_bytes, 120)
+
     def test_a_declared_nested_stack_is_one_model(self):
         model = self.root / "ltx-2.5"
         make_files(model / "diffusion_models", "transformer.safetensors", size=100)

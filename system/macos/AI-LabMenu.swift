@@ -52,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        let stopping = managerProcess
         stopManager()
+        stopping?.waitUntilExit()
     }
 
     private func item(_ title: String, action: Selector) -> NSMenuItem {
@@ -104,9 +106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: settings.pythonPath)
         process.arguments = ["-m", "ai_lab.main", "--config", settings.configPath]
-        process.currentDirectoryURL = URL(fileURLWithPath: settings.projectDirectory)
+        process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         process.environment = [
             "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
+            "PYTHONPATH": settings.projectDirectory,
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             "PYTHONUNBUFFERED": "1",
         ]

@@ -285,6 +285,20 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(operations.unloads, ["coder"])
         self.assertEqual(operations.loads, ["reviewer"])
 
+    def test_switch_refreshes_memory_after_lazy_weight_load(self):
+        operations = two_models()
+        gateway = quick(operations)
+        gateway._needs_mb = lambda shape: 15000.0
+        with gateway.acquire("coder"):
+            pass
+        # The server initially appeared to use almost no memory, then loaded
+        # its weights during inference without a process change.
+        gateway._budget_pools["card"]["available_mb"] = 31998.0
+        with gateway.acquire("reviewer"):
+            pass
+        self.assertEqual(operations.unloads, ["coder"])
+        self.assertEqual(operations.loads, ["coder", "reviewer"])
+
     def test_only_the_new_model_is_left_running(self):
         # Not "one fewer than before" — one, full stop.
         operations = two_models(coder=True, reviewer=True)
@@ -1344,6 +1358,7 @@ class RefusingWhatCannotFit(unittest.TestCase):
         gateway._budget_pools = {"card": {"name": "card", "available_mb": 100.0,
                                           "for_models_mb": 200.0,
                                           "total_mb": 32000.0}}
+        gateway._read_the_card = lambda: None
         # The one being asked for is far too big; what is already there is
         # small, so taking it off frees nothing worth having. Both numbers
         # matter: an earlier version of this test made every model want 30 GB,

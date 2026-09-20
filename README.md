@@ -38,7 +38,8 @@ not send it gets the entry's configured settings and nothing breaks. See
 
 Runs on Linux with an NVIDIA card, where systemd supervises the engines, and on
 macOS with Apple silicon, where it supervises them itself. llama.cpp works on
-both. vLLM, NeMo and the current speech services are Linux capabilities. An
+both. vLLM and NeMo are Linux capabilities; MLX Whisper and Qwen3-TTS also run
+on macOS. An
 unsupported engine stays visible but disabled, with the reason.
 
 ## Where things are
@@ -62,7 +63,7 @@ before it says how it works.
 | | |
 |---|---|
 | [Writing a request](docs/requests.md) | Chat and multipart audio requests, the `ai_lab` field for startup settings, and what a refusal contains so a client can correct itself. |
-| [Using a model directly](docs/direct-use.md) | Browser actions for chat, images, music, audio analysis and OCR; current limits for TTS and other music engines. |
+| [Using a model directly](docs/direct-use.md) | Browser actions for chat, images, music, speech, audio analysis and OCR; current limits for library-only models. |
 | [Music generation](docs/music.md) | ACE-Step setup contract, direct use and agent API. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
 | [Audio](docs/audio.md) | Speech-to-text, VAD and speaker diarization, their endpoints, and the public Data-Lab method used to prepare this personal project's Romanian evaluation audio. |

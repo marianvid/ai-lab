@@ -50,7 +50,8 @@ class LinuxHost:
                  pyannote_binary: str | None = None,
                  paddleocr_binary: str | None = None,
                  comfyui_binary: str | None = None,
-                 acestep_binary: str | None = None) -> None:
+                 acestep_binary: str | None = None,
+                 qwentts_binary: str | None = None) -> None:
         self.control_helper = control_helper
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
@@ -61,6 +62,7 @@ class LinuxHost:
         self.paddleocr_binary = paddleocr_binary
         self.comfyui_binary = comfyui_binary
         self.acestep_binary = acestep_binary
+        self.qwentts_binary = qwentts_binary
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -88,6 +90,8 @@ class LinuxHost:
             engines.add("comfyui")
         if self.acestep_binary:
             engines.add("acestep")
+        if self.qwentts_binary:
+            engines.add("qwentts")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),
@@ -95,7 +99,7 @@ class LinuxHost:
             can_configure_accelerator=False,
             operating_system="Linux",
             supported_engines=frozenset({"llamacpp", "vllm", "nemo", "onnx",
-                                         "pyannote", "paddleocr", "comfyui", "acestep"}),
+                                         "pyannote", "paddleocr", "comfyui", "acestep", "qwentts"}),
         )
 
     def _accelerator_kind(self) -> str:
