@@ -28,6 +28,23 @@ host)`, `probe(deployment)`, `start(deployment)`, `open(session)` and
 launch a separate UI service, or expose a workflow application. Process
 supervision stays in `hosts/`; request admission stays in `gateway/`.
 
+## Package boundaries
+
+```text
+ai_lab/interfaces/types.py       Provider, deployment, binding and session values
+ai_lab/interfaces/providers/      One adapter per maintained UI family
+ai_lab/interfaces/registry.py     Compatibility and configured preference resolution
+ai_lab/interfaces/sessions.py     Open, heartbeat, release and expiry
+ai_lab/api/routes/direct.py       Read-only choices and explicit session actions
+ai_lab/web/js/views/             Display the choices returned by the API
+```
+
+`interfaces/` depends on the existing runtime, gateway and host contracts; the
+engine package does not import a browser provider. A provider adapter contains
+integration details for its UI family, not names of individual checkpoints.
+A new model version changes configuration. A new engine or UI family may add
+one adapter and its tests.
+
 ## Traffic and memory ownership
 
 Two traffic modes have different safety rules:
