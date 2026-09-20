@@ -34,6 +34,7 @@ from threading import RLock
 from typing import Iterator
 
 from .config_migrations import SCHEMA_VERSION, migrate
+from .config_policy import GatewayPolicy, MediaPolicy
 
 
 @dataclass(slots=True)
@@ -162,6 +163,14 @@ class Config:
             self.model_roots = [
                 ModelRoot(id="core", name="Core", path=self.models_root)
             ]
+
+    @property
+    def gateway_policy(self) -> GatewayPolicy:
+        return GatewayPolicy.from_mapping(self.gateway)
+
+    @property
+    def media_policy(self) -> MediaPolicy:
+        return MediaPolicy.from_mapping(self.media)
 
     def repository(self, repository_id: str) -> Repository:
         found = next((item for item in self.repositories if item.id == repository_id), None)

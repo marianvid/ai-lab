@@ -27,6 +27,7 @@ ai_lab/storage.py       Explicitly allowed caches and leftovers that may be recl
 ai_lab/operations.py    Joining the services into whole actions
 ai_lab/application/    Focused use cases for model storage and downloads
 ai_lab/config.py        Reading and writing config.json
+ai_lab/config_policy.py Typed gateway and media runtime settings
 ai_lab/naming.py        Rules about model file names
 ai_lab/types.py         Shared data structures
 ai_lab/events.py        Publishing progress to subscribers

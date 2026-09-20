@@ -28,6 +28,36 @@ class ConfigurationValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown media settings"):
             validate_configuration(config, {'comfyui'})
 
+    def test_gateway_policy_has_typed_task_waits(self):
+        config = self.base()
+        config.gateway = {"task_timeouts": {
+            "music-generation": {"first_byte_s": 1800, "between_bytes_s": 60}}}
+        validate_configuration(config, {'comfyui'})
+        policy = config.gateway_policy
+        self.assertEqual(policy.task_timeouts["music-generation"].first_byte_s, 1800)
+        self.assertEqual(policy.max_waiting, 150)
+
+    def test_invalid_gateway_task_wait_fails_at_startup(self):
+        config = self.base()
+        config.gateway = {"task_timeouts": {
+            "music-generation": {"first_byte_s": -1}}}
+        with self.assertRaisesRegex(ValueError, "Gateway first_byte_s"):
+            validate_configuration(config, {'comfyui'})
+
+    def test_unknown_gateway_fields_survive_a_config_save(self):
+        from ai_lab.config import ConfigStore
+        import json
+        with TemporaryDirectory() as root:
+            path = Path(root) / "config.json"
+            path.write_text(json.dumps({"gateway": {
+                "max_waiting": 12, "future_control": {"enabled": True}}}))
+            store = ConfigStore(path)
+            self.assertEqual(store.load().gateway_policy.max_waiting, 12)
+            with store.mutate() as config:
+                config.title = "Updated"
+            self.assertEqual(json.loads(path.read_text())["gateway"]["future_control"],
+                             {"enabled": True})
+
     def test_valid_image_profile(self):
         config = self.base()
         with TemporaryDirectory() as root:

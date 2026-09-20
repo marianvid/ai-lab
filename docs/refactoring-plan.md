@@ -89,7 +89,9 @@ the installed engine reports unsupported names at model load.
 The on-disk schema now has an explicit version and a migration from legacy
 unversioned files. Future schema versions fail before a save, and unknown fields
 within the current schema survive a round trip. Both active machines and
-private snapshots use schema 1. Typed nested sections remain to be implemented.
+private snapshots use schema 1. Gateway and media policies now have typed,
+validated runtime views while their editable JSON fields and unknown-field
+round trips remain intact. Engine-specific options are strategy owned.
 
 ### 3. Split application use cases
 

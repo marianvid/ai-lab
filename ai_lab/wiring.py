@@ -19,8 +19,7 @@ from .config_validation import validate_configuration
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
-from .gateway import (BETWEEN_BYTES_S, FIRST_BYTE_S, MAX_WAITING,
-                      Gateway)
+from .gateway import Gateway
 from .hosts import current_host
 from .installs import Installs
 from .images.jobs import ImageJobs
@@ -90,20 +89,20 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     # settings — how long to wait for an engine, how many requests to hold —
     # come from the configuration, because the right numbers differ between the
     # two machines this runs on.
-    front_door = store.load().gateway
+    front_door = config.gateway_policy
     model_gateway = Gateway(
         operations,
-        first_byte_s=float(front_door.get("first_byte_s", FIRST_BYTE_S)),
-        between_bytes_s=float(front_door.get("between_bytes_s", BETWEEN_BYTES_S)),
-        max_waiting=int(front_door.get("max_waiting", MAX_WAITING)),
+        first_byte_s=front_door.first_byte_s,
+        between_bytes_s=front_door.between_bytes_s,
+        max_waiting=front_door.max_waiting,
         # Per-task overrides — a slow image or OCR job must not force a text
         # client to wait on the same clock. See `Gateway.timeouts_for`.
-        task_timeouts=front_door.get("task_timeouts", {}),
-        max_upload_bytes=int(front_door.get("max_upload_bytes", 0)),
-        max_upload_pixels=int(front_door.get("max_upload_pixels", 0)),
-        max_upload_dimension=int(front_door.get("max_upload_dimension", 0)))
+        task_timeouts=front_door.timeout_mapping(),
+        max_upload_bytes=front_door.max_upload_bytes,
+        max_upload_pixels=front_door.max_upload_pixels,
+        max_upload_dimension=front_door.max_upload_dimension)
     operations.image_jobs = ImageJobs(
         model_gateway, store.load().images, host.state_dir(), bus)
     operations.media_jobs = MediaJobs(
-        model_gateway, host.state_dir(), bus, settings=config.media)
+        model_gateway, host.state_dir(), bus, settings=config.media_policy)
     return operations, bus, store, model_gateway

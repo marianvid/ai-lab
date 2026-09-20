@@ -160,20 +160,11 @@ def validate_configuration(config: Config, engine_ids: set[str],
             errors.append(f"{item.id}: port must be between 1 and 65535")
         ports.add(item.port)
 
-    media_limits = {
-        "result_ttl_s": (60, 30 * 86400),
-        "max_queue": (1, 1000),
-        "max_input_bytes": (1024, 512 * 1024 * 1024),
-        "max_result_bytes": (1024, 1024 * 1024 * 1024),
-    }
-    unknown_media = set(config.media) - set(media_limits)
-    if unknown_media:
-        errors.append("Unknown media settings: " + ", ".join(sorted(unknown_media)))
-    for key, (minimum, maximum) in media_limits.items():
-        value = config.media.get(key)
-        if value is not None and (type(value) is not int or
-                                  not minimum <= value <= maximum):
-            errors.append(f"Media {key} must be between {minimum} and {maximum}")
+    for policy_name in ("gateway_policy", "media_policy"):
+        try:
+            getattr(config, policy_name)
+        except ValueError as error:
+            errors.append(str(error))
 
     images = config.images
     profiles = images.get("profiles", {})

@@ -10,6 +10,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from ..config_policy import MediaPolicy
 from ..engines.base import MUSIC_PATHS, SPEECH_PATHS, VIDEO_PATHS
 from ..types import ChangeEvent, Task
 from .job_store import FINAL, JobStore
@@ -23,14 +24,15 @@ PATHS = {
 
 class MediaJobs:
     def __init__(self, gateway, state_root: Path, bus=None,
-                 *, settings: dict | None = None) -> None:
+                 *, settings: MediaPolicy | dict | None = None) -> None:
         self.gateway = gateway
         self.bus = bus
-        settings = settings or {}
-        self.ttl_s = float(settings.get("result_ttl_s", 86400))
-        self.max_queue = int(settings.get("max_queue", 32))
-        self.max_input_bytes = int(settings.get("max_input_bytes", 40 * 1024 * 1024))
-        self.max_result_bytes = int(settings.get("max_result_bytes", 256 * 1024 * 1024))
+        policy = (settings if isinstance(settings, MediaPolicy)
+                  else MediaPolicy.from_mapping(settings))
+        self.ttl_s = policy.result_ttl_s
+        self.max_queue = policy.max_queue
+        self.max_input_bytes = policy.max_input_bytes
+        self.max_result_bytes = policy.max_result_bytes
         self.store = JobStore(Path(state_root) / "media-jobs")
         self.lock = threading.RLock()
         self.jobs = self.store.recover()
