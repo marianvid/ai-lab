@@ -199,6 +199,9 @@ Mac and Linux smoke checks passed, and rollback instructions tested.
 Runtime progress and operation records now live in `runtime_state.py`; log
 diagnosis lives in `runtime_diagnostics.py`. The runtime coordinator now
 focuses on process transitions and host supervision.
+Source builds and package installs now have small configuration/watch managers
+(`builds.py`, `installs.py`) and separate per-engine version handlers, with
+rollback still selected through the stable `current` link.
 
 ## Repository and deployment policy
 
