@@ -31,8 +31,12 @@ supervised, access-controlled route that respects AI-Lab's model scheduling;
 the existing adapter intentionally does not expose that native UI. The
 [ACE-Step project](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/UI_SUPPORT.md)
 offers a full Gradio interface for music experiments and a separate REST API.
-Integrating either behind AI-Lab requires a model entry, lifecycle adapter,
-result contract and resource admission checks. The direct UI and those
+[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) provides the `qwen-tts-demo`
+web interface and documents an inference path through vLLM-Omni. These are
+viable direct experimentation surfaces for the corresponding models, but a
+standalone server would compete with AI-Lab for accelerator memory. Integrating
+one behind AI-Lab requires a model entry, lifecycle adapter, result contract
+and resource admission checks. A library label alone is insufficient. The direct UI and those
 contracts should be designed before the large gateway and operations classes
 are split.
 
