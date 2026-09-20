@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Handler(BaseHTTPRequestHandler):
     backend = None
+    max_body_bytes = 65536
 
     def do_GET(self):
         if self.path == "/health":
@@ -20,7 +21,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= 65536:
+            if not 0 < size <= self.max_body_bytes:
                 raise ValueError("music request is empty or too large")
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
@@ -40,6 +41,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-def serve(backend, port: int) -> None:
+def serve(backend, port: int, max_body_bytes: int = 65536) -> None:
     Handler.backend = backend
+    Handler.max_body_bytes = max_body_bytes
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

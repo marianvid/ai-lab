@@ -33,6 +33,7 @@ from .higgs import HiggsEngine
 from .heartmula import HeartMulaEngine
 from .yue2 import Yue2Engine
 from .comfy_music import ComfyMusicEngine
+from .mulacover import MulaCoverEngine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -80,6 +81,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         HeartMulaEngine.id: HeartMulaEngine(**settings.get(HeartMulaEngine.id, {})),
         Yue2Engine.id: Yue2Engine(**settings.get(Yue2Engine.id, {})),
         ComfyMusicEngine.id: ComfyMusicEngine(**settings.get(ComfyMusicEngine.id, {})),
+        MulaCoverEngine.id: MulaCoverEngine(**settings.get(MulaCoverEngine.id, {})),
     }
 
 

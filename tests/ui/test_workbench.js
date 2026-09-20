@@ -114,6 +114,35 @@ describe('direct model use', () => {
     assert.match(context.view.textContent, /Download ABC score/);
   });
 
+  it('sends a reference WAV for a source-conditioned music engine', async () => {
+    const context = installDom({
+      'POST /v1/audio/music/generations': {
+        seed: 42, data: [{ b64_wav: 'UklGRg==' }],
+      },
+    });
+    renderMusic(context.view, 'cover-model', {
+      reference_audio_required: true, lyrics_required: true, duration_kind: 'none',
+    });
+    context.view.querySelector('textarea[aria-label="Music description"]').value =
+      'genre:[soul]';
+    context.view.querySelector('textarea[aria-label="Lyrics"]').value =
+      '[Verse] Hello';
+    const input = context.view.querySelector('input[aria-label="Reference WAV"]');
+    Object.defineProperty(input, 'files', { value: [{ size: 8,
+      arrayBuffer: async () => Uint8Array.from([82, 73, 70, 70, 0, 0, 0, 0]).buffer,
+    }] });
+    context.view.querySelector('form').dispatchEvent(new context.window.Event(
+      'submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const call = context.calls.find((item) => item.path ===
+      '/v1/audio/music/generations');
+    const body = JSON.parse(call.body);
+    assert.equal(body.reference_audio_base64, 'UklGRgAAAAA=');
+    assert.equal(body.instrumental, false);
+    assert.equal('duration' in body, false);
+    assert.equal(input.required, true);
+  });
+
   it('synthesizes speech and shows a WAV player', async () => {
     const context = installDom({
       'POST /v1/audio/speech/generations': {

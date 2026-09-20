@@ -11,7 +11,8 @@ MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "kokoro": "model_options", "voxcpm": "model_options",
                     "khala": "model_options", "higgs": "model_options",
                     "heartmula": "model_options", "yue2": "model_options",
-                    "comfy_music": "model_options"}
+                    "comfy_music": "model_options",
+                    "mulacover": "model_options"}
 
 
 def validate_configuration(config: Config, engine_ids: set[str],
@@ -118,6 +119,20 @@ def validate_configuration(config: Config, engine_ids: set[str],
                     type(options.get("memory_reservation_mb")) in (int, float) and
                     options["memory_reservation_mb"] > 0):
                     errors.append(f"{item.id}: ComfyUI music settings are invalid")
+            elif item.engine == "mulacover":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    isinstance(options.get("checkpoint_subdir"), str) and
+                    options["checkpoint_subdir"] and
+                    Path(options["checkpoint_subdir"]).name == options["checkpoint_subdir"] and
+                    type(options.get("topk")) is int and 1 <= options["topk"] <= 1000 and
+                    type(options.get("temperature")) in (int, float) and
+                    0 <= options["temperature"] <= 5 and
+                    type(options.get("cfg_scale")) in (int, float) and
+                    0 < options["cfg_scale"] <= 10 and
+                    type(options.get("memory_reservation_mb")) in (int, float) and
+                    options["memory_reservation_mb"] > 0):
+                    errors.append(f"{item.id}: MuLaCover settings are invalid")
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")

@@ -16,6 +16,7 @@ working engine before it can be used.
 | Transcript alignment | Upload audio and transcript, inspect word timestamps | `/v1/audio/alignments` through the gateway |
 | OCR | Upload an image and read recognized text | `/v1/images/ocr` |
 | Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
+| Music cover (MuLaCover on Linux) | Upload a source WAV, enter style and lyrics, play and download the cover | `/v1/audio/music/generations` through the gateway |
 | Music (MiniMax Music 3 on Linux) | Music form with instrumental or lyric controls, player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Music (YuE2 on Linux) | Music form with required lyrics, editable ABC score, player and WAV/ABC download | `/v1/audio/music/generations` through the gateway |
 | Music (HeartMuLa on Linux) | Music form with required lyrics, player and WAV download | `/v1/audio/music/generations` through the gateway |
@@ -42,7 +43,7 @@ offers a full Gradio interface for music experiments and a separate REST API.
 web interface and documents an inference path through vLLM-Omni. These are
 viable direct experimentation surfaces for the corresponding models, but a
 standalone server would compete with AI-Lab for accelerator memory. AI-Lab
-provides controlled ACE-Step, HeartMuLa, YuE2, MiniMax Music 3, Khala, Qwen3-TTS, Kokoro, VoxCPM and Higgs adapters for configured checkpoints
+provides controlled ACE-Step, HeartMuLa, YuE2, MiniMax Music 3, MuLaCover, Khala, Qwen3-TTS, Kokoro, VoxCPM and Higgs adapters for configured checkpoints
 on Linux and macOS. Browser and agent requests use the same gateway lease,
 held until the WAV is returned. Add or replace a checkpoint in the private
 configuration; the adapter reads its mode from that configuration, not its
@@ -52,6 +53,10 @@ VoxCPM supports voice descriptions in the Speak form. Reference-audio cloning
 still needs an upload field and request contract; it is not offered by this form.
 Higgs supports inline style controls in the speech text; its installed
 SGLang-Omni worker is loaded and stopped with the AI-Lab instance.
+MuLaCover accepts a source WAV of up to 25 MiB, style tags and lyrics. It
+determines the output length itself. Its
+[official model card](https://huggingface.co/HeartMuLa/MuLaCover/blob/main/README.md)
+sets noncommercial terms for the published weights and outputs.
 MiniMax Music 3 runs a configured ComfyUI audio workflow inside a supervised
 AI-Lab worker. Its checkpoint components and workflow are selected through
 private configuration. [ComfyUI documentation](https://docs.comfy.org/tutorials/audio/minimax/minimax-music-3)

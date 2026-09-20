@@ -155,6 +155,10 @@ MiniMax Music 3 now uses the existing supervised ComfyUI lifecycle through
 a separate audio workflow adapter. Workflow input markers, component paths and
 memory reservation are private configuration. The Linux gateway returned both
 instrumental and lyric-conditioned 11.99-second PCM16 WAVs at 44.1 kHz.
+MuLaCover now accepts a bounded source WAV through the common music gateway.
+The installed runtime bundle is checked against the configured checkpoint.
+A 30-second YuE2 source returned a 137.12-second stereo WAV through Linux;
+the browser and agent use the same route and model lease.
 Higgs TTS now uses the installed SGLang-Omni worker behind the common speech
 contract on Linux; a 24 kHz WAV was checked through the gateway. Its measured
 GPU requirement is reserved in private configuration. Near-full-card requests

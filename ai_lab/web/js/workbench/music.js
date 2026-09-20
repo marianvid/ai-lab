@@ -5,6 +5,7 @@ export function renderMusic(target, model, options = {}) {
   const bucket = options?.duration_kind === 'bucket';
   const hasDuration = options?.duration_kind !== 'none';
   const editableScore = Boolean(options?.editable_score);
+  const referenceRequired = Boolean(options?.reference_audio_required);
   const prompt = element('textarea', { rows: '4', required: 'required',
     placeholder: 'Describe the song, mood and instruments',
     'aria-label': 'Music description' });
@@ -19,6 +20,8 @@ export function renderMusic(target, model, options = {}) {
     'aria-label': bucket ? 'Length bucket' : 'Duration in seconds' });
   const seed = element('input', { type: 'number', min: '0', max: '4294967295',
     placeholder: 'Random', 'aria-label': 'Seed' });
+  const reference = element('input', { type: 'file', accept: '.wav,audio/wav',
+    required: 'required', 'aria-label': 'Reference WAV' });
   const score = element('textarea', { rows: '12',
     placeholder: 'Optional ABC score; edit a generated score and run again',
     'aria-label': 'Editable ABC score' });
@@ -36,6 +39,17 @@ export function renderMusic(target, model, options = {}) {
       };
       if (hasDuration) request[bucket ? 'length_bucket' : 'duration'] = Number(duration.value);
       if (editableScore && score.value.trim()) request.abc = score.value.trim();
+      if (referenceRequired) {
+        const file = reference.files?.[0];
+        if (!file) throw new Error('Select a reference WAV');
+        if (file.size > 25 * 1024 * 1024) throw new Error('Reference WAV exceeds 25 MiB');
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const chunks = [];
+        for (let offset = 0; offset < bytes.length; offset += 32768) {
+          chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
+        }
+        request.reference_audio_base64 = btoa(chunks.join(''));
+      }
       if (seed.value !== '') request.seed = Number(seed.value);
       const response = await api.music(model, request);
       const audio = response.data?.[0]?.b64_wav;
@@ -59,6 +73,8 @@ export function renderMusic(target, model, options = {}) {
   }}, [prompt, lyrics,
     ...(hasDuration ? [element('label', {}, [element('span', { text: bucket
       ? 'Length bucket (0 is shortest; actual seconds vary)' : 'Duration (seconds)' }), duration])] : []),
+    ...(referenceRequired ? [element('label', {}, [
+      element('span', { text: 'Reference WAV (up to 25 MiB)' }), reference])] : []),
     ...(editableScore ? [element('label', {}, [
       element('span', { text: 'ABC score (optional; edit and regenerate)' }), score])] : []),
     element('label', {}, [element('span', { text: 'Seed' }), seed]),
