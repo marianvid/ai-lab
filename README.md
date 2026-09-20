@@ -63,7 +63,7 @@ before it says how it works.
 | | |
 |---|---|
 | [Writing a request](docs/requests.md) | Chat and multipart audio requests, the `ai_lab` field for startup settings, and what a refusal contains so a client can correct itself. |
-| [Using a model directly](docs/direct-use.md) | Browser actions for chat, images, music, speech, audio analysis and OCR; current limits for library-only models. |
+| [Using a model directly](docs/direct-use.md) | Browser actions for chat, images, music, Qwen/Kokoro speech, audio analysis and OCR; current limits for library-only models. |
 | [Music generation](docs/music.md) | ACE-Step setup contract, direct use and agent API. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
 | [Audio](docs/audio.md) | Speech-to-text, VAD and speaker diarization, their endpoints, and the public Data-Lab method used to prepare this personal project's Romanian evaluation audio. |

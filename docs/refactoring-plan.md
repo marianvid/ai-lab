@@ -128,6 +128,8 @@ ACE-Step 1.5 XL Turbo now has a synchronous AI-Lab music endpoint and browser
 player on Linux and macOS, tested with real eight-second WAV output on both.
 Qwen3-TTS VoiceDesign and CustomVoice have a separate isolated engine, speech
 endpoint and browser player, each tested through the gateway on both machines.
+Kokoro uses the same speech contract on macOS with configurable checkpoint,
+language and voice; two voices were tested through the gateway.
 The gateway lease protects the whole generation. Checkpoint names, paths and
 speech modes come from private configuration; switching model versions does
 not require editing the adapter. Durable media jobs, cancellation, retention

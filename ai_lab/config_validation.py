@@ -7,6 +7,9 @@ from pathlib import Path
 from .config import Config
 from .types import Task
 
+MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
+                    "kokoro": "model_options"}
+
 
 def validate_configuration(config: Config, engine_ids: set[str],
                            *, check_workflows: bool = False) -> None:
@@ -33,11 +36,19 @@ def validate_configuration(config: Config, engine_ids: set[str],
         instance_ids.add(item.id)
         if item.engine not in engine_ids:
             errors.append(f"{item.id}: unknown engine {item.engine}")
-        if item.engine in {"acestep", "qwentts"}:
-            field = "model_configs" if item.engine == "acestep" else "model_modes"
+        if item.engine in MODEL_MAP_FIELDS:
+            field = MODEL_MAP_FIELDS[item.engine]
             configured = config.engines.get(item.engine, {}).get(field, {})
-            if item.model_id.rsplit("/", 1)[-1] not in configured:
+            model_name = item.model_id.rsplit("/", 1)[-1]
+            if model_name not in configured:
                 errors.append(f"{item.id}: {item.engine} has no configured checkpoint")
+            elif item.engine == "kokoro":
+                options = configured[model_name]
+                required = ("language_code", "default_voice", "repo_id")
+                if not isinstance(options, dict) or any(
+                        not isinstance(options.get(key), str) or not options[key]
+                        for key in required):
+                    errors.append(f"{item.id}: Kokoro model options are incomplete")
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")

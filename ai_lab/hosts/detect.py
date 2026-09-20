@@ -32,6 +32,7 @@ def current_host(engines: dict | None = None) -> Host:
             comfyui_main=settings.get("comfyui", {}).get("comfyui"),
             acestep_binary=settings.get("acestep", {}).get("binary"),
             qwentts_binary=settings.get("qwentts", {}).get("binary"),
+            kokoro_binary=settings.get("kokoro", {}).get("binary"),
         )
     from .linux import LinuxHost
 

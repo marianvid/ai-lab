@@ -78,6 +78,34 @@ describe('direct model use', () => {
       /^data:audio\/wav;base64,/);
   });
 
+  it('uses configured speech controls without inspecting the model name', async () => {
+    const context = installDom({
+      'POST /v1/audio/speech/generations': {
+        data: [{ b64_wav: 'UklGRg==' }],
+      },
+    });
+    renderSpeech(context.view, 'any-new-checkpoint', {
+      instruction_visible: false, language_visible: false,
+      speaker_visible: true, speaker_label: 'Voice',
+      speaker_hint: 'Default: bm_george',
+    });
+    const instruction = context.view.querySelector(
+      'textarea[aria-label="Voice instruction"]');
+    const speaker = context.view.querySelector('input[aria-label="Speaker"]');
+    assert.equal(instruction.closest('label').hidden, true);
+    assert.equal(speaker.closest('label').hidden, false);
+    assert.equal(speaker.placeholder, 'Default: bm_george');
+    speaker.value = 'af_heart';
+    context.view.querySelector('textarea[aria-label="Text to speak"]').value =
+      'Hello there';
+    context.view.querySelector('form').dispatchEvent(new context.window.Event(
+      'submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const call = context.calls.find((item) => item.path ===
+      '/v1/audio/speech/generations');
+    assert.equal(JSON.parse(call.body).speaker, 'af_heart');
+  });
+
   it('sends an audio upload with the configured model name', async () => {
     const context = installDom({ 'POST /v1/audio/transcriptions': { text: 'Test' } });
     global.FormData = context.window.FormData;

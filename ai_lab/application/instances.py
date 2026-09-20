@@ -70,6 +70,9 @@ class InstanceService:
             task = Task(self._task(config, item.model_id))
             row["params"] = self._effective(engine, item.params, task)
             row["task"] = task.value
+            if task is Task.SPEECH_SYNTHESIS and hasattr(engine, "speech_form"):
+                row["speech_form"] = engine.speech_form(
+                    item.model_id.rsplit("/", 1)[-1])
             rows.append(row)
         return rows
 
@@ -252,6 +255,8 @@ class InstanceService:
             configured_names = getattr(engine, "model_configs", None)
             if configured_names is None:
                 configured_names = getattr(engine, "model_modes", None)
+            if configured_names is None:
+                configured_names = getattr(engine, "model_options", None)
             if configured_names is not None:
                 description["supported_model_ids"] = [
                     model["id"] for model in models

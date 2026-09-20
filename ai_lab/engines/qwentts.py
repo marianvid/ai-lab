@@ -34,6 +34,14 @@ class QwenTtsEngine:
                 and self.model_modes.get(model.name) in
                 {"voice-design", "custom-voice"})
 
+    def speech_form(self, model_name: str) -> dict:
+        mode = self.model_modes.get(model_name)
+        return {"instruction_required": mode == "voice-design",
+                "instruction_visible": True,
+                "speaker_visible": mode == "custom-voice",
+                "language_visible": True,
+                "speaker_label": "Speaker"}
+
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if not self.supports(model):
             raise ValueError(f"Qwen3-TTS runtime is not configured for {model.name}")
@@ -41,11 +49,12 @@ class QwenTtsEngine:
             raise ValueError("Qwen3-TTS has no instance settings")
         checkpoint = Path(model.entrypoint)
         model_directory = checkpoint.parent if checkpoint.is_file() else checkpoint
-        return LaunchPlan(argv=[self.binary, self.server,
+        return LaunchPlan(argv=[self.binary, self.server, "--backend", "qwen",
                                 "--model-path", str(model_directory),
                                 "--mode", self.model_modes[model.name],
                                 "--port", str(port)],
-                          env={"PYTHONUNBUFFERED": "1"})
+                          env={"PYTHONUNBUFFERED": "1",
+                               "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 
     def ready(self, port: int) -> bool:
         return http_ok(port)
@@ -55,7 +64,11 @@ class QwenTtsEngine:
 
     def needs_mb(self, model: ModelSet, params: dict,
                  card_total_mb: float) -> float:
-        return model.size_bytes / (1024 * 1024)
+        weights_mb = model.size_bytes / (1024 * 1024)
+        # The runtime also holds activations, attention buffers and CUDA
+        # allocations. Weight bytes alone let the scheduler admit a second
+        # checkpoint into less free VRAM than loading actually requires.
+        return max(weights_mb * 1.5, weights_mb + 2048)
 
     def api_paths(self, task: Task = Task.SPEECH_SYNTHESIS) -> tuple[str, ...]:
         return SPEECH_PATHS if task is Task.SPEECH_SYNTHESIS else ()

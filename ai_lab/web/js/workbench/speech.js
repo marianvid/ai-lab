@@ -1,15 +1,18 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
 
-export function renderSpeech(target, model) {
+export function renderSpeech(target, model, options = {}) {
+  const formOptions = options || {};
   const text = element('textarea', { rows: '5', required: 'required',
     'aria-label': 'Text to speak', placeholder: 'Write the text to speak' });
   const instruction = element('textarea', { rows: '3',
+    ...(formOptions.instruction_required ? { required: 'required' } : {}),
     'aria-label': 'Voice instruction',
     placeholder: 'Voice description (required for voice design), or optional delivery instruction' });
   const language = element('input', { value: 'Auto',
     'aria-label': 'Language', placeholder: 'Auto, English, Chinese…' });
-  const speaker = element('input', { placeholder: 'Ryan, Vivian…',
+  const speaker = element('input', {
+    placeholder: formOptions.speaker_hint || 'Optional speaker or voice',
     'aria-label': 'Speaker' });
   const status = element('p', { class: 'muted', role: 'status' });
   const result = element('section', { class: 'panel stack', hidden: true });
@@ -33,10 +36,14 @@ export function renderSpeech(target, model) {
       status.textContent = '';
     } catch (error) { status.textContent = error.message; }
     finally { submit.disabled = false; }
-  }}, [text, instruction,
-    element('label', {}, [element('span', { text: 'Language' }), language]),
-    element('label', {}, [
-      element('span', { text: 'Speaker (CustomVoice)' }), speaker]),
+  }}, [text,
+    element('label', { hidden: formOptions.instruction_visible === false ? '' : undefined }, [
+      element('span', { text: 'Voice instruction' }), instruction]),
+    element('label', { hidden: formOptions.language_visible === false ? '' : undefined }, [
+      element('span', { text: 'Language' }), language]),
+    element('label', { hidden: formOptions.speaker_visible === false ? '' : undefined }, [
+      element('span', { text: formOptions.speaker_label || 'Speaker / voice' }),
+      speaker]),
     submit, status]);
   target.replaceChildren(element('h1', { text: `Speech · ${model}` }), form, result);
 }

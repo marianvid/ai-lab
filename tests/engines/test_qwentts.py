@@ -34,6 +34,11 @@ class QwenTtsEngineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.engine.plan(self.model, 8113, {})
 
+    def test_memory_estimate_includes_runtime_headroom(self):
+        model = replace(self.model, files=(ModelFile(
+            'model.safetensors', 4096 * 1024 * 1024),))
+        self.assertEqual(self.engine.needs_mb(model, {}, 32768), 6144)
+
     def test_manifest_entrypoint_uses_checkpoint_directory(self):
         with TemporaryDirectory() as root:
             checkpoint = Path(root) / 'model.safetensors'

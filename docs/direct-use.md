@@ -15,7 +15,7 @@ working engine before it can be used.
 | VAD/diarization | Upload audio and inspect segments/speakers | Task-specific audio routes |
 | OCR | Upload an image and read recognized text | `/v1/images/ocr` |
 | Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
-| Speech (Qwen3-TTS VoiceDesign/CustomVoice) | Speak form with player and WAV download | `/v1/audio/speech/generations` through the gateway |
+| Speech (Qwen3-TTS VoiceDesign/CustomVoice, Kokoro) | Speak form with engine-specific controls, player and WAV download | `/v1/audio/speech/generations` through the gateway |
 | Other installed music, speech, alignment and video models | No direct action until an engine and job contract are configured | Library only |
 
 The new chat workbench is deliberately small: it keeps the current
@@ -37,7 +37,7 @@ offers a full Gradio interface for music experiments and a separate REST API.
 web interface and documents an inference path through vLLM-Omni. These are
 viable direct experimentation surfaces for the corresponding models, but a
 standalone server would compete with AI-Lab for accelerator memory. AI-Lab
-provides controlled ACE-Step and Qwen3-TTS adapters for configured checkpoints
+provides controlled ACE-Step, Qwen3-TTS and Kokoro adapters for configured checkpoints
 on Linux and macOS. Browser and agent requests use the same gateway lease,
 held until the WAV is returned. Add or replace a checkpoint in the private
 configuration; the adapter reads its mode from that configuration, not its
