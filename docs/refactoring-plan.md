@@ -77,6 +77,12 @@ private `opts`, redacts sensitive values and reports drift. Gate: fixtures
 from both platforms parse; round trips preserve unknown fields during the
 migration; a deliberately invalid profile fails before a job is queued.
 
+The configuration loader now preserves unknown top-level fields during a
+save, and startup validates instance/engine/repository references, unique
+ports, and image profile tasks and workflow files. The private verifier
+compares active Mac and Linux bytes with `opts` snapshots after deployment.
+Schema versioning and typed nested sections remain to be implemented.
+
 ### 3. Split application use cases
 
 Move one vertical slice at a time out of `Operations`: instance lifecycle,

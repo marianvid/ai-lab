@@ -148,6 +148,9 @@ class Config:
     models_root: str = ""
     model_roots: list[ModelRoot] = field(default_factory=list)
     download_root: str = "core"
+    # Forward-compatible top-level fields survive a UI edit and save. A newer
+    # deployment may understand them even when this manager version does not.
+    extra_fields: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.model_roots:
@@ -225,6 +228,8 @@ class ConfigStore:
             model_notes=raw.get("model_notes", {}),
             model_roots=roots,
             download_root=raw.get("download_root", "core"),
+            extra_fields={key: value for key, value in raw.items()
+                          if key not in Config.__dataclass_fields__},
         )
 
     def save(self, config: Config) -> None:
@@ -232,6 +237,8 @@ class ConfigStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_name(self.path.name + ".tmp")
             payload = asdict(config)
+            extras = payload.pop("extra_fields")
+            payload = {**extras, **payload}
             payload["repositories"] = [
                 asdict(item) for item in config.repositories
                 if item.root_id == "core"

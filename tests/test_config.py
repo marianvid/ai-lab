@@ -49,6 +49,17 @@ class ConfigStoreTests(unittest.TestCase):
         store.save(original)
         self.assertEqual(store.load(), original)
 
+    def test_unknown_top_level_fields_survive_a_mutation(self):
+        store = self.write({"models_root": "/models", "future_policy": {
+            "enabled": True, "options": [1, 2, 3]}})
+        with store.mutate() as config:
+            config.title = "Updated"
+        raw = json.loads(self.path.read_text())
+        self.assertEqual(raw["future_policy"], {
+            "enabled": True, "options": [1, 2, 3]})
+        self.assertNotIn("extra_fields", raw)
+        self.assertEqual(store.load().title, "Updated")
+
     def test_benchmark_root_derives_namespaced_repositories(self):
         config = self.write({
             "models_root": "/models",

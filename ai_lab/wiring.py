@@ -15,6 +15,7 @@ from .builds import Builds
 from .capabilities import Known
 from .catalog import Catalog
 from .config import ConfigStore
+from .config_validation import validate_configuration
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
@@ -37,9 +38,11 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     # builds uses the one named in config.json rather than whichever PATH
     # happens to find first. The host needs the same section: vLLM lives in a
     # virtual environment, so whether it is installed cannot be read from PATH.
-    engine_settings = store.load().engines
-    host = current_host(engine_settings)
+    config = store.load()
+    engine_settings = config.engines
     engines = Registry(engine_settings)
+    validate_configuration(config, set(engines.known()), check_workflows=True)
+    host = current_host(engine_settings)
     builds = Builds(engine_settings, bus)
     # Engines that arrive as packages rather than as source. A new
     # version is installed beside the one that works, never over it.

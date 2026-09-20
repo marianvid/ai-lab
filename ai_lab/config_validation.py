@@ -1,0 +1,70 @@
+"""Static configuration checks before the manager starts any background work."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from .config import Config
+from .types import Task
+
+
+def validate_configuration(config: Config, engine_ids: set[str],
+                           *, check_workflows: bool = False) -> None:
+    """Reject broken references and conflicting ports with one useful report.
+
+    Model files are checked by the catalog when loaded. This validation only
+    uses the declared configuration, so it also works against a snapshot on a
+    machine that does not host the weights.
+    """
+    errors: list[str] = []
+    roots = {item.id for item in config.model_roots}
+    if config.download_root not in roots:
+        errors.append(f"Unknown download root: {config.download_root}")
+    repository_ids = [item.id for item in config.repositories]
+    if len(repository_ids) != len(set(repository_ids)):
+        errors.append("Repository IDs must be unique")
+    instance_ids: set[str] = set()
+    ports = {config.port}
+    if not 1 <= config.port <= 65535:
+        errors.append("Manager port must be between 1 and 65535")
+    for item in config.instances:
+        if item.id in instance_ids:
+            errors.append(f"Duplicate instance ID: {item.id}")
+        instance_ids.add(item.id)
+        if item.engine not in engine_ids:
+            errors.append(f"{item.id}: unknown engine {item.engine}")
+        repository_id = item.model_id.split("/", 1)[0]
+        if repository_id not in repository_ids:
+            errors.append(f"{item.id}: unknown repository {repository_id}")
+        if item.port in ports:
+            errors.append(f"{item.id}: port {item.port} is already assigned")
+        if not 1 <= item.port <= 65535:
+            errors.append(f"{item.id}: port must be between 1 and 65535")
+        ports.add(item.port)
+
+    images = config.images
+    profiles = images.get("profiles", {})
+    workflow_root = Path(images.get("workflow_root", ""))
+    for profile_id, profile in profiles.items():
+        model_id = profile.get("model", "")
+        if model_id not in instance_ids:
+            errors.append(f"Image profile {profile_id}: unknown instance {model_id}")
+            continue
+        task = profile.get("task", "generation")
+        if task not in {"generation", "edit"}:
+            errors.append(f"Image profile {profile_id}: unsupported task {task}")
+            continue
+        instance = config.instance(model_id)
+        repository = config.repository(instance.model_id.split("/", 1)[0])
+        expected = (Task.IMAGE_EDIT if task == "edit" else
+                    Task.IMAGE_GENERATION).value
+        if repository.task != expected:
+            errors.append(f"Image profile {profile_id}: {model_id} is configured "
+                          f"for {repository.task}, expected {expected}")
+        workflow = profile.get("workflow", "")
+        if not workflow or Path(workflow).name != workflow:
+            errors.append(f"Image profile {profile_id}: invalid workflow name")
+        elif check_workflows and not (workflow_root / workflow).is_file():
+            errors.append(f"Image profile {profile_id}: workflow file is absent")
+    if errors:
+        raise ValueError("Invalid AI-Lab configuration:\n- " + "\n- ".join(errors))
