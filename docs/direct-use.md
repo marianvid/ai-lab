@@ -1,14 +1,14 @@
 # Use a model directly
 
 Every configured model has an agent-facing API. The **Models** page also offers
-a direct action where AI-Lab has a browser workflow for that task. AI-Lab's
-workbench sends requests to the gateway, so a stopped model can be loaded on
-the first request. A model in Library still needs a configured entry and a
+a direct action where AI-Lab has a browser workflow for that task. That action
+is disabled until the model is loaded and ready. API requests through the
+gateway can still load a stopped model automatically. A model in Library still needs a configured entry and a
 working engine before it can be used.
 
 | Task | Direct action | Current route |
 |---|---|---|
-| Text (llama.cpp) | Chat in the engine's own UI when ready; AI-Lab chat while stopped | `/v1/chat/completions` through the gateway |
+| Text (llama.cpp) | Chat in the engine's own UI when ready; otherwise AI-Lab chat | `/v1/chat/completions` through the gateway |
 | Text (vLLM) | AI-Lab chat | `/v1/chat/completions` through the gateway |
 | Image generation/editing | Create/Edit with a named ComfyUI profile | AI-Lab image jobs |
 | Transcription | Upload audio and read text | `/v1/audio/transcriptions` |
@@ -56,8 +56,9 @@ Higgs supports inline style controls in the speech text; its installed
 SGLang-Omni worker is loaded and stopped with the AI-Lab instance.
 MiniMax H3 and LTX 2.5 use configured ComfyUI image-to-video workflows.
 Both accept a reference PNG, motion prompt and seed. The configured workflows
-currently produce clips of about six seconds. A stopped model loads on the first
-request, and AI-Lab schedules the full generation under one model lease.
+currently produce clips of about six seconds. API requests can load a stopped
+model on demand; the browser action requires it to be ready first. AI-Lab
+schedules the full generation under one model lease.
 [ComfyUI H3 guide](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
 and [LTX documentation](https://docs.ltx.io/open-source-model/usage-guides/image-to-video)
 describe the underlying workflow controls.

@@ -271,13 +271,19 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     ].filter(Boolean));
   }
 
-  // Keep llama.cpp's native page when it is ready. Other configured tasks use
-  // AI-Lab's gateway, which can load a stopped model before serving a request.
+  // Keep llama.cpp's native page when it is ready. Direct-use controls are
+  // available only after the model has finished loading.
   function useLink(instance) {
     const task = instance.task || 'text-generation';
     const action = TASK_ACTIONS[task];
     if (!action) return null;
-    const native = task === 'text-generation' && instance.ready && instance.web_ui;
+    if (!instance.ready) return element('button', {
+      class: 'pill chat-link', type: 'button', disabled: 'disabled',
+      title: instance.running ? 'Wait for the model to finish loading'
+                              : 'Load the model to use it directly',
+      text: action.label,
+    });
+    const native = task === 'text-generation' && instance.web_ui;
     return element('a', {
       class: 'pill chat-link', target: '_blank', rel: 'noopener',
       href: native

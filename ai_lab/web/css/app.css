@@ -154,8 +154,7 @@ table.model-library td.model-curated > .ident > strong {
    name on the left is what gives way when the row is narrow, never these. */
 .pill.format { flex: none; }
 .row.instance > .inline { flex: none; }
-/* Direct use of a configured model. The gateway loads a stopped entry on the
-   first request; llama.cpp's native chat page is linked only while ready. */
+/* Direct use of a configured model, available only after it is ready. */
 .chat-link {
   color: var(--ok); border-color: var(--ok);
   text-decoration: none; white-space: nowrap;
@@ -167,6 +166,10 @@ table.model-library td.model-curated > .ident > strong {
 }
 .chat-link:hover, .chat-link:focus-visible {
   background: var(--ok); color: var(--bg);
+}
+.chat-link:disabled, .chat-link:disabled:hover {
+  color: var(--muted); border-color: var(--border);
+  background: transparent; box-shadow: none; cursor: not-allowed;
 }
 .chat-message { border-bottom: 1px solid var(--border); padding: 0.5rem 0; }
 .chat-message p { white-space: pre-wrap; margin: 0.35rem 0; }

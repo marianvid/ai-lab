@@ -173,12 +173,14 @@ describe('the Models page', () => {
     assert.equal(chat.getAttribute('target'), '_blank');
   });
 
-  it('uses the gateway when the model has not loaded yet', async () => {
+  it('disables direct use while the model is loading', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, ready: false }],
     });
-    assert.equal(view.querySelector('.chat-link').getAttribute('href'),
-                 '/workbench.html?model=qwen-coder');
+    const chat = view.querySelector('.chat-link');
+    assert.equal(chat.tagName, 'BUTTON');
+    assert.equal(chat.disabled, true);
+    assert.equal(chat.hasAttribute('href'), false);
   });
 
   it('uses AI-Lab chat when the engine serves no page', async () => {
@@ -204,7 +206,8 @@ describe('the Models page', () => {
     });
     const link = view.querySelector('.chat-link');
     assert.equal(link.textContent, 'Music');
-    assert.equal(link.getAttribute('href'), '/workbench.html?model=music-ace-xl');
+    assert.equal(link.disabled, true);
+    assert.equal(link.hasAttribute('href'), false);
   });
 
   it('builds the chat address from the page, not from the server', async () => {
@@ -723,12 +726,12 @@ describe('the buttons line up down the page', () => {
     assert.match(chat(view).getAttribute('href'), /:8080\//);
   });
 
-  it('offers the gateway for a model that is not running', async () => {
+  it('disables direct use for a model that is not running', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, running: false, ready: false }],
     });
-    assert.equal(chat(view).getAttribute('href'),
-                 '/workbench.html?model=qwen-coder');
+    assert.equal(chat(view).disabled, true);
+    assert.equal(chat(view).hasAttribute('href'), false);
   });
 
   it('offers AI-Lab chat for a running vLLM model', async () => {
@@ -768,6 +771,19 @@ describe('the buttons line up down the page', () => {
         { ...INSTANCE, task, web_ui: false },
       ] });
       assert.equal(view.querySelector('.chat-link').textContent, label);
+    }
+  });
+
+  it('disables every direct workflow until its model is ready', async () => {
+    for (const task of ['text-generation', 'image-generation', 'image-edit',
+                        'music-generation', 'video-generation', 'speech-synthesis']) {
+      const { view } = await renderPage({ '/api/instances': [
+        { ...INSTANCE, task, running: false, ready: false, web_ui: false },
+      ] });
+      const control = view.querySelector('.chat-link');
+      assert.ok(control, `missing direct-use control for ${task}`);
+      assert.equal(control.disabled, true, `${task} should be disabled`);
+      assert.equal(control.hasAttribute('href'), false);
     }
   });
 });
