@@ -21,7 +21,6 @@ tmp/
 
 # Test-only dependency for the browser interface. Nothing here is deployed.
 node_modules/
-package-lock.json
 
 # Repository checkouts kept inside this workspace but versioned independently.
 # Private machine-specific configuration.
