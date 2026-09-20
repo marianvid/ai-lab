@@ -18,7 +18,7 @@ class RegistryTests(unittest.TestCase):
                          {"llamacpp", "mlxwhisper", "vllm", "nemo", "onnx",
                           "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
                           "kokoro", "voxcpm", "qwenalign", "khala", "higgs",
-                          "heartmula", "yue2", "comfy_music", "mulacover"})
+                          "heartmula", "yue2", "comfy_music", "mulacover", "comfy_video"})
 
     def test_only_installed_engines_are_available(self):
         self.assertEqual(set(self.registry.available(capabilities())), {"llamacpp"})

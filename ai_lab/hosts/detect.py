@@ -53,4 +53,5 @@ def current_host(engines: dict | None = None) -> Host:
         yue2_binary=settings.get("yue2", {}).get("binary"),
         comfy_music_binary=settings.get("comfy_music", {}).get("binary"),
         mulacover_binary=settings.get("mulacover", {}).get("binary"),
+        comfy_video_binary=settings.get("comfy_video", {}).get("binary"),
     )

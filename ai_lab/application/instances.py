@@ -76,6 +76,9 @@ class InstanceService:
             if task is Task.MUSIC_GENERATION and hasattr(engine, "music_form"):
                 row["music_form"] = engine.music_form(
                     item.model_id.rsplit("/", 1)[-1])
+            if task is Task.VIDEO_GENERATION and hasattr(engine, "video_form"):
+                row["video_form"] = engine.video_form(
+                    item.model_id.rsplit("/", 1)[-1])
             rows.append(row)
         return rows
 

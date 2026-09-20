@@ -35,7 +35,8 @@ class Backend:
                 f"ai_lab_{index}:\n  base_path: {json.dumps(root)}\n"
                 "  checkpoints: .\n  diffusion_models: .\n"
                 "  text_encoders: .\n  vae: .\n  loras: .\n"
-                "  controlnet: .\n  clip_vision: .\n")
+                "  controlnet: .\n  clip_vision: .\n"
+                "  latent_upscale_models: .\n")
         extra.write_text("".join(sections))
         command = [python, comfyui, "--listen", "127.0.0.1", "--port", str(port),
                    "--extra-model-paths-config", str(extra),

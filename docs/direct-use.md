@@ -16,13 +16,14 @@ working engine before it can be used.
 | Transcript alignment | Upload audio and transcript, inspect word timestamps | `/v1/audio/alignments` through the gateway |
 | OCR | Upload an image and read recognized text | `/v1/images/ocr` |
 | Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
+| Video (MiniMax H3 and LTX 2.5 on Linux) | Upload a reference PNG, enter a motion prompt, play and download an MP4 | `/v1/videos/generations` through the gateway |
 | Music cover (MuLaCover on Linux) | Upload a source WAV, enter style and lyrics, play and download the cover | `/v1/audio/music/generations` through the gateway |
 | Music (MiniMax Music 3 on Linux) | Music form with instrumental or lyric controls, player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Music (YuE2 on Linux) | Music form with required lyrics, editable ABC score, player and WAV/ABC download | `/v1/audio/music/generations` through the gateway |
 | Music (HeartMuLa on Linux) | Music form with required lyrics, player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Music (Khala on macOS) | Music form with length bucket, player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Speech (Qwen3-TTS VoiceDesign/CustomVoice, Kokoro, VoxCPM, Higgs on Linux) | Speak form with engine-specific controls, player and WAV download | `/v1/audio/speech/generations` through the gateway |
-| Other installed music, speech, alignment and video models | No direct action until an engine and job contract are configured | Library only |
+| Supporting codec, VAE, embedding and OCR component files | Used through their parent model | Library only |
 
 The new chat workbench is deliberately small: it keeps the current
 conversation in the page and sends one request at a time. llama.cpp's own UI
@@ -53,6 +54,13 @@ VoxCPM supports voice descriptions in the Speak form. Reference-audio cloning
 still needs an upload field and request contract; it is not offered by this form.
 Higgs supports inline style controls in the speech text; its installed
 SGLang-Omni worker is loaded and stopped with the AI-Lab instance.
+MiniMax H3 and LTX 2.5 use configured ComfyUI image-to-video workflows.
+Both accept a reference PNG, motion prompt and seed. The configured workflows
+currently produce clips of about six seconds. A stopped model loads on the first
+request, and AI-Lab schedules the full generation under one model lease.
+[ComfyUI H3 guide](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
+and [LTX documentation](https://docs.ltx.io/open-source-model/usage-guides/image-to-video)
+describe the underlying workflow controls.
 MuLaCover accepts a source WAV of up to 25 MiB, style tags and lyrics. It
 determines the output length itself. Its
 [official model card](https://huggingface.co/HeartMuLa/MuLaCover/blob/main/README.md)

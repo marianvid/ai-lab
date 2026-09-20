@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from ...engines.base import (ALIGNMENT_PATHS, ANTHROPIC_PATHS, DIARIZATION_PATHS, OCR_PATHS,
                              OPENAI_PATHS, TRANSCRIPTION_PATHS, VAD_PATHS, MUSIC_PATHS,
-                             SPEECH_PATHS)
+                             SPEECH_PATHS, VIDEO_PATHS)
 from ...gateway import Gateway
 from ...types import Task
 from ..multipart import MultipartBody
@@ -32,7 +32,7 @@ from ..uploads import UploadRejected, validate_image
 FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
                                 + TRANSCRIPTION_PATHS + VAD_PATHS
                                 + DIARIZATION_PATHS + OCR_PATHS + MUSIC_PATHS
-                                + SPEECH_PATHS + ALIGNMENT_PATHS))
+                                + SPEECH_PATHS + ALIGNMENT_PATHS + VIDEO_PATHS))
 
 # Which task a request path belongs to, for per-task timeouts (see
 # `Gateway.timeouts_for`) and for which uploads get image validation. Paths
@@ -48,6 +48,7 @@ _TASK_OF_PATH = {
     **{path: Task.MUSIC_GENERATION for path in MUSIC_PATHS},
     **{path: Task.SPEECH_SYNTHESIS for path in SPEECH_PATHS},
     **{path: Task.ALIGNMENT for path in ALIGNMENT_PATHS},
+    **{path: Task.VIDEO_GENERATION for path in VIDEO_PATHS},
 }
 
 # Paths whose upload is an image and must pass the configured byte/pixel/

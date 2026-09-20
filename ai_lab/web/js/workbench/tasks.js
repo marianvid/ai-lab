@@ -4,6 +4,7 @@ export const TASK_ACTIONS = Object.freeze({
   'image-generation': { label: 'Create', surface: 'images' },
   'image-edit': { label: 'Edit', surface: 'images' },
   'music-generation': { label: 'Music', surface: 'music' },
+  'video-generation': { label: 'Video', surface: 'video' },
   'speech-synthesis': { label: 'Speak', surface: 'speech' },
   alignment: { label: 'Align', surface: 'file' },
   transcription: { label: 'Transcribe', surface: 'file' },

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { installDom, settle } from './support/dom.js';
 import { renderChat } from '../../ai_lab/web/js/workbench/chat.js';
 import { renderMusic } from '../../ai_lab/web/js/workbench/music.js';
+import { renderVideo } from '../../ai_lab/web/js/workbench/video.js';
 import { renderSpeech } from '../../ai_lab/web/js/workbench/speech.js';
 import { renderFileTask } from '../../ai_lab/web/js/workbench/file-task.js';
 
@@ -141,6 +142,32 @@ describe('direct model use', () => {
     assert.equal(body.instrumental, false);
     assert.equal('duration' in body, false);
     assert.equal(input.required, true);
+  });
+
+  it('generates a playable video from a reference PNG', async () => {
+    const context = installDom({
+      'POST /v1/videos/generations': {
+        seed: 42, data: [{ b64_mp4: 'AAAAGGZ0eXA=' }],
+      },
+    });
+    renderVideo(context.view, 'video-model', { clip_seconds: 6.58 });
+    context.view.querySelector('textarea[aria-label="Video prompt"]').value =
+      'Gentle motion in a locked shot';
+    const input = context.view.querySelector('input[aria-label="Reference PNG"]');
+    Object.defineProperty(input, 'files', { value: [{ size: 8,
+      arrayBuffer: async () => Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]).buffer,
+    }] });
+    context.view.querySelector('form').dispatchEvent(new context.window.Event(
+      'submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const call = context.calls.find((item) => item.path === '/v1/videos/generations');
+    const body = JSON.parse(call.body);
+    assert.equal(body.model, 'video-model');
+    assert.equal(body.prompt, 'Gentle motion in a locked shot');
+    assert.equal(body.image_base64, 'iVBORw0KGgo=');
+    assert.match(context.view.querySelector('video').getAttribute('src'),
+      /^data:video\/mp4;base64,/);
+    assert.match(context.view.textContent, /Download MP4/);
   });
 
   it('synthesizes speech and shows a WAV player', async () => {

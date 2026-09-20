@@ -1,4 +1,4 @@
-"""Small JSON HTTP host shared by isolated music backends."""
+"""Small JSON HTTP host shared by isolated media backends."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 class Handler(BaseHTTPRequestHandler):
     backend = None
     max_body_bytes = 65536
+    request_path = "/v1/audio/music/generations"
 
     def do_GET(self):
         if self.path == "/health":
@@ -16,7 +17,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": {"message": "not found"}})
 
     def do_POST(self):
-        if self.path != "/v1/audio/music/generations":
+        if self.path != self.request_path:
             self._json(404, {"error": {"message": "not found"}})
             return
         try:
@@ -41,7 +42,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-def serve(backend, port: int, max_body_bytes: int = 65536) -> None:
+def serve(backend, port: int, max_body_bytes: int = 65536,
+          request_path: str = "/v1/audio/music/generations") -> None:
     Handler.backend = backend
     Handler.max_body_bytes = max_body_bytes
+    Handler.request_path = request_path
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

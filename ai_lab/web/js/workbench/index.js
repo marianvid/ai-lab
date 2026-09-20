@@ -4,6 +4,7 @@ import { onChange, startEventStream } from '../events.js';
 import { render as renderImages } from '../views/images.js';
 import { renderChat } from './chat.js';
 import { renderMusic } from './music.js';
+import { renderVideo } from './video.js';
 import { renderSpeech } from './speech.js';
 import { renderFileTask } from './file-task.js';
 import { TASK_ACTIONS } from './tasks.js';
@@ -45,6 +46,7 @@ export async function renderWorkbench() {
   const surface = TASK_ACTIONS[task]?.surface;
   if (surface === 'chat') renderChat(target, model);
   else if (surface === 'music') renderMusic(target, model, instance.music_form);
+  else if (surface === 'video') renderVideo(target, model, instance.video_form);
   else if (surface === 'speech') renderSpeech(target, model, instance.speech_form);
   else if (surface === 'images') {
     await renderImages(target, model);

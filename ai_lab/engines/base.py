@@ -104,6 +104,7 @@ VAD_PATHS = ("/v1/audio/speech-segments",)
 DIARIZATION_PATHS = ("/v1/audio/diarizations",)
 OCR_PATHS = ("/v1/images/ocr",)
 MUSIC_PATHS = ("/v1/audio/music/generations",)
+VIDEO_PATHS = ("/v1/videos/generations",)
 SPEECH_PATHS = ("/v1/audio/speech/generations",)
 ALIGNMENT_PATHS = ("/v1/audio/alignments",)
 

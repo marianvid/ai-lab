@@ -159,6 +159,10 @@ MuLaCover now accepts a bounded source WAV through the common music gateway.
 The installed runtime bundle is checked against the configured checkpoint.
 A 30-second YuE2 source returned a 137.12-second stereo WAV through Linux;
 the browser and agent use the same route and model lease.
+MiniMax H3 and LTX 2.5 now share a configurable ComfyUI video adapter and
+a direct reference-image form. The Linux gateway returned 6.58-second and
+6.04-second MP4s, respectively, from the same private PNG. ComfyUI video
+uses measured RAM offload because each stack exceeds the card capacity.
 Higgs TTS now uses the installed SGLang-Omni worker behind the common speech
 contract on Linux; a 24 kHz WAV was checked through the gateway. Its measured
 GPU requirement is reserved in private configuration. Near-full-card requests
@@ -166,7 +170,8 @@ evict all resident models to avoid trusting approximate memory estimates.
 The gateway lease protects the whole generation. Checkpoint names, paths and
 speech modes come from private configuration; switching model versions does
 not require editing the adapter. Durable media jobs, cancellation, retention
-and adapters for the remaining installed model families still need work.
+still need work; every independent model currently in Library now has a
+configured agent route and direct-use form on its installed machine.
 
 ### 6. Shrink browser views and complete operational checks
 

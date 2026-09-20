@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
+import { readBase64 } from './file-encoding.js';
 
 export function renderMusic(target, model, options = {}) {
   const bucket = options?.duration_kind === 'bucket';
@@ -40,15 +41,8 @@ export function renderMusic(target, model, options = {}) {
       if (hasDuration) request[bucket ? 'length_bucket' : 'duration'] = Number(duration.value);
       if (editableScore && score.value.trim()) request.abc = score.value.trim();
       if (referenceRequired) {
-        const file = reference.files?.[0];
-        if (!file) throw new Error('Select a reference WAV');
-        if (file.size > 25 * 1024 * 1024) throw new Error('Reference WAV exceeds 25 MiB');
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        const chunks = [];
-        for (let offset = 0; offset < bytes.length; offset += 32768) {
-          chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
-        }
-        request.reference_audio_base64 = btoa(chunks.join(''));
+        request.reference_audio_base64 = await readBase64(
+          reference.files?.[0], 25 * 1024 * 1024, 'reference WAV');
       }
       if (seed.value !== '') request.seed = Number(seed.value);
       const response = await api.music(model, request);

@@ -121,6 +121,8 @@ export const api = {
     { model, messages, stream: false }),
   music: (model, settings) => request('POST', '/v1/audio/music/generations',
     { model, ...settings }),
+  video: (model, settings) => request('POST', '/v1/videos/generations',
+    { model, ...settings }),
   speech: (model, settings) => request('POST', '/v1/audio/speech/generations',
     { model, ...settings }),
   analyzeFile: (path, model, file, fields = {}) => {

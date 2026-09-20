@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from ai_lab.music.heartmula_backend import HeartMulaBackend
-from ai_lab.music.http_host import serve
+from ai_lab.media.http_host import serve
 
 
 def main() -> None:
