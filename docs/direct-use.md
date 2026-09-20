@@ -16,6 +16,7 @@ working engine before it can be used.
 | Transcript alignment | Upload audio and transcript, inspect word timestamps | `/v1/audio/alignments` through the gateway |
 | OCR | Upload an image and read recognized text | `/v1/images/ocr` |
 | Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
+| Music (YuE2 on Linux) | Music form with required lyrics, editable ABC score, player and WAV/ABC download | `/v1/audio/music/generations` through the gateway |
 | Music (HeartMuLa on Linux) | Music form with required lyrics, player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Music (Khala on macOS) | Music form with length bucket, player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Speech (Qwen3-TTS VoiceDesign/CustomVoice, Kokoro, VoxCPM, Higgs on Linux) | Speak form with engine-specific controls, player and WAV download | `/v1/audio/speech/generations` through the gateway |
@@ -40,7 +41,7 @@ offers a full Gradio interface for music experiments and a separate REST API.
 web interface and documents an inference path through vLLM-Omni. These are
 viable direct experimentation surfaces for the corresponding models, but a
 standalone server would compete with AI-Lab for accelerator memory. AI-Lab
-provides controlled ACE-Step, HeartMuLa, Khala, Qwen3-TTS, Kokoro, VoxCPM and Higgs adapters for configured checkpoints
+provides controlled ACE-Step, HeartMuLa, YuE2, Khala, Qwen3-TTS, Kokoro, VoxCPM and Higgs adapters for configured checkpoints
 on Linux and macOS. Browser and agent requests use the same gateway lease,
 held until the WAV is returned. Add or replace a checkpoint in the private
 configuration; the adapter reads its mode from that configuration, not its
@@ -50,6 +51,11 @@ VoxCPM supports voice descriptions in the Speak form. Reference-audio cloning
 still needs an upload field and request contract; it is not offered by this form.
 Higgs supports inline style controls in the speech text; its installed
 SGLang-Omni worker is loaded and stopped with the AI-Lab instance.
+YuE2 returns an ABC composition alongside its audio. The Music form lets you edit
+that score and regenerate; it reports when the model marks a song as truncated.
+YuE2 determines song length from the composition, so its form has no duration
+control. [YuE2 generation documentation](https://github.com/multimodal-art-projection/YuE/blob/main/docs/generation.md)
+describes the supported score-editing workflow.
 HeartMuLa requires lyrics; the Music form marks that field as required when this
 engine is selected. Its installed checkpoint and supporting codec/tokenizer are
 selected through private configuration.

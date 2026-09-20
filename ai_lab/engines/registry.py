@@ -31,6 +31,7 @@ from .qwenalign import QwenAlignEngine
 from .khala import KhalaEngine
 from .higgs import HiggsEngine
 from .heartmula import HeartMulaEngine
+from .yue2 import Yue2Engine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -76,6 +77,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         KhalaEngine.id: KhalaEngine(**settings.get(KhalaEngine.id, {})),
         HiggsEngine.id: HiggsEngine(**settings.get(HiggsEngine.id, {})),
         HeartMulaEngine.id: HeartMulaEngine(**settings.get(HeartMulaEngine.id, {})),
+        Yue2Engine.id: Yue2Engine(**settings.get(Yue2Engine.id, {})),
     }
 
 

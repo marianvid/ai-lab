@@ -86,6 +86,34 @@ describe('direct model use', () => {
     assert.match(lyrics.placeholder, /required/);
   });
 
+  it('edits a YuE2 score and does not send an unsupported duration', async () => {
+    const context = installDom({
+      'POST /v1/audio/music/generations': {
+        seed: 42, score_abc: 'X:1\nT:New song\n',
+        data: [{ b64_wav: 'UklGRg==' }],
+      },
+    });
+    renderMusic(context.view, 'song-checkpoint', {
+      lyrics_required: true, duration_kind: 'none', editable_score: true,
+    });
+    context.view.querySelector('textarea[aria-label="Music description"]').value =
+      'Soul piano';
+    context.view.querySelector('textarea[aria-label="Lyrics"]').value =
+      '[Verse] Hello';
+    const score = context.view.querySelector('textarea[aria-label="Editable ABC score"]');
+    score.value = 'X:1\nT:My edit\n';
+    context.view.querySelector('form').dispatchEvent(new context.window.Event(
+      'submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const call = context.calls.find((item) => item.path ===
+      '/v1/audio/music/generations');
+    const body = JSON.parse(call.body);
+    assert.equal(body.abc, 'X:1\nT:My edit');
+    assert.equal('duration' in body, false);
+    assert.equal(score.value, 'X:1\nT:New song\n');
+    assert.match(context.view.textContent, /Download ABC score/);
+  });
+
   it('synthesizes speech and shows a WAV player', async () => {
     const context = installDom({
       'POST /v1/audio/speech/generations': {

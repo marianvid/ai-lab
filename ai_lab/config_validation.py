@@ -10,7 +10,7 @@ from .types import Task
 MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "kokoro": "model_options", "voxcpm": "model_options",
                     "khala": "model_options", "higgs": "model_options",
-                    "heartmula": "model_options"}
+                    "heartmula": "model_options", "yue2": "model_options"}
 
 
 def validate_configuration(config: Config, engine_ids: set[str],
@@ -95,6 +95,15 @@ def validate_configuration(config: Config, engine_ids: set[str],
                     type(options.get("memory_reservation_mb")) in (int, float) and
                     options["memory_reservation_mb"] > 0):
                     errors.append(f"{item.id}: HeartMuLa settings are invalid")
+            elif item.engine == "yue2":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    options.get("cot") in {"full", "melody"} and
+                    type(options.get("memory_budget_gib")) in (int, float) and
+                    4 <= options["memory_budget_gib"] <= 64 and
+                    type(options.get("memory_reservation_mb")) in (int, float) and
+                    options["memory_reservation_mb"] > 0):
+                    errors.append(f"{item.id}: YuE2 settings are invalid")
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")

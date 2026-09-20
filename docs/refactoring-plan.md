@@ -144,6 +144,13 @@ contract as ACE-Step and Khala. The common HTTP host is shared by the Khala
 and HeartMuLa workers. A lyric-conditioned 20.08-second WAV at 48 kHz was
 checked through the Linux gateway. The checkpoint, bundle layout, sampling
 controls and memory reservation are configured privately.
+YuE2 now has an isolated Linux music adapter and an editable ABC score in the
+common music response. Its direct form omits duration because the installed
+runtime derives length from the composition. A gateway run returned a 92.08-second
+48 kHz PCM16 WAV and a 977-character ABC score; the runtime reported that
+the result reached its generation limit, which the browser now surfaces.
+An edited ABC was submitted through the same gateway and produced a second
+91.44-second WAV, confirming the composition editing path.
 Higgs TTS now uses the installed SGLang-Omni worker behind the common speech
 contract on Linux; a 24 kHz WAV was checked through the gateway. Its measured
 GPU requirement is reserved in private configuration. Near-full-card requests
