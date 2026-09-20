@@ -196,6 +196,10 @@ deployment, and record the exact public/private commits that were verified
 together. Gate: no private values in public diff, both repositories clean,
 Mac and Linux smoke checks passed, and rollback instructions tested.
 
+Settings, Library and Models pages now compose focused ES modules for engine
+status, paths, installed models, remote discovery, model rows, progress and
+adding a model. CI runs Python and browser tests and checks wheel contents.
+
 Runtime progress and operation records now live in `runtime_state.py`; log
 diagnosis lives in `runtime_diagnostics.py`. The runtime coordinator now
 focuses on process transitions and host supervision.

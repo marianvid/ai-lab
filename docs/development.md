@@ -12,6 +12,7 @@ ai_lab/audio/           Small HTTP adapters launched inside speech runtimes
 ai_lab/downloads/       Hugging Face browsing and whole-set transfers
 ai_lab/api/             HTTP routing and the progress event stream
 ai_lab/web/             Browser interface, native ES modules, no build step
+ai_lab/web/js/views/    Page composition and focused controls for Settings, Library, Models
 ai_lab/gateway.py       One address for an agent: routing by model name, and swapping
 ai_lab/scheduler.py     Who gets the card next: the queue, the places, the swap
 ai_lab/lastloaded.py    What was on the card, so a restart can put it back
@@ -67,9 +68,15 @@ Inference runtimes have their own environments and are not project dependencies.
 
 ```bash
 python3 -m unittest discover -t . -s tests
+npm ci && npm test
+python3 -m pip wheel --no-deps --wheel-dir dist .
+python3 scripts/check-wheel.py dist/ai_lab-*.whl
 python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
+
+CI repeats the Python and browser tests, builds a wheel, and checks that it includes
+all application files without private `opts` content.
 
 The tests need neither a GPU nor a network: the host and the engine are passed
 in, so a fake stands in for both, and model directories are built from empty
