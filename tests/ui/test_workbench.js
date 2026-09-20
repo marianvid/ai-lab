@@ -121,4 +121,24 @@ describe('direct model use', () => {
     assert.equal(call.body.get('file').name, 'sample.wav');
     assert.match(context.view.textContent, /Test/);
   });
+
+  it('sends a transcript and audio file for alignment', async () => {
+    const context = installDom({ 'POST /v1/audio/alignments': {
+      words: [{ text: 'Hello', start: 0.1, end: 0.5 }],
+    } });
+    global.FormData = context.window.FormData;
+    renderFileTask(context.view, 'aligner', 'alignment');
+    const file = context.view.querySelector('input[type="file"]');
+    Object.defineProperty(file, 'files', { value: [new context.window.File(
+      ['audio'], 'sample.wav', { type: 'audio/wav' })] });
+    context.view.querySelector('textarea[aria-label="Transcript"]').value = 'Hello';
+    context.view.querySelector('form').dispatchEvent(new context.window.Event(
+      'submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const call = context.calls.find((item) => item.path === '/v1/audio/alignments');
+    assert.equal(call.body.get('model'), 'aligner');
+    assert.equal(call.body.get('text'), 'Hello');
+    assert.equal(call.body.get('language'), 'English');
+    assert.match(context.view.textContent, /0.5/);
+  });
 });

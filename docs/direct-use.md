@@ -13,6 +13,7 @@ working engine before it can be used.
 | Image generation/editing | Create/Edit with a named ComfyUI profile | AI-Lab image jobs |
 | Transcription | Upload audio and read text | `/v1/audio/transcriptions` |
 | VAD/diarization | Upload audio and inspect segments/speakers | Task-specific audio routes |
+| Transcript alignment | Upload audio and transcript, inspect word timestamps | `/v1/audio/alignments` through the gateway |
 | OCR | Upload an image and read recognized text | `/v1/images/ocr` |
 | Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
 | Speech (Qwen3-TTS VoiceDesign/CustomVoice, Kokoro, VoxCPM) | Speak form with engine-specific controls, player and WAV download | `/v1/audio/speech/generations` through the gateway |

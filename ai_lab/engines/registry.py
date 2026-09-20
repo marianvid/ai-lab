@@ -27,6 +27,7 @@ from .acestep import AceStepEngine
 from .qwentts import QwenTtsEngine
 from .kokoro import KokoroEngine
 from .voxcpm import VoxCpmEngine
+from .qwenalign import QwenAlignEngine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -68,6 +69,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         QwenTtsEngine.id: QwenTtsEngine(**settings.get(QwenTtsEngine.id, {})),
         KokoroEngine.id: KokoroEngine(**settings.get(KokoroEngine.id, {})),
         VoxCpmEngine.id: VoxCpmEngine(**settings.get(VoxCpmEngine.id, {})),
+        QwenAlignEngine.id: QwenAlignEngine(**settings.get(QwenAlignEngine.id, {})),
     }
 
 

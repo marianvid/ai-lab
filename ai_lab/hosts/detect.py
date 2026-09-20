@@ -34,6 +34,7 @@ def current_host(engines: dict | None = None) -> Host:
             qwentts_binary=settings.get("qwentts", {}).get("binary"),
             kokoro_binary=settings.get("kokoro", {}).get("binary"),
             voxcpm_binary=settings.get("voxcpm", {}).get("binary"),
+            qwenalign_binary=settings.get("qwenalign", {}).get("binary"),
         )
     from .linux import LinuxHost
 

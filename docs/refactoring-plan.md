@@ -132,6 +132,8 @@ Kokoro uses the same speech contract on macOS with configurable checkpoint,
 language and voice; two voices were tested through the gateway.
 VoxCPM uses that contract for direct multilingual speech and voice descriptions
 on macOS; reference-audio cloning remains a separate workflow to implement.
+Qwen forced alignment now accepts an audio file and transcript through the
+gateway and Workbench on macOS; word timestamps were checked on generated audio.
 The gateway lease protects the whole generation. Checkpoint names, paths and
 speech modes come from private configuration; switching model versions does
 not require editing the adapter. Durable media jobs, cancellation, retention

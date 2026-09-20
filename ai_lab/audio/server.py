@@ -11,12 +11,18 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import sys
 import tempfile
 from email import policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+
+# This file is launched directly by runtime-specific Python environments.
+# Give those environments access to the small adapter beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from ai_lab.audio.aligner import QwenAlignBackend
 
 
 def _torch_device(torch):
@@ -244,6 +250,11 @@ class Handler(BaseHTTPRequestHandler):
                     result = {"segments": segments,
                               "speakers": sorted({item["speaker"]
                                                   for item in segments})}
+                elif isinstance(self.backend, QwenAlignBackend):
+                    text = self._field(fields, "text", "")
+                    language = self._field(fields, "language", "English")
+                    result = {"words": self.backend.align(
+                        temporary.name, text, language)}
                 else:
                     threshold = self._number(fields, "threshold", 0.5, float)
                     silence = self._number(fields, "min_silence_duration_ms", 100, int)
@@ -273,6 +284,11 @@ class Handler(BaseHTTPRequestHandler):
         return fields
 
     @staticmethod
+    def _field(fields, name, default):
+        part = fields.get(name)
+        return part[1].decode("utf-8") if part is not None else default
+
+    @staticmethod
     def _number(fields, name, default, converter):
         part = fields.get(name)
         return converter(part[1].decode("utf-8")) if part is not None else default
@@ -289,7 +305,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend",
-                        choices=("nemo", "mlx-whisper", "sortformer", "pyannote", "silero"),
+                        choices=("nemo", "mlx-whisper", "sortformer", "pyannote", "silero", "qwen-align"),
                         required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--name", required=True)
@@ -300,7 +316,8 @@ def main() -> None:
     args = parser.parse_args()
     backends = {"nemo": NemoBackend, "mlx-whisper": MlxWhisperBackend,
                 "sortformer": SortformerBackend,
-                "pyannote": PyannoteBackend, "silero": SileroBackend}
+                "pyannote": PyannoteBackend, "silero": SileroBackend,
+                "qwen-align": QwenAlignBackend}
     backend = backends[args.backend]
     Handler.backend = backend(args.model, args.precision)
     Handler.model_name = args.name

@@ -761,7 +761,7 @@ describe('the buttons line up down the page', () => {
     const cases = [
       ['image-generation', 'Create'], ['image-edit', 'Edit'],
       ['transcription', 'Transcribe'], ['vad', 'Speech'],
-      ['diarization', 'Speakers'], ['ocr', 'Read'],
+      ['diarization', 'Speakers'], ['alignment', 'Align'], ['ocr', 'Read'],
     ];
     for (const [task, label] of cases) {
       const { view } = await renderPage({ '/api/instances': [
