@@ -74,6 +74,7 @@ class Operations:
         # and nothing is remembered.
         self.last_loaded = last_loaded
         self.image_jobs = None
+        self.media_jobs = None
         self.model_downloads = ModelDownloadService(
             store, downloads, huggingface, host, self.engines)
         self.model_storage = ModelStorageService(

@@ -126,6 +126,12 @@
       }
     }
   },
+  "media": {
+    "result_ttl_s": 86400,
+    "max_queue": 32,
+    "max_input_bytes": 41943040,
+    "max_result_bytes": 268435456
+  },
   "images": {
     "workflow_root": "/etc/ai-lab/image-workflows",
     "state_dir": "/var/lib/ai-lab/image-jobs",

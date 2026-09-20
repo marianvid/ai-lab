@@ -178,9 +178,12 @@ GPU requirement is reserved in private configuration. Near-full-card requests
 evict all resident models to avoid trusting approximate memory estimates.
 The gateway lease protects the whole generation. Checkpoint names, paths and
 speech modes come from private configuration; switching model versions does
-not require editing the adapter. Durable media jobs, cancellation, retention
-still need work; every independent model currently in Library now has a
-configured agent route and direct-use form on its installed machine.
+not require editing the adapter. Durable music, speech and video jobs now have submit, inspect, cancel and
+retention contracts. The Workbench offers background generation and saved
+results while direct agent routes remain synchronous. ComfyUI jobs can be
+interrupted; other engines finish their current request before releasing the
+model lease. Every independent model currently in Library has a configured
+agent route and direct-use form on its installed machine.
 
 ### 6. Shrink browser views and complete operational checks
 

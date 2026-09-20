@@ -134,6 +134,11 @@ export const api = {
     });
     return requestForm('POST', path, body);
   },
+  mediaJobs: () => request('GET', '/api/media-jobs'),
+  mediaJob: (id) => request('GET', `/api/media-jobs/${encodeURIComponent(id)}`),
+  createMediaJob: (model, task, input) => request('POST', '/api/media-jobs',
+    { model, task, input }),
+  cancelMediaJob: (id) => request('DELETE', `/api/media-jobs/${encodeURIComponent(id)}`),
   imageJobs: () => request('GET', '/api/image-jobs'),
   imageJob: (id) => request('GET', `/api/image-jobs/${encodeURIComponent(id)}`),
   generateImage: (payload) => request('POST', '/v1/images/generations', payload),

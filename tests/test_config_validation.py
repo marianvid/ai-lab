@@ -16,6 +16,18 @@ class ConfigurationValidationTests(unittest.TestCase):
             instances=[Instance('picture', 'comfyui', 'images/picture', 8100)],
         )
 
+    def test_invalid_media_retention_fails_at_startup(self):
+        config = self.base()
+        config.media = {"result_ttl_s": -1}
+        with self.assertRaisesRegex(ValueError, "Media result_ttl_s"):
+            validate_configuration(config, {'comfyui'})
+
+    def test_unknown_media_setting_is_refused(self):
+        config = self.base()
+        config.media = {"retention_days": 1}
+        with self.assertRaisesRegex(ValueError, "Unknown media settings"):
+            validate_configuration(config, {'comfyui'})
+
     def test_valid_image_profile(self):
         config = self.base()
         with TemporaryDirectory() as root:

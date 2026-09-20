@@ -137,6 +137,8 @@ class Config:
     # Named, operator-owned image workflows and their durable job state.
     # Public callers select a profile; they never submit a ComfyUI graph.
     images: dict = field(default_factory=dict)
+    # Durable music, speech and video jobs: queue, input, output and retention.
+    media: dict = field(default_factory=dict)
     # Settings for fetching models. Today the only one is `bundles`: models
     # assembled from named upstream files rather than downloaded as a whole
     # directory. See `downloads/bundles.py` for why they have to be declared.
@@ -229,6 +231,7 @@ class ConfigStore:
             memory=raw.get("memory", {}),
             storage=raw.get("storage", {}),
             images=raw.get("images", {}),
+            media=raw.get("media", {}),
             downloads=raw.get("downloads", {}),
             model_notes=raw.get("model_notes", {}),
             model_roots=roots,

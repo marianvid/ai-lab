@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
 import { readBase64 } from './file-encoding.js';
+import { runMediaJob, showMediaHistory } from './media-jobs.js';
 
 export function renderMusic(target, model, options = {}) {
   const bucket = options?.duration_kind === 'bucket';
@@ -29,9 +30,32 @@ export function renderMusic(target, model, options = {}) {
   const status = element('p', { role: 'status', class: 'muted' });
   const result = element('section', { class: 'panel stack', hidden: true });
   const submit = element('button', { type: 'submit', text: 'Generate music' });
+  const background = element('button', { type: 'submit', text: 'Generate in background' });
+  const cancel = element('button', { type: 'button', text: 'Cancel job', hidden: true });
+  const history = element('section', { class: 'panel stack' });
+  const display = (response) => {
+    const audio = response.data?.[0]?.b64_wav;
+    if (!audio) throw new Error('The model returned no audio');
+    const src = `data:audio/wav;base64,${audio}`;
+    result.hidden = false;
+    result.replaceChildren(
+      element('h2', { text: 'Generated audio' }),
+      element('audio', { controls: 'controls', src }),
+      element('a', { href: src, download: `${model}-${response.seed}.wav`,
+        text: 'Download WAV' }));
+    if (editableScore && response.score_abc) {
+      score.value = response.score_abc;
+      result.append(element('a', {
+        href: `data:text/plain;charset=utf-8,${encodeURIComponent(response.score_abc)}`,
+        download: `${model}-${response.seed}.abc`, text: 'Download ABC score' }));
+    }
+    status.textContent = response.truncated ? 'The model reached its generation limit; review the ending.' : '';
+  };
+  let refreshHistory = () => {};
   const form = element('form', { class: 'panel stack', onsubmit: async (event) => {
     event.preventDefault();
     submit.disabled = true;
+    background.disabled = true;
     status.textContent = 'Generating music…';
     try {
       const request = {
@@ -45,25 +69,13 @@ export function renderMusic(target, model, options = {}) {
           reference.files?.[0], 25 * 1024 * 1024, 'reference WAV');
       }
       if (seed.value !== '') request.seed = Number(seed.value);
-      const response = await api.music(model, request);
-      const audio = response.data?.[0]?.b64_wav;
-      if (!audio) throw new Error('The model returned no audio');
-      const src = `data:audio/wav;base64,${audio}`;
-      result.hidden = false;
-      result.replaceChildren(
-        element('h2', { text: 'Generated audio' }),
-        element('audio', { controls: 'controls', src }),
-        element('a', { href: src, download: `${model}-${response.seed}.wav`,
-          text: 'Download WAV' }));
-      if (editableScore && response.score_abc) {
-        score.value = response.score_abc;
-        result.append(element('a', {
-          href: `data:text/plain;charset=utf-8,${encodeURIComponent(response.score_abc)}`,
-          download: `${model}-${response.seed}.abc`, text: 'Download ABC score' }));
-      }
-      status.textContent = response.truncated ? 'The model reached its generation limit; review the ending.' : '';
+      const response = event.submitter === background
+        ? await runMediaJob(model, 'music-generation', request, status, cancel)
+        : await api.music(model, request);
+      display(response);
+      if (event.submitter === background) refreshHistory();
     } catch (error) { status.textContent = error.message; }
-    finally { submit.disabled = false; }
+    finally { submit.disabled = false; background.disabled = false; }
   }}, [prompt, lyrics,
     ...(hasDuration ? [element('label', {}, [element('span', { text: bucket
       ? 'Length bucket (0 is shortest; actual seconds vary)' : 'Duration (seconds)' }), duration])] : []),
@@ -72,6 +84,7 @@ export function renderMusic(target, model, options = {}) {
     ...(editableScore ? [element('label', {}, [
       element('span', { text: 'ABC score (optional; edit and regenerate)' }), score])] : []),
     element('label', {}, [element('span', { text: 'Seed' }), seed]),
-    submit, status]);
-  target.replaceChildren(element('h1', { text: `Music · ${model}` }), form, result);
+    submit, background, cancel, status]);
+  target.replaceChildren(element('h1', { text: `Music · ${model}` }), form, result, history);
+  refreshHistory = showMediaHistory(history, model, 'music-generation', display, status);
 }

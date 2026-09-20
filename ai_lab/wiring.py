@@ -24,6 +24,7 @@ from .gateway import (BETWEEN_BYTES_S, FIRST_BYTE_S, MAX_WAITING,
 from .hosts import current_host
 from .installs import Installs
 from .images.jobs import ImageJobs
+from .media.jobs import MediaJobs
 from .lastloaded import LastLoaded
 from .operations import Operations
 from .runtime import Runtime
@@ -103,4 +104,6 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
         max_upload_dimension=int(front_door.get("max_upload_dimension", 0)))
     operations.image_jobs = ImageJobs(
         model_gateway, store.load().images, host.state_dir(), bus)
+    operations.media_jobs = MediaJobs(
+        model_gateway, host.state_dir(), bus, settings=config.media)
     return operations, bus, store, model_gateway

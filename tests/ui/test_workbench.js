@@ -57,6 +57,37 @@ describe('direct model use', () => {
       /^data:audio\/wav;base64,/);
   });
 
+  it('runs music in a durable job and can reopen its result', async () => {
+    const context = installDom({
+      'GET /api/media-jobs': [{ id: 'job-1', model: 'music-xl',
+        task: 'music-generation', status: 'succeeded' }],
+      'POST /api/media-jobs': { id: 'job-1', status: 'queued' },
+      'GET /api/media-jobs/job-1': { id: 'job-1', status: 'succeeded',
+        result: { seed: 7, data: [{ b64_wav: 'UklGRg==' }] } },
+    });
+    renderMusic(context.view, 'music-xl');
+    context.view.querySelector('textarea[aria-label="Music description"]').value =
+      'Soft strings';
+    const background = [...context.view.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate in background');
+    const event = new context.window.Event('submit', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'submitter', { value: background });
+    context.view.querySelector('form').dispatchEvent(event);
+    await settle();
+    const call = context.calls.find((item) => item.path === '/api/media-jobs'
+      && item.method === 'POST');
+    assert.equal(JSON.parse(call.body).task, 'music-generation');
+    assert.equal(JSON.parse(call.body).input.prompt, 'Soft strings');
+    assert.match(context.view.querySelector('audio').getAttribute('src'),
+      /^data:audio\/wav;base64,/);
+    const open = [...context.view.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Open result');
+    open.click();
+    await settle();
+    assert.equal(context.calls.filter((item) => item.path ===
+      '/api/media-jobs/job-1').length, 2);
+  });
+
   it('shows Khala length buckets instead of seconds', async () => {
     const context = installDom({
       'POST /v1/audio/music/generations': {
