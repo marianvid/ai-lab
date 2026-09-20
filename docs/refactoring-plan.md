@@ -124,6 +124,11 @@ Music 3 without forcing audio into the image response schema. Gate: fake
 engine lifecycle tests, result persistence/cancellation tests and one real
 generation on each platform, with the generated files kept private.
 
+ACE-Step 1.5 XL Turbo now has a synchronous AI-Lab music endpoint and browser
+player on Linux and macOS, tested with real eight-second WAV output on both.
+The gateway lease protects the whole generation. This is a first slice; durable
+music jobs, cancellation, retention and other music/TTS engines remain.
+
 ### 6. Shrink browser views and complete operational checks
 
 Extract controls by behavior (model picker, settings editor, job list, result

@@ -23,6 +23,7 @@ from .nemo import NemoEngine
 from .onnx import OnnxEngine
 from .paddleocr import PaddleOcrEngine
 from .comfyui import ComfyUiEngine
+from .acestep import AceStepEngine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -60,6 +61,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
             server=settings.get(ComfyUiEngine.id, {}).get("server"),
             comfyui=settings.get(ComfyUiEngine.id, {}).get("comfyui"),
             model_paths=settings.get(ComfyUiEngine.id, {}).get("model_paths", [])),
+        AceStepEngine.id: AceStepEngine(**settings.get(AceStepEngine.id, {})),
     }
 
 
@@ -118,6 +120,6 @@ def _reason(engine_id: str, capabilities: Capabilities) -> str:
     if engine_id == "nemo" and capabilities.accelerator_kind != "cuda":
         return "Requires an NVIDIA GPU"
     if engine_id in ("vllm", "nemo", "mlxwhisper", "onnx", "pyannote",
-                     "paddleocr", "comfyui"):
+                     "paddleocr", "comfyui", "acestep"):
         return "Not installed"
     return "Binary not found"

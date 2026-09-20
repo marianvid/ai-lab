@@ -189,6 +189,24 @@ describe('the Models page', () => {
                  '/workbench.html?model=qwen-coder');
   });
 
+  it('opens the music workspace for a configured ACE-Step model', async () => {
+    const music = { ...INSTANCE, id: 'music-ace-xl', engine: 'acestep',
+      model_id: 'audio-music/ace-step-1.5-xl-turbo', task: 'music-generation',
+      running: false, ready: false, web_ui: false, params: {} };
+    const model = { ...MODEL, id: music.model_id, name: 'ace-step-1.5-xl-turbo',
+      format: 'safetensors', task: 'music-generation' };
+    const engine = { ...ENGINE, id: 'acestep', formats: ['safetensors'],
+      tasks: ['music-generation'], params: [], supported_model_ids: [model.id] };
+    const { view } = await renderPage({
+      '/api/instances': [music], '/api/models': [model],
+      '/api/settings': { title: 'AI-Lab', engines: [engine], repositories: [],
+                         accelerator: {}, host: {} },
+    });
+    const link = view.querySelector('.chat-link');
+    assert.equal(link.textContent, 'Music');
+    assert.equal(link.getAttribute('href'), '/workbench.html?model=music-ace-xl');
+  });
+
   it('builds the chat address from the page, not from the server', async () => {
     // The manager may be reached by name, by address or through a tunnel; the
     // engine is on the same host under a different port.

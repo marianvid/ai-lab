@@ -30,6 +30,7 @@ def current_host(engines: dict | None = None) -> Host:
             paddleocr_binary=settings.get("paddleocr", {}).get("binary"),
             comfyui_binary=settings.get("comfyui", {}).get("binary"),
             comfyui_main=settings.get("comfyui", {}).get("comfyui"),
+            acestep_binary=settings.get("acestep", {}).get("binary"),
         )
     from .linux import LinuxHost
 
@@ -40,4 +41,5 @@ def current_host(engines: dict | None = None) -> Host:
         pyannote_binary=settings.get("pyannote", {}).get("binary"),
         paddleocr_binary=settings.get("paddleocr", {}).get("binary"),
         comfyui_binary=settings.get("comfyui", {}).get("binary"),
+        acestep_binary=settings.get("acestep", {}).get("binary"),
     )

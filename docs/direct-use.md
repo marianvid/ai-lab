@@ -14,7 +14,8 @@ working engine before it can be used.
 | Transcription | Upload audio and read text | `/v1/audio/transcriptions` |
 | VAD/diarization | Upload audio and inspect segments/speakers | Task-specific audio routes |
 | OCR | Upload an image and read recognized text | `/v1/images/ocr` |
-| TTS/music | No AI-Lab engine and job contract yet | Future work |
+| Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
+| Other music and TTS | No AI-Lab engine and job contract yet | Future work |
 
 The new chat workbench is deliberately small: it keeps the current
 conversation in the page and sends one request at a time. llama.cpp's own UI
@@ -34,9 +35,11 @@ offers a full Gradio interface for music experiments and a separate REST API.
 [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) provides the `qwen-tts-demo`
 web interface and documents an inference path through vLLM-Omni. These are
 viable direct experimentation surfaces for the corresponding models, but a
-standalone server would compete with AI-Lab for accelerator memory. Integrating
-one behind AI-Lab requires a model entry, lifecycle adapter, result contract
-and resource admission checks. A library label alone is insufficient. The direct UI and those
+standalone server would compete with AI-Lab for accelerator memory. AI-Lab now provides one controlled ACE-Step adapter for the selected XL Turbo
+model on Linux and macOS. It serves both the browser music form and an agent
+request, with AI-Lab holding a model lease until the WAV is returned. The
+remaining models still require their own lifecycle adapter, result contract
+and resource checks. A library label alone is insufficient. The direct UI and those
 contracts should be designed before the large gateway and operations classes
 are split.
 

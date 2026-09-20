@@ -103,6 +103,7 @@ TRANSCRIPTION_PATHS = ("/v1/audio/transcriptions", "/v1/chat/completions")
 VAD_PATHS = ("/v1/audio/speech-segments",)
 DIARIZATION_PATHS = ("/v1/audio/diarizations",)
 OCR_PATHS = ("/v1/images/ocr",)
+MUSIC_PATHS = ("/v1/audio/music/generations",)
 
 # Image generation and editing are separate public request shapes. ComfyUI
 # serves both; the selected workflow profile determines the operation.

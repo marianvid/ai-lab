@@ -25,6 +25,9 @@ let redraw = () => {};
 // have no task field. They are text models: that was the only kind there was.
 const taskOf = (model) => model?.task || 'text-generation';
 const tasksOf = (engine) => engine?.tasks || ['text-generation'];
+const engineCanUse = (engine, model) =>
+  engine.formats.includes(model.format) && tasksOf(engine).includes(taskOf(model))
+  && (!engine.supported_model_ids || engine.supported_model_ids.includes(model.id));
 
 // -- the progress bar -------------------------------------------------------
 
@@ -265,8 +268,7 @@ function card(instance, models, engines) {
   if (instance.running && latest) paint(bar, latest); else paintFromState(bar, instance);
 
   const picker = modelPicker(models
-    .filter((item) => !engine || (engine.formats.includes(item.format)
-      && tasksOf(engine).includes(taskOf(item))))
+    .filter((item) => !engine || engineCanUse(engine, item))
     .map((item) => ({ id: item.id,
       label: `${item.name} · ${bytes(item.size_bytes)}` })),
     instance.model_id, { 'data-model': instance.id });
@@ -436,8 +438,7 @@ function useLink(instance) {
 function addCard(form) {
   const usable = form.models.filter((model) =>
     form.engines.some((engine) => engine.available
-      && engine.formats.includes(model.format)
-      && tasksOf(engine).includes(taskOf(model))));
+      && engineCanUse(engine, model)));
 
   if (!usable.length) {
     return element('div', { class: 'card' }, [
@@ -463,8 +464,7 @@ function addCard(form) {
   const engineFor = (modelId) => {
     const model = usable.find((item) => item.id === modelId);
     return form.engines.find((engine) =>
-      engine.available && engine.formats.includes(model.format)
-        && tasksOf(engine).includes(taskOf(model)));
+      engine.available && engineCanUse(engine, model));
   };
 
   const specsFor = (modelId) => {

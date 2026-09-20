@@ -3,6 +3,7 @@ import { element } from '../format.js';
 import { onChange, startEventStream } from '../events.js';
 import { render as renderImages } from '../views/images.js';
 import { renderChat } from './chat.js';
+import { renderMusic } from './music.js';
 import { renderFileTask } from './file-task.js';
 import { TASK_ACTIONS } from './tasks.js';
 
@@ -42,6 +43,7 @@ export async function renderWorkbench() {
   document.getElementById('model-name').textContent = model;
   const surface = TASK_ACTIONS[task]?.surface;
   if (surface === 'chat') renderChat(target, model);
+  else if (surface === 'music') renderMusic(target, model);
   else if (surface === 'images') {
     await renderImages(target, model);
     watchImageJobs();

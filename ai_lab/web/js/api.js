@@ -119,6 +119,8 @@ export const api = {
   imageProfiles: () => request('GET', '/api/image-profiles'),
   chat: (model, messages) => request('POST', '/v1/chat/completions',
     { model, messages, stream: false }),
+  music: (model, settings) => request('POST', '/v1/audio/music/generations',
+    { model, ...settings }),
   analyzeFile: (path, model, file, fields = {}) => {
     const body = new FormData();
     body.append('model', model);

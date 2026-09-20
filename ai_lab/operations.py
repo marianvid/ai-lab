@@ -119,7 +119,8 @@ class Operations:
             formats = engine.formats()
             tasks = engine.tasks()
             models = [item for item in models
-                      if item.format in formats and item.task in tasks]
+                      if item.format in formats and item.task in tasks
+                      and (not hasattr(engine, "supports") or engine.supports(item))]
         rows = []
         for item in models:
             row = self._model(item)

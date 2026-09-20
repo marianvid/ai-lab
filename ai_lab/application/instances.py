@@ -245,11 +245,18 @@ class InstanceService:
         can be tuned with, and a free port.
         """
         capabilities = self.host.capabilities()
-        return {
-            "port": self.suggest_port(),
-            "engines": self.engines.describe(capabilities),
-            "models": self.models(),
-        }
+        models = self.models()
+        engines = self.engines.describe(capabilities)
+        for description in engines:
+            engine = self.engines.get(description["id"])
+            if hasattr(engine, "model_configs"):
+                description["supported_model_ids"] = [
+                    model["id"] for model in models
+                    if model["name"] in engine.model_configs
+                    and model["format"] in description["formats"]
+                    and model["task"] in description["tasks"]]
+        return {"port": self.suggest_port(), "engines": engines,
+                "models": models}
 
     def create_instance(self, payload: dict) -> dict:
         """Add an entry. The id is given rather than worked out.
@@ -262,6 +269,8 @@ class InstanceService:
         config = self.store.load()
         engine = self.engines.get(payload["engine"])
         model = self.catalog.find(config.repositories, payload["model_id"])
+        if hasattr(engine, "supports") and not engine.supports(model):
+            raise ValueError(f"{engine.display_name} is not configured for {model.name}")
         params = validate(engine.params(model.task), payload.get("params", {}))
         identifier = str(payload.get("id", "")).strip()
         if not INSTANCE_ID.match(identifier):
@@ -305,6 +314,8 @@ class InstanceService:
             engine = self.engines.get(instance.engine)
             target_model_id = str(changes.get("model_id", instance.model_id))
             model = self.catalog.find(config.repositories, target_model_id)
+            if hasattr(engine, "supports") and not engine.supports(model):
+                raise ValueError(f"{engine.display_name} is not configured for {model.name}")
             if "params" in changes:
                 instance.params = validate(engine.params(model.task), changes["params"])
             if "model_id" in changes:

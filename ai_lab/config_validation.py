@@ -33,6 +33,10 @@ def validate_configuration(config: Config, engine_ids: set[str],
         instance_ids.add(item.id)
         if item.engine not in engine_ids:
             errors.append(f"{item.id}: unknown engine {item.engine}")
+        if item.engine == "acestep":
+            configured = config.engines.get("acestep", {}).get("model_configs", {})
+            if item.model_id.rsplit("/", 1)[-1] not in configured:
+                errors.append(f"{item.id}: ACE-Step has no configured checkpoint")
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")
