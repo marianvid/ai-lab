@@ -130,6 +130,8 @@ Qwen3-TTS VoiceDesign and CustomVoice have a separate isolated engine, speech
 endpoint and browser player, each tested through the gateway on both machines.
 Kokoro uses the same speech contract on macOS with configurable checkpoint,
 language and voice; two voices were tested through the gateway.
+VoxCPM uses that contract for direct multilingual speech and voice descriptions
+on macOS; reference-audio cloning remains a separate workflow to implement.
 The gateway lease protects the whole generation. Checkpoint names, paths and
 speech modes come from private configuration; switching model versions does
 not require editing the adapter. Durable media jobs, cancellation, retention

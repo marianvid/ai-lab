@@ -8,7 +8,7 @@ from .config import Config
 from .types import Task
 
 MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
-                    "kokoro": "model_options"}
+                    "kokoro": "model_options", "voxcpm": "model_options"}
 
 
 def validate_configuration(config: Config, engine_ids: set[str],
@@ -49,6 +49,14 @@ def validate_configuration(config: Config, engine_ids: set[str],
                         not isinstance(options.get(key), str) or not options[key]
                         for key in required):
                     errors.append(f"{item.id}: Kokoro model options are incomplete")
+            elif item.engine == "voxcpm":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    type(options.get("cfg_value")) in (int, float) and
+                    0 < options["cfg_value"] <= 10 and
+                    type(options.get("inference_timesteps")) is int and
+                    1 <= options["inference_timesteps"] <= 100):
+                    errors.append(f"{item.id}: VoxCPM inference settings are invalid")
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")

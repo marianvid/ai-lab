@@ -33,6 +33,7 @@ def current_host(engines: dict | None = None) -> Host:
             acestep_binary=settings.get("acestep", {}).get("binary"),
             qwentts_binary=settings.get("qwentts", {}).get("binary"),
             kokoro_binary=settings.get("kokoro", {}).get("binary"),
+            voxcpm_binary=settings.get("voxcpm", {}).get("binary"),
         )
     from .linux import LinuxHost
 

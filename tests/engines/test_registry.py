@@ -17,7 +17,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(set(self.registry.known()),
                          {"llamacpp", "mlxwhisper", "vllm", "nemo", "onnx",
                           "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
-                          "kokoro"})
+                          "kokoro", "voxcpm"})
 
     def test_only_installed_engines_are_available(self):
         self.assertEqual(set(self.registry.available(capabilities())), {"llamacpp"})
@@ -47,6 +47,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(rows["acestep"]["tasks"], ["music-generation"])
         self.assertEqual(rows["qwentts"]["tasks"], ["speech-synthesis"])
         self.assertEqual(rows["kokoro"]["tasks"], ["speech-synthesis"])
+        self.assertEqual(rows["voxcpm"]["tasks"], ["speech-synthesis"])
         transcription = rows["vllm"]["task_params"]["transcription"]
         self.assertNotIn("context_size", {item["key"] for item in transcription})
 

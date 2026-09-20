@@ -26,6 +26,7 @@ from .comfyui import ComfyUiEngine
 from .acestep import AceStepEngine
 from .qwentts import QwenTtsEngine
 from .kokoro import KokoroEngine
+from .voxcpm import VoxCpmEngine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -66,6 +67,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         AceStepEngine.id: AceStepEngine(**settings.get(AceStepEngine.id, {})),
         QwenTtsEngine.id: QwenTtsEngine(**settings.get(QwenTtsEngine.id, {})),
         KokoroEngine.id: KokoroEngine(**settings.get(KokoroEngine.id, {})),
+        VoxCpmEngine.id: VoxCpmEngine(**settings.get(VoxCpmEngine.id, {})),
     }
 
 

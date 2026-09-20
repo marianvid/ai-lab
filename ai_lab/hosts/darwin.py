@@ -48,7 +48,8 @@ class DarwinHost:
                  comfyui_main: str | None = None,
                  acestep_binary: str | None = None,
                  qwentts_binary: str | None = None,
-                 kokoro_binary: str | None = None) -> None:
+                 kokoro_binary: str | None = None,
+                 voxcpm_binary: str | None = None) -> None:
         self.engine_binaries = {
             "llamacpp": llamacpp_binary,
             "mlxwhisper": mlxwhisper_binary,
@@ -59,6 +60,7 @@ class DarwinHost:
             "acestep": acestep_binary,
             "qwentts": qwentts_binary,
             "kokoro": kokoro_binary,
+            "voxcpm": voxcpm_binary,
         }
         self.comfyui_main = comfyui_main
         self._processes: dict[str, subprocess.Popen] = {}
@@ -82,7 +84,7 @@ class DarwinHost:
         """Portable and Metal-native engines; CUDA-only engines are absent."""
         supported = frozenset({"llamacpp", "mlxwhisper", "onnx", "pyannote",
                                "paddleocr", "comfyui", "acestep", "qwentts",
-                               "kokoro"})
+                               "kokoro", "voxcpm"})
         engines = {key for key, binary in self.engine_binaries.items()
                    if self._installed(binary)}
         if "llamacpp" not in engines and which("llama-server"):
