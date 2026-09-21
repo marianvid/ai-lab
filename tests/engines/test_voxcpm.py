@@ -27,6 +27,7 @@ class VoxCpmEngineTests(unittest.TestCase):
         self.assertEqual(plan.argv[plan.argv.index('--cfg-value') + 1], '2.4')
         self.assertEqual(plan.argv[plan.argv.index('--inference-timesteps') + 1],
                          '12')
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18118')
         self.assertEqual(self.engine.api_paths(),
                          ('/v1/audio/speech/generations',))
         self.assertEqual(self.engine.needs_mb(self.model, {}, 32768), 6144)

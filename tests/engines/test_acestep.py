@@ -24,6 +24,7 @@ class AceStepEngineTests(unittest.TestCase):
         self.assertEqual(plan.argv[plan.argv.index('--model-path') + 1],
                          self.model.entrypoint)
         self.assertEqual(plan.argv[-1], '8105')
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18105')
         self.assertEqual(self.engine.concurrency({}), 1)
         self.assertEqual(self.engine.api_paths(),
                          ('/v1/audio/music/generations',))

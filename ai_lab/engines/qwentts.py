@@ -52,6 +52,7 @@ class QwenTtsEngine:
         return LaunchPlan(argv=[self.binary, self.server, "--backend", "qwen",
                                 "--model-path", str(model_directory),
                                 "--mode", self.model_modes[model.name],
+                                "--ui-port", str(port + 10000),
                                 "--port", str(port)],
                           env={"PYTHONUNBUFFERED": "1",
                                "PYTHONPATH": str(Path(__file__).resolve().parents[2])})

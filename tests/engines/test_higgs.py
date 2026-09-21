@@ -28,6 +28,7 @@ class HiggsEngineTests(unittest.TestCase):
                                             entrypoint=str(checkpoint)), 8121, {})
             self.assertEqual(plan.argv[plan.argv.index('--model-path') + 1], root)
         self.assertEqual(plan.argv[plan.argv.index('--worker-port') + 1], '9000')
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18121')
         self.assertEqual(self.engine.needs_mb(self.model, {}, 32623), 30000)
         self.assertEqual(self.engine.api_paths(),
                          ('/v1/audio/speech/generations',))

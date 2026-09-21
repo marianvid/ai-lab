@@ -54,7 +54,7 @@ class HiggsEngine:
             "--model-path", str(model_dir),
             "--worker-port", str(options["worker_port"]),
             "--mem-fraction-static", str(options["mem_fraction_static"]),
-            "--port", str(port)],
+            "--port", str(port), "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 

@@ -53,13 +53,17 @@ class ComfyMusicEngine:
             argv.extend(["--model-path", str(model_dir / subdir)])
         return LaunchPlan(argv=argv, env={"PYTHONUNBUFFERED": "1",
                                           "HF_HUB_OFFLINE": "1",
-                                          "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
+                                          "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
+                          web_ui=True)
 
     def ready(self, port: int) -> bool:
         return http_ok(port)
 
     def concurrency(self, params: dict) -> int:
         return 1
+
+    def web_ui(self) -> str:
+        return "native"
 
     def needs_mb(self, model: ModelSet, params: dict,
                  card_total_mb: float) -> float:

@@ -50,7 +50,8 @@ class AceStepEngine:
         return LaunchPlan(argv=[
             self.binary, self.server, "--project-root", self.project_root,
             "--config-name", config_name, "--model-path", model.entrypoint,
-            "--output-root", self.output_root, "--port", str(port),
+            "--output-root", self.output_root, "--ui-port", str(port + 10000),
+            "--port", str(port),
         ], env={"PYTHONUNBUFFERED": "1"})
 
     def ready(self, port: int) -> bool:

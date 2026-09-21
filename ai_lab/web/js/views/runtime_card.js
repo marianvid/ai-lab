@@ -6,7 +6,6 @@ import { settingsForm } from '../form.js';
 import { bytes, element, seconds } from '../format.js';
 import { toggleLogs, watching } from '../logpane.js';
 import { modelPicker } from '../model-picker.js';
-import { TASK_ACTIONS } from '../workbench/tasks.js';
 import { taskOf, engineCanUse } from './runtime_model.js';
 
 export function createCard({ progress, open, paint, paintFromState, run, removeInstance, redraw }) {
@@ -271,27 +270,37 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     ].filter(Boolean));
   }
 
-  // Keep llama.cpp's native page when it is ready. Direct-use controls are
-  // available only after the model has finished loading.
+  // Direct use is the engine's own interface, never a reduced AI-Lab form.
   function useLink(instance) {
     const task = instance.task || 'text-generation';
-    const action = TASK_ACTIONS[task];
-    if (!action) return null;
+    const comfy = ['comfyui', 'comfy_music', 'comfy_video'].includes(instance.engine);
+    const ace = instance.engine === 'acestep' && task === 'music-generation';
+    const qwenTts = instance.engine === 'qwentts' && task === 'speech-synthesis';
+    const higgs = instance.engine === 'higgs' && task === 'speech-synthesis';
+    const voxcpm = instance.engine === 'voxcpm' && task === 'speech-synthesis';
+    const llama = instance.engine === 'llamacpp' && task === 'text-generation';
+    if (!comfy && !ace && !qwenTts && !higgs && !voxcpm && !llama) return null;
+    const label = comfy ? ({ 'image-generation': 'Create', 'image-edit': 'Edit',
+      'music-generation': 'Music', 'video-generation': 'Video' }[task] || 'ComfyUI')
+      : ace ? 'Music' : qwenTts || higgs || voxcpm ? 'Speak' : 'Chat';
     if (!instance.ready) return element('button', {
       class: 'pill chat-link', type: 'button', disabled: 'disabled',
       title: instance.running ? 'Wait for the model to finish loading'
                               : 'Load the model to use it directly',
-      text: action.label,
+      text: label,
     });
-    const native = task === 'text-generation' && instance.web_ui;
     return element('a', {
       class: 'pill chat-link', target: '_blank', rel: 'noopener',
-      href: native
-        ? `${window.location.protocol}//${window.location.hostname}:${instance.port}/`
-        : `/workbench.html?model=${encodeURIComponent(instance.id)}`,
-      title: native ? 'Open the chat page served by llama.cpp'
-                    : 'Use this model directly through AI-Lab',
-      text: action.label,
+      href: `${window.location.protocol}//${window.location.hostname}:`
+        + `${instance.port + (comfy || ace || qwenTts || higgs || voxcpm ? 10000 : 0)}/`
+        + (comfy ? '?ai_lab_preset=1' : ''),
+      title: comfy ? 'Open this model in ComfyUI with its configured workflow'
+        : ace ? 'Open the official ACE-Step editor using this loaded model'
+        : qwenTts ? 'Open the official Qwen3-TTS editor using this loaded model'
+        : higgs ? 'Open the official Higgs Audio playground using this loaded model'
+        : voxcpm ? 'Open the official VoxCPM editor using this loaded model'
+        : 'Open the chat page served by llama.cpp',
+      text: label,
     });
   }
 

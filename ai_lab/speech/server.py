@@ -59,11 +59,15 @@ def main() -> None:
     parser.add_argument("--cfg-value", type=float, default=2.0)
     parser.add_argument("--inference-timesteps", type=int, default=10)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--ui-port", type=int)
     args = parser.parse_args()
     if args.backend == "qwen":
         if not args.mode:
             parser.error("Qwen speech requires --mode")
         Handler.backend = QwenTtsBackend(args.model_path, args.mode)
+        if args.ui_port is None:
+            parser.error("Qwen speech requires --ui-port")
+        launch_native_qwen_ui(Handler.backend, args.model_path, args.ui_port)
     elif args.backend == "kokoro":
         if not all((args.language_code, args.default_voice, args.repo_id)):
             parser.error("Kokoro requires language, voice and repo settings")
@@ -73,7 +77,36 @@ def main() -> None:
     else:
         Handler.backend = VoxCpmBackend(
             args.model_path, args.cfg_value, args.inference_timesteps)
+        if args.ui_port is None:
+            parser.error("VoxCPM speech requires --ui-port")
+        launch_native_voxcpm_ui(Handler.backend, args.model_path, args.ui_port)
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
+
+
+def launch_native_qwen_ui(backend: QwenTtsBackend, model_path: Path,
+                          port: int) -> None:
+    """Use Qwen's full Gradio editor without loading the checkpoint twice."""
+    from qwen_tts.cli.demo import build_demo
+
+    demo = build_demo(backend.model, str(model_path), {})
+    demo.queue(default_concurrency_limit=1)
+    demo.launch(server_name="0.0.0.0", server_port=port, share=False,
+                inbrowser=False, prevent_thread_lock=True, show_error=True)
+
+
+def launch_native_voxcpm_ui(backend: VoxCpmBackend, model_path: Path,
+                            port: int) -> None:
+    """Use the full upstream VoxCPM editor and its already-loaded model."""
+    from ai_lab.native_ui.voxcpm_upstream import app as upstream
+
+    demo = upstream.VoxCPMDemo(model_id=str(model_path))
+    demo.voxcpm_model = backend.model
+    interface = upstream.create_demo_interface(demo)
+    interface.queue(max_size=10, default_concurrency_limit=1).launch(
+        server_name="0.0.0.0", server_port=port, show_error=True,
+        i18n=upstream.I18N, theme=upstream._APP_THEME,
+        css=upstream._CUSTOM_CSS, share=False, inbrowser=False,
+        prevent_thread_lock=True)
 
 
 if __name__ == "__main__":

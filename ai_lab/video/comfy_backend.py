@@ -12,6 +12,7 @@ from pathlib import Path
 from threading import Lock
 
 from ai_lab.images.comfyui_server import Backend as ComfyBackend
+from ai_lab.comfyui_templates import for_model
 
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -35,7 +36,8 @@ class ComfyVideoBackend:
         self.state = state
         self.lock = Lock()
         self.comfy = ComfyBackend(python, comfyui, model_paths, state,
-                                  comfy_port)
+                                  comfy_port, workflow=workflow,
+                                  ui_workflow=for_model(model_name))
 
     def close(self) -> None:
         self.comfy.close()

@@ -154,10 +154,50 @@ def main() -> None:
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--ui-port", type=int, required=True)
     args = parser.parse_args()
     Handler.backend = AceStepBackend(args.project_root, args.config_name,
                                      args.model_path, args.output_root)
+    launch_native_ui(Handler.backend, args.config_name, args.model_path,
+                     args.ui_port)
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
+
+
+def launch_native_ui(backend: AceStepBackend, config_name: str,
+                     model_path: Path, port: int) -> None:
+    """Mount ACE-Step's own full editor using the already-loaded handlers."""
+    from acestep.acestep_v15_pipeline import (
+        create_demo, get_gpu_config, set_global_gpu_config,
+    )
+
+    gpu_config = get_gpu_config()
+    set_global_gpu_config(gpu_config)
+    demo = create_demo(init_params={
+        "pre_initialized": True,
+        "service_mode": False,
+        "checkpoint": str(model_path),
+        "config_path": config_name,
+        "device": "auto",
+        "init_llm": False,
+        "lm_model_path": None,
+        "backend": gpu_config.recommended_backend,
+        "use_flash_attention": None,
+        "offload_to_cpu": False,
+        "offload_dit_to_cpu": False,
+        "quantization": None,
+        "init_status": "ACE-Step model loaded by AI-Lab",
+        "enable_generate": True,
+        "dit_handler": backend.dit,
+        "llm_handler": backend.llm,
+        "language": "en",
+        "gpu_config": gpu_config,
+        "output_dir": str(backend.output_root),
+        "default_batch_size": 1,
+    }, language="en")
+    demo.queue(max_size=20, default_concurrency_limit=1)
+    demo.launch(server_name="0.0.0.0", server_port=port,
+                share=False, inbrowser=False, prevent_thread_lock=True,
+                show_error=True, allowed_paths=[str(backend.output_root)])
 
 
 if __name__ == "__main__":

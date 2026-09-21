@@ -17,4 +17,8 @@ build-backend = "setuptools.build_meta"
 include = ["ai_lab*"]
 
 [tool.setuptools.package-data]
-ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*", "web/js/workbench/*"]
+ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*",
+          "comfyui_custom_nodes/ai_lab_preset/web/*",
+          "comfyui_templates/*.json",
+          "native_ui/sglang_omni/playground/higgs/frontend/*",
+          "native_ui/voxcpm_upstream/assets/*"]

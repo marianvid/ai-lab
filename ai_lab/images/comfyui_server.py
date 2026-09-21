@@ -8,6 +8,7 @@ import atexit
 import base64
 import copy
 import json
+import os
 import signal
 import subprocess
 import tempfile
@@ -18,11 +19,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 
+from ai_lab.comfyui_templates import for_model
+
 
 class Backend:
     def __init__(self, python: str, comfyui: str, model_roots: list[str],
                  state: Path, port: int, timeout: float = 1800,
-                 vram_mode: str = "normal") -> None:
+                 vram_mode: str = "normal", workflow: Path | None = None,
+                 ui_workflow: Path | None = None) -> None:
         self.base = f"http://127.0.0.1:{port}"
         self.timeout = timeout
         self.lock = Lock()
@@ -38,7 +42,11 @@ class Backend:
                 "  controlnet: .\n  clip_vision: .\n"
                 "  latent_upscale_models: .\n")
         extra.write_text("".join(sections))
-        command = [python, comfyui, "--listen", "127.0.0.1", "--port", str(port),
+        preset_nodes = Path(__file__).resolve().parents[1] / "comfyui_custom_nodes"
+        with extra.open("a") as output:
+            output.write(f"ai_lab_preset:\n  base_path: {json.dumps(str(preset_nodes))}\n"
+                         "  custom_nodes: .\n")
+        command = [python, comfyui, "--listen", "0.0.0.0", "--port", str(port),
                    "--extra-model-paths-config", str(extra),
                    "--output-directory", str(state / "output"),
                    "--temp-directory", str(state / "temp")]
@@ -46,7 +54,14 @@ class Backend:
             command.append("--lowvram")
         elif vram_mode == "cpu":
             command.append("--cpu")
-        self.process = subprocess.Popen(command)
+        environment = os.environ.copy()
+        environment.pop("AI_LAB_COMFYUI_PRESET", None)
+        environment.pop("AI_LAB_COMFYUI_UI_PRESET", None)
+        if workflow is not None:
+            environment["AI_LAB_COMFYUI_PRESET"] = str(workflow.resolve())
+        if ui_workflow is not None:
+            environment["AI_LAB_COMFYUI_UI_PRESET"] = str(ui_workflow.resolve())
+        self.process = subprocess.Popen(command, env=environment)
         self._wait_ready()
 
     def close(self) -> None:
@@ -196,6 +211,7 @@ def main() -> None:
     parser.add_argument("--name", required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--workflow", type=Path)
     memory = parser.add_mutually_exclusive_group()
     memory.add_argument("--lowvram", action="store_true")
     memory.add_argument("--cpu", action="store_true")
@@ -208,7 +224,8 @@ def main() -> None:
     Handler.backend = Backend(__import__("sys").executable, args.comfyui,
                               [args.model_root, *args.extra_model_root], state,
                               backend_port,
-                              vram_mode=vram_mode)
+                              vram_mode=vram_mode, workflow=args.workflow,
+                              ui_workflow=for_model(args.name))
     atexit.register(Handler.backend.close)
 
     def stop(_signum, _frame):

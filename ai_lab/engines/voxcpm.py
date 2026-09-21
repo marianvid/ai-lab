@@ -50,7 +50,7 @@ class VoxCpmEngine:
             "--model-path", str(model_dir),
             "--cfg-value", str(options.get("cfg_value", 2.0)),
             "--inference-timesteps", str(options.get("inference_timesteps", 10)),
-            "--port", str(port)],
+            "--port", str(port), "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 

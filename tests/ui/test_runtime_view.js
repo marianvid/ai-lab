@@ -173,6 +173,25 @@ describe('the Models page', () => {
     assert.equal(chat.getAttribute('target'), '_blank');
   });
 
+  it('opens the official Higgs playground only while Higgs is ready', async () => {
+    const higgs = { ...INSTANCE, engine: 'higgs', task: 'speech-synthesis' };
+    const { view } = await renderPage({ '/api/instances': [higgs] });
+    const link = view.querySelector('.chat-link');
+    assert.equal(link.textContent, 'Speak');
+    assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
+    const loading = await renderPage({ '/api/instances': [{ ...higgs, ready: false }] });
+    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
+  });
+
+  it('opens the official VoxCPM editor only while VoxCPM is ready', async () => {
+    const voxcpm = { ...INSTANCE, engine: 'voxcpm', task: 'speech-synthesis' };
+    const { view } = await renderPage({ '/api/instances': [voxcpm] });
+    assert.equal(view.querySelector('.chat-link').getAttribute('href'),
+                 'http://localhost:18080/');
+    const loading = await renderPage({ '/api/instances': [{ ...voxcpm, ready: false }] });
+    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
+  });
+
   it('disables direct use while the model is loading', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, ready: false }],
@@ -183,18 +202,18 @@ describe('the Models page', () => {
     assert.equal(chat.hasAttribute('href'), false);
   });
 
-  it('uses AI-Lab chat when the engine serves no page', async () => {
+  it('does not substitute an AI-Lab form when an engine serves no page', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, web_ui: false }],
     });
     assert.equal(view.querySelector('.chat-link').getAttribute('href'),
-                 '/workbench.html?model=qwen-coder');
+                 'http://localhost:8080/');
   });
 
-  it('opens the music workspace for a configured ACE-Step model', async () => {
+  it('offers ACE-Step’s upstream editor instead of an AI-Lab workspace', async () => {
     const music = { ...INSTANCE, id: 'music-ace-xl', engine: 'acestep',
       model_id: 'audio-music/ace-step-1.5-xl-turbo', task: 'music-generation',
-      running: false, ready: false, web_ui: false, params: {} };
+      running: true, ready: true, web_ui: false, params: {} };
     const model = { ...MODEL, id: music.model_id, name: 'ace-step-1.5-xl-turbo',
       format: 'safetensors', task: 'music-generation' };
     const engine = { ...ENGINE, id: 'acestep', formats: ['safetensors'],
@@ -204,10 +223,8 @@ describe('the Models page', () => {
       '/api/settings': { title: 'AI-Lab', engines: [engine], repositories: [],
                          accelerator: {}, host: {} },
     });
-    const link = view.querySelector('.chat-link');
-    assert.equal(link.textContent, 'Music');
-    assert.equal(link.disabled, true);
-    assert.equal(link.hasAttribute('href'), false);
+    assert.equal(view.querySelector('.chat-link').getAttribute('href'),
+                 'http://localhost:18080/');
   });
 
   it('builds the chat address from the page, not from the server', async () => {
@@ -734,12 +751,11 @@ describe('the buttons line up down the page', () => {
     assert.equal(chat(view).hasAttribute('href'), false);
   });
 
-  it('offers AI-Lab chat for a running vLLM model', async () => {
+  it('does not offer the removed AI-Lab chat for vLLM', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...VLLM, running: true, ready: true }],
     });
-    assert.equal(chat(view).getAttribute('href'),
-                 '/workbench.html?model=coder-fast');
+    assert.equal(chat(view), null);
   });
 
   it('puts the direct-use link before settings and controls', async () => {
@@ -755,30 +771,51 @@ describe('the buttons line up down the page', () => {
     assert.equal(chat(view).getAttribute('target'), '_blank');
   });
 
-  it('keeps the same buttons for a vLLM row as for a llama.cpp one', async () => {
+  it('keeps the same model-management buttons for vLLM and llama.cpp', async () => {
     const { view } = await renderPage({ '/api/instances': [INSTANCE, VLLM] });
-    assert.deepEqual(slots(view, 0), slots(view, 1));
+    assert.deepEqual(slots(view, 0).filter((slot) => slot !== 'Chat'), slots(view, 1));
   });
 
-  it('uses the task to name each direct workflow', async () => {
+  it('uses the task to name each native ComfyUI workflow', async () => {
     const cases = [
       ['image-generation', 'Create'], ['image-edit', 'Edit'],
-      ['transcription', 'Transcribe'], ['vad', 'Speech'],
-      ['diarization', 'Speakers'], ['alignment', 'Align'], ['ocr', 'Read'],
+      ['music-generation', 'Music'], ['video-generation', 'Video'],
     ];
     for (const [task, label] of cases) {
       const { view } = await renderPage({ '/api/instances': [
-        { ...INSTANCE, task, web_ui: false },
+        { ...INSTANCE, task, engine: task === 'video-generation' ? 'comfy_video'
+          : task === 'music-generation' ? 'comfy_music' : 'comfyui' },
       ] });
       assert.equal(view.querySelector('.chat-link').textContent, label);
+      assert.equal(view.querySelector('.chat-link').getAttribute('href'),
+                   'http://localhost:18080/?ai_lab_preset=1');
     }
   });
 
-  it('disables every direct workflow until its model is ready', async () => {
-    for (const task of ['text-generation', 'image-generation', 'image-edit',
-                        'music-generation', 'video-generation', 'speech-synthesis']) {
+  it('opens the official music and speech editors for ready models', async () => {
+    for (const [task, engine, label] of [
+      ['music-generation', 'acestep', 'Music'],
+      ['speech-synthesis', 'qwentts', 'Speak'],
+    ]) {
       const { view } = await renderPage({ '/api/instances': [
-        { ...INSTANCE, task, running: false, ready: false, web_ui: false },
+        { ...INSTANCE, task, engine, running: true, ready: true },
+      ] });
+      const link = view.querySelector('.chat-link');
+      assert.equal(link.textContent, label);
+      assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
+    }
+  });
+
+  it('disables native interfaces until their model is ready', async () => {
+    for (const [task, engine] of [['text-generation', 'llamacpp'],
+                                  ['image-generation', 'comfyui'],
+                                  ['image-edit', 'comfyui'],
+                                  ['music-generation', 'comfy_music'],
+                                  ['video-generation', 'comfy_video'],
+                                  ['music-generation', 'acestep'],
+                                  ['speech-synthesis', 'qwentts']]) {
+      const { view } = await renderPage({ '/api/instances': [
+        { ...INSTANCE, task, engine, running: false, ready: false },
       ] });
       const control = view.querySelector('.chat-link');
       assert.ok(control, `missing direct-use control for ${task}`);

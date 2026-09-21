@@ -1,86 +1,66 @@
-# Use a model directly
+# Use a loaded model directly
 
-Every configured model has an agent-facing API. The **Models** page also offers
-a direct action where AI-Lab has a browser workflow for that task. That action
-is disabled until the model is loaded and ready. API requests through the
-gateway can still load a stopped model automatically. A model in Library still needs a configured entry and a
-working engine before it can be used.
+The Models page links to a native interface only when the configured instance
+is ready. A stopped instance shows a disabled action; it starts no UI process.
 
-| Task | Direct action | Current route |
+| Engine | Action | Interface |
 |---|---|---|
-| Text (llama.cpp) | Chat in the engine's own UI when ready; otherwise AI-Lab chat | `/v1/chat/completions` through the gateway |
-| Text (vLLM) | AI-Lab chat | `/v1/chat/completions` through the gateway |
-| Image generation/editing | Create/Edit with a named ComfyUI profile | AI-Lab image jobs |
-| Transcription | Upload audio and read text | `/v1/audio/transcriptions` |
-| VAD/diarization | Upload audio and inspect segments/speakers | Task-specific audio routes |
-| Transcript alignment | Upload audio and transcript, inspect word timestamps | `/v1/audio/alignments` through the gateway |
-| OCR | Upload an image and read recognized text | `/v1/images/ocr` |
-| Music (ACE-Step 1.5 XL Turbo) | Music form with player and WAV download | `/v1/audio/music/generations` through the gateway |
-| Video (MiniMax H3 and LTX 2.5 on Linux) | Upload a reference PNG, enter a motion prompt, play and download an MP4 | `/v1/videos/generations` through the gateway |
-| Music cover (MuLaCover on Linux) | Upload a source WAV, enter style and lyrics, play and download the cover | `/v1/audio/music/generations` through the gateway |
-| Music (MiniMax Music 3 on Linux) | Music form with instrumental or lyric controls, player and WAV download | `/v1/audio/music/generations` through the gateway |
-| Music (YuE2 on Linux) | Music form with required lyrics, editable ABC score, player and WAV/ABC download | `/v1/audio/music/generations` through the gateway |
-| Music (HeartMuLa on Linux) | Music form with required lyrics, player and WAV download | `/v1/audio/music/generations` through the gateway |
-| Music (Khala on macOS) | Music form with length bucket, player and WAV download | `/v1/audio/music/generations` through the gateway |
-| Speech (Qwen3-TTS VoiceDesign/CustomVoice, Kokoro, VoxCPM, Higgs on Linux) | Speak form with engine-specific controls, player and WAV download | `/v1/audio/speech/generations` through the gateway |
-| Supporting codec, VAE, embedding and OCR component files | Used through their parent model | Library only |
+| llama.cpp | Chat | The engine's own chat page |
+| ComfyUI image/edit | Create / Edit | Native ComfyUI with a model-specific template adapted to installed weights |
+| ComfyUI video | Video | Native ComfyUI with a model-specific image-to-video template adapted to installed weights |
+| ComfyUI music | Music | Native ComfyUI with the MiniMax Music 3 template adapted to INT8 |
+| ACE-Step 1.5 | Music | Upstream Gradio playground using the already-loaded AI-Lab model |
+| Qwen3-TTS VoiceDesign / CustomVoice | Speak | Upstream Gradio demo using the already-loaded AI-Lab model |
+| Higgs TTS 3 | Speak | Official SGLang-Omni playground connected to the already-loaded Higgs worker |
+| VoxCPM2 | Speak | Upstream Gradio editor using the already-loaded model |
 
-The new chat workbench is deliberately small: it keeps the current
-conversation in the page and sends one request at a time. llama.cpp's own UI
-remains available for its richer chat features. [Open WebUI](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-vllm/)
-can connect to vLLM or AI-Lab's OpenAI-compatible gateway if a richer shared
-chat workspace is wanted. vLLM itself documents an
-[OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/)
-and separate UI examples, rather than a built-in chat page like
-[llama.cpp](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
+Other engines remain available to API clients through AI-Lab's gateway, but
+AI-Lab does not substitute small browser forms for their full interfaces.
 
-ComfyUI has its own workflow interface, but AI-Lab currently runs named
-workflows through an adapter. Opening ComfyUI separately would need a
-supervised, access-controlled route that respects AI-Lab's model scheduling;
-the existing adapter intentionally does not expose that native UI. The
-[ACE-Step project](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/UI_SUPPORT.md)
-offers a full Gradio interface for music experiments and a separate REST API.
-[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) provides the `qwen-tts-demo`
-web interface and documents an inference path through vLLM-Omni. These are
-viable direct experimentation surfaces for the corresponding models, but a
-standalone server would compete with AI-Lab for accelerator memory. AI-Lab
-provides controlled ACE-Step, HeartMuLa, YuE2, MiniMax Music 3, MuLaCover, Khala, Qwen3-TTS, Kokoro, VoxCPM and Higgs adapters for configured checkpoints
-on Linux and macOS. Browser and agent requests use the same gateway lease,
-held until the WAV is returned. Add or replace a checkpoint in the private
-configuration; the adapter reads its mode from that configuration, not its
-version or instance name. Other library models still require their own
-lifecycle adapter, result contract and resource checks before direct use.
-VoxCPM supports voice descriptions in the Speak form. Reference-audio cloning
-still needs an upload field and request contract; it is not offered by this form.
-Higgs supports inline style controls in the speech text; its installed
-SGLang-Omni worker is loaded and stopped with the AI-Lab instance.
-MiniMax H3 and LTX 2.5 use configured ComfyUI image-to-video workflows.
-Both accept a reference PNG, motion prompt and seed. The configured workflows
-currently produce clips of about six seconds. API requests can load a stopped
-model on demand; the browser action requires it to be ready first. AI-Lab
-schedules the full generation under one model lease.
-[ComfyUI H3 guide](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
-and [LTX documentation](https://docs.ltx.io/open-source-model/usage-guides/image-to-video)
-describe the underlying workflow controls.
-MuLaCover accepts a source WAV of up to 25 MiB, style tags and lyrics. It
-determines the output length itself. Its
-[official model card](https://huggingface.co/HeartMuLa/MuLaCover/blob/main/README.md)
-sets noncommercial terms for the published weights and outputs.
-MiniMax Music 3 runs a configured ComfyUI audio workflow inside a supervised
-AI-Lab worker. Its checkpoint components and workflow are selected through
-private configuration. [ComfyUI documentation](https://docs.comfy.org/tutorials/audio/minimax/minimax-music-3)
-shows the native workflow controls.
-YuE2 returns an ABC composition alongside its audio. The Music form lets you edit
-that score and regenerate; it reports when the model marks a song as truncated.
-YuE2 determines song length from the composition, so its form has no duration
-control. [YuE2 generation documentation](https://github.com/multimodal-art-projection/YuE/blob/main/docs/generation.md)
-describes the supported score-editing workflow.
-HeartMuLa requires lyrics; the Music form marks that field as required when this
-engine is selected. Its installed checkpoint and supporting codec/tokenizer are
-selected through private configuration.
-Khala accepts `length_bucket` instead of seconds. Its output duration varies;
-the browser displays that control using the runtime's actual unit.
+The remaining installed models have no verified, same-instance native editor
+yet. In particular, the current YuE2 generation pipeline is CLI/API based;
+the community YuE interfaces use separate backends and are not a drop-in view
+of AI-Lab's loaded pipeline. HeartMuLa, MuLaCover and Mac Khala likewise
+need a separately verified editor/backend integration. Kokoro's public demo
+starts its own models and is configured for its hosted environment, so linking
+it to the Mac instance would duplicate loading. ASR, diarization, alignment,
+OCR and Demucs/Matchering remain API/command utilities. These entries have no
+direct-use button rather than a misleading one.
+ACE-Step and Qwen3-TTS each expose their upstream Gradio editor on the
+instance port plus 10000, in the same process as the API and with the same
+model object; opening the editor does not load a second checkpoint. Their
+Gradio queue is limited to one request at a time. API requests should not be
+sent concurrently with a manual generation in that editor, since the two
+interfaces do not share one request queue.
 
-The actual Linux and Mac entries, paths and workflow profiles belong to the
-private `opts` repository. This public page describes behavior without
-publishing installation secrets.
+Higgs runs its official SGLang-Omni playground on the instance port plus
+10000. This is a separate lightweight web process that forwards requests to
+the existing Higgs worker; it does not load another checkpoint. Unloading
+Higgs stops both the playground and the worker. Its browser interface allows
+reference-audio uploads and generation controls that the AI-Lab gateway does
+not expose.
+
+VoxCPM2 uses its upstream Gradio editor on the instance port plus 10000.
+The editor receives AI-Lab's existing model object, so it does not load a
+second checkpoint. Its voice cloning controls may additionally load the
+upstream ASR helper when reference-audio transcription is requested. As with
+ACE-Step and Qwen3-TTS, avoid simultaneous UI and API generations because
+the two request queues are independent.
+
+Each loaded ComfyUI instance has one supervised ComfyUI child process on its
+AI-Lab port plus 10000. The link opens that process directly. Unloading the
+instance stops the adapter and its child. Separate loaded instances have
+separate ComfyUI processes and memory use. AI-Lab's named API workflow and
+manual runs in native ComfyUI share that one process and its queue.
+
+ComfyUI listens on the host's network interfaces so a browser on the private
+network can reach it. This native interface has no additional authentication;
+deployments must restrict access at the network/firewall layer. Do not expose
+these ports to the public internet.
+
+When a model-specific UI template is bundled, it is separate from the
+API-format graph used by AI-Lab jobs. Unknown models fall back to the
+configured API-format graph. Image,
+audio or video input placeholders need to be filled in the native interface
+before a manual run. The model checkpoint and any required components remain
+configured in ComfyUI's per-instance model paths.

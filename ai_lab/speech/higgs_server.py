@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -54,16 +60,61 @@ def main():
     parser.add_argument("--worker-port", type=int, required=True)
     parser.add_argument("--mem-fraction-static", type=float, required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--ui-port", type=int, required=True)
     args = parser.parse_args()
     backend = HiggsBackend(args.worker_binary, args.model_path,
                            args.worker_port, args.mem_fraction_static)
     Handler.backend = backend
-    server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+    playground_root = Path(__file__).resolve().parents[1] / "native_ui" / "sglang_omni"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(playground_root), env.get("PYTHONPATH", ""))))
+    try:
+        playground = subprocess.Popen([
+            sys.executable, "-m", "playground.higgs.app", "--api-base",
+            f"http://127.0.0.1:{args.worker_port}", "--port", str(args.ui_port)],
+            env=env)
+    except Exception:
+        backend.close()
+        raise
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if playground.poll() is not None:
+                raise RuntimeError("Higgs playground exited during startup")
+            try:
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{args.ui_port}/healthz", timeout=2) as response:
+                    if response.status == 200:
+                        break
+            except (OSError, urllib.error.URLError):
+                pass
+            time.sleep(0.5)
+        else:
+            raise TimeoutError("Higgs playground did not become ready")
+        server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+    except Exception:
+        if playground.poll() is None:
+            playground.terminate()
+            try:
+                playground.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                playground.kill()
+                playground.wait(timeout=5)
+        backend.close()
+        raise
     signal.signal(signal.SIGTERM, lambda *_: Thread(
         target=server.shutdown, daemon=True).start())
     try:
         server.serve_forever()
     finally:
+        if playground.poll() is None:
+            playground.terminate()
+            try:
+                playground.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                playground.kill()
+                playground.wait(timeout=5)
         backend.close()
         server.server_close()
 

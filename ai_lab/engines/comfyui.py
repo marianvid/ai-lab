@@ -25,12 +25,14 @@ class ComfyUiEngine:
 
     def __init__(self, binary: str | None = None, server: str | None = None,
                  comfyui: str | None = None,
-                 model_paths: list[str] | None = None) -> None:
+                 model_paths: list[str] | None = None,
+                 preset_workflows: dict[str, str] | None = None) -> None:
         self.binary = binary or which("python") or "python"
         self.server = server or str(
             Path(__file__).resolve().parents[1] / "images" / "comfyui_server.py")
         self.comfyui = comfyui or "/opt/ComfyUI/main.py"
         self.model_paths = list(model_paths or [])
+        self.preset_workflows = dict(preset_workflows or {})
 
     def formats(self) -> frozenset[Format]:
         return frozenset({Format.COMFYUI})
@@ -57,8 +59,10 @@ class ComfyUiEngine:
             argv.append("--cpu")
         for path in self.model_paths:
             argv.extend(["--extra-model-root", path])
+        if workflow := self.preset_workflows.get(model.id):
+            argv.extend(["--workflow", workflow])
         return LaunchPlan(
-            argv=argv, env={"PYTHONUNBUFFERED": "1"}, web_ui=False,
+            argv=argv, env={"PYTHONUNBUFFERED": "1"}, web_ui=True,
             splits_across_cpu=mode != "normal")
 
     def ready(self, port: int) -> bool:
@@ -68,6 +72,9 @@ class ComfyUiEngine:
     def concurrency(self, params: dict) -> int:
         # ComfyUI's interrupt endpoint targets the current global execution.
         return 1
+
+    def web_ui(self) -> str:
+        return "native"
 
     def needs_mb(self, model: ModelSet, params: dict,
                  card_total_mb: float) -> float:

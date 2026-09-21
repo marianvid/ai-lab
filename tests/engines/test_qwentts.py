@@ -22,6 +22,7 @@ class QwenTtsEngineTests(unittest.TestCase):
         plan = self.engine.plan(self.model, 8113, {})
         self.assertEqual(plan.argv[0], '/tts/python')
         self.assertEqual(plan.argv[plan.argv.index('--mode') + 1], 'voice-design')
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18113')
         self.assertEqual(plan.argv[plan.argv.index('--model-path') + 1],
                          self.model.entrypoint)
         self.assertEqual(self.engine.api_paths(),

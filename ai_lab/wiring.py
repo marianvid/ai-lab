@@ -39,7 +39,20 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     # happens to find first. The host needs the same section: vLLM lives in a
     # virtual environment, so whether it is installed cannot be read from PATH.
     config = store.load()
-    engine_settings = config.engines
+    engine_settings = dict(config.engines)
+    image_profiles = config.images.get("profiles", {})
+    by_instance = {instance.id: instance.model_id for instance in config.instances}
+    presets = {}
+    workflow_root = Path(config.images.get("workflow_root", ".")).resolve()
+    for profile in image_profiles.values():
+        model_id = by_instance.get(profile.get("model"))
+        if model_id and profile.get("workflow"):
+            workflow = (workflow_root / profile["workflow"]).resolve()
+            if workflow.is_relative_to(workflow_root):
+                presets.setdefault(model_id, str(workflow))
+    engine_settings["comfyui"] = {
+        **engine_settings.get("comfyui", {}), "preset_workflows": presets,
+    }
     engines = Registry(engine_settings)
     validate_configuration(config, set(engines.known()), check_workflows=True)
     host = current_host(engine_settings)
