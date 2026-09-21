@@ -192,6 +192,46 @@ describe('the Models page', () => {
     assert.equal(loading.view.querySelector('.chat-link').disabled, true);
   });
 
+  it('opens the official Kokoro editor only while Kokoro is ready', async () => {
+    const kokoro = { ...INSTANCE, engine: 'kokoro', task: 'speech-synthesis' };
+    const { view } = await renderPage({ '/api/instances': [kokoro] });
+    const link = view.querySelector('.chat-link');
+    assert.equal(link.textContent, 'Speak');
+    assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
+    const loading = await renderPage({ '/api/instances': [{ ...kokoro, ready: false }] });
+    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
+  });
+
+  it('opens Khala Studio only while Khala is ready', async () => {
+    const khala = { ...INSTANCE, engine: 'khala', task: 'music-generation' };
+    const { view } = await renderPage({ '/api/instances': [khala] });
+    const link = view.querySelector('.chat-link');
+    assert.equal(link.textContent, 'Music');
+    assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
+    const loading = await renderPage({ '/api/instances': [{ ...khala, ready: false }] });
+    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
+  });
+
+  it('opens YuE2 Studio only while YuE2 is ready', async () => {
+    const yue2 = { ...INSTANCE, engine: 'yue2', task: 'music-generation' };
+    const { view } = await renderPage({ '/api/instances': [yue2] });
+    const link = view.querySelector('.chat-link');
+    assert.equal(link.textContent, 'Music');
+    assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
+    const loading = await renderPage({ '/api/instances': [{ ...yue2, ready: false }] });
+    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
+  });
+
+  it('opens HeartMuse only while HeartMuLa is ready', async () => {
+    const heart = { ...INSTANCE, engine: 'heartmula', task: 'music-generation' };
+    const { view } = await renderPage({ '/api/instances': [heart] });
+    const link = view.querySelector('.chat-link');
+    assert.equal(link.textContent, 'Music');
+    assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
+    const loading = await renderPage({ '/api/instances': [{ ...heart, ready: false }] });
+    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
+  });
+
   it('disables direct use while the model is loading', async () => {
     const { view } = await renderPage({
       '/api/instances': [{ ...INSTANCE, ready: false }],

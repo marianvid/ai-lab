@@ -60,7 +60,7 @@ class KhalaEngine:
             "--output-root", self.output_root,
             "--default-bucket", str(options.get("default_bucket", 0)),
             "--maximum-bucket", str(options.get("maximum_bucket", 4)),
-            "--port", str(port)],
+            "--port", str(port), "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 

@@ -19,6 +19,7 @@ class KokoroBackend:
         model_path = checkpoint.parent
         device = "cuda" if torch.cuda.is_available() else (
             "mps" if torch.backends.mps.is_available() else "cpu")
+        self.device = device
         self.model = KModel(
             repo_id=repo_id, config=str(model_path / "config.json"),
             model=str(checkpoint)).to(device).eval()

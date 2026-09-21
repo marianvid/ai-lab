@@ -13,17 +13,15 @@ is ready. A stopped instance shows a disabled action; it starts no UI process.
 | Qwen3-TTS VoiceDesign / CustomVoice | Speak | Upstream Gradio demo using the already-loaded AI-Lab model |
 | Higgs TTS 3 | Speak | Official SGLang-Omni playground connected to the already-loaded Higgs worker |
 | VoxCPM2 | Speak | Upstream Gradio editor using the already-loaded model |
+| Kokoro | Speak | Upstream Gradio editor using the already-loaded model |
+| Khala | Music | Full Khala Studio frontend and its native queued Mac worker |
+| YuE2 | Music | Full ds-yue-webui Studio: generate, cover, edit, ABC score and library |
+| HeartMuLa | Music | Full HeartMuse Studio using the already-loaded pipeline |
 
 Other engines remain available to API clients through AI-Lab's gateway, but
 AI-Lab does not substitute small browser forms for their full interfaces.
 
-The remaining installed models have no verified, same-instance native editor
-yet. In particular, the current YuE2 generation pipeline is CLI/API based;
-the community YuE interfaces use separate backends and are not a drop-in view
-of AI-Lab's loaded pipeline. HeartMuLa, MuLaCover and Mac Khala likewise
-need a separately verified editor/backend integration. Kokoro's public demo
-starts its own models and is configured for its hosted environment, so linking
-it to the Mac instance would duplicate loading. ASR, diarization, alignment,
+MuLaCover has no verified full native editor. ASR, diarization, alignment,
 OCR and Demucs/Matchering remain API/command utilities. These entries have no
 direct-use button rather than a misleading one.
 ACE-Step and Qwen3-TTS each expose their upstream Gradio editor on the
@@ -41,11 +39,19 @@ reference-audio uploads and generation controls that the AI-Lab gateway does
 not expose.
 
 VoxCPM2 uses its upstream Gradio editor on the instance port plus 10000.
-The editor receives AI-Lab's existing model object, so it does not load a
-second checkpoint. Its voice cloning controls may additionally load the
-upstream ASR helper when reference-audio transcription is requested. As with
-ACE-Step and Qwen3-TTS, avoid simultaneous UI and API generations because
-the two request queues are independent.
+Kokoro uses its upstream Gradio editor on the instance port plus 10000 and
+keeps the official US/UK voice, speed, token, pronunciation and streaming
+controls. It reuses the resident checkpoint; it does not load another model.
+Khala starts its complete Studio stack with the AI-Lab instance: the upstream
+React frontend, queue/progress dispatcher and the Apple-Silicon worker. The
+worker owns the resident model and is terminated when the instance unloads.
+YuE2 starts the pinned ds-yue-webui Studio and its resident YuE2 worker. Both
+the Studio and the AI-Lab music endpoint submit work to that same worker, so
+the checkpoint is not loaded twice.
+HeartMuLa launches HeartMuse with composition fields, variants, style
+reference, transcription, history and memory monitoring. HeartMuse receives
+AI-Lab's existing pipeline and shares its generation lock, so UI and API work
+are serialized around one checkpoint.
 
 Each loaded ComfyUI instance has one supervised ComfyUI child process on its
 AI-Lab port plus 10000. The link opens that process directly. Unloading the

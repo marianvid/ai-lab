@@ -56,7 +56,8 @@ class KokoroEngine:
             "--model-path", model.entrypoint,
             "--language-code", options["language_code"],
             "--default-voice", options["default_voice"],
-            "--repo-id", options["repo_id"], "--port", str(port)],
+            "--repo-id", options["repo_id"], "--port", str(port),
+            "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 

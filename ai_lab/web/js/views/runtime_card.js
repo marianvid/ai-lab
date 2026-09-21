@@ -278,11 +278,15 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     const qwenTts = instance.engine === 'qwentts' && task === 'speech-synthesis';
     const higgs = instance.engine === 'higgs' && task === 'speech-synthesis';
     const voxcpm = instance.engine === 'voxcpm' && task === 'speech-synthesis';
+    const kokoro = instance.engine === 'kokoro' && task === 'speech-synthesis';
+    const khala = instance.engine === 'khala' && task === 'music-generation';
+    const yue2 = instance.engine === 'yue2' && task === 'music-generation';
+    const heartmula = instance.engine === 'heartmula' && task === 'music-generation';
     const llama = instance.engine === 'llamacpp' && task === 'text-generation';
-    if (!comfy && !ace && !qwenTts && !higgs && !voxcpm && !llama) return null;
+    if (!comfy && !ace && !qwenTts && !higgs && !voxcpm && !kokoro && !khala && !yue2 && !heartmula && !llama) return null;
     const label = comfy ? ({ 'image-generation': 'Create', 'image-edit': 'Edit',
       'music-generation': 'Music', 'video-generation': 'Video' }[task] || 'ComfyUI')
-      : ace ? 'Music' : qwenTts || higgs || voxcpm ? 'Speak' : 'Chat';
+      : ace || khala || yue2 || heartmula ? 'Music' : qwenTts || higgs || voxcpm || kokoro ? 'Speak' : 'Chat';
     if (!instance.ready) return element('button', {
       class: 'pill chat-link', type: 'button', disabled: 'disabled',
       title: instance.running ? 'Wait for the model to finish loading'
@@ -292,13 +296,17 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     return element('a', {
       class: 'pill chat-link', target: '_blank', rel: 'noopener',
       href: `${window.location.protocol}//${window.location.hostname}:`
-        + `${instance.port + (comfy || ace || qwenTts || higgs || voxcpm ? 10000 : 0)}/`
+        + `${instance.port + (comfy || ace || qwenTts || higgs || voxcpm || kokoro || khala || yue2 || heartmula ? 10000 : 0)}/`
         + (comfy ? '?ai_lab_preset=1' : ''),
       title: comfy ? 'Open this model in ComfyUI with its configured workflow'
         : ace ? 'Open the official ACE-Step editor using this loaded model'
         : qwenTts ? 'Open the official Qwen3-TTS editor using this loaded model'
         : higgs ? 'Open the official Higgs Audio playground using this loaded model'
         : voxcpm ? 'Open the official VoxCPM editor using this loaded model'
+        : kokoro ? 'Open the official Kokoro editor using this loaded model'
+        : khala ? 'Open Khala Studio using this loaded model'
+        : yue2 ? 'Open the full YuE2 Studio using this loaded model'
+        : heartmula ? 'Open the full HeartMuse Studio using this loaded model'
         : 'Open the chat page served by llama.cpp',
       text: label,
     });

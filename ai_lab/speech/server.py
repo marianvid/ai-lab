@@ -74,6 +74,10 @@ def main() -> None:
         Handler.backend = KokoroBackend(
             args.model_path, args.language_code, args.default_voice,
             args.repo_id)
+        if args.ui_port is None:
+            parser.error("Kokoro speech requires --ui-port")
+        launch_native_kokoro_ui(Handler.backend, args.model_path.parent,
+                                args.ui_port)
     else:
         Handler.backend = VoxCpmBackend(
             args.model_path, args.cfg_value, args.inference_timesteps)
@@ -107,6 +111,17 @@ def launch_native_voxcpm_ui(backend: VoxCpmBackend, model_path: Path,
         i18n=upstream.I18N, theme=upstream._APP_THEME,
         css=upstream._CUSTOM_CSS, share=False, inbrowser=False,
         prevent_thread_lock=True)
+
+
+def launch_native_kokoro_ui(backend: KokoroBackend, model_path: Path,
+                            port: int) -> None:
+    """Use Kokoro's full upstream editor with the resident AI-Lab model."""
+    from ai_lab.native_ui.kokoro_upstream.app import create_demo
+
+    interface = create_demo(backend, model_path)
+    interface.queue(max_size=10, default_concurrency_limit=1).launch(
+        server_name="0.0.0.0", server_port=port, show_error=True,
+        share=False, inbrowser=False, prevent_thread_lock=True)
 
 
 if __name__ == "__main__":

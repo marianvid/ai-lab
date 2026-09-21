@@ -14,12 +14,14 @@ class Yue2Engine:
 
     def __init__(self, binary: str | None = None, server: str | None = None,
                  vae_path: str | None = None, output_root: str | None = None,
+                 webui_root: str | None = None,
                  model_options: dict[str, dict] | None = None) -> None:
         self.binary = binary or "python"
         self.server = server or str(Path(__file__).resolve().parents[1] /
                                     "music" / "yue2_server.py")
         self.vae_path = vae_path or ""
         self.output_root = output_root or ""
+        self.webui_root = webui_root or ""
         self.model_options = dict(model_options or {})
 
     def formats(self) -> frozenset[Format]:
@@ -45,8 +47,8 @@ class Yue2Engine:
             raise ValueError(f"YuE2 is not configured for {model.name}")
         if params:
             raise ValueError("YuE2 has no instance settings")
-        if not self.vae_path or not self.output_root:
-            raise ValueError("YuE2 VAE and output paths must be configured")
+        if not self.vae_path or not self.output_root or not self.webui_root:
+            raise ValueError("YuE2 VAE, output and Studio paths must be configured")
         options = self.model_options[model.name]
         checkpoint = Path(model.entrypoint)
         model_dir = checkpoint.parent if checkpoint.is_file() else checkpoint
@@ -54,7 +56,9 @@ class Yue2Engine:
             self.binary, self.server, "--model-path", str(model_dir),
             "--vae-path", self.vae_path, "--output-root", self.output_root,
             "--cot", options["cot"], "--memory-budget-gib",
-            str(options["memory_budget_gib"]), "--port", str(port)],
+            str(options["memory_budget_gib"]), "--port", str(port),
+            "--ui-port", str(port + 10000),
+            "--webui-root", self.webui_root],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 

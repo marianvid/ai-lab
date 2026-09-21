@@ -14,6 +14,7 @@ class HeartMulaEngine:
 
     def __init__(self, binary: str | None = None, server: str | None = None,
                  bundle_root: str | None = None,
+                 heartmuse_root: str | None = None,
                  output_root: str | None = None,
                  model_options: dict[str, dict] | None = None) -> None:
         self.binary = binary or "python"
@@ -21,6 +22,7 @@ class HeartMulaEngine:
                                     "music" / "heartmula_server.py")
         self.output_root = output_root or ""
         self.bundle_root = bundle_root or ""
+        self.heartmuse_root = heartmuse_root or ""
         self.model_options = dict(model_options or {})
 
     def formats(self) -> frozenset[Format]:
@@ -45,8 +47,8 @@ class HeartMulaEngine:
             raise ValueError(f"HeartMuLa is not configured for {model.name}")
         if params:
             raise ValueError("HeartMuLa has no instance settings")
-        if not self.output_root or not self.bundle_root:
-            raise ValueError("HeartMuLa bundle and output paths must be configured")
+        if not self.output_root or not self.bundle_root or not self.heartmuse_root:
+            raise ValueError("HeartMuLa bundle, output and HeartMuse paths must be configured")
         options = self.model_options[model.name]
         checkpoint = Path(model.entrypoint)
         model_dir = checkpoint.parent if checkpoint.is_file() else checkpoint
@@ -59,7 +61,8 @@ class HeartMulaEngine:
             "--topk", str(options["topk"]),
             "--temperature", str(options["temperature"]),
             "--cfg-scale", str(options["cfg_scale"]),
-            "--port", str(port)],
+            "--port", str(port), "--ui-port", str(port + 10000),
+            "--heartmuse-root", self.heartmuse_root],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 

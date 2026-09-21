@@ -29,6 +29,7 @@ class KhalaEngineTests(unittest.TestCase):
             self.assertEqual(plan.argv[plan.argv.index('--model-path') + 1], root)
         self.assertEqual(plan.argv[plan.argv.index('--generator-script') + 1],
                          '/runtime/generate.py')
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18120')
         self.assertEqual(self.engine.music_form('future-checkpoint'), {
             'duration_kind': 'bucket', 'default_bucket': 0,
             'maximum_bucket': 4})

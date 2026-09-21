@@ -25,6 +25,7 @@ class KokoroEngineTests(unittest.TestCase):
                          'bm_george')
         self.assertEqual(plan.argv[plan.argv.index('--repo-id') + 1],
                          'publisher/model')
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18117')
         self.assertEqual(self.engine.api_paths(),
                          ('/v1/audio/speech/generations',))
 

@@ -11,7 +11,8 @@ class HeartMulaEngineTests(unittest.TestCase):
     def setUp(self):
         self.engine = HeartMulaEngine(
             binary='/heartlib/python', bundle_root='/runtime/bundle',
-            output_root='/tmp/music', model_options={
+            output_root='/tmp/music', heartmuse_root='/opt/heartmuse',
+            model_options={
                 'future-checkpoint': {'version': '3B',
                                       'checkpoint_subdir': 'HeartMuLa-oss-3B', 'topk': 50,
                                       'temperature': 1.0, 'cfg_scale': 1.5,
@@ -32,6 +33,9 @@ class HeartMulaEngineTests(unittest.TestCase):
         self.assertEqual(plan.argv[plan.argv.index('--bundle-root') + 1],
                          '/runtime/bundle')
         self.assertEqual(plan.argv[plan.argv.index('--version') + 1], '3B')
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18123')
+        self.assertEqual(plan.argv[plan.argv.index('--heartmuse-root') + 1],
+                         '/opt/heartmuse')
         self.assertEqual(self.engine.needs_mb(self.model, {}, 32623), 18000)
         self.assertEqual(self.engine.music_form('future-checkpoint'),
                          {'lyrics_required': True})
