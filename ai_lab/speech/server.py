@@ -61,6 +61,8 @@ def main() -> None:
     parser.add_argument("--inference-timesteps", type=int, default=10)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--ui-port", type=int)
+    parser.add_argument("--max-batch", type=int, default=1)
+    parser.add_argument("--batch-window-ms", type=int, default=100)
     args = parser.parse_args()
     if args.backend == "qwen":
         if not args.mode:
@@ -81,7 +83,8 @@ def main() -> None:
                                 args.ui_port)
     elif args.backend == "higgs":
         # No bundled editor: the voice studio is the interface for Higgs.
-        Handler.backend = HiggsLocalBackend(args.model_path)
+        Handler.backend = HiggsLocalBackend(
+            args.model_path, args.max_batch, args.batch_window_ms)
     else:
         Handler.backend = VoxCpmBackend(
             args.model_path, args.cfg_value, args.inference_timesteps)

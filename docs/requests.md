@@ -86,6 +86,15 @@ take both; Qwen-TTS takes a seed; Kokoro takes neither. A field the model
 would ignore is **refused**, not dropped: an answer in a different voice than
 the one asked for, without a word, is worse than an error.
 
+Parallel requests to Higgs are served together. On Linux SGLang-Omni does
+that itself; on the Mac (`higgs_local`) the server groups requests that
+arrive within 100 ms, up to `max_batch` (engine setting, 1–16), and decodes
+them in one pass: eight lines take about as long as two alone. The answer
+carries the `seed` that was used, also when none was sent, so a take can be
+kept. The same seed gives the same voice and delivery, but a line decoded
+next to others may come out very slightly different from the same line
+decoded alone — the arithmetic of a batch is not bit-identical.
+
 ### The `ai_lab` field: asking for a model started a particular way
 
 Some settings go in a request — temperature, top-p, how many tokens to write.

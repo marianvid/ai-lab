@@ -18,7 +18,14 @@ class HiggsLocalEngine:
     display_name = "Higgs TTS (transformers)"
 
     def __init__(self, binary: str | None = None, server: str | None = None,
-                 model_options: dict[str, dict] | None = None) -> None:
+                 model_options: dict[str, dict] | None = None,
+                 max_batch: int = 1, batch_window_ms: int = 100) -> None:
+        if type(max_batch) is not int or not 1 <= max_batch <= 16:
+            raise ValueError("Higgs max_batch must be an integer from 1 to 16")
+        if type(batch_window_ms) is not int or not 0 <= batch_window_ms <= 2000:
+            raise ValueError("Higgs batch_window_ms must be an integer from 0 to 2000")
+        self.max_batch = max_batch
+        self.batch_window_ms = batch_window_ms
         self.binary = binary or "python"
         self.server = server or str(Path(__file__).resolve().parents[1] /
                                     "speech" / "server.py")
@@ -52,7 +59,9 @@ class HiggsLocalEngine:
         model_dir = checkpoint.parent if checkpoint.is_file() else checkpoint
         return LaunchPlan(argv=[
             self.binary, self.server, "--backend", "higgs",
-            "--model-path", str(model_dir), "--port", str(port)],
+            "--model-path", str(model_dir), "--port", str(port),
+            "--max-batch", str(self.max_batch),
+            "--batch-window-ms", str(self.batch_window_ms)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
@@ -61,7 +70,8 @@ class HiggsLocalEngine:
         return http_ok(port)
 
     def concurrency(self, params: dict) -> int:
-        return 1  # one model copy on one device: requests take turns
+        # One model copy; parallel requests are decoded together in one batch.
+        return self.max_batch
 
     def needs_mb(self, model: ModelSet, params: dict,
                  card_total_mb: float) -> float:

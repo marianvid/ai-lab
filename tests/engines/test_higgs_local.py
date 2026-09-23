@@ -24,6 +24,21 @@ class HiggsLocalEngineTests(unittest.TestCase):
         self.assertEqual(plan.env['HF_HUB_OFFLINE'], '1')
         self.assertEqual(self.engine.needs_mb(self.model, {}, 0), 12000)
         self.assertEqual(self.engine.concurrency({}), 1)
+        self.assertEqual(plan.argv[plan.argv.index('--max-batch') + 1], '1')
+
+    def test_batch_size_sets_gateway_concurrency(self):
+        engine = HiggsLocalEngine(
+            model_options={'higgs-port': {'memory_reservation_mb': 12000}},
+            max_batch=8, batch_window_ms=50)
+        plan = engine.plan(self.model, 8125, {})
+        self.assertEqual(engine.concurrency({}), 8)
+        self.assertEqual(plan.argv[plan.argv.index('--max-batch') + 1], '8')
+        self.assertEqual(
+            plan.argv[plan.argv.index('--batch-window-ms') + 1], '50')
+        for bad in ({'max_batch': 0}, {'max_batch': 17}, {'max_batch': '8'},
+                    {'batch_window_ms': -1}):
+            with self.assertRaises(ValueError):
+                HiggsLocalEngine(**bad)
 
     def test_form_offers_cloning_and_seed(self):
         form = self.engine.speech_form('higgs-port')
