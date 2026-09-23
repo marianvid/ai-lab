@@ -24,6 +24,13 @@ class Yue2RequestTests(unittest.TestCase):
             self.backend._validate({'prompt': 'soul', 'lyrics': 'hello',
                                     'instrumental': True})
 
+    def test_truncation_is_read_per_stage(self):
+        from ai_lab.music.yue2_web_backend import was_truncated
+        self.assertFalse(was_truncated({'abc': False, 'semantic': False}))
+        self.assertTrue(was_truncated({'abc': False, 'semantic': True}))
+        self.assertFalse(was_truncated(None))
+        self.assertTrue(was_truncated(True))
+
 
 if __name__ == '__main__':
     unittest.main()

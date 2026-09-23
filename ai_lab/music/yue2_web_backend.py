@@ -11,6 +11,18 @@ from io import BytesIO
 from pathlib import Path
 
 
+def was_truncated(value) -> bool:
+    """YuE2 reports truncation per stage, as {"abc": False, "semantic": False}.
+
+    A non-empty dictionary is truthy in Python, so `bool()` of that report
+    said "truncated" for every song, including ones that finished cleanly.
+    A song is truncated only when some stage says so.
+    """
+    if isinstance(value, dict):
+        return any(bool(stage) for stage in value.values())
+    return bool(value)
+
+
 class Yue2WebBackend:
     def __init__(self, ui_url: str, model_name: str, cot: str) -> None:
         self.ui_url = ui_url.rstrip("/")
@@ -48,7 +60,7 @@ class Yue2WebBackend:
         result = job.get("result") or {}
         return {"model": self.model_name, "seed": request["seed"],
                 "duration": result.get("audio_seconds", len(samples) / sample_rate),
-                "truncated": bool(result.get("truncated")),
+                "truncated": was_truncated(result.get("truncated")),
                 "score_abc": score.read_text() if score.is_file() else "",
                 "data": [{"mime_type": "audio/wav",
                           "b64_wav": base64.b64encode(wav.getvalue()).decode()}]}

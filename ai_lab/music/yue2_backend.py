@@ -9,10 +9,13 @@ import wave
 from pathlib import Path
 from threading import Lock
 
+from .yue2_web_backend import was_truncated
+
 
 class Yue2Backend:
     def __init__(self, model_path: Path, vae_path: Path,
-                 output_root: Path, cot: str, memory_budget_gib: float) -> None:
+                 output_root: Path, cot: str, memory_budget_gib: float,
+                 device: str = "cuda") -> None:
         from yue2 import YuE2Pipeline
 
         if not model_path.is_dir() or not vae_path.is_dir():
@@ -25,7 +28,7 @@ class Yue2Backend:
         self.cot = cot
         self.lock = Lock()
         self.context = YuE2Pipeline.from_pretrained(
-            str(model_path), vae=str(vae_path), device="cuda",
+            str(model_path), vae=str(vae_path), device=device,
             memory_budget_gib=memory_budget_gib, local_files_only=True)
         self.pipeline = self.context.__enter__()
         atexit.register(self.context.__exit__, None, None, None)
@@ -53,7 +56,8 @@ class Yue2Backend:
             score = root / "score.abc"
             abc = score.read_text() if score.is_file() else ""
             return {"model": self.model_name, "seed": request["seed"],
-                    "duration": duration, "truncated": bool(song.truncated),
+                    "duration": duration,
+                    "truncated": was_truncated(song.truncated),
                     "score_abc": abc,
                     "data": [{"mime_type": "audio/wav",
                               "b64_wav": base64.b64encode(audio).decode()}]}
