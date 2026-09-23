@@ -8,22 +8,27 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore
 
 from .contract import validate_payload
 
 
 class HiggsBackend:
     def __init__(self, worker_binary: Path, model_path: Path,
-                 worker_port: int, mem_fraction_static: float) -> None:
+                 worker_port: int, mem_fraction_static: float,
+                 max_parallel: int = 1) -> None:
         if not worker_binary.is_file() or not model_path.is_dir():
             raise ValueError("Higgs worker or checkpoint is absent")
-        if not 1 <= worker_port <= 65535 or not 0 < mem_fraction_static < 1:
+        if (not 1 <= worker_port <= 65535 or not 0 < mem_fraction_static < 1
+                or not 1 <= max_parallel <= 64):
             raise ValueError("Higgs worker settings are invalid")
         self.model_name = model_path.name
         self.model_path = model_path
         self.worker_port = worker_port
-        self.lock = Lock()
+        # The worker batches concurrent requests; this caps how many it is
+        # handed at once, as the gateway does, for callers that reach this
+        # host without going through the gateway.
+        self.slots = BoundedSemaphore(max_parallel)
         self.process = subprocess.Popen([
             str(worker_binary), "serve", "--model-path", str(model_path),
             "--host", "127.0.0.1", "--port", str(worker_port),
@@ -64,7 +69,7 @@ class HiggsBackend:
         call = urllib.request.Request(
             f"http://127.0.0.1:{self.worker_port}/v1/audio/speech",
             data=payload, headers={"Content-Type": "application/json"})
-        with self.lock, urllib.request.urlopen(call, timeout=600) as response:
+        with self.slots, urllib.request.urlopen(call, timeout=600) as response:
             audio = response.read()
         if not audio.startswith(b"RIFF"):
             raise RuntimeError("Higgs did not return WAV audio")

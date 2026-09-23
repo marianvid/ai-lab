@@ -2,7 +2,7 @@ import base64
 import json
 import unittest
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore
 from unittest.mock import patch
 
 from ai_lab.speech.higgs_backend import HiggsBackend
@@ -25,7 +25,7 @@ class HiggsRequestTests(unittest.TestCase):
         self.backend.model_name = 'future-checkpoint'
         self.backend.model_path = Path('/models/future-checkpoint')
         self.backend.worker_port = 8122
-        self.backend.lock = Lock()
+        self.backend.slots = BoundedSemaphore(8)
 
     def test_converts_binary_worker_audio_to_speech_contract(self):
         with patch('urllib.request.urlopen', return_value=FakeResponse()) as call:

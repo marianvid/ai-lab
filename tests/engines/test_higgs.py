@@ -33,6 +33,20 @@ class HiggsEngineTests(unittest.TestCase):
         self.assertEqual(self.engine.api_paths(),
                          ('/v1/audio/speech/generations',))
 
+    def test_parallel_limit_reaches_gateway_and_worker_host(self):
+        self.assertEqual(self.engine.concurrency({}), 1)
+        engine = HiggsEngine(worker_binary='/runtime/sgl-omni',
+                             model_options=self.engine.model_options,
+                             max_parallel=8)
+        self.assertEqual(engine.concurrency({}), 8)
+        plan = engine.plan(self.model, 8121, {})
+        self.assertEqual(plan.argv[plan.argv.index('--max-parallel') + 1], '8')
+
+    def test_parallel_limit_is_bounded(self):
+        for bad in (0, 65, 2.0, '8'):
+            with self.assertRaises(ValueError):
+                HiggsEngine(max_parallel=bad)
+
     def test_unmapped_checkpoint_is_rejected(self):
         self.engine.model_options.clear()
         self.assertFalse(self.engine.supports(self.model))

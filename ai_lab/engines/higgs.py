@@ -14,12 +14,21 @@ class HiggsEngine:
 
     def __init__(self, binary: str | None = None, server: str | None = None,
                  worker_binary: str | None = None,
-                 model_options: dict[str, dict] | None = None) -> None:
+                 model_options: dict[str, dict] | None = None,
+                 max_parallel: int = 1) -> None:
         self.binary = binary or "python"
         self.server = server or str(Path(__file__).resolve().parents[1] /
                                     "speech" / "higgs_server.py")
         self.worker_binary = worker_binary or "sgl-omni"
         self.model_options = dict(model_options or {})
+        # How many speech requests the SGLang worker is sent at once. The
+        # worker batches them itself; the limit exists because the stages
+        # outside its static memory share (audio encoder, vocoder) grow with
+        # every request in flight. Measured on the 32 GB card at 0.8: eight
+        # succeed together, sixteen ran out of memory.
+        if type(max_parallel) is not int or not 1 <= max_parallel <= 64:
+            raise ValueError("Higgs max_parallel must be an integer from 1 to 64")
+        self.max_parallel = max_parallel
 
     def formats(self) -> frozenset[Format]:
         return frozenset({Format.SAFETENSORS})
@@ -54,6 +63,7 @@ class HiggsEngine:
             "--model-path", str(model_dir),
             "--worker-port", str(options["worker_port"]),
             "--mem-fraction-static", str(options["mem_fraction_static"]),
+            "--max-parallel", str(self.max_parallel),
             "--port", str(port), "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
@@ -62,7 +72,7 @@ class HiggsEngine:
         return http_ok(port)
 
     def concurrency(self, params: dict) -> int:
-        return 1
+        return self.max_parallel
 
     def needs_mb(self, model: ModelSet, params: dict,
                  card_total_mb: float) -> float:
