@@ -26,11 +26,21 @@ def main() -> None:
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--ui-port", type=int, required=True)
     parser.add_argument("--webui-root", type=Path, required=True)
+    parser.add_argument("--device", choices=("cuda", "mps"), default="cuda")
     args = parser.parse_args()
     ui_url = f"http://127.0.0.1:{args.ui_port}"
     launch_studio(args, ui_url)
     backend = Yue2WebBackend(ui_url, args.model_path.name, args.cot)
     serve(backend, args.port)
+
+
+def studio_env(device: str) -> dict[str, str]:
+    """Offline always; on Metal, let an operator PyTorch lacks run on the CPU
+    instead of stopping the song, as the measured Mac benchmark did."""
+    env = {**os.environ, "HF_HUB_OFFLINE": "1"}
+    if device == "mps":
+        env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+    return env
 
 
 def launch_studio(args, ui_url: str) -> None:
@@ -47,16 +57,16 @@ def launch_studio(args, ui_url: str) -> None:
         f"memory_budget_gib: {args.memory_budget_gib}\n"
         "yue2:\n"
         f"  model: {args.model_path}\n  vae: {args.vae_path}\n"
-        f"  vae_legacy: {args.vae_path}\n  device: cuda\n"
+        f"  vae_legacy: {args.vae_path}\n  device: {args.device}\n"
         "  backend: torch\n  quantization: none\n  offload_ar: true\n"
-        "sheetsage2:\n  model: auto\n  device: cuda\n  dtype: bf16\n"
+        f"sheetsage2:\n  model: auto\n  device: {args.device}\n  dtype: bf16\n"
         "worker:\n"
         f"  python: {os.sys.executable}\n  python_yue2: {os.sys.executable}\n"
         f"  python_sheetsage2: {os.sys.executable}\n")
     child = subprocess.Popen(
         [os.sys.executable, "-m", "server", "--config", str(config),
          "--host", "0.0.0.0", "--port", str(args.ui_port)],
-        cwd=args.webui_root, env={**os.environ, "HF_HUB_OFFLINE": "1"})
+        cwd=args.webui_root, env=studio_env(args.device))
 
     def stop() -> None:
         if child.poll() is None:

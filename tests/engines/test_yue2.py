@@ -30,6 +30,26 @@ class Yue2EngineTests(unittest.TestCase):
                              '/opt/yue-studio')
             self.assertEqual(engine.needs_mb(model, {}, 32623), 28000)
             self.assertTrue(engine.music_form(model.name)['editable_score'])
+            self.assertEqual(plan.argv[plan.argv.index('--device') + 1], 'cuda')
+            metal = Yue2Engine(binary='/yue2/python', vae_path='/models/vae',
+                               output_root='/tmp/music', webui_root='/opt/yue-studio',
+                               model_options=engine.model_options, device='mps')
+            plan = metal.plan(model, 8124, {})
+            self.assertEqual(plan.argv[plan.argv.index('--device') + 1], 'mps')
+
+    def test_unknown_accelerator_is_refused(self):
+        for bad in ('cpu', 'metal', ''):
+            with self.assertRaises(ValueError):
+                Yue2Engine(device=bad)
+
+    def test_studio_uses_metal_fallback_only_on_mac(self):
+        import os
+        from unittest.mock import patch
+        from ai_lab.music.yue2_server import studio_env
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(studio_env('mps'), {
+                'HF_HUB_OFFLINE': '1', 'PYTORCH_ENABLE_MPS_FALLBACK': '1'})
+            self.assertEqual(studio_env('cuda'), {'HF_HUB_OFFLINE': '1'})
 
 
 if __name__ == '__main__':

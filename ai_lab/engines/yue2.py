@@ -15,7 +15,8 @@ class Yue2Engine:
     def __init__(self, binary: str | None = None, server: str | None = None,
                  vae_path: str | None = None, output_root: str | None = None,
                  webui_root: str | None = None,
-                 model_options: dict[str, dict] | None = None) -> None:
+                 model_options: dict[str, dict] | None = None,
+                 device: str = "cuda") -> None:
         self.binary = binary or "python"
         self.server = server or str(Path(__file__).resolve().parents[1] /
                                     "music" / "yue2_server.py")
@@ -23,6 +24,12 @@ class Yue2Engine:
         self.output_root = output_root or ""
         self.webui_root = webui_root or ""
         self.model_options = dict(model_options or {})
+        # Which accelerator the YuE2 runtime and its Studio use: the NVIDIA
+        # card on Linux, Metal on a Mac. Configured per host rather than
+        # guessed, so a Mac never silently falls back to the CPU.
+        if device not in ("cuda", "mps"):
+            raise ValueError("YuE2 device must be cuda or mps")
+        self.device = device
 
     def formats(self) -> frozenset[Format]:
         return frozenset({Format.SAFETENSORS})
@@ -58,7 +65,7 @@ class Yue2Engine:
             "--cot", options["cot"], "--memory-budget-gib",
             str(options["memory_budget_gib"]), "--port", str(port),
             "--ui-port", str(port + 10000),
-            "--webui-root", self.webui_root],
+            "--webui-root", self.webui_root, "--device", self.device],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 
