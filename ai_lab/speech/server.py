@@ -7,7 +7,8 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from ai_lab.speech.contract import PATH, validate_payload
+from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH, validate_payload
+from ai_lab.speech.higgs_local_backend import HiggsLocalBackend
 from ai_lab.speech.kokoro_backend import KokoroBackend
 from ai_lab.speech.qwen import MODES, QwenTtsBackend
 from ai_lab.speech.voxcpm_backend import VoxCpmBackend
@@ -28,7 +29,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= 16384:
+            if not 0 < size <= MAX_REQUEST_BYTES:
                 raise ValueError("speech request is empty or too large")
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
@@ -50,7 +51,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=("qwen", "kokoro", "voxcpm"), default="qwen")
+    parser.add_argument("--backend", choices=("qwen", "kokoro", "voxcpm", "higgs"), default="qwen")
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--mode", choices=sorted(MODES))
     parser.add_argument("--language-code")
@@ -78,6 +79,9 @@ def main() -> None:
             parser.error("Kokoro speech requires --ui-port")
         launch_native_kokoro_ui(Handler.backend, args.model_path.parent,
                                 args.ui_port)
+    elif args.backend == "higgs":
+        # No bundled editor: the voice studio is the interface for Higgs.
+        Handler.backend = HiggsLocalBackend(args.model_path)
     else:
         Handler.backend = VoxCpmBackend(
             args.model_path, args.cfg_value, args.inference_timesteps)

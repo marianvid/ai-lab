@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 from threading import BoundedSemaphore
 
-from .contract import validate_payload
+from .contract import ReferenceFile, validate_payload
 
 
 class HiggsBackend:
@@ -57,20 +57,28 @@ class HiggsBackend:
         raise TimeoutError("Higgs worker did not become ready")
 
     def generate(self, body: dict) -> dict:
-        request = validate_payload(body)
+        request = validate_payload(body, seed=True, reference=True)
         if body.get("model") not in (None, self.model_name):
             raise ValueError(f"this engine serves {self.model_name}")
         if request["instruction"]:
             raise ValueError("Higgs accepts style controls inline in the text")
-        payload = json.dumps({"model": str(self.model_path),
-                              "input": request["text"],
-                              "voice": request["speaker"] or "default",
-                              "response_format": "wav"}).encode()
-        call = urllib.request.Request(
-            f"http://127.0.0.1:{self.worker_port}/v1/audio/speech",
-            data=payload, headers={"Content-Type": "application/json"})
-        with self.slots, urllib.request.urlopen(call, timeout=600) as response:
-            audio = response.read()
+        with ReferenceFile(request["reference_audio"]) as reference:
+            fields = {"model": str(self.model_path), "input": request["text"],
+                      "voice": request["speaker"] or "default",
+                      "response_format": "wav"}
+            if request["seed"] is not None:
+                fields["seed"] = request["seed"]
+            if reference:
+                # The worker runs on this machine and reads the clip by path;
+                # the transcript is what makes the cloning faithful.
+                fields["references"] = [{"audio_path": reference,
+                                         "text": request["reference_text"] or None}]
+            call = urllib.request.Request(
+                f"http://127.0.0.1:{self.worker_port}/v1/audio/speech",
+                data=json.dumps(fields).encode(),
+                headers={"Content-Type": "application/json"})
+            with self.slots, urllib.request.urlopen(call, timeout=600) as response:
+                audio = response.read()
         if not audio.startswith(b"RIFF"):
             raise RuntimeError("Higgs did not return WAV audio")
         return {"model": self.model_name, "mode": "higgs",

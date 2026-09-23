@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
+from ai_lab.speech.contract import MAX_REQUEST_BYTES
 from ai_lab.speech.higgs_backend import HiggsBackend
 
 
@@ -33,7 +34,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= 16384:
+            if not 0 < size <= MAX_REQUEST_BYTES:
                 raise ValueError("speech request is empty or too large")
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):

@@ -1,0 +1,47 @@
+import unittest
+
+from ai_lab.engines.higgs_local import HiggsLocalEngine
+from ai_lab.speech.higgs_local_backend import frame_limit
+from ai_lab.types import Format, ModelFile, ModelSet, Task
+
+
+class HiggsLocalEngineTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = HiggsLocalEngine(
+            binary='/runtime/python',
+            model_options={'higgs-port': {'memory_reservation_mb': 12000}})
+        self.model = ModelSet(
+            id='audio-tts/higgs-port', name='higgs-port',
+            format=Format.SAFETENSORS, task=Task.SPEECH_SYNTHESIS,
+            entrypoint='/models/higgs-port',
+            files=(ModelFile('model.safetensors', 1024),))
+
+    def test_plan_runs_the_shared_speech_host_offline(self):
+        plan = self.engine.plan(self.model, 8125, {})
+        self.assertEqual(plan.argv[plan.argv.index('--backend') + 1], 'higgs')
+        self.assertEqual(plan.argv[plan.argv.index('--model-path') + 1],
+                         '/models/higgs-port')
+        self.assertEqual(plan.env['HF_HUB_OFFLINE'], '1')
+        self.assertEqual(self.engine.needs_mb(self.model, {}, 0), 12000)
+        self.assertEqual(self.engine.concurrency({}), 1)
+
+    def test_form_offers_cloning_and_seed(self):
+        form = self.engine.speech_form('higgs-port')
+        self.assertTrue(form['reference_supported'])
+        self.assertTrue(form['seed_supported'])
+
+    def test_unmapped_checkpoint_and_settings_are_refused(self):
+        with self.assertRaises(ValueError):
+            self.engine.plan(self.model, 8125, {'context_size': 1})
+        self.engine.model_options.clear()
+        self.assertFalse(self.engine.supports(self.model))
+
+    def test_runaway_limit_follows_the_text(self):
+        short, long = frame_limit('Salut'), frame_limit('x' * 400)
+        self.assertLess(short, long)
+        self.assertLessEqual(long, 2048)
+        self.assertGreaterEqual(frame_limit(''), 64)
+
+
+if __name__ == '__main__':
+    unittest.main()

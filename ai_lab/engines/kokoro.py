@@ -40,7 +40,8 @@ class KokoroEngine:
                 "speaker_visible": True,
                 "language_visible": False,
                 "speaker_label": "Voice",
-                "speaker_hint": "Default: " + options.get("default_voice", "")}
+                "speaker_hint": "Default: " + options.get("default_voice", ""),
+                "seed_supported": False, "reference_supported": False}
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if not self.supports(model):

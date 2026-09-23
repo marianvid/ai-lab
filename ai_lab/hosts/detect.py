@@ -37,6 +37,7 @@ def current_host(engines: dict | None = None) -> Host:
             qwenalign_binary=settings.get("qwenalign", {}).get("binary"),
             khala_binary=settings.get("khala", {}).get("binary"),
             yue2_binary=settings.get("yue2", {}).get("binary"),
+            higgs_local_binary=settings.get("higgs_local", {}).get("binary"),
         )
     from .linux import LinuxHost
 

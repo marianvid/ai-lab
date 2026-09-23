@@ -1,4 +1,9 @@
-"""Higgs TTS via a supervised SGLang-Omni worker."""
+"""Higgs TTS 3 through its transformers port, for hosts without SGLang-Omni.
+
+The same weights as `higgs.py`, run in-process instead of behind an SGLang
+worker. On Apple silicon it is the only way Higgs runs at all. It serves the
+same speech contract, so a client cannot tell the two apart except by speed.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,27 +13,16 @@ from .base import LaunchPlan, SPEECH_PATHS
 from .probe import http_ok
 
 
-class HiggsEngine:
-    id = "higgs"
-    display_name = "Higgs TTS"
+class HiggsLocalEngine:
+    id = "higgs_local"
+    display_name = "Higgs TTS (transformers)"
 
     def __init__(self, binary: str | None = None, server: str | None = None,
-                 worker_binary: str | None = None,
-                 model_options: dict[str, dict] | None = None,
-                 max_parallel: int = 1) -> None:
+                 model_options: dict[str, dict] | None = None) -> None:
         self.binary = binary or "python"
         self.server = server or str(Path(__file__).resolve().parents[1] /
-                                    "speech" / "higgs_server.py")
-        self.worker_binary = worker_binary or "sgl-omni"
+                                    "speech" / "server.py")
         self.model_options = dict(model_options or {})
-        # How many speech requests the SGLang worker is sent at once. The
-        # worker batches them itself; the limit exists because the stages
-        # outside its static memory share (audio encoder, vocoder) grow with
-        # every request in flight. Measured on the 32 GB card at 0.8: eight
-        # succeed together, sixteen ran out of memory.
-        if type(max_parallel) is not int or not 1 <= max_parallel <= 64:
-            raise ValueError("Higgs max_parallel must be an integer from 1 to 64")
-        self.max_parallel = max_parallel
 
     def formats(self) -> frozenset[Format]:
         return frozenset({Format.SAFETENSORS})
@@ -46,34 +40,28 @@ class HiggsEngine:
 
     def speech_form(self, model_name: str) -> dict:
         return {"instruction_required": False, "instruction_visible": False,
-                "language_visible": False, "speaker_visible": True,
-                "speaker_label": "Voice", "speaker_hint": "Default voice",
+                "language_visible": False, "speaker_visible": False,
                 "seed_supported": True, "reference_supported": True}
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if not self.supports(model):
-            raise ValueError(f"Higgs is not configured for {model.name}")
+            raise ValueError(f"Higgs (transformers) is not configured for {model.name}")
         if params:
             raise ValueError("Higgs has no instance settings")
-        options = self.model_options[model.name]
         checkpoint = Path(model.entrypoint)
         model_dir = checkpoint.parent if checkpoint.is_file() else checkpoint
         return LaunchPlan(argv=[
-            self.binary, self.server,
-            "--worker-binary", self.worker_binary,
-            "--model-path", str(model_dir),
-            "--worker-port", str(options["worker_port"]),
-            "--mem-fraction-static", str(options["mem_fraction_static"]),
-            "--max-parallel", str(self.max_parallel),
-            "--port", str(port), "--ui-port", str(port + 10000)],
+            self.binary, self.server, "--backend", "higgs",
+            "--model-path", str(model_dir), "--port", str(port)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
+                 "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 
     def ready(self, port: int) -> bool:
         return http_ok(port)
 
     def concurrency(self, params: dict) -> int:
-        return self.max_parallel
+        return 1  # one model copy on one device: requests take turns
 
     def needs_mb(self, model: ModelSet, params: dict,
                  card_total_mb: float) -> float:

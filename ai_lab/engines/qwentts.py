@@ -40,7 +40,8 @@ class QwenTtsEngine:
                 "instruction_visible": True,
                 "speaker_visible": mode == "custom-voice",
                 "language_visible": True,
-                "speaker_label": "Speaker"}
+                "speaker_label": "Speaker",
+                "seed_supported": True, "reference_supported": False}
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if not self.supports(model):

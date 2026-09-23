@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Lock
 
-from .contract import validate_payload, wav_result
+from .contract import apply_seed, validate_payload, wav_result
 
 MODES = {"voice-design", "custom-voice"}
 
@@ -29,10 +29,11 @@ class QwenTtsBackend:
         self.lock = Lock()
 
     def generate(self, body: dict) -> dict:
-        request = validate_payload(body)
+        request = validate_payload(body, seed=True)
         if body.get("model") not in (None, self.model_name):
             raise ValueError(f"this engine serves {self.model_name}")
         with self.lock:
+            apply_seed(request["seed"])
             if self.mode == "voice-design":
                 if not request["instruction"]:
                     raise ValueError("VoiceDesign requires a voice instruction")

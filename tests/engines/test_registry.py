@@ -17,7 +17,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(set(self.registry.known()),
                          {"llamacpp", "mlxwhisper", "vllm", "nemo", "onnx",
                           "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
-                          "kokoro", "voxcpm", "qwenalign", "khala", "higgs",
+                          "kokoro", "voxcpm", "qwenalign", "khala", "higgs", "higgs_local",
                           "heartmula", "yue2", "comfy_music", "mulacover", "comfy_video"})
 
     def test_only_installed_engines_are_available(self):

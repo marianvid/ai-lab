@@ -10,6 +10,7 @@ from .types import Task
 MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "kokoro": "model_options", "voxcpm": "model_options",
                     "khala": "model_options", "higgs": "model_options",
+                    "higgs_local": "model_options",
                     "heartmula": "model_options", "yue2": "model_options",
                     "comfy_music": "model_options",
                     "mulacover": "model_options",
@@ -83,6 +84,12 @@ def validate_configuration(config: Config, engine_ids: set[str],
                     errors.append(f"{item.id}: Higgs worker settings are invalid")
                 else:
                     ports.add(options["worker_port"])
+            elif item.engine == "higgs_local":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    type(options.get("memory_reservation_mb")) in (int, float) and
+                    options["memory_reservation_mb"] > 0):
+                    errors.append(f"{item.id}: Higgs (transformers) settings are invalid")
             elif item.engine == "heartmula":
                 options = configured[model_name]
                 if not isinstance(options, dict) or not (

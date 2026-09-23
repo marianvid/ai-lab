@@ -30,6 +30,7 @@ from .voxcpm import VoxCpmEngine
 from .qwenalign import QwenAlignEngine
 from .khala import KhalaEngine
 from .higgs import HiggsEngine
+from .higgs_local import HiggsLocalEngine
 from .heartmula import HeartMulaEngine
 from .yue2 import Yue2Engine
 from .comfy_music import ComfyMusicEngine
@@ -80,6 +81,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         QwenAlignEngine.id: QwenAlignEngine(**settings.get(QwenAlignEngine.id, {})),
         KhalaEngine.id: KhalaEngine(**settings.get(KhalaEngine.id, {})),
         HiggsEngine.id: HiggsEngine(**settings.get(HiggsEngine.id, {})),
+        HiggsLocalEngine.id: HiggsLocalEngine(**settings.get(HiggsLocalEngine.id, {})),
         HeartMulaEngine.id: HeartMulaEngine(**settings.get(HeartMulaEngine.id, {})),
         Yue2Engine.id: Yue2Engine(**settings.get(Yue2Engine.id, {})),
         ComfyMusicEngine.id: ComfyMusicEngine(**settings.get(ComfyMusicEngine.id, {})),

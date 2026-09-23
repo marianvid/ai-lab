@@ -35,7 +35,8 @@ class VoxCpmEngine:
 
     def speech_form(self, model_name: str) -> dict:
         return {"instruction_required": False, "instruction_visible": True,
-                "speaker_visible": False, "language_visible": False}
+                "speaker_visible": False, "language_visible": False,
+                "seed_supported": True, "reference_supported": True}
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
         if not self.supports(model):
