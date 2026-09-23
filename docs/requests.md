@@ -68,6 +68,24 @@ labels found:
 The request-specific `ai_lab` startup override below applies to JSON text
 requests. Audio currently uses the settings saved on its configured instance.
 
+### Speech: a seed, and a voice to imitate
+
+Speech goes to `POST /v1/audio/speech/generations` as JSON: `model`, `text`,
+and whatever the model offers — `speaker`, `instruction`, `language`. Two
+more fields exist for models that can use them:
+
+- `seed` — fixes the random draw. The same seed and text give the same audio,
+  so a take somebody liked can be made again.
+- `reference_audio` (a WAV in base64) and `reference_text` (exactly what is
+  said in it) — the model imitates that voice. The transcript matters: without
+  it cloning is noticeably worse.
+
+Which model takes which is in `GET /api/instances`, under `speech_form`:
+`seed_supported` and `reference_supported`. Higgs (both machines) and VoxCPM
+take both; Qwen-TTS takes a seed; Kokoro takes neither. A field the model
+would ignore is **refused**, not dropped: an answer in a different voice than
+the one asked for, without a word, is worse than an error.
+
 ### The `ai_lab` field: asking for a model started a particular way
 
 Some settings go in a request — temperature, top-p, how many tokens to write.
