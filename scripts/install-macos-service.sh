@@ -9,13 +9,28 @@ fi
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${AI_LAB_CONFIG:-${HOME}/.ai-lab/config.json}"
-python="${AI_LAB_PYTHON:-$(command -v python3)}"
 uid="$(id -u)"
 domain="gui/${uid}"
 menu_label="com.ai-lab.menu"
 agents_dir="${HOME}/Library/LaunchAgents"
 logs_dir="${HOME}/Library/Logs/AI-Lab"
 app_dir="${HOME}/Applications/AI-Lab Menu.app"
+settings="${app_dir}/Contents/Resources/settings.json"
+
+# Python for the manager: AI_LAB_PYTHON if set; otherwise the one the menu app
+# already uses, so a reinstall keeps the chosen environment; otherwise python3.
+installed_python=""
+if [ -f "${settings}" ]; then
+  installed_python="$(sed -n 's/.*"pythonPath": *"\([^"]*\)".*/\1/p' "${settings}")"
+fi
+if [ -n "${AI_LAB_PYTHON:-}" ]; then
+  python="${AI_LAB_PYTHON}"
+elif [ -n "${installed_python}" ] && [ -x "${installed_python}" ]; then
+  python="${installed_python}"
+else
+  python="$(command -v python3)"
+fi
+echo "Python: ${python}"
 manager_plist="${agents_dir}/com.ai-lab.manager.plist"
 menu_plist="${agents_dir}/${menu_label}.plist"
 
