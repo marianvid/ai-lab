@@ -136,4 +136,4 @@ repository.
 
 ---
 
-[← all documents](../README.md)  ·  [Audio](audio.md)  ·  [Writing a request](requests.md)  ·  [Working on it](development.md)
+[← all documents](../README.md)  ·  [Audio](audio.md)  ·  [Writing a request](requests.md)

@@ -67,16 +67,6 @@ before it says how it works.
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
 | [Audio](docs/audio.md) | Speech-to-text, VAD and speaker diarization, their endpoints, and the public Data-Lab method used to prepare this personal project's Romanian evaluation audio. |
 
-**Working on it**
-
-| | |
-|---|---|
-| [Direct model interfaces](docs/direct-interfaces.md) | How reusable native and external UIs attach to managed models on each host. |
-| [Working on it](docs/development.md) | What each module is for, running it locally, and deploying. |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | The one dependency rule every module follows, and the reason for it. **Read this before changing anything.** |
-| [`MODEL_STORAGE.md`](MODEL_STORAGE.md) | How the model store is laid out on disk, and what each weight format is. |
-| [Refactoring plan](docs/refactoring-plan.md) | Audit findings, target package boundaries, migration stages and tests. |
-
 ## What it looks like
 
 ![The model list](docs/screenshots/models.png)
