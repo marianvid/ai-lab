@@ -138,6 +138,42 @@ fields (`package`, `install`, `modules`, `requirements`, `minimum_versions`,
 The versions used for published measurements remain recorded in the benchmark
 repository.
 
+### MLX LM: text models on a Mac
+
+MLX is Apple's own library for running models on the graphics part of Apple
+silicon. mlx-lm is the text program built on it. It is a second way to run a
+text model on a Mac, beside llama.cpp, and it reads a different weight format:
+`mlx`, a folder holding `config.json`, a tokenizer and `*.safetensors` files
+written by mlx-lm's conversion tool. The `mlx-community` models on Hugging
+Face are in this format. It does not read GGUF, and llama.cpp does not read
+MLX, so the same model needs one download per engine.
+
+It is installed like the other package engines: `source.package` is
+`mlx-lm`, each version gets its own environment beside the others, and
+`current` points at the one in use. The engine starts AI-Lab's launcher,
+`ai_lab/text/mlxlm_server.py`, with that environment's Python. The launcher
+runs mlx-lm's own server with two changes: its health page says "not yet"
+until the weights are in memory (mlx-lm on its own says "ok" at once), and
+any model name in a request means the one model loaded (mlx-lm on its own
+would try to download a model by that name).
+
+What differs from llama.cpp, in the settings:
+
+- **No context size.** llama.cpp reserves memory for a fixed context at start
+  and splits it between its slots. mlx-lm grows each request's memory as the
+  text grows, so there is nothing to reserve and nothing to split.
+- **Answers produced together** (`decode_concurrency`). mlx-lm advances
+  several answers in the same step, which is where throughput under load comes
+  from. The manager also uses this number as how many requests it lets in at
+  once. It works only for models whose cache can be merged; others are
+  answered one at a time.
+- **Thinking.** A request turns a model's thinking off with
+  `"chat_template_kwargs": {"enable_thinking": false}` — the same field
+  llama.cpp accepts. The Thinking setting sets the default for requests that
+  do not say.
+- **Cache precision** is fixed at the model's own 16 bits; mlx-lm has no
+  option to shrink it.
+
 ### Which engines have an update row
 
 An engine gets an update row only when its configuration has a `source`
@@ -146,7 +182,8 @@ section (`builds.py`, `installs.py`):
 - `source.path` — a git checkout compiled here, such as llama.cpp. See
   [Source build versions](source-builds.md).
 - `source.package` — a Python package installed into its own environment,
-  such as vLLM, NeMo, the Silero ONNX adapter, pyannote.audio or PaddleOCR.
+  such as vLLM, NeMo, the Silero ONNX adapter, pyannote.audio, PaddleOCR or
+  mlx-lm.
   See [Package-installed engine versions](package-installs.md).
 - `source.kind: "git-app"` — a complete git application such as ComfyUI, as
   described above.

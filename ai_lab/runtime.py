@@ -26,7 +26,7 @@ import time
 from threading import RLock
 
 from .config import Instance
-from .engines.base import Engine
+from .engines.base import Engine, withheld
 from .events import EventBus
 from .runtime_diagnostics import RuntimeDiagnostics
 from .runtime_state import (Operation, RuntimeProgress, Step, LOAD_SPAN,
@@ -154,6 +154,10 @@ class Runtime:
             "pid": process.pid,
             "ready": engine.ready(instance.port) if process.running else False,
             "web_ui": bool(getattr(engine, "web_ui", lambda: None)()),
+            # What the engine will not do with these settings, whatever the
+            # weights can — pictures on mlx-lm, or on vLLM "text only". The
+            # page takes those icons off the row.
+            "withheld": sorted(withheld(engine, instance.params)),
             "last_operation": self.last(instance.id),
         }
 

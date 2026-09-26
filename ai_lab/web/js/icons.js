@@ -75,11 +75,15 @@ export function capabilities(has, taken = []) {
 }
 
 
-// What a set of settings takes away. Kept next to the icons because it is the
-// same question — what will the running model actually do — and there is
-// exactly one of these to know about.
-export function suppressed(params) {
-  return (params && params.language_model_only) ? [PICTURES] : [];
+// What an entry takes away. Kept next to the icons because it is the same
+// question — what will the running model actually do. `withheld` is the
+// engine's own answer, sent by the manager (mlx-lm never reads pictures).
+// The "Text only" setting is also read here directly, so the row is still
+// right when talking to a manager too old to send `withheld`.
+export function suppressed(params, withheld = []) {
+  const taken = new Set(withheld || []);
+  if (params && params.language_model_only) taken.add(PICTURES);
+  return [...taken];
 }
 
 export { PICTURES, TOOLS };

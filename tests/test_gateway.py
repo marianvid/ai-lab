@@ -287,10 +287,49 @@ class DescribingTests(unittest.TestCase):
         rows = {row["id"]: row for row in quick(self.operations()).catalogue()}
         self.assertEqual(rows["reviewer"]["capabilities"], [])
 
+    class Withholding(FakeEngine):
+        """An engine that says what it will not do, as vLLM and mlx-lm do."""
+
+        def __init__(self, rule):
+            super().__init__(OPENAI_PATHS)
+            self.rule = rule
+
+        def withholds(self, params):
+            return self.rule(params)
+
+    def with_engine(self, rule, **params):
+        operations = self.operations(**params)
+        engine = self.Withholding(rule)
+        operations.engines = type("Registry", (), {
+            "get": staticmethod(lambda engine_id: engine)})()
+        return operations
+
     def test_text_only_takes_pictures_away(self):
-        gateway = quick(self.operations(language_model_only=True))
+        # vLLM's rule: "Text only" drops the picture reader.
+        rule = lambda params: {"images"} if params.get("language_model_only") else set()
+        rows = {row["id"]: row for row in
+                quick(self.with_engine(rule, language_model_only=True)).catalogue()}
+        self.assertEqual(rows["coder"]["capabilities"], ["tools"])
+        rows = {row["id"]: row for row in quick(self.with_engine(rule)).catalogue()}
+        self.assertEqual(rows["coder"]["capabilities"], ["images", "tools"])
+
+    def test_an_engine_that_never_reads_pictures_takes_them_away(self):
+        # mlx-lm's rule: text only, whatever the model's files say.
+        gateway = quick(self.with_engine(lambda params: {"images"}))
         rows = {row["id"]: row for row in gateway.catalogue()}
         self.assertEqual(rows["coder"]["capabilities"], ["tools"])
+
+    def test_the_real_engines_say_what_they_withhold(self):
+        from ai_lab.engines.base import withheld
+        from ai_lab.engines.llamacpp import LlamaCppEngine
+        from ai_lab.engines.mlxlm import MlxLmEngine
+        from ai_lab.engines.vllm import VllmEngine
+        self.assertEqual(withheld(MlxLmEngine(binary="python"), {}), {"images"})
+        self.assertEqual(withheld(VllmEngine(binary="vllm"),
+                                  {"language_model_only": True}), {"images"})
+        self.assertEqual(withheld(VllmEngine(binary="vllm"), {}), frozenset())
+        self.assertEqual(withheld(LlamaCppEngine(binary="llama-server"), {}),
+                         frozenset())
 
     def test_one_model_carries_its_settings_and_forms(self):
         row = quick(self.operations()).describe("CODER")

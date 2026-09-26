@@ -17,7 +17,7 @@ from .gateway_errors import CardBusy, CouldNotLoad, NotConfigured, ShapeNotServe
 from .gateway_resources import GatewayResources
 from .gateway_control import GatewayControl
 from .scheduler import Abandoned, Scheduler, WillNotFit
-from .capabilities import IMAGES
+from .engines.base import withheld
 from .types import Task
 
 
@@ -141,9 +141,9 @@ class Gateway:
     def _capabilities(self, instance: dict) -> list[str]:
         """What the model's own files say it can do, minus what the entry turns off.
 
-        Read from the weights (see `capabilities.py`), not configured. An entry
-        started with `language_model_only` loads without the picture reader,
-        so it cannot read pictures even when the weights could.
+        Read from the weights (see `capabilities.py`), not configured. The
+        engine can then take things away — vLLM started "text only", or
+        mlx-lm, which never reads pictures — so it is asked what it withholds.
         A model whose files cannot be read reports nothing rather than failing
         the whole listing.
         """
@@ -151,9 +151,11 @@ class Gateway:
             able = set(self.operations.model_for(instance["id"]).capabilities)
         except Exception:
             return []
-        if (instance.get("params") or {}).get("language_model_only"):
-            able.discard(IMAGES)
-        return sorted(able)
+        try:
+            engine = self.operations.engines.get(instance["engine"])
+        except KeyError:
+            return sorted(able)
+        return sorted(able - withheld(engine, instance.get("params")))
 
     def _shapes(self, instance: dict) -> list[str]:
         try:

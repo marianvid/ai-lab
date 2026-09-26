@@ -196,6 +196,11 @@ class Engine(Protocol):
         """
         ...
 
+    # Optional: `withholds(params) -> frozenset[str]`, the capabilities (see
+    # `capabilities.py`) this engine will not offer with these settings even
+    # when the weights have them. Read through `withheld` below, so an engine
+    # that never withholds anything need not define it.
+
     def api_paths(self, task: Task = Task.TEXT_GENERATION) -> tuple[str, ...]:
         """The request shapes this engine answers.
 
@@ -206,3 +211,20 @@ class Engine(Protocol):
         engine that will reject it in its own words.
         """
         ...
+
+
+def withheld(engine, params: dict | None) -> frozenset[str]:
+    """What this engine, started with these settings, will not do.
+
+    The weights say what a model *can* do; the engine running it can take
+    things away. vLLM started "text only" skips the part that reads
+    pictures, and mlx-lm never reads pictures at all. Asked of the engine so
+    neither the gateway nor the page needs to know which engine is which.
+    """
+    ask = getattr(engine, "withholds", None)
+    if ask is None:
+        return frozenset()
+    try:
+        return frozenset(ask(params or {}))
+    except Exception:
+        return frozenset()

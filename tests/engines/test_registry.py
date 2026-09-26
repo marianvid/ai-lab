@@ -15,7 +15,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_every_engine_is_known_everywhere(self):
         self.assertEqual(set(self.registry.known()),
-                         {"llamacpp", "mlxwhisper", "vllm", "nemo", "onnx",
+                         {"llamacpp", "mlxlm", "mlxwhisper", "vllm", "nemo", "onnx",
                           "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
                           "kokoro", "voxcpm", "qwenalign", "khala", "higgs", "higgs_local",
                           "heartmula", "yue2", "comfy_music", "mulacover", "comfy_video"})

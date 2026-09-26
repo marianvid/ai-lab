@@ -29,7 +29,7 @@ WEIGHT_SUFFIXES = {
 # consumed, not a different file container. They all live in `.safetensors`
 # files on disk.
 SAFETENSORS_FORMATS = frozenset({
-    "safetensors", "fp8", "nvfp4", "awq", "gptq", "comfyui",
+    "safetensors", "fp8", "nvfp4", "awq", "gptq", "comfyui", "mlx",
 })
 
 # Files that belong to a model without holding weights.

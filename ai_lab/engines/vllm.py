@@ -21,6 +21,7 @@ startup — which is why every setting below belongs to the memory group.
 
 from __future__ import annotations
 
+from ..capabilities import IMAGES
 from ..types import Format, ModelSet, Task
 from ..hosts.command import which
 from .base import (ANTHROPIC_PATHS, OPENAI_PATHS, TRANSCRIPTION_PATHS,
@@ -190,6 +191,10 @@ class VllmEngine:
 
     def ready(self, port: int) -> bool:
         return http_ok(port, "/health")
+
+    def withholds(self, params: dict) -> frozenset[str]:
+        """"Text only" loads a model that can see without the part that sees."""
+        return frozenset({IMAGES}) if params.get("language_model_only") else frozenset()
 
     def needs_mb(self, model, params: dict, card_total_mb: float) -> float:
         """A share of the whole card, and it is exactly that.

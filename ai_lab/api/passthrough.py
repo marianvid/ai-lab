@@ -90,26 +90,49 @@ def forward(url: str, payload: dict | bytes, on_close=None,
             on_close()
         raise
 
-    # The answer has begun, so the tighter limit applies from here. Reached
-    # through the socket underneath because that is where a read timeout lives;
-    # if it cannot be reached, the first-byte limit keeps applying to every
-    # read, which is looser than intended but still bounded.
-    _tighten(response, between_bytes_s)
+    # Headers are not the first byte, and neither is a keep-alive. A streaming
+    # engine sends its headers at once and then reads the prompt, which on a
+    # Mac takes a minute for a long one. During that time llama.cpp sends
+    # only an empty "still here" line (`:` on its own, an SSE comment) every
+    # 30 s. Starting the idle limit at the headers cut those answers off at
+    # 30 s, just before the first keep-alive, and the client got an empty
+    # stream. So the first-byte limit runs from when the request was sent
+    # until the first byte of real answer arrives; only then does the tighter
+    # idle limit take over. Keep-alives are still passed on to the client.
+    def remaining() -> float:
+        return max(0.1, first_byte_s - (time.perf_counter() - sent_at))
+
+    _limit(response, remaining())
+
+    # `read1` hands over whatever has arrived. Plain `read(CHUNK)` waits until
+    # it has CHUNK bytes or the answer ends, so a stream reached the client in
+    # 8 KB bursts — dozens of words late, which showed up as a slower first
+    # word through the gateway than straight from the engine.
+    take = getattr(response, "read1", None) or response.read
 
     def read() -> Iterator[bytes]:
         first = True
         try:
             while True:
-                chunk = response.read(CHUNK)
+                chunk = take(CHUNK)
                 if not chunk:
                     return
+                if first and _keep_alive_only(chunk):
+                    # Not an answer yet: the first-byte limit keeps running,
+                    # counted from when the request was sent.
+                    _limit(response, remaining())
+                    yield chunk
+                    continue
                 if first:
                     first = False
+                    # The answer has begun, so the tighter limit applies from
+                    # here.
+                    _limit(response, between_bytes_s)
                     if on_first_chunk:
-                        # How long the engine took to say anything. Timed here
-                        # rather than counted anywhere, because this is the only
-                        # place that sees the moment it arrives — and it never
-                        # looks at what is in it.
+                        # How long the engine took to start answering. Timed
+                        # here because this is the only place that sees the
+                        # moment it arrives. It looks at a piece only to tell
+                        # a keep-alive from an answer, never further.
                         on_first_chunk(time.perf_counter() - sent_at)
                 yield chunk
         finally:
@@ -126,8 +149,24 @@ def forward(url: str, payload: dict | bytes, on_close=None,
         headers=headers)
 
 
-def _tighten(response, seconds: float) -> None:
-    """Apply the between-bytes limit to the rest of this answer."""
+def _keep_alive_only(chunk: bytes) -> bool:
+    """Whether a piece of a stream is only "still here" and no answer.
+
+    In the event-stream format a line starting with `:` is a comment, which
+    engines send to keep a quiet connection open. Blank lines separate events.
+    A piece made of nothing else carries no part of the answer.
+    """
+    return all(not line.strip() or line.startswith(b":")
+               for line in chunk.split(b"\n"))
+
+
+def _limit(response, seconds: float) -> None:
+    """Set how long each further read of this answer may wait.
+
+    Reached through the socket underneath, because that is where a read
+    timeout lives. If it cannot be reached, the first-byte limit given to
+    `urlopen` keeps applying to every read: looser than intended, but bounded.
+    """
     for owner in (getattr(response, "fp", None), response):
         raw = getattr(owner, "raw", owner)
         sock = getattr(raw, "_sock", None)

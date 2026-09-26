@@ -38,6 +38,7 @@ def current_host(engines: dict | None = None) -> Host:
             khala_binary=settings.get("khala", {}).get("binary"),
             yue2_binary=settings.get("yue2", {}).get("binary"),
             higgs_local_binary=settings.get("higgs_local", {}).get("binary"),
+            mlxlm_binary=settings.get("mlxlm", {}).get("binary"),
         )
     from .linux import LinuxHost
 

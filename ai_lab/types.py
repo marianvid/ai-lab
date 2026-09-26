@@ -28,6 +28,9 @@ class Format(str, Enum):
     PYANNOTE = "pyannote"
     PADDLEOCR = "paddleocr"
     COMFYUI = "comfyui"
+    # Apple MLX: a folder of safetensors written by mlx-lm's converter, with
+    # its quantisation described in config.json. Only mlx-lm reads it.
+    MLX = "mlx"
 
 
 class Task(str, Enum):

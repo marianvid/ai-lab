@@ -43,6 +43,15 @@ anything else: it is a manual act, for looking at one model, and if there is no
 room it says what is in the way. On llama.cpp it loads anyway and lets the
 engine leave the layers that will not fit in system memory.
 
+**The weight format decides the engine.** GGUF goes to llama.cpp, the NVIDIA
+formats to vLLM, and on a Mac the `mlx` format — a folder written by Apple's
+mlx-lm converter — goes to MLX LM. An MLX folder is one model, named after the
+folder, exactly like any other directory of safetensors; its picture and tool
+icons come from its `config.json` and chat template in the same way. MLX LM
+itself reads text only, so its rows never show the picture icon, even when
+the model's files say it can see. The engine says so itself (it "withholds"
+pictures), the same way vLLM's "Text only" setting does.
+
 **Settings** on a row shows what the model will be started with — context,
 cache precision, how many requests at once, precision for NeMo, and per engine
 the rest. Settings that do not apply to the selected task are not shown. Changing

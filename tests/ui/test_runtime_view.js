@@ -152,6 +152,28 @@ describe('the Models page', () => {
                  'the line is spending screen on something the tooltip carries');
   });
 
+  it('shows an MLX entry with its format, engine and concurrency, and no chat link', async () => {
+    // mlx-lm has no context size and no chat page. The row must not invent
+    // either, and should still say how many requests it answers together.
+    const instance = {
+      ...INSTANCE, id: 'bench-mlx', engine: 'mlxlm', model_id: 'mlx/qwen-4bit',
+      params: { decode_concurrency: 4, temperature: 0.8 }, web_ui: false,
+    };
+    const model = { ...MODEL, id: 'mlx/qwen-4bit', name: 'qwen-4bit', format: 'mlx' };
+    const engine = { ...ENGINE, id: 'mlxlm', name: 'MLX LM', formats: ['mlx'] };
+    const { view } = await renderPage({
+      '/api/instances': [instance], '/api/models': [model],
+      '/api/settings': { title: 'AI-Lab', engines: [engine], repositories: [],
+                         accelerator: {}, host: {} },
+    });
+    const line = view.querySelector('.row.instance');
+    assert.equal(view.querySelector('.pill.format').textContent, 'mlx');
+    assert.equal(view.querySelector('.pill.engine').textContent, 'MLX LM');
+    assert.match(line.title, /4 at once/);
+    assert.doesNotMatch(line.title, /ctx/);
+    assert.equal(view.querySelector('.chat-link'), null);
+  });
+
   it('shapes the way in like the pills, not like the buttons', async () => {
     // It belongs with the pills: they describe the model, and this one says
     // the model is answering and here is the door. Sharing their class rather

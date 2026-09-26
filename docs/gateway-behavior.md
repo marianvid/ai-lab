@@ -89,10 +89,21 @@ work nothing comes near them.
 
 **To the first byte** covers connecting and reading the prompt — and, for a
 request that did not ask for streaming, the whole answer, because such an
-engine sends nothing until it has finished. Measured here: 8,400 tokens of
+engine sends nothing until it has finished. It is counted from when the
+request is sent to the first byte of the *answer*. Two things arrive earlier
+and do not count: the reply's headers, which a streaming engine sends at
+once, and "still here" lines (event-stream comments, a line starting with
+`:`), which llama.cpp and mlx-lm send while they read a long prompt. Those
+lines are passed on to the client unchanged. Counting either as the first
+byte started the idle limit too early: a 34,000-token prompt on the Mac, a
+40-second read, came back empty after 30 s. Measured here: 8,400 tokens of
 prompt read in 0.78 s on the card. On a model split between card and system
 memory, or on Apple silicon, it is far slower — that is what this number is
 sized for.
+
+Each piece of a streamed answer is passed on the moment it arrives, not
+collected into larger blocks first, so the first word reaches the client when
+the engine sends it.
 
 **Between bytes** catches an engine that starts answering and stops. At the
 slowest generation measured on either machine, 17 tokens a second, the gap

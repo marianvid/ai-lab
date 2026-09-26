@@ -83,6 +83,14 @@ describe('what a model can do, on the Models page', () => {
     assert.deepEqual(icons(view), ['Can call tools']);
   });
 
+  it('takes the picture icon away when the engine says it withholds pictures', async () => {
+    // mlx-lm reads text only, whatever the model's config.json says. The
+    // manager sends that as `withheld`; the page does not name the engine.
+    const mlx = { ...INSTANCE, withheld: ['images'] };
+    const { view } = await renderModels({ '/api/instances': [mlx] });
+    assert.deepEqual(icons(view), ['Can call tools']);
+  });
+
   it('leaves the tools icon alone when pictures are switched off', async () => {
     // The setting is about the vision tower. It has nothing to do with the
     // chat template, which is what decides whether tools can be asked for.

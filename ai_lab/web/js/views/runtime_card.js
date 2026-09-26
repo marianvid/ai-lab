@@ -23,6 +23,8 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
       [`port ${instance.port}`,
        settings.context_size ? `ctx ${settings.context_size}` : null,
        settings.parallel ? `${settings.parallel} slot${settings.parallel === 1 ? '' : 's'}` : null,
+       // MLX LM has no slots: it produces several answers in the same step.
+       settings.decode_concurrency ? `${settings.decode_concurrency} at once` : null,
        settings.temperature !== undefined ? `temp ${settings.temperature}` : null,
       ].filter(Boolean).join(' · '),
       instance.ready ? 'ready' : instance.running ? 'starting' : 'stopped',
@@ -91,7 +93,8 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
   function canDo(instance, models) {
     const model = models.find((item) => item.id === instance.model_id);
     if (!model) return [];
-    return capabilities(model.capabilities, suppressed(instance.params));
+    return capabilities(model.capabilities,
+                        suppressed(instance.params, instance.withheld));
   }
 
   function formatOf(instance, models) {
