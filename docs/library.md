@@ -14,12 +14,55 @@ fails to load with an unhelpful message.
 once there is something to clear, because a button that does nothing is one
 people press once and stop trusting.
 
+Each model on disk is one row: its name, the weight format, the task, which
+storage it sits in, its size, how many files it has, and whether the set is
+complete. An incomplete set says how many files are missing, and hovering
+names them. **Refresh library** looks at the disks again, for files that
+arrived without going through this page.
+
+## Two places to keep models
+
+Models live in one of two stores:
+
+- **core** — "Production" in the page. Models that have been tried and are
+  used by AI-Lab.
+- **benchmark** — "Temporary / benchmark" in the page. Models still being
+  evaluated.
+
+This is a physical split, not two kinds of model. A folder of the same format
+in each store shows up as one section, and each row's storage badge says
+where that model is.
+
+**Starting a download asks where to put it.** The dialog shows both stores
+with their free space. Benchmark is picked by default, because a new model has
+not been evaluated yet. A store that is disabled, not mounted, read-only or too
+small for the download cannot be picked, and the dialog says which of those it
+is. Which folder inside the store is decided by the server, from the model's
+format.
+
+**Move to core** and **Move to benchmark** carry a model to the other store.
+The move is careful:
+
+- It is refused while the model is loaded. Unload it in Models first.
+- The files are copied into a hidden working folder on the destination, and
+  each copy's checksum (a fingerprint of the bytes) is compared with the
+  original. A mismatch stops the move.
+- Only then does the copy appear under its real name, and only then are the
+  originals removed. A tokenizer or settings file that another model in the
+  old folder still needs is left behind for it.
+- A configured entry that pointed at the model is repointed to the new place,
+  so the Models row keeps working.
+- If the manager stops mid-move, the move is marked as failed at the next
+  start rather than shown as still running. The originals are never touched
+  before the whole copy is checked.
+
 ## Curation
 
 An installation can attach operator-owned guidance to a model in `config.json`
 under `model_notes`, keyed by the model's on-disk name. `short` is shown beneath
 a configured entry on **Models**; `detail` is the tooltip on its name in
-**Library**. The name stays the same when a model moves between benchmark and
+**Library**, where an ⓘ beside the name shows there is one. A plain string
+instead of the two fields serves as both. The name stays the same when a model moves between benchmark and
 core storage, so its guidance moves with it.
 
 ```json
@@ -31,8 +74,7 @@ core storage, so its guidance moves with it.
 }
 ```
 
-A download goes to the folder for its format, decided by the server rather than
-chosen. Deleting a model is refused while a configured entry points at it, and
+Deleting a model is refused while a configured entry points at it, and
 that refusal sends you to Models to remove the entry first — two actions on two
 pages, so it is always clear which kind of data is about to disappear.
 

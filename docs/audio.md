@@ -21,14 +21,66 @@ published audio measurements were made.
 |---|---|---|---|
 | transcription | `/v1/audio/transcriptions` | vLLM | Whisper large-v3, Whisper large-v3-turbo, Qwen3-ASR 0.6B and 1.7B |
 | transcription | `/v1/audio/transcriptions` | NeMo | Parakeet TDT 0.6B v3, Canary 1B v2; Nemotron 3.5 ASR Streaming 0.6B is installed but its checkpoint does not accept Romanian |
+| transcription | `/v1/audio/transcriptions` | MLX Whisper (macOS only) | Whisper checkpoints in safetensors format, run on Apple silicon |
 | voice activity detection | `/v1/audio/speech-segments` | ONNX Runtime adapter | Silero VAD 6.2.1 |
-| alignment | — | not served for Romanian | Qwen3 ForcedAligner is stored, but Romanian is not in its supported-language list |
+| alignment | `/v1/audio/alignments` | Qwen Forced Aligner (macOS only) | Qwen3 ForcedAligner; Romanian is not in its supported-language list |
 | diarization | `/v1/audio/diarizations` | NeMo | NVIDIA Sortformer 4-speaker v1; non-commercial evaluation only |
 | diarization | `/v1/audio/diarizations` | pyannote.audio | Speaker Diarization Community-1 |
+| speech synthesis | `/v1/audio/speech/generations` | Qwen3-TTS, Kokoro, VoxCPM, Higgs TTS | see [Speech engines](#speech-engines) |
 
 The task is a property of both a stored model and a configured instance. The
 interface filters out engines that cannot serve that task instead of allowing a
 configuration that will fail only when it starts.
+
+## Which machine runs which audio engine
+
+The Linux host and the Mac offer different engines (`hosts/linux.py` and
+`hosts/darwin.py`). An engine that the host does not offer is not shown for
+that host at all.
+
+| Engine | What it does | Linux | macOS |
+|---|---|---|---|
+| vLLM | transcription (it also serves text models) | yes (NVIDIA card needed) | no |
+| NVIDIA NeMo Speech | transcription and diarization from `.nemo` files | yes (NVIDIA card needed) | no |
+| MLX Whisper | transcription on Apple silicon | no | yes |
+| ONNX Runtime (Silero) | voice activity detection | yes | yes |
+| pyannote.audio | diarization | yes | yes |
+| Qwen Forced Aligner | alignment | no | yes |
+| Qwen3-TTS | speech synthesis | yes | yes |
+| Higgs TTS (SGLang-Omni) | speech synthesis | yes | no |
+| Higgs TTS (transformers) | speech synthesis, same weights | no | yes |
+| Kokoro | speech synthesis | no | yes |
+| VoxCPM | speech synthesis | no | yes |
+
+Diarization means working out who spoke when. Voice activity detection (VAD)
+means finding the parts of a recording where somebody is speaking.
+
+## Alignment
+
+Alignment takes a recording and its known transcript, and says when each word
+was spoken. Send a multipart request to `POST /v1/audio/alignments` with the
+audio in `file`, the transcript in `text` (1–10000 characters) and the
+`language` name (default `English`). The answer is
+`{"words":[{"text":…,"start":…,"end":…}]}`, with times in seconds.
+
+The aligner accepts Chinese, English, Cantonese, French, German, Italian,
+Japanese, Korean, Portuguese, Russian and Spanish. Any other language is
+refused, which is why it is not used for the Romanian evaluation audio.
+
+## Speech engines
+
+Speech synthesis (text to speech) goes to `POST /v1/audio/speech/generations`.
+The request fields — `seed`, a reference voice to imitate, and which model
+takes which — are described in
+[Writing a request](requests.md#speech-a-seed-and-a-voice-to-imitate).
+
+Higgs TTS comes in two forms that serve the same request contract. On Linux
+it runs behind an SGLang-Omni worker, a separate serving program that AI-Lab
+starts and watches over. The engine setting `max_parallel` (1–64) limits how
+many requests that worker is sent at once. On the Mac it runs through the
+transformers library inside AI-Lab's own adapter, because SGLang-Omni does not
+run there. There, requests that arrive within `batch_window_ms` of each other
+(default 100 ms) are grouped, up to `max_batch` (1–16), and decoded together.
 
 ## Runtime isolation
 
@@ -44,8 +96,10 @@ The manager, vLLM, NeMo and Silero do not share Python packages:
 
 The adapter in `ai_lab/audio/server.py` is launched with the runtime's Python.
 It restores one model, exposes a small HTTP contract, and does no durable data
-work. systemd still supervises one process per configured instance, exactly as
-it does for text engines.
+work. It has one backend per engine: NeMo, MLX Whisper, Sortformer, pyannote,
+Silero and the Qwen aligner. There is still one process per configured
+instance, exactly as for text engines. On Linux systemd supervises it; on the
+Mac the manager starts it as its own child process.
 
 vLLM's base package does not include audio decoding. The active vLLM
 environment therefore also carries its declared audio dependencies (`av`,

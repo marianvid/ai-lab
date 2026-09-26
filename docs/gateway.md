@@ -7,24 +7,33 @@ here, read this one.
 Each configured model is a separate engine on its own port. Pointed straight at
 those, a client naming a model that happens not to be running gets a refused
 connection. The Gateway is one address in front of all of them. It exposes the
-OpenAI text and audio shapes supported by the configured engines, plus the
-Anthropic Messages shape where the engine supports it:
+OpenAI text and audio shapes supported by the configured engines, the
+Anthropic Messages shape where the engine supports it, and this project's own
+shapes for music, speech, video, alignment, OCR and images:
 
 ```sh
-curl http://ai-lab.lan:8090/v1/chat/completions \
+curl http://localhost:8090/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model": "reviewer", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
-Name any configured model. No API key is checked; any value will do.
+Replace `localhost` with the machine's address when calling from elsewhere;
+8090 is the manager's default port.
+
+Name any configured model by its id — the id only, not its label or file name.
+No API key is checked; any value will do.
 `GET /v1/models` lists every configured entry, loaded or not, which is the
 point: a client is meant to be able to ask for one of them.
 
 The **Server address** block is the contract of this particular installation.
 It lists the endpoints available now and which configured models can answer
-each one. That includes chat and completion requests, Anthropic messages and
-token counting, transcription, voice-activity detection and speaker
-diarization. An endpoint absent from this block is not served here.
+each one. Depending on what is configured, that includes chat and completion
+requests, Anthropic messages and token counting, transcription, alignment
+(matching a transcript to the audio word by word), voice-activity detection,
+speaker diarization, OCR, image generation and editing, speech, music and
+video. The list is built from the configured models' engines, so an endpoint
+absent from this block has no model here that answers it. How to write each
+request is in [Writing a request](requests.md).
 
 ### OCR and image workflows
 
@@ -32,6 +41,17 @@ OCR is exposed at `POST /v1/images/ocr` and uses an isolated PaddleOCR 3.x
 runtime. Image generation and editing are exposed at
 `POST /v1/images/generations` and `POST /v1/images/edits`. Callers select an
 operator-defined profile; arbitrary ComfyUI graphs are never accepted.
+`GET /api/image-profiles` lists the profiles, with the task and model each one
+uses. A request may carry only `profile`, `model`, `prompt`,
+`negative_prompt`, `seed`, `width`, `height`, `steps`, `cfg_scale`, `n`,
+`async` and `response_format`; any other field is refused.
+
+Uploaded images — for OCR and for edits — are checked against the size limits
+in the `gateway` section of the configuration: `max_upload_bytes`,
+`max_upload_pixels` and `max_upload_dimension`. Zero means no limit.
+
+Without `async`, the call waits for the result, up to `images.client_wait_s`
+(default 1,800 seconds).
 
 Set `async: true` to receive a durable job immediately. Poll
 `GET /api/image-jobs/{id}`, list with `GET /api/image-jobs`, and cancel with
@@ -42,6 +62,9 @@ metadata, and temporary inputs are removed after completion.
 ComfyUI runs behind a private adapter and is deliberately single-concurrency:
 its interrupt endpoint affects the current global execution. Workflow files
 must be exported in API format and stored below `images.workflow_root`.
+
+Music, speech and video have their own background jobs, described in
+[Media jobs](media-jobs.md).
 
 ![The gateway](screenshots/gateway.png)
 
@@ -71,6 +94,13 @@ loaded model with what it is answering and what is queued for it; **Waiting**,
 the total queued for models already there; **Next change**, the model that has
 to be loaded next; and **Remaining**, everything held up behind that change.
 
+**Limits** are the three numbers the page lets you change, and they take
+effect at once, without a restart: **Max TTFT** (time to first token — how long
+to wait for an engine to start answering, default 120 s), **Max idle time**
+(how long a silence in the middle of an answer may last, default 30 s) and
+**Max queue size** (how many requests may wait at once, default 150). What the
+two waits are for is in [Gateway behavior](gateway-behavior.md#how-long-to-wait-for-an-engine).
+
 ### How loading and unloading is decided
 
 **Nothing is loaded or unloaded on a timer, or in the background, or because
@@ -78,7 +108,8 @@ something looked idle.** Every change happens because a request needs it.
 
 **A request goes straight through only if all three hold:** nobody is waiting,
 the model it names is loaded, and that model has a free place. Otherwise it
-joins the back of the queue.
+joins the back of the queue — unless **Max queue size** requests are already
+waiting, in which case it is refused at once with "try again shortly".
 
 The first of those matters more than it looks. **The moment anybody is waiting,
 the door closes for everybody** — including a request for a model that is
@@ -110,6 +141,26 @@ chosen to come off until it does:
 Because the door is shut while anybody waits, the models being drained cannot
 pick up new work, so that wait is bounded by whatever was already in flight.
 
+Two cases skip the arithmetic and **empty the machine of everything else**
+(idle models first, then the answering ones, waited for as above):
+
+- **The model needs 90% or more of the memory set aside for models.** In
+  practice such a model needs an empty card; adding up the other models'
+  estimates against an old reading can claim room that the card does not
+  really have.
+- **The engine cannot say how much it needs.** Some engines answer "unknown":
+  voice-activity detection, llama.cpp told to split a model between card and
+  system memory, and ComfyUI image models in a memory-saving mode. Unknown is
+  treated as "may need all of it".
+
+**Anything running that the Gateway has not taken up (see below) is also taken
+off at the next switch**, because its memory is real but is not in the
+arithmetic.
+
+**A client that hangs up while waiting is dropped, not served.** This is
+checked just before its turn, so a client that gave up never costs anybody a
+model switch.
+
 Nothing is protected from being unloaded. A model that is answering is waited
 for, not spared.
 
@@ -127,13 +178,18 @@ here.
 model being loaded. Without that, the model just loaded starves the request
 that was already waiting — the door problem again with the names swapped.
 
-**How much a model needs is worked out each time and never remembered.** For
-vLLM the answer is exact: it claims `gpu_memory_fraction` of the whole card and
-the setting says which. For llama.cpp the weights are taken as a floor and
-nothing more — measured at a 32k context, the gap between file size and card
-usage ran from **−476 MiB to +6,663** across four models, so a computed cache
-figure would look precise and be wrong. What a model took last time is
-knowledge about the past, and it belongs to whatever is making the requests.
+**How much a model needs is worked out each time and never remembered.** Each
+engine answers for itself. For vLLM the answer is exact: it claims
+`gpu_memory_fraction` of the whole card and the setting says which. For
+llama.cpp the weights are taken as a floor and nothing more — measured at a
+32k context, the gap between file size and card usage ran from **−476 MiB to
++6,663** across four models, so a computed cache figure would look precise and
+be wrong. Engines that run as a separate worker with a fixed appetite — Higgs,
+YuE2, HeartMuLa, MuLaCover, ComfyUI music and video — use a figure written per
+model in the configuration, `memory_reservation_mb`. Qwen-TTS, VoxCPM and
+Khala take their weights plus half again, and at least 2 GB more; the rest
+mostly take their weights. What a model took last time is knowledge about the
+past, and it belongs to whatever is making the requests.
 
 **A model that will not fit however much comes off is refused before anything
 is disturbed**, with the numbers to correct by — see

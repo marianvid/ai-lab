@@ -198,6 +198,37 @@ AI-Lab is complete for this phase only when:
 - the UI reports live state without exposing private engine paths;
 - no benchmark result or private payload is committed.
 
+## Status against the code, 26 September 2026
+
+What the code does today, item by item. "Done" means the code for it exists;
+it does not mean the real-machine gate above was run. Items that need a real
+machine or a log review are listed as not checked.
+
+| Item | Status | Where in the code |
+|---|---|---|
+| Operation matrix: text, transcription, VAD, diarization, OCR, image generation, image editing | Done — every public path is declared | `engines/base.py` path constants; `api/routes/images.py` |
+| `ocr`, `image-generation`, `image-edit` task values | Done | `types.py` `Task` |
+| `ai_lab` request field removed before the engine sees it | Done | `api/routes/gateway.py` `SETTINGS_FIELD` |
+| Timings, engine and settings returned as response headers | Not done — forwarded responses carry no timing headers | `api/server.py` |
+| Engines reachable only through the gateway | Not done — engines and their built-in pages listen on all addresses, and the Models page links to those pages on their own ports | `engines/*.py` (`0.0.0.0`); `web/js/views/runtime_card.js` |
+| OCR route with language hint, lines, polygons, confidence, orientation | Done | `images/server.py` |
+| OCR output detail choice (plain text, lines or blocks) and deskew control | Not done | `images/server.py` |
+| Named workflow profiles from configuration; no graphs from clients | Done | `images/jobs.py`; `config_validation.py` |
+| Pollable, cancellable image jobs; results expire | Done | `images/jobs.py`; `/api/image-jobs` |
+| Per-task timeouts | Partly — per task there is a first-byte limit and a between-bytes limit, not a total-execution limit | `config_policy.py` `GatewayPolicy.task_timeouts` |
+| Upload byte, pixel and dimension limits; type read from the file's first bytes | Done | `api/uploads.py`; `config_policy.py` |
+| `core` and `benchmark` model roots; downloads go to the configured `download_root` | Done | `config.py` `ModelRoot`; `application/downloads.py` |
+| Managed moves: copy, SHA-256 check, publish, then delete the source | Done | `application/model_storage.py` |
+| Move refused for a model used by an active image or media job | Not done — only a loaded or loading model is refused | `application/model_storage.py` `_reject_if_busy` |
+| Move progress on the event stream | Partly — phases are written to the job record; the stream is told only when the move ends | `application/model_storage.py` |
+| Library shows each model's tier | Done | `operations.py` `storage_tier` |
+| ComfyUI sees every model root without copies | Done | `images/comfyui_server.py` `extra_model_paths.yaml` |
+| Restart marks unfinished image, media and move jobs failed | Done | `images/jobs.py` `_recover`; `media/job_store.py`; `application/model_storage.py` `recover_moves` |
+| Log redaction, health report split, real-service gates, Linux mounts | Not checked from the code | — |
+
+Video generation was out of scope for this phase. It now exists anyway
+(`engines/comfy_video.py`, `/v1/videos/generations`).
+
 ## Data-Lab continuation gate
 
 After AI-Lab passes its completion gate, resume the existing Data-Lab run and

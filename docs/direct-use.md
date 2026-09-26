@@ -3,26 +3,31 @@
 The Models page links to a native interface only when the configured instance
 is ready. A stopped instance shows a disabled action; it starts no UI process.
 
-| Engine | Action | Interface |
-|---|---|---|
-| llama.cpp | Chat | The engine's own chat page |
-| ComfyUI image/edit | Create / Edit | Native ComfyUI with a model-specific template adapted to installed weights |
-| ComfyUI video | Video | Native ComfyUI with a model-specific image-to-video template adapted to installed weights |
-| ComfyUI music | Music | Native ComfyUI with the MiniMax Music 3 template adapted to INT8 |
-| ACE-Step 1.5 | Music | Upstream Gradio playground using the already-loaded AI-Lab model |
-| Qwen3-TTS VoiceDesign / CustomVoice | Speak | Upstream Gradio demo using the already-loaded AI-Lab model |
-| Higgs TTS 3 | Speak | Official SGLang-Omni playground connected to the already-loaded Higgs worker |
-| VoxCPM2 | Speak | Upstream Gradio editor using the already-loaded model |
-| Kokoro | Speak | Upstream Gradio editor using the already-loaded model |
-| Khala | Music | Full Khala Studio frontend and its native queued Mac worker |
-| YuE2 | Music | Full ds-yue-webui Studio: generate, cover, edit, ABC score and library |
-| HeartMuLa | Music | Full HeartMuse Studio using the already-loaded pipeline |
+| Engine | Action | Interface | Host |
+|---|---|---|---|
+| llama.cpp | Chat | The engine's own chat page | both |
+| ComfyUI image/edit | Create / Edit | Native ComfyUI with a model-specific template adapted to installed weights | both |
+| ComfyUI video | Video | Native ComfyUI with a model-specific image-to-video template adapted to installed weights | Linux |
+| ComfyUI music | Music | Native ComfyUI with the MiniMax Music 3 template adapted to INT8 | Linux |
+| ACE-Step 1.5 | Music | Upstream Gradio playground using the already-loaded AI-Lab model | both |
+| Qwen3-TTS VoiceDesign / CustomVoice | Speak | Upstream Gradio demo using the already-loaded AI-Lab model | both |
+| Higgs TTS 3 | Speak | Official SGLang-Omni playground connected to the already-loaded Higgs worker | Linux |
+| VoxCPM2 | Speak | Upstream Gradio editor using the already-loaded model | macOS |
+| Kokoro | Speak | Upstream Gradio editor using the already-loaded model | macOS |
+| Khala | Music | Full Khala Studio frontend and its native queued Mac worker | macOS |
+| YuE2 | Music | Full ds-yue-webui Studio: generate, cover, edit, ABC score and library | both |
+| HeartMuLa | Music | Full HeartMuse Studio using the already-loaded pipeline | Linux |
+
+"Host" says where the engine is offered at all: the Linux host, the Mac, or
+both (`hosts/linux.py`, `hosts/darwin.py`). On the Mac, Higgs runs as the
+separate "Higgs TTS (transformers)" engine. It has no playground, so it has no
+Speak button; use it through the API.
 
 Other engines remain available to API clients through AI-Lab's gateway, but
 AI-Lab does not substitute small browser forms for their full interfaces.
 
-MuLaCover has no verified full native editor. ASR, diarization, alignment,
-OCR and Demucs/Matchering remain API/command utilities. These entries have no
+MuLaCover has no verified full native editor. ASR, VAD, diarization,
+alignment and OCR remain API utilities. These entries have no
 direct-use button rather than a misleading one.
 ACE-Step and Qwen3-TTS each expose their upstream Gradio editor on the
 instance port plus 10000, in the same process as the API and with the same
@@ -63,6 +68,12 @@ ComfyUI listens on the host's network interfaces so a browser on the private
 network can reach it. This native interface has no additional authentication;
 deployments must restrict access at the network/firewall layer. Do not expose
 these ports to the public internet.
+
+The Models link opens ComfyUI with `?ai_lab_preset=1`. A small AI-Lab
+extension inside ComfyUI (`ai_lab/comfyui_custom_nodes/ai_lab_preset`) sees
+that and loads the instance's workflow into the editor. The bundled
+model-specific templates, and the official templates they are adapted from,
+are listed in `ai_lab/comfyui_templates/README.md`.
 
 When a model-specific UI template is bundled, it is separate from the
 API-format graph used by AI-Lab jobs. Unknown models fall back to the

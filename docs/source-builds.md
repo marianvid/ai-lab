@@ -8,10 +8,24 @@ installed, ask upstream whether there is a newer one, and run the update while
 streaming its output to the browser.
 
 On a versioned installation every update is configured and compiled in a new
-folder, verified, and only then selected through the stable `current` link.
-The previous build remains untouched for rollback. Configuration supplies the
+folder named `build-<tag>`, verified, and only then selected through the stable
+`current` link. "Verified" means the new `llama-server` must exist and answer
+`--version`. If anything fails, the half-made folder is deleted and the source
+checkout is put back on the version that is still running. The previous build
+remains untouched for rollback. Configuration supplies the
 machine-specific CMake flags explicitly; guessing them would risk producing a
 working binary that quietly lost an optimisation.
+
+Storage lists the compiled builds. **Use this one** switches back (or
+forward) to another build without recompiling; it also moves the source
+checkout to that build's version, so the next update check compares against
+what actually runs. A build can be deleted only when it is not the one in use.
+Updating and switching are refused while any model is loaded: the engine is
+about to be launched from somewhere else.
+
+AI-Lab asks upstream for a newer tag by itself: first about 20 seconds after
+the manager starts, then once an hour (`builds.py`). A failed check, for
+example while offline, is ignored.
 
 An installation without a configured build root keeps the original behaviour
 for backwards compatibility: it checks out the selected tag and rebuilds the

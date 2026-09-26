@@ -1,12 +1,16 @@
 # Writing a request
 
-Everything below is about the request itself: chat, transcription and VAD, the
-one field that is this project's own, and what comes back when a model cannot
-be served.
+Everything below is about the request itself: chat, transcription and VAD,
+speech, video and alignment, the one field that is this project's own, and what
+comes back when a model cannot be served.
+
+The examples use `localhost:8090`. From another machine, put that machine's
+address in place of `localhost`.
 
 ### Text requests have two shapes
 
-Nearly every client speaks the shape above. A client written against
+Nearly every client speaks the OpenAI shape, `POST /v1/chat/completions`
+(the example in [the Gateway](gateway.md)). A client written against
 Anthropic's own library speaks a different one and posts to `/v1/messages`
 instead. Both are accepted here.
 
@@ -29,7 +33,7 @@ Transcription uses the OpenAI-compatible endpoint and sends the configured
 instance name in `model`:
 
 ```sh
-curl http://ai-lab.lan:8090/v1/audio/transcriptions \
+curl http://localhost:8090/v1/audio/transcriptions \
   -F model=whisper-large-v3-turbo -F language=ro -F file=@recording.wav
 ```
 
@@ -43,7 +47,7 @@ needed, and forwards the same multipart request. The response is:
 Voice activity detection uses the same transport but a separate endpoint:
 
 ```sh
-curl http://ai-lab.lan:8090/v1/audio/speech-segments \
+curl http://localhost:8090/v1/audio/speech-segments \
   -F model=silero-vad -F file=@recording.wav
 ```
 
@@ -54,7 +58,7 @@ refused. See [Audio](audio.md).
 Speaker diarization uses the same multipart shape:
 
 ```sh
-curl http://ai-lab.lan:8090/v1/audio/diarizations \
+curl http://localhost:8090/v1/audio/diarizations \
   -F model=pyannote-community-1 -F file=@meeting.wav
 ```
 
@@ -65,8 +69,12 @@ labels found:
 {"segments":[{"start":0.15,"end":2.48,"speaker":"SPEAKER_01"}],"speakers":["SPEAKER_01"]}
 ```
 
-The request-specific `ai_lab` startup override below applies to JSON text
-requests. Audio currently uses the settings saved on its configured instance.
+Alignment — matching a known transcript to the audio, word by word — uses the
+same multipart shape at `POST /v1/audio/alignments`; its fields are in
+[Audio](audio.md#alignment).
+
+The request-specific `ai_lab` startup override below applies to JSON requests.
+Multipart audio uses the settings saved on its configured instance.
 
 ### Speech: a seed, and a voice to imitate
 
@@ -76,9 +84,14 @@ more fields exist for models that can use them:
 
 - `seed` — fixes the random draw. The same seed and text give the same audio,
   so a take somebody liked can be made again.
-- `reference_audio` (a WAV in base64) and `reference_text` (exactly what is
-  said in it) — the model imitates that voice. The transcript matters: without
-  it cloning is noticeably worse.
+- `reference_audio` (a WAV in base64, at most 8 MB) and `reference_text`
+  (exactly what is said in it) — the model imitates that voice. The transcript
+  matters: without it cloning is noticeably worse. `reference_text` without
+  `reference_audio` is refused.
+
+`text` may be 1 to 2,000 characters and `seed` a whole number from 0 to
+2,147,483,647. The answer is JSON with the audio inside it:
+`data[0].b64_wav` (a WAV file in base64) and `mime_type: audio/wav`.
 
 Which model takes which is in `GET /api/instances`, under `speech_form`:
 `seed_supported` and `reference_supported`. Higgs (both machines) and VoxCPM
@@ -86,14 +99,26 @@ take both; Qwen-TTS takes a seed; Kokoro takes neither. A field the model
 would ignore is **refused**, not dropped: an answer in a different voice than
 the one asked for, without a word, is worse than an error.
 
-Parallel requests to Higgs are served together. On Linux SGLang-Omni does
-that itself; on the Mac (`higgs_local`) the server groups requests that
-arrive within 100 ms, up to `max_batch` (engine setting, 1–16), and decodes
-them in one pass: eight lines take about as long as two alone. The answer
-carries the `seed` that was used, also when none was sent, so a take can be
-kept. The same seed gives the same voice and delivery, but a line decoded
+Higgs takes style directions inside `text`, so it refuses `instruction`; the
+Mac version also refuses `speaker`, because it has no named voices — clone one
+with a reference instead. Parallel requests to Higgs are served together; how
+is in [Audio](audio.md#speech-engines). On the Mac (`higgs_local`) the answer
+also carries the `seed` that was used, even when none was sent, so a take can
+be kept. The same seed gives the same voice and delivery, but a line decoded
 next to others may come out very slightly different from the same line
 decoded alone — the arithmetic of a batch is not bit-identical.
+
+### Music and video
+
+Music goes to `POST /v1/audio/music/generations`; its fields are in
+[Music generation](music.md). Video goes to `POST /v1/videos/generations` as
+JSON: `model`, `prompt` (1 to 4,000 characters), `image_base64` — a PNG of
+at most 25 MiB that the clip starts from, required — and optionally `seed`
+(0 to 4,294,967,295). The answer
+carries the `seed` used and `data[0].b64_mp4`, the MP4 file in base64.
+
+Both can take minutes. To get a job ID back at once instead of holding the
+connection open, use [Media jobs](media-jobs.md).
 
 ### The `ai_lab` field: asking for a model started a particular way
 
@@ -201,13 +226,28 @@ OpenAI client already understands, with the detail beside it:
 ```
 
 `needed_mb` against `capacity_mb` says whether it could ever fit here;
-`available_mb` says whether it fits now. An agent that reads them can ask again
+`available_mb` says whether it fits now. `asked` lists every setting the model
+would have started with — the entry's own, with the request's `ai_lab` values
+on top — not only the ones the request sent. An agent that reads them can ask again
 with a smaller context, or a smaller share of the card, without anybody
 guessing.
 
 An engine that refuses for its own reasons passes its own words through
 unchanged — vLLM, told to hold more context than it can, names the largest that
 would have fitted, and that sentence is the most useful thing in the answer.
+
+Other refusals use the same `error` object, with `type` set to
+`invalid_request_error` and `code` empty, and no `ai_lab` detail. The HTTP
+status says which kind it is:
+
+| status | when |
+|---|---|
+| 404 | no configured model has that id; the message lists the ids that exist |
+| 400 | the request is wrong or cannot be served: a shape the entry's engine does not answer, a setting it does not have, a model that does not fit, a full queue ("try again shortly"), a load that failed |
+| 409 | only from the page's Load and Unload buttons: a model is busy (see [Gateway behavior](gateway-behavior.md#the-buttons-on-the-page-are-the-other-way-in)) |
+
+Routes under `/api/` — media jobs, image jobs, the page's own — answer
+`{"error": "the sentence"}` instead, with the same statuses.
 
 **Nothing about any of this is remembered between requests.** This manager
 reports what it measures now and works out what a request asks for; knowing
@@ -228,7 +268,7 @@ model's family — `qwen3_coder`, `gemma4`, `glm47`.
 With that set, and a context window big enough for the agent's own prompt:
 
 ```sh
-ANTHROPIC_BASE_URL=http://ai-lab.lan:8090 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_MODEL=coder-fast CLAUDE_CODE_MAX_CONTEXT_TOKENS=98304 claude -p "read note.txt and tell me which colour it mentions"
+ANTHROPIC_BASE_URL=http://localhost:8090 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_MODEL=coder-fast CLAUDE_CODE_MAX_CONTEXT_TOKENS=98304 claude -p "read note.txt and tell me which colour it mentions"
 ```
 
 Measured here on an RTX PRO 4500 with Qwen3-Coder-30B at NVFP4: Claude Code

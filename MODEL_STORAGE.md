@@ -11,14 +11,50 @@ Corsair. A missing benchmark disk never redirects a download to core.
 | core | /mnt/ai-models | /models | production models |
 | benchmark | /mnt/corsair-4tb/test_models | /test_models | downloads and benchmarks |
 
-Library can promote or demote a model. AI-Lab copies into a temporary path,
-verifies every file by SHA-256, commits the destination, and only then removes
-the source. Models referenced by an instance cannot move.
+Each tier holds the same format-first tree. Only the core repositories are
+written in `config.json`; when the file is read, every one of them is repeated
+under each other tier with the tier's name in front of its id — `gguf` on core
+is `benchmark-gguf` on benchmark. A tier that is switched off, or marked
+read-only, makes its copies unusable or read-only too. Two tiers may not be the
+same place on disk: the paths are compared after following links, and a
+configuration where they match is refused (`validate_distinct_roots` in
+`config.py`).
+
+Library can promote or demote a model. The move works like this
+(`application/model_storage.py`):
+
+1. **A job record is written first**, in the state directory under `moves/`.
+   It is updated at each step: copying, verifying, publishing, then completed,
+   failed or cancelled. If the manager dies halfway, the next start finds the
+   record, marks it failed instead of pretending it is still running, and
+   deletes its staging folder.
+2. **The files are copied to a hidden staging folder**,
+   `<tier>/.ai-lab-staging/<job>/`. It sits beside the format folders, not
+   inside one, so the Library never shows a half-copied model. Each file is
+   checked by SHA-256 against its source.
+3. **The copy is made visible** in one rename when the model is a folder, or
+   file by file when it is loose files at the top of a repository.
+4. **Stopped entries that use the model are pointed at the new copy.** Moving
+   storage keeps the entry; you do not have to delete and re-create it.
+5. **Only then is the source removed.** A companion file — a tokenizer, say —
+   that another model in the same folder still needs is left in place.
+   Every finished move is appended to `model-moves.jsonl` in the state
+   directory.
+
+A move is refused before anything is copied when the model is loaded or
+loading (checked again just before step 3, because a copy can take a long
+time), when a move of the same model is already running, when the destination
+already holds a file with the same name, when the destination tier lacks free
+space, or when the manager could not delete the source files afterwards
+(their folder is not writable). A cancelled move deletes its staging folder. A
+move that fails while it runs keeps it for inspection; nothing removes it
+automatically. Deleting a model is stricter than moving
+one: it is refused while any entry, running or not, points at the model.
 
 This document describes how model weights are organised on the AI-Lab host and
 why. The layout was chosen before multiple engines arrived, and now lets
-llama.cpp, vLLM, NeMo and ONNX-backed audio services coexist without moving or
-duplicating weights. It leaves room for SGLang or TensorRT-LLM later.
+llama.cpp, vLLM, NeMo, ONNX-backed audio services, PaddleOCR and ComfyUI image
+models coexist without moving or duplicating weights. It leaves room for SGLang or TensorRT-LLM later.
 
 ## Where the weights live
 
@@ -67,6 +103,10 @@ format-first tree also allows mounting individual subtrees read-only later.
 │   ├── alignment/
 │   ├── vad/
 │   └── diarization/
+├── images/          OCR and ComfyUI image models, one folder per job
+│   ├── ocr/
+│   ├── generation/
+│   └── edit/
 ├── gguf/            llama.cpp, ollama — quantised single files
 │   ├── qwen-coder/
 │   └── gemma-general/
@@ -115,6 +155,14 @@ rule:
 - **Every other format: one directory is one model.** The weights are spread over
   several `.safetensors` files plus a tokenizer and a `config.json`, and the
   engine is handed the whole directory, never a single file.
+
+Two repositories may share one folder — the Hugging Face and NeMo
+transcription repositories both read `audio/asr/`. Each one then counts only
+the weight files whose file type matches its own format, so a checkpoint
+appears once, under the right repository (`is_weight_for_format` in
+`naming.py`). The `fp8`, `nvfp4`, `awq`, `gptq` and `comfyui` formats all count
+`.safetensors` files. A `comfyui` folder also counts `.gguf` files, because a
+ComfyUI model can mix a GGUF diffusion model with safetensors parts.
 
 Two consequences that caused real bugs:
 
@@ -188,7 +236,8 @@ repositories shared, so `/models` on the container and
 `/Volumes/Marian_Backup/models` on the Mac come out unchanged.
 
 The *format* names the folder, not the repository's id — an id is a short name
-somebody chose and may differ.
+somebody chose and may differ. A repository that declares a `subpath`, such as
+`audio/asr` or `images/ocr`, uses that folder instead.
 
 Two differences that are not going away:
 

@@ -35,8 +35,11 @@ such; AI-Lab does not scan the disk and guess what is unwanted.
 
 Engines install or compile a new version beside the one in use. Storage shows
 the inactive environments and builds because they are simultaneously a
-recovery option and recoverable disk space. The active version cannot be
-deleted. Nothing removes an inactive version automatically: only the person
+recovery option and recoverable disk space. Each inactive version has two
+buttons. **Use this one** points the engine back at it; nothing is downloaded
+and nothing is deleted. **Delete** frees its space. The active version is
+marked *in use* and has neither, so it cannot be deleted. Both buttons are
+switched off while that engine is being installed or built. Nothing removes an inactive version automatically: only the person
 who has decided the new version has proved itself can know that the rollback
 copy is no longer needed.
 

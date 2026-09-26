@@ -11,10 +11,39 @@ more usefully, what it must *not* contain.
 Dependencies point in a single direction:
 
 ```
-web  →  api  →  gateway  →  operations  →  services  →  engines  →  hosts
+web  →  api  →  gateway  →  operations  →  application  →  services  →  engines  →  hosts
 ```
 
-Nothing imports upward, and **no service imports another service**.
+Nothing imports upward, and **no service imports another service**. A service
+may split its own work into helper files — `runtime.py` uses
+`runtime_state.py` and `runtime_diagnostics.py` — and those helpers are used by
+nobody else.
+
+`application/` sits between `operations.py` and the services: one file per
+family of user actions (models on disk, downloads, engine updates, configured
+entries).
+`operations.py` hands each request to one of them. They may use several
+services, which is their job, but never each other.
+
+A layer may skip the ones below it and import further down. The routes, for
+instance, read `engines/base.py` for the list of request paths.
+
+Three kinds of file sit outside the line:
+
+- **Shared files** that anything may import: `types.py`, the `config*.py`
+  files, `naming.py`, `events.py`, `budget.py` and `eviction.py`. They hold
+  data shapes, rules or arithmetic, and decide nothing about what to do.
+- **The job queues** `images/jobs.py` and `media/jobs.py`. They are handed the
+  gateway when the application is built, so they sit beside `api/`, above the
+  gateway, and send their work through it like any other client.
+- **The isolated runtime adapters** — `audio/`, `speech/`, `music/`, `video/`,
+  and the servers in `images/`. The manager never imports them. An engine
+  starts one as a separate program, with the engine's own Python, so its
+  heavy libraries never load into the manager.
+
+One import breaks the rule today: `images/jobs.py` borrows
+`api/multipart.py` and `api/uploads.py` to read and check uploaded images.
+Moving those two below the gateway would end it.
 
 The reason is practical rather than doctrinal. When two modules depend on each
 other, a change to either can break the other in a way nothing catches until
@@ -27,32 +56,60 @@ there is exactly one place to look.
 |---|---|---|
 | `hosts/` | Starting and stopping processes, reading the accelerator, saying what this machine supports | Anything about models or engines |
 | `hosts/base.py` | The questions every platform must answer, including `statuses` — the same question as `status`, asked about several instances at once | — |
-| `engines/` | Per engine: formats read, settings offered, command line built, readiness probe | Process supervision, filesystem scanning |
-| `audio/` | Thin HTTP adapters executed by isolated speech runtimes | Scheduling, configuration, model discovery |
+| `hosts/linux.py`, `hosts/darwin.py` | One file per platform: systemd and `nvidia-smi` on Linux, plain child processes and unified memory on macOS | Code for the other platform |
+| `hosts/detect.py`, `hosts/command.py`, `hosts/launch.py` | Picking the platform file; running an external command; the `ai-lab-run` launcher a systemd unit calls | Decisions of any kind |
+| `engines/` | Per engine: formats read, tasks served, settings offered, command line built, readiness probe, request paths, how many requests at once, memory needed | Process supervision, filesystem scanning |
+| `engines/base.py`, `engines/registry.py`, `engines/probe.py` | The interface every engine satisfies and the public request paths; which engines exist and which work on this machine; the readiness question | — |
+| `engines/llamacpp.py`, `vllm.py` | Text models | — |
+| `engines/nemo.py`, `onnx.py`, `pyannote.py`, `qwenalign.py`, `mlxwhisper.py` | Transcription, voice detection, speaker diarization, transcript alignment, and Whisper on Apple silicon | — |
+| `engines/kokoro.py`, `qwentts.py`, `voxcpm.py`, `higgs.py`, `higgs_local.py` | Speech synthesis. Two Higgs files: one through the SGLang-Omni server, one through the plain transformers port for machines without it | — |
+| `engines/acestep.py`, `khala.py`, `heartmula.py`, `yue2.py`, `mulacover.py`, `comfy_music.py` | Music generation | — |
+| `engines/comfyui.py`, `comfy_video.py`, `paddleocr.py` | Image workflows, image-to-video workflows, and text recognition in images | — |
+| `audio/` | Isolated adapters: an OpenAI-shaped HTTP server for audio runtimes that ship none (`server.py`), and transcript alignment (`aligner.py`) | Scheduling, configuration, model discovery |
+| `speech/` | Isolated adapters for speech synthesis: one HTTP host (`server.py`, and `higgs_server.py` for the Higgs worker), one backend file per engine (`kokoro_backend.py`, `voxcpm_backend.py`, `qwen.py`, `higgs_backend.py`, `higgs_local_backend.py`), the shared request check and WAV answer (`contract.py`), and grouping requests that arrive together into one model pass (`batching.py`) | Anything the manager imports |
+| `music/` | Isolated adapters for music: `server.py` for ACE-Step, and for each other engine a `<engine>_server.py` host with a `<engine>_backend.py` that does the work (Khala, HeartMuLa, YuE2, MuLaCover, ComfyUI). `yue2_web_backend.py` drives YuE2 through its own resident web worker | Anything the manager imports |
+| `video/` | Isolated adapter for ComfyUI video from an uploaded picture: `comfy_server.py` host, `comfy_backend.py` work | Anything the manager imports |
+| `images/` | `server.py`: isolated PaddleOCR adapter. `comfyui_server.py`: isolated bridge to a private ComfyUI. `jobs.py`: named image workflows run as jobs that survive a restart | Arbitrary workflow graphs from clients |
+| `media/` | `jobs.py` and `job_store.py`: music, speech and video jobs that can be cancelled and survive a restart. `http_host.py`: the small JSON server the isolated media adapters share | Choosing a model — the gateway does that |
+| `comfyui_templates/`, `comfyui_custom_nodes/` | Workflow files for ComfyUI's own editor, one per model, and the ComfyUI extension that loads the entry's workflow into it | Python logic beyond finding the right file |
+| `native_ui/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000 | AI-Lab rules — it is vendored code |
 | `catalog.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
 | `capabilities.py` | Reading a model's own files to find out whether it can call tools or read pictures, and remembering the answer | Which engine will run it, and what any setting says |
 | `runtime.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |
-| `downloads/` | Hugging Face browsing and fetching whole model sets | Deciding what a model *is* — that is the catalog's rule |
+| `runtime_state.py`, `runtime_diagnostics.py` | The record of one load or unload; finding the useful line in an engine's noisy log when it fails | — |
+| `downloads/` | Hugging Face browsing (`huggingface.py`), the download queue (`transfers.py`), and models made of files from several places (`bundles.py`) | Deciding what a model *is* — that is the catalog's rule |
 | `settings.py` | Assembling the settings screen from configuration and host | Writing to the accelerator |
-| `builds.py` | Reporting an engine's source version, checking upstream, moving to a tag and recompiling | Running engines, or choosing compile flags |
-| `changes/` | What an update would bring, read before anything is pressed: commits waiting, notes written upstream, packages that would be replaced | Doing the update — it only reads |
-| `installs.py` | The installed versions of an engine that arrives as packages: adding one beside the others, choosing between them, dropping one | Compiling anything, or deciding when an old version stops being needed |
-| `operations.py` | Joining the services into whole actions | Anything a single service could do alone |
+| `storage.py` | Files that can be deleted to free space and are not models, chosen by id from a configured list | Model files, or any path the browser sends |
+| `builds.py` | The engines compiled from source, and a timer that checks upstream for new versions | The build itself |
+| `source_build.py`, `source_versions.py` | One source checkout: update, compile into a new folder, check it, switch to it; version labels and folder helpers | Choosing when to update |
+| `changes/` | What an update would bring, read before anything is pressed: commits waiting (`fromgit.py`), notes written upstream (`fromgithub.py`), packages that would be replaced (`frompackages.py`), and which of it matters here (`sifting.py`) | Doing the update — it only reads |
+| `installs.py` | The engines installed as packages, and a timer that checks for new versions | The install itself |
+| `package_install.py` | One package-installed engine: add a version beside the others, check it imports, switch to it, drop one | Compiling anything, or deciding when an old version stops being needed |
+| `gitapps.py` | The same for a Python application installed from git, such as ComfyUI: a full checkout and environment beside the working one, then a switch | — |
+| `application/instances.py` | Configured entries: create, change, delete, load, unload, restore after a restart | HTTP |
 | `application/model_storage.py` | Deletion, verified moves and durable move jobs | HTTP and engine startup |
 | `application/downloads.py` | Finding download candidates and safe destinations | Model scheduling and HTTP |
+| `application/engine_maintenance.py` | Engine updates, version switches and package installs, refused while a model is running | HTTP |
+| `operations.py` | The single object the routes and the gateway talk to. It hands each action to an `application/` service, and still does the few small ones that need no service of their own | Anything a single service could do alone |
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
+| `gateway_state.py`, `gateway_control.py`, `gateway_resources.py`, `gateway_stats.py`, `gateway_errors.py` | The gateway's parts: a held place and a model-plus-settings shape; the guard for the page's buttons; memory readings and waiting for the card to empty; the read-only report the Gateway page shows; the refusals the web layer turns into HTTP answers | HTTP |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
-| `lastloaded.py` | One fact on disk: which model was on the card and how it was started | Deciding anything — it remembers and is read |
-| `api/` | HTTP routing, JSON and multipart bodies, the event stream | Any decision about models, engines or formats |
-| `web/` | The browser interface | — |
+| `lastloaded.py` | One record on disk: which models were loaded, in order, and how each was started | Deciding anything — it remembers and is read |
+| `api/` | HTTP routing (`server.py`, `router.py`, one file per group of URLs in `routes/`), JSON and multipart bodies, the event stream (`sse.py`), forwarding to an engine (`passthrough.py`), checking uploaded images (`uploads.py`) | Any decision about models, engines or formats |
+| `web/` | The browser interface. One file per page under `web/js/views/`, split further where a page grew large | — |
 
-Five supporting files carry no policy of their own:
+Supporting files carry no policy of their own:
 
 | File | Purpose |
 |---|---|
 | `types.py` | Shared data structures. No I/O of any kind. |
 | `config.py` | Reading and writing `config.json`, and the rules a stored value must satisfy. No decisions about what to do with it. |
+| `config_migrations.py` | Bringing an older `config.json` up to the current layout. The layout has a number, `schema_version`, currently 1; a file with no number is version 0. A file newer than the application is refused. |
+| `config_policy.py` | The gateway and media-job settings read into fixed, checked values with their defaults and limits in one place. |
+| `config_validation.py` | Checking the whole configuration before anything starts — unknown engines, repeated ports, missing checkpoint settings, image profiles pointing nowhere — and reporting every problem at once. |
 | `naming.py` | Rules about model file names — what a shard is, what a companion is. Pure text. |
+| `budget.py` | How much memory models may use on this machine. Pure arithmetic. |
+| `eviction.py` | Which loaded models must come off so another fits. Pure choice; it reads nothing itself. |
 | `events.py` | Publishing progress to subscribers. |
 | `wiring.py` | Constructing objects and connecting them. No logic. |
 | `main.py` | Reading the arguments, building the application, serving. Stops the engines on the way out, where this application is the one supervising them. |
@@ -67,6 +124,13 @@ the services and one below the routes.
 
 The test for whether something belongs there: it reads as a sentence a user
 would say. *Load this instance. Swap it to that model. Download this one.*
+
+The file grew too long doing all of that itself, so most of the work has moved
+one step down, into `application/`. `Operations` is still the one object the
+routes and the gateway are given, but a call like `load` or `move_model` now
+passes straight through to the service for that family of actions. What is
+left in `operations.py` is the handful of small actions that need no service
+of their own, such as changing where a storage tier lives.
 
 ### Why `gateway.py` exists
 
@@ -114,11 +178,17 @@ agent workflow is a sequence. That stopped being true the moment subagents
 fanned out over one model, which is the commonest shape there is. The premise
 changed; the conclusion had to.
 
-**Which model comes off, when one has to, is decided in `gateway.py` and
-never in `scheduler.py`.** The scheduler is handed a function that answers it,
-because a shape there is an opaque key and it knows nothing about megabytes.
+**Which model comes off, when one has to, is decided in `eviction.py` and
+never in `scheduler.py`.** The gateway hands the scheduler a function that asks
+`EvictionPlanner`, because a shape there is an opaque key and the scheduler
+knows nothing about megabytes. The planner reads nothing itself: it works from
+the gateway's last memory reading, since it runs while the scheduler's lock is
+held and asking the card at that moment would stop every request.
 Idle models go first, since taking one off costs no waiting, then whichever has
 gone longest without a request — and everything waits for that one to finish.
+A model that needs 90% of the card or more empties it completely: the other
+models' figures are estimates, and adding them to an old reading can claim room
+the card does not have. A model bigger than the whole card is refused.
 Nothing is protected from being unloaded, and nothing is unloaded until
 something needs the room.
 
@@ -362,7 +432,12 @@ default is stable. The two cannot be compared by their numbers — `b10448` and
 is that tag already in this history? Exact, the same question on both lines,
 and still right when somebody switches between them.
 
-### Why `installs.py` exists
+### Why `installs.py` and `package_install.py` exist
+
+`installs.py` only keeps the list of package-installed engines and checks, on a
+timer, whether a newer version is out. The work described below is in
+`package_install.py`. `gitapps.py` does the same job for an application
+installed from git with its own Python environment, such as ComfyUI.
 
 vLLM is not compiled here — it is 382 packages and 7.7 GB in a virtual
 environment, a folder holding its own Python and everything that version needs.
@@ -485,8 +560,11 @@ earlier — so a machine came back with two models on a card that holds one, and
 nothing in the application could say otherwise. That flag is gone from the
 interface, from the status a host reports, and from the units.
 
-In its place, the model on the card is written down as it changes and put back
-when the manager starts. Three cases, and the second and third are the ones
+In its place, what is loaded is written down as it changes and put back when
+the manager starts. More than one model can be loaded, so it is a list, in the
+order they were loaded. On the way back they go on in that order and stop at
+the first that does not fit: a machine given less memory since, or a larger
+reserve, must not be filled past what it can hold now. Three cases, and the second and third are the ones
 worth stating:
 
 - **A machine rebooted.** Nothing is running, something was remembered, so it
@@ -521,12 +599,18 @@ deliberately empty on Linux.
 A load also refuses to start when something is already answering the port that
 this manager did not start, for the same reason.
 
-**Updating an engine rebuilds; it does not reconfigure.** Both machines
-compile llama.cpp from git, and the existing `build/` directory already holds
-the flags each was set up with — CUDA compiled for this exact card, Metal with
-embedded shaders. `cmake --build` reuses them. Regenerating the configuration
-would mean guessing those flags, and guessing wrong is silent: a working binary
-that quietly lost an optimisation.
+**Updating an engine never guesses its compile flags.** Both machines compile
+llama.cpp from git, with flags chosen for them — CUDA compiled for this exact
+card, Metal with embedded shaders. Guessing those flags wrong is silent: a
+working binary that quietly lost an optimisation.
+
+So there are two ways, and the configuration decides which (`source_build.py`).
+When a folder for builds is configured (`source.builds`), every update is compiled into a new
+folder of its own, with the CMake flags written in the configuration
+(`source.cmake_args`), checked, and only then selected through a `current`
+link. The previous build stays for going back. Without that folder, the old
+behaviour stays: the existing `build/` directory already holds the flags, and
+`cmake --build` reuses them in place.
 
 An update is refused while any instance is running, because a linker cannot
 write over an executing binary — the build would fail partway with a message
@@ -540,8 +624,14 @@ look newer.
 the form. The path to its binary comes from configuration rather than PATH: a
 machine can easily hold two builds of llama.cpp — one packaged, one compiled
 with the flags you wanted — and PATH order is nobody's decision. This is why the configuration nests engine settings under `params`
-rather than listing every engine's fields side by side, and why adding an
+rather than listing every engine's fields side by side, and why adding a text
 engine touches neither the schema nor the front end.
+
+The speech, music and video engines added later break that last part. Each one
+names its checkpoints in its own block of settings, which
+`config_validation.py` checks field by field, and the Models page lists them by
+name to decide which get a button that opens their own page
+(`web/js/views/runtime_card.js`).
 
 **How long to wait for an engine: two limits, both of safety.** In normal work
 nothing comes near them.
@@ -556,6 +646,10 @@ machine, 17 tokens a second, the gap between tokens is 59 milliseconds, while a
 large prompt on that same machine can take minutes before the first byte. Four
 orders of magnitude apart. There used to be one limit, of an hour, which was
 absurd for one job and useless for the other.
+
+Both limits can also be set per task — text, OCR, image and so on — in
+`gateway.task_timeouts`, so a slow image job does not make a text client wait
+on the same clock (`config_policy.py`, `Gateway.timeouts_for`).
 
 They and the queue length are configured rather than sent with a request: they
 belong to the machine, and the right numbers on a card that reads 8,400 tokens

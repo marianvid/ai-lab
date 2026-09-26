@@ -104,8 +104,9 @@ otherwise.
 ComfyUI is managed as a complete Git application rather than updated inside
 its live checkout. Each release contains a pinned ComfyUI commit, an isolated
 Python environment, and pinned copies of every Git-based custom node. AI-Lab
-installs all requirements and verifies CUDA plus the ComfyUI server import
-before atomically moving `/opt/ai/comfyui/current`. A failed candidate is
+installs all requirements and verifies that ComfyUI's server module imports —
+and that CUDA works, when the configuration sets `requires_cuda` — before
+atomically moving `/opt/ai/comfyui/current`. A failed candidate is
 removed and the active release is never touched.
 
 Custom-node updates use the same mechanism: AI-Lab copies the active set of
@@ -123,16 +124,42 @@ update workflow: create at the final versioned path, install, import the
 runtime, verify CUDA for the GPU engines, and only then repoint `current`.
 
 The interface reports whether each runtime is available on the current host.
-NeMo is offered for native `.nemo` transcription checkpoints. The ONNX adapter
+NeMo is offered for native `.nemo` checkpoints, for transcription and for
+diarization (Sortformer). The ONNX adapter
 is offered for VAD. On a host where the runtime or required accelerator is
 missing, the engine is disabled with a reason rather than failing after an
 instance has been configured.
 
-The package distribution, import modules, companion requirements and CUDA
-requirement are separate configuration fields. This matters for names such as
+The package distribution, import modules, companion requirements, minimum
+versions of other packages and CUDA requirement are separate configuration
+fields (`package`, `install`, `modules`, `requirements`, `minimum_versions`,
+`requires_cuda`). This matters for names such as
 `nemo_toolkit[asr]`, whose package name and Python import are not the same.
 The versions used for published measurements remain recorded in the benchmark
 repository.
+
+### Which engines have an update row
+
+An engine gets an update row only when its configuration has a `source`
+section (`builds.py`, `installs.py`):
+
+- `source.path` — a git checkout compiled here, such as llama.cpp. See
+  [Source build versions](source-builds.md).
+- `source.package` — a Python package installed into its own environment,
+  such as vLLM, NeMo, the Silero ONNX adapter, pyannote.audio or PaddleOCR.
+  See [Package-installed engine versions](package-installs.md).
+- `source.kind: "git-app"` — a complete git application such as ComfyUI, as
+  described above.
+
+The music and speech adapters (ACE-Step, Qwen3-TTS, Kokoro, VoxCPM, Higgs,
+HeartMuLa, YuE2, Khala, MuLaCover, the ComfyUI music and video adapters),
+MLX Whisper and the Qwen aligner are normally configured with only the
+Python that runs them, and no `source` section. Then they have no update row:
+their runtimes are installed and updated outside AI-Lab.
+
+AI-Lab asks upstream for new versions by itself, once an hour. The first check
+runs about 20 seconds after the manager starts. So the Settings page is already current when
+it is opened. A failed check, for example while offline, is ignored.
 
 ---
 

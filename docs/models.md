@@ -12,10 +12,16 @@ back a message elsewhere would be gone. Port, context, temperature, state and
 the breakdown of that load by phase live in the tooltip, because they are
 wanted occasionally and were costing three lines of screen every time.
 
+When the model has a note written for it (see
+[Curation](library.md#curation)), its short line sits under the name.
+
 ![The model list](screenshots/models.png)
 
-**The task label says what kind of request an entry accepts**: text generation,
-transcription, alignment, voice activity detection or diarization. The two
+**The task says what kind of request an entry accepts.** It is in the row's
+tooltip, and beside every model in the list you pick from. The tasks are text
+generation, transcription, alignment, voice activity detection, diarization,
+speech synthesis (text to speech), music generation, OCR (reading the text out
+of an image), image generation, image editing and video generation. The two
 small pictures on text models say whether they can call tools or read pictures.
 Those capabilities are not configured anywhere —
 both are read from the model's own files, once, and remembered. A directory of
@@ -43,6 +49,38 @@ the rest. Settings that do not apply to the selected task are not shown. Changin
 them means restarting the model, which is why the button says **Apply & reload**.
 **Save** writes them down without touching the card.
 
+**Log** shows what the engine is printing about itself. It works only while
+the model is running: a stopped model has a log on Linux and none on macOS, and
+why a model would not start is already in the message a failed load shows.
+
+**Remove** deletes the entry, not the model. The downloaded files stay in
+[Library](library.md). It is switched off while the model is loaded, and it
+asks first.
+
+## Adding a model
+
+**+ Add model** opens a small form. It lists only the models on disk that an
+installed engine on this machine can run.
+
+- **Model** — which weights. Each is shown with its task, format and size.
+- **Name** — lower-case letters, digits and hyphens. A request sends this as
+  `"model"`, so it cannot be changed later. Renaming means removing the entry
+  and adding it again.
+- **Port** — the first free one is filled in. Change it only if a client
+  expects another.
+
+Below those come the engine's own settings for that model's task.
+
+## Using a model directly
+
+Many engines come with their own web page: llama.cpp has a chat page, ComfyUI
+has its editor, and the speech and music engines have upstream editors. When
+such a model is loaded and ready, its row carries a button that opens that
+page in a new tab — **Chat**, **Speak**, **Music**, **Create**, **Edit** or
+**Video**. While the model is stopped or still loading, the button is there
+but greyed out. Which engine opens what is in
+[Using a model directly](direct-use.md).
+
 ---
 
-[← all documents](../README.md)  ·  [Library](library.md)  ·  [Audio](audio.md)
+[← all documents](../README.md)  ·  [Library](library.md)  ·  [Using a model directly](direct-use.md)  ·  [Audio](audio.md)

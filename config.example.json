@@ -323,6 +323,13 @@
       "model_id": "images-comfyui-generation/comic-model",
       "port": 8093,
       "params": {}
+    },
+    {
+      "id": "image-comic-edit",
+      "engine": "comfyui",
+      "model_id": "images-comfyui-edit/comic-edit-model",
+      "port": 8094,
+      "params": {}
     }
   ],
   "model_notes": {

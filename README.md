@@ -37,10 +37,19 @@ not send it gets the entry's configured settings and nothing breaks. See
 [the `ai_lab` field](docs/requests.md#the-ai_lab-field-asking-for-a-model-started-a-particular-way).
 
 Runs on Linux with an NVIDIA card, where systemd supervises the engines, and on
-macOS with Apple silicon, where it supervises them itself. llama.cpp works on
-both. vLLM and NeMo are Linux capabilities; MLX Whisper and Qwen3-TTS also run
-on macOS. An
-unsupported engine stays visible but disabled, with the reason.
+macOS with Apple silicon, where it supervises them itself. Which engines each
+side supports:
+
+- **Both:** llama.cpp, ComfyUI (images), ONNX Runtime, pyannote.audio,
+  PaddleOCR, ACE-Step, Qwen3-TTS and YuE2. Higgs TTS runs on both, through a
+  different engine on each.
+- **Linux only:** vLLM, NVIDIA NeMo Speech, HeartMuLa, MuLaCover, and ComfyUI
+  for music and for video.
+- **macOS only:** MLX Whisper, Kokoro, VoxCPM, Khala and the Qwen forced
+  aligner.
+
+An engine the machine supports but has not installed stays visible but
+disabled, with the reason. An engine the machine cannot support is not listed.
 
 ## Where things are
 
@@ -51,21 +60,32 @@ before it says how it works.
 
 | | |
 |---|---|
-| [Models](docs/models.md) | One row per configured model: what it runs, what it can do, whether it is loaded and how long the last load took. Where models are started, stopped and set up. |
-| [Library](docs/library.md) | What is on disk, per weight format, and a search of Hugging Face to download more. |
+| [Models](docs/models.md) | One row per configured model: what it runs, what it can do, whether it is loaded and how long the last load took. Where models are started, stopped, set up and opened in their own interface. |
+| [Library](docs/library.md) | What is on disk, per weight format, in production or benchmark storage, and a search of Hugging Face to download more. |
 | [Gateway](docs/gateway.md) | The address an agent talks to. What is loaded, what is queued, and **the rules by which models are loaded and unloaded** — the part nobody can guess. |
 | [Storage](docs/storage.md) | Cache, incomplete files and inactive engine versions whose space can be reclaimed. Model deletion stays in Library. |
-| [Settings](docs/settings.md) | What this machine is, how much of its memory models may use, engine updates, and where the model store lives. |
+| [Settings](docs/settings.md) | What this machine is, how much of its memory models may use, engine updates, and where the two model stores live. |
 
 **Using it**
 
 | | |
 |---|---|
 | [Writing a request](docs/requests.md) | Chat and multipart audio requests, the `ai_lab` field for startup settings, and what a refusal contains so a client can correct itself. |
-| [Using a model directly](docs/direct-use.md) | Native llama.cpp and ComfyUI interfaces for loaded models; other engines remain available through the API. |
-| [Music generation](docs/music.md) | ACE-Step setup contract, direct use and agent API. |
+| [Using a model directly](docs/direct-use.md) | A loaded model's own web page: llama.cpp's chat, ComfyUI, and the upstream speech and music editors. Other engines remain available through the API. |
+| [Music generation](docs/music.md) | The six music engines (ACE-Step, HeartMuLa, YuE2, MuLaCover, Khala, ComfyUI), what each accepts, direct use and agent API. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
-| [Audio](docs/audio.md) | Speech-to-text, VAD and speaker diarization, their endpoints, and the public Data-Lab method used to prepare this personal project's Romanian evaluation audio. |
+| [Audio](docs/audio.md) | Speech-to-text, VAD, speaker diarization, transcript alignment and speech synthesis, their endpoints, and the public Data-Lab method used to prepare this personal project's Romanian evaluation audio. |
+| [Media jobs](docs/media-jobs.md) | Music, speech and video requests that run in the background: submit, poll, cancel. For agents and scripts. |
+
+**How it works inside**
+
+| | |
+|---|---|
+| [Gateway behavior](docs/gateway-behavior.md) | What happens when models are switched, how long the gateway waits for an engine, and the timeout settings. |
+| [Source build versions](docs/source-builds.md) | Engines compiled from source (llama.cpp): each version in its own folder, switching back, deleting. |
+| [Package-installed versions](docs/package-installs.md) | Engines installed from PyPI (vLLM and others): each version in its own environment, verify, switch, delete. |
+| [Architecture](ARCHITECTURE.md) | The module map: which file does which job and which may import which. |
+| [Model storage](MODEL_STORAGE.md) | How model files are laid out on disk and moved between core and benchmark storage. |
 
 ## What it looks like
 
