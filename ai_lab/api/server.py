@@ -23,7 +23,7 @@ from ..events import EventBus
 from ..gateway import CardBusy
 from ..operations import Operations
 from . import sse
-from .multipart import MultipartBody
+from ..multipart import MultipartBody
 from .passthrough import Passthrough
 from .router import Router
 from .routes import register_all

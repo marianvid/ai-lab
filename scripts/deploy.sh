@@ -13,13 +13,13 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 #   opts/deploy.env      AI_LAB_HOST=root@... , AI_LAB_SSH_KEY=..., AI_LAB_CTID=...
 #
 # Without it, set them in the environment:
-#   AI_LAB_HOST=root@proxmox.lan AI_LAB_SSH_KEY=~/.ssh/key ./scripts/deploy.sh
+#   AI_LAB_HOST=root@<proxmox-host> AI_LAB_SSH_KEY=<private-key> AI_LAB_CTID=<container-id> ./scripts/deploy.sh
 if [ -f "${project_dir}/opts/deploy.env" ]; then
   # shellcheck disable=SC1091
   . "${project_dir}/opts/deploy.env"
 fi
 target_host="${AI_LAB_HOST:?set AI_LAB_HOST, or check out the private half into opts/}"
-container_id="${AI_LAB_CTID:-102}"
+container_id="${AI_LAB_CTID:?set AI_LAB_CTID to the Proxmox container id}"
 ssh_key="${AI_LAB_SSH_KEY:?set AI_LAB_SSH_KEY to the private key for that host}"
 runtime_dir="/opt/ai-lab"
 
@@ -38,7 +38,7 @@ else
   echo "  (skipping the interface tests: run npm install first)"
 fi
 
-echo "[2/6] Uploading to LXC ${container_id}"
+echo "[2/6] Uploading to container ${container_id}"
 # Remove the code tree first: tar only adds and overwrites, so a file deleted
 # in the repository would otherwise stay on the server for ever — a stale
 # module still importable, a stale script still served. The running manager

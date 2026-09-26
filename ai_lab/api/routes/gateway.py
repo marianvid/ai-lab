@@ -58,6 +58,9 @@ _IMAGE_UPLOAD_PATHS = frozenset(OCR_PATHS)
 
 def register(router, operations, gateway: Gateway) -> None:
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway))
+    router.add("GET", "/v1/models/{model}",
+               lambda model, **_: _one_model(gateway.describe(model),
+                                                 detailed=True))
     router.add("GET", "/api/gateway", lambda **_: gateway.stats())
 
     def settings(body=None, **_):
@@ -77,19 +80,29 @@ def _catalogue(gateway: Gateway) -> dict:
     Models that are not loaded are listed too. That is the point: a client is
     supposed to be able to ask for one of them.
     """
-    data = []
-    for row in gateway.catalogue():
-        data.append({
-            "id": row["id"],
-            "object": "model",
-            "owned_by": row["engine"],
-            # Not part of the OpenAI shape, and harmless to a client that
-            # ignores unknown fields. A person reading this by hand wants to
-            # know which of these are up.
-            "ai_lab": {"loaded": row["loaded"], "ready": row["ready"],
-                       "port": row["port"], "shapes": row["shapes"]},
-        })
-    return {"object": "list", "data": data}
+    return {"object": "list",
+            "data": [_one_model(row) for row in gateway.catalogue()]}
+
+
+# Extra details only `GET /v1/models/{model}` carries: too long for a listing.
+_DETAIL_FIELDS = ("model_id", "params", "speech_form", "music_form", "video_form")
+
+
+def _one_model(row: dict, detailed: bool = False) -> dict:
+    """One model in the OpenAI shape, with this project's details beside it."""
+    extra = {"loaded": row["loaded"], "ready": row["ready"],
+             "port": row["port"], "shapes": row["shapes"],
+             "task": row["task"], "capabilities": row["capabilities"]}
+    if detailed:
+        extra.update({key: row[key] for key in _DETAIL_FIELDS if key in row})
+    return {
+        "id": row["id"],
+        "object": "model",
+        "owned_by": row["engine"],
+        # Not part of the OpenAI shape, and harmless to a client that ignores
+        # unknown fields. It says which models are up and what each can do.
+        "ai_lab": extra,
+    }
 
 
 # Where a client puts settings the model has to be *started* with, rather than

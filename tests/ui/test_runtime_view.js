@@ -183,6 +183,18 @@ describe('the Models page', () => {
     assert.equal(loading.view.querySelector('.chat-link').disabled, true);
   });
 
+  it('opens the same Higgs playground for the Mac engine (higgs_local)', async () => {
+    // On a Mac Higgs runs through its transformers port, engine higgs_local.
+    // Its speech host serves the same upstream playground on port + 10000.
+    const higgs = { ...INSTANCE, engine: 'higgs_local', task: 'speech-synthesis' };
+    const { view } = await renderPage({ '/api/instances': [higgs] });
+    const link = view.querySelector('.chat-link');
+    assert.equal(link.textContent, 'Speak');
+    assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
+    const loading = await renderPage({ '/api/instances': [{ ...higgs, ready: false }] });
+    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
+  });
+
   it('opens the official VoxCPM editor only while VoxCPM is ready', async () => {
     const voxcpm = { ...INSTANCE, engine: 'voxcpm', task: 'speech-synthesis' };
     const { view } = await renderPage({ '/api/instances': [voxcpm] });

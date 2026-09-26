@@ -4,9 +4,11 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "${project_dir}/opts/deploy.env"
 target_host="${AI_LAB_HOST:?}"
-container_id="${AI_LAB_CTID:-102}"
+container_id="${AI_LAB_CTID:?}"
 ssh_key="${AI_LAB_SSH_KEY:?}"
-source_path="/mnt/corsair-4tb/test_models"
+# The benchmark folder on the Proxmox host. Machine-specific, so it lives in
+# opts/deploy.env with the other deployment values.
+source_path="${AI_LAB_TEST_MODELS_SOURCE:?set AI_LAB_TEST_MODELS_SOURCE to the host folder for /test_models}"
 target_path="/test_models"
 
 ssh -i "${ssh_key}" "${target_host}" bash -s -- "${container_id}" \

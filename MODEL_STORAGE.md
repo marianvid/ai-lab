@@ -3,13 +3,16 @@
 ## Core and benchmark tiers
 
 AI-Lab uses two explicit storage tiers. "core" is the production library on
-the internal Lexar. "benchmark" is disposable test capacity on the external
-Corsair. A missing benchmark disk never redirects a download to core.
+the internal disk. "benchmark" is disposable test capacity on an external
+disk. A missing benchmark disk never redirects a download to core.
 
-| Tier | Host | LXC | Purpose |
-|---|---|---|---|
-| core | /mnt/ai-models | /models | production models |
-| benchmark | /mnt/corsair-4tb/test_models | /test_models | downloads and benchmarks |
+| Tier | Path inside the container | Purpose |
+|---|---|---|
+| core | /models | production models |
+| benchmark | /test_models | downloads and benchmarks |
+
+Each path is a folder on the host, mounted into the container. The host
+folders are machine-specific and are not recorded here.
 
 Each tier holds the same format-first tree. Only the core repositories are
 written in `config.json`; when the file is read, every one of them is repeated
@@ -58,36 +61,35 @@ models coexist without moving or duplicating weights. It leaves room for SGLang 
 
 ## Where the weights live
 
-| Layer | Path |
+| Layer | What it is |
 |---|---|
-| Physical disk | Lexar NM790 4 TB, the internal one that also holds the system |
-| Volume | `pve/ai-models`, a thin volume of 800 GB, ext4 label `ai-models` |
-| Host mount | `/mnt/ai-models` (from `/etc/fstab`, `nofail`) |
-| Path inside LXC `102` | `/models` (bind mount declared as `mp0` in `102.conf`) |
+| Physical disk | the host's internal NVMe disk, the one that also holds the system |
+| Volume | a dedicated volume on that disk, formatted ext4 |
+| Host mount | a folder on the host, mounted at boot |
+| Path inside the container | `/models`, a bind mount (a host folder made visible inside the container) |
 
 The container sees only `/models`. Nothing in `config.json` or in the systemd
 units refers to the host path, so the store can be moved to a different disk by
-changing one line in `/etc/pve/lxc/102.conf` and restarting the container.
+changing the container's mount line and restarting the container.
 
 ### It used to be the external disk, and that is why it moved
 
-Until 19 August 2026 the store was the **Corsair EX400U**, an external NVMe on a
-USB4 link, mounted at `/mnt/corsair-4tb`. That disk kept falling off the
+Until 19 August 2026 the store was an **external NVMe disk on a USB4 link**.
+That disk kept falling off the
 Thunderbolt bus — nine times on 19 August alone, at one point every few minutes —
 and each time it took AI-Lab with it: every read of `/models` returned
 `Input/output error` and no engine could start.
 
-The 447 GB were copied to the internal disk, which had 3.5 TB free in the thin
-pool and is **faster anyway**: 4.0/4.5 GB/s against 3.3/3.0 GB/s through USB4.
+The 447 GB were copied to the internal disk, which had plenty of free space
+and is **faster anyway**: 4.0/4.5 GB/s against 3.3/3.0 GB/s through USB4.
 The copy ran at 560 MB/s and verified equal, 471 files on both sides.
 
 **AI-Lab no longer depends on any external disk.** That is the point of the
 move, more than the speed: the store is now on the same disk as everything else
 that has to be working for the container to run at all.
 
-The external disk is still attached and still labelled `corsair-4tb`. It holds
-the media library work and whatever the home-lab dashboard reads. It is no
-longer AI-Lab's problem.
+The external disk is still attached and now holds only the benchmark tier and
+work unrelated to AI-Lab. The production store no longer depends on it.
 
 ## Directory layout
 
@@ -131,7 +133,7 @@ never mount this tree or load the weights directly.
 
 `downloads/`, `cache/hf/` and `audio/` are owned by `ai-lab-manager`; the stable
 language-model trees are owned by root inside the container. On the host these
-appear as shifted LXC uids because container `102` is unprivileged.
+appear as shifted LXC uids because the container is unprivileged.
 
 ### Two directories that are easy to forget
 
@@ -222,7 +224,7 @@ entry pointing at it blocks deleting the real model beside it.
 
 ## The same layout on the Mac
 
-The M3 Max keeps its models at `/Volumes/Marian_Backup/models`, with the same
+The M3 Max keeps its models in one folder on its data volume, with the same
 format-first tree — `gguf/`, `safetensors/`, `fp8/`, `nvfp4/` — so a path means
 the same thing on both machines and a model can be moved across without being
 reorganised.
@@ -232,8 +234,8 @@ root — and each repository is a folder in it named after its weight format.
 Setting them one at a time let GGUF sit on one disk and NVFP4 on another, which
 nothing else here expects and which nobody chooses on purpose. A configuration
 written before that still loads: the root is read back from the directory the
-repositories shared, so `/models` on the container and
-`/Volumes/Marian_Backup/models` on the Mac come out unchanged.
+repositories shared, so `/models` on the container and the models folder on
+the Mac come out unchanged.
 
 The *format* names the folder, not the repository's id — an id is a short name
 somebody chose and may differ. A repository that declares a `subpath`, such as
@@ -296,16 +298,16 @@ Measured with direct I/O on 8 GB transfers:
 
 | Disk | Read | Write |
 |---|---:|---:|
-| Corsair EX400U (USB4) | 3.3 GB/s | 3.0 GB/s |
-| Lexar NM790 (internal PCIe) | 4.0 GB/s | 4.5 GB/s |
+| External NVMe (USB4) | 3.3 GB/s | 3.0 GB/s |
+| Internal NVMe (PCIe) | 4.0 GB/s | 4.5 GB/s |
 
 Storage bandwidth only affects model load time, never inference throughput, so
 the external disk costs a little over a second on a 25 GB load. The reported
 PCIe link speed of `2.5GT/s x1` is an artefact of USB4 tunnelling and does not
 reflect real throughput.
 
-`lexar-2` is reserved for real-time data capture and is not available for model
-storage, regardless of how empty it looks.
+Not every empty-looking disk on the host is free for models. Which disks are
+reserved for other work is recorded in the private half, `opts`.
 
 ## What is actually stored, 17 August 2026
 

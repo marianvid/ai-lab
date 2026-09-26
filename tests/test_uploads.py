@@ -3,7 +3,7 @@
 import struct
 import unittest
 
-from ai_lab.api.uploads import UploadRejected, sniff_image, validate_image
+from ai_lab.uploads import UploadRejected, sniff_image, validate_image
 
 
 def png(width: int, height: int) -> bytes:

@@ -23,7 +23,10 @@ Replace `localhost` with the machine's address when calling from elsewhere;
 Name any configured model by its id — the id only, not its label or file name.
 No API key is checked; any value will do.
 `GET /v1/models` lists every configured entry, loaded or not, which is the
-point: a client is meant to be able to ask for one of them.
+point: a client is meant to be able to ask for one of them. Each entry also
+says what it can do (its task, and whether it reads pictures or calls tools);
+`GET /v1/models/{id}` gives one model in full. See
+[Finding out what a model can do](requests.md#finding-out-what-a-model-can-do-before-using-it).
 
 The **Server address** block is the contract of this particular installation.
 It lists the endpoints available now and which configured models can answer

@@ -82,9 +82,15 @@ def main() -> None:
         launch_native_kokoro_ui(Handler.backend, args.model_path.parent,
                                 args.ui_port)
     elif args.backend == "higgs":
-        # No bundled editor: the voice studio is the interface for Higgs.
         Handler.backend = HiggsLocalBackend(
             args.model_path, args.max_batch, args.batch_window_ms)
+        if args.ui_port is None:
+            parser.error("Higgs speech requires --ui-port")
+        # The same upstream playground page Linux shows, answered by the
+        # model this process already holds (see higgs_playground.py).
+        from ai_lab.speech import higgs_playground
+
+        higgs_playground.serve(Handler.backend, args.ui_port)
     else:
         Handler.backend = VoxCpmBackend(
             args.model_path, args.cfg_value, args.inference_timesteps)

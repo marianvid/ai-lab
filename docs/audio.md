@@ -81,6 +81,8 @@ many requests that worker is sent at once. On the Mac it runs through the
 transformers library inside AI-Lab's own adapter, because SGLang-Omni does not
 run there. There, requests that arrive within `batch_window_ms` of each other
 (default 100 ms) are grouped, up to `max_batch` (1–16), and decoded together.
+Both forms offer the upstream Higgs playground page for direct use on the
+instance port plus 10000 ([Use a loaded model directly](direct-use.md)).
 
 ## Runtime isolation
 

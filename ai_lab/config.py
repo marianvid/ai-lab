@@ -327,7 +327,7 @@ def _root_of(stored: list) -> str:
 
     The directory every repository sat in. Read from what is there rather than
     guessed at, so a machine keeps pointing where it pointed: on the container
-    that is `/models`, on the Mac `/Volumes/Marian_Backup/models`.
+    that is `/models`, on the Mac the models folder on the data volume.
 
     Nothing when they did not share one — which cannot be expressed under one
     root, and is better left empty and visible than silently moved.

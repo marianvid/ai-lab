@@ -27,6 +27,42 @@ from .contract import validate_payload, wav_result
 SAMPLE_RATE = 24000
 FRAMES_PER_SECOND = 27  # measured on the M3 Max: 155 frames made 5.9 s
 TEMPERATURE, TOP_P, TOP_K = 1.0, 0.95, 50
+MAX_FRAMES = 2048  # the model's own ceiling on audio frames for one answer
+
+
+def sampling_settings(temperature: float | None = None,
+                      top_p: float | None = None, top_k: int | None = None,
+                      max_new_tokens: int | None = None) -> dict:
+    """Check the "how adventurous" knobs one request may set, with defaults.
+
+    Only the browser playground sends these; the public speech API always
+    uses the defaults. In plain words:
+    - `temperature` flattens (above 1) or sharpens (below 1) the odds of each
+      next sound, so higher sounds livelier and less predictable;
+    - `top_k` keeps only that many most likely next sounds;
+    - `top_p` keeps the smallest set of likely sounds whose odds add up to it;
+    - `max_new_tokens` caps the length, in audio frames (27 per second).
+    A value outside its range is refused rather than quietly clamped.
+    """
+    result = {"temperature": TEMPERATURE, "top_p": TOP_P, "top_k": TOP_K,
+              "max_frames": MAX_FRAMES}
+    if temperature is not None:
+        if not 0.05 <= float(temperature) <= 2.0:
+            raise ValueError("temperature must be from 0.05 to 2")
+        result["temperature"] = float(temperature)
+    if top_p is not None:
+        if not 0.0 < float(top_p) <= 1.0:
+            raise ValueError("top_p must be above 0 and at most 1")
+        result["top_p"] = float(top_p)
+    if top_k is not None:
+        if type(top_k) is not int or not 1 <= top_k <= 1000:
+            raise ValueError("top_k must be an integer from 1 to 1000")
+        result["top_k"] = top_k
+    if max_new_tokens is not None:
+        if type(max_new_tokens) is not int or max_new_tokens < 1:
+            raise ValueError("max_new_tokens must be a positive integer")
+        result["max_frames"] = min(max_new_tokens, MAX_FRAMES)
+    return result
 
 
 def frame_limit(text: str) -> int:
@@ -39,7 +75,7 @@ def frame_limit(text: str) -> int:
     ceiling.
     """
     seconds = 0.13 * max(len(text), 1) + 3.0
-    return max(64, min(2048, int(seconds * FRAMES_PER_SECOND)))
+    return max(64, min(MAX_FRAMES, int(seconds * FRAMES_PER_SECOND)))
 
 
 class HiggsLocalBackend:
@@ -68,7 +104,9 @@ class HiggsLocalBackend:
 
     # -- the contract ---------------------------------------------------------
 
-    def generate(self, body: dict) -> dict:
+    def generate(self, body: dict, sampling: dict | None = None) -> dict:
+        """One speech request. `sampling` comes from `sampling_settings`;
+        only the browser playground passes it, the API uses the defaults."""
         request = validate_payload(body, seed=True, reference=True)
         if body.get("model") not in (None, self.model_name):
             raise ValueError(f"this engine serves {self.model_name}")
@@ -80,7 +118,8 @@ class HiggsLocalBackend:
         samples = self.queue.submit({
             "text": request["text"], "seed": seed,
             "reference": request["reference_audio"],
-            "reference_text": request["reference_text"]})
+            "reference_text": request["reference_text"],
+            "sampling": sampling or sampling_settings()})
         result = wav_result(self.model_name, "higgs", samples, SAMPLE_RATE)
         result["seed"] = seed
         return result
@@ -139,7 +178,11 @@ class HiggsLocalBackend:
             generator = torch.Generator()
             generator.manual_seed(request["seed"])
             generators.append(generator)
-        limits = [frame_limit(r["text"]) for r in requests]
+        limits = [min(frame_limit(r["text"]), r["sampling"]["max_frames"])
+                  for r in requests]
+        # Each line keeps its own sampling knobs, one value per row.
+        knobs = {name: [r["sampling"][name] for r in requests]
+                 for name in ("temperature", "top_p", "top_k")}
 
         # Left padding: every row ends in the same column, so the next
         # position of every row is the same cache slot.
@@ -159,7 +202,10 @@ class HiggsLocalBackend:
         active, length = list(range(B)), S
 
         while active:
-            probs = self._probabilities(m.audio_head(hidden).to(torch.float32)).cpu()
+            probs = self._probabilities(
+                m.audio_head(hidden).to(torch.float32),
+                *(torch.tensor([knobs[name][b] for b in active], device=device)
+                  for name in ("temperature", "top_p", "top_k"))).cpu()
             codes, keep = [], []
             for j, b in enumerate(active):
                 drawn = torch.multinomial(probs[j], 1, generator=generators[b]).squeeze(-1)
@@ -196,15 +242,25 @@ class HiggsLocalBackend:
         return waves
 
     @staticmethod
-    def _probabilities(logits):
-        """Temperature, top-k and top-p for the whole group at once, on the GPU."""
+    def _probabilities(logits, temperature, top_p, top_k):
+        """Temperature, top-k and top-p for the whole group at once, on the GPU.
+
+        `logits` holds one row per line in the group (then one per codebook,
+        then one score per possible sound). The three knobs hold one value
+        per line, so lines in the same group may sample differently.
+        """
         import torch
 
-        logits = logits / TEMPERATURE
-        kth = logits.topk(TOP_K, dim=-1).values[..., -1:]
+        rows = logits.shape[0]
+        shape = (rows,) + (1,) * (logits.dim() - 1)
+        logits = logits / temperature.to(logits.dtype).view(shape)
+        k = top_k.clamp(max=logits.shape[-1]).to(torch.long)
+        best = logits.topk(int(k.max()), dim=-1).values
+        index = (k - 1).view(shape).expand(*logits.shape[:-1], 1)
+        kth = best.gather(-1, index)
         logits = torch.where(logits < kth, float("-inf"), logits)
         ordered, order = torch.sort(logits, descending=True, dim=-1)
-        remove = ordered.softmax(-1).cumsum(-1) > TOP_P
+        remove = ordered.softmax(-1).cumsum(-1) > top_p.to(logits.dtype).view(shape)
         remove[..., 1:] = remove[..., :-1].clone()
         remove[..., 0] = False
         scattered = torch.zeros_like(remove)

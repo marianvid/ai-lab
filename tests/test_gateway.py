@@ -261,6 +261,59 @@ class NamingTests(unittest.TestCase):
         self.assertNotIn("name", self.gateway.catalogue()[0])
 
 
+class DescribingTests(unittest.TestCase):
+    """What a client can learn about a model without trying it."""
+
+    class Model:
+        def __init__(self, capabilities):
+            self.capabilities = frozenset(capabilities)
+
+    def operations(self, **params):
+        operations = two_models()
+        operations._entries["coder"]["task"] = "text-generation"
+        operations._entries["coder"]["params"].update(params)
+        operations._entries["coder"]["speech_form"] = {"not": "for text"}
+        able = {"coder": {"images", "tools"}}
+        operations.model_for = lambda instance_id: self.Model(able[instance_id])
+        return operations
+
+    def test_the_listing_says_what_each_model_can_do(self):
+        rows = {row["id"]: row for row in quick(self.operations()).catalogue()}
+        self.assertEqual(rows["coder"]["capabilities"], ["images", "tools"])
+        self.assertEqual(rows["coder"]["task"], "text-generation")
+
+    def test_a_model_whose_files_cannot_be_read_lists_nothing(self):
+        # "reviewer" has no model in the fake: the listing must still come back.
+        rows = {row["id"]: row for row in quick(self.operations()).catalogue()}
+        self.assertEqual(rows["reviewer"]["capabilities"], [])
+
+    def test_text_only_takes_pictures_away(self):
+        gateway = quick(self.operations(language_model_only=True))
+        rows = {row["id"]: row for row in gateway.catalogue()}
+        self.assertEqual(rows["coder"]["capabilities"], ["tools"])
+
+    def test_one_model_carries_its_settings_and_forms(self):
+        row = quick(self.operations()).describe("CODER")
+        self.assertEqual(row["id"], "coder")
+        self.assertEqual(row["params"]["context_size"], 32768)
+        self.assertIn("speech_form", row)
+
+    def test_an_unknown_model_is_not_configured(self):
+        with self.assertRaises(NotConfigured):
+            quick(self.operations()).describe("gpt-4")
+
+    def test_the_route_keeps_the_openai_shape(self):
+        from ai_lab.api.routes.gateway import _one_model
+        gateway = quick(self.operations())
+        listed = _one_model(gateway.catalogue()[0])
+        self.assertEqual(listed["object"], "model")
+        self.assertEqual(listed["ai_lab"]["capabilities"], ["images", "tools"])
+        self.assertNotIn("params", listed["ai_lab"], "the listing stays short")
+        one = _one_model(gateway.describe("coder"), detailed=True)
+        self.assertIn("params", one["ai_lab"])
+        self.assertEqual(one["ai_lab"]["model_id"], "gguf/qwen/Qwen3.6-35B")
+
+
 class LoadingTests(unittest.TestCase):
     def test_asking_for_a_loaded_model_does_not_reload_it(self):
         operations = two_models(coder=True)

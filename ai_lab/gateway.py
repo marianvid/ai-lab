@@ -17,6 +17,7 @@ from .gateway_errors import CardBusy, CouldNotLoad, NotConfigured, ShapeNotServe
 from .gateway_resources import GatewayResources
 from .gateway_control import GatewayControl
 from .scheduler import Abandoned, Scheduler, WillNotFit
+from .capabilities import IMAGES
 from .types import Task
 
 
@@ -97,6 +98,26 @@ class Gateway:
         Entries that are not loaded are listed too. A client is meant to be able
         to ask for one of them — that is the whole point.
         """
+        return self._rows(self.operations.instances())
+
+    def describe(self, wanted: str) -> dict:
+        """Everything a client needs to know about one model before using it.
+
+        The listing row, plus the settings the model will start with and, for
+        speech, music and video, the fields a request may carry
+        (`speech_form`, `music_form`, `video_form`).
+        """
+        instances = self.operations.instances()
+        instance = self.resolve(wanted, instances)
+        row = self._rows([instance])[0]
+        row["params"] = instance.get("params", {})
+        for form in ("speech_form", "music_form", "video_form"):
+            if form in instance:
+                row[form] = instance[form]
+        return row
+
+    def _rows(self, instances: list[dict]) -> list[dict]:
+        """One listing row per entry already read."""
         return [{
             "id": instance["id"],
             "model_id": instance["model_id"],
@@ -109,7 +130,30 @@ class Gateway:
             # only one of them can tell from the listing which models are open
             # to it, instead of finding out by being refused.
             "shapes": self._shapes(instance),
-        } for instance in self.operations.instances()]
+
+            # What kind of work it does, and what it can do beyond plain
+            # text: read pictures ("images"), ask for tool calls ("tools").
+            # Without these a client has to try a model to find out.
+            "task": instance.get("task", Task.TEXT_GENERATION.value),
+            "capabilities": self._capabilities(instance),
+        } for instance in instances]
+
+    def _capabilities(self, instance: dict) -> list[str]:
+        """What the model's own files say it can do, minus what the entry turns off.
+
+        Read from the weights (see `capabilities.py`), not configured. An entry
+        started with `language_model_only` loads without the picture reader,
+        so it cannot read pictures even when the weights could.
+        A model whose files cannot be read reports nothing rather than failing
+        the whole listing.
+        """
+        try:
+            able = set(self.operations.model_for(instance["id"]).capabilities)
+        except Exception:
+            return []
+        if (instance.get("params") or {}).get("language_model_only"):
+            able.discard(IMAGES)
+        return sorted(able)
 
     def _shapes(self, instance: dict) -> list[str]:
         try:

@@ -31,7 +31,8 @@ instance, read `engines/base.py` for the list of request paths.
 Three kinds of file sit outside the line:
 
 - **Shared files** that anything may import: `types.py`, the `config*.py`
-  files, `naming.py`, `events.py`, `budget.py` and `eviction.py`. They hold
+  files, `naming.py`, `events.py`, `budget.py`, `eviction.py`, `multipart.py`
+  and `uploads.py`. They hold
   data shapes, rules or arithmetic, and decide nothing about what to do.
 - **The job queues** `images/jobs.py` and `media/jobs.py`. They are handed the
   gateway when the application is built, so they sit beside `api/`, above the
@@ -41,9 +42,11 @@ Three kinds of file sit outside the line:
   starts one as a separate program, with the engine's own Python, so its
   heavy libraries never load into the manager.
 
-One import breaks the rule today: `images/jobs.py` borrows
-`api/multipart.py` and `api/uploads.py` to read and check uploaded images.
-Moving those two below the gateway would end it.
+No import breaks the rule today. The last one did: `images/jobs.py` borrowed
+the multipart reader and the uploaded-image check from `api/`. Both moved to
+the shared level (`multipart.py`, `uploads.py`), so the job queue and the web
+layer now import them from below. `api/multipart.py` and `api/uploads.py`
+remain only as pass-throughs so older imports keep working.
 
 The reason is practical rather than doctrinal. When two modules depend on each
 other, a change to either can break the other in a way nothing catches until
@@ -66,13 +69,13 @@ there is exactly one place to look.
 | `engines/acestep.py`, `khala.py`, `heartmula.py`, `yue2.py`, `mulacover.py`, `comfy_music.py` | Music generation | — |
 | `engines/comfyui.py`, `comfy_video.py`, `paddleocr.py` | Image workflows, image-to-video workflows, and text recognition in images | — |
 | `audio/` | Isolated adapters: an OpenAI-shaped HTTP server for audio runtimes that ship none (`server.py`), and transcript alignment (`aligner.py`) | Scheduling, configuration, model discovery |
-| `speech/` | Isolated adapters for speech synthesis: one HTTP host (`server.py`, and `higgs_server.py` for the Higgs worker), one backend file per engine (`kokoro_backend.py`, `voxcpm_backend.py`, `qwen.py`, `higgs_backend.py`, `higgs_local_backend.py`), the shared request check and WAV answer (`contract.py`), and grouping requests that arrive together into one model pass (`batching.py`) | Anything the manager imports |
+| `speech/` | Isolated adapters for speech synthesis: one HTTP host (`server.py`, and `higgs_server.py` for the Higgs worker), one backend file per engine (`kokoro_backend.py`, `voxcpm_backend.py`, `qwen.py`, `higgs_backend.py`, `higgs_local_backend.py`), the shared request check and WAV answer (`contract.py`), grouping requests that arrive together into one model pass (`batching.py`), and `higgs_playground.py`, which serves the upstream Higgs playground page from the in-process `higgs_local` model | Anything the manager imports |
 | `music/` | Isolated adapters for music: `server.py` for ACE-Step, and for each other engine a `<engine>_server.py` host with a `<engine>_backend.py` that does the work (Khala, HeartMuLa, YuE2, MuLaCover, ComfyUI). `yue2_web_backend.py` drives YuE2 through its own resident web worker | Anything the manager imports |
 | `video/` | Isolated adapter for ComfyUI video from an uploaded picture: `comfy_server.py` host, `comfy_backend.py` work | Anything the manager imports |
 | `images/` | `server.py`: isolated PaddleOCR adapter. `comfyui_server.py`: isolated bridge to a private ComfyUI. `jobs.py`: named image workflows run as jobs that survive a restart | Arbitrary workflow graphs from clients |
 | `media/` | `jobs.py` and `job_store.py`: music, speech and video jobs that can be cancelled and survive a restart. `http_host.py`: the small JSON server the isolated media adapters share | Choosing a model — the gateway does that |
 | `comfyui_templates/`, `comfyui_custom_nodes/` | Workflow files for ComfyUI's own editor, one per model, and the ComfyUI extension that loads the entry's workflow into it | Python logic beyond finding the right file |
-| `native_ui/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000 | AI-Lab rules — it is vendored code |
+| `native_ui/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000. The Higgs page is used by both Higgs engines | AI-Lab rules — it is vendored code |
 | `catalog.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
 | `capabilities.py` | Reading a model's own files to find out whether it can call tools or read pictures, and remembering the answer | Which engine will run it, and what any setting says |
 | `runtime.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |
@@ -95,7 +98,7 @@ there is exactly one place to look.
 | `gateway_state.py`, `gateway_control.py`, `gateway_resources.py`, `gateway_stats.py`, `gateway_errors.py` | The gateway's parts: a held place and a model-plus-settings shape; the guard for the page's buttons; memory readings and waiting for the card to empty; the read-only report the Gateway page shows; the refusals the web layer turns into HTTP answers | HTTP |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
 | `lastloaded.py` | One record on disk: which models were loaded, in order, and how each was started | Deciding anything — it remembers and is read |
-| `api/` | HTTP routing (`server.py`, `router.py`, one file per group of URLs in `routes/`), JSON and multipart bodies, the event stream (`sse.py`), forwarding to an engine (`passthrough.py`), checking uploaded images (`uploads.py`) | Any decision about models, engines or formats |
+| `api/` | HTTP routing (`server.py`, `router.py`, one file per group of URLs in `routes/`), JSON bodies, the event stream (`sse.py`), forwarding to an engine (`passthrough.py`). `multipart.py` and `uploads.py` here only pass through the shared files of the same name | Any decision about models, engines or formats |
 | `web/` | The browser interface. One file per page under `web/js/views/`, split further where a page grew large | — |
 
 Supporting files carry no policy of their own:
@@ -110,6 +113,8 @@ Supporting files carry no policy of their own:
 | `naming.py` | Rules about model file names — what a shard is, what a companion is. Pure text. |
 | `budget.py` | How much memory models may use on this machine. Pure arithmetic. |
 | `eviction.py` | Which loaded models must come off so another fits. Pure choice; it reads nothing itself. |
+| `multipart.py` | Reading the few named parts AI-Lab needs from a multipart body (a form upload: text fields and files in one request) and rebuilding it with a field changed. Pure bytes; no HTTP. |
+| `uploads.py` | Checking an uploaded image: its real type read from its first bytes, and its size, pixel and dimension limits. Pure bytes; no HTTP. |
 | `events.py` | Publishing progress to subscribers. |
 | `wiring.py` | Constructing objects and connecting them. No logic. |
 | `main.py` | Reading the arguments, building the application, serving. Stops the engines on the way out, where this application is the one supervising them. |

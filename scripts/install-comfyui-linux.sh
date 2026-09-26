@@ -4,7 +4,7 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "${project_dir}/opts/deploy.env"
 target_host="${AI_LAB_HOST:?}"
-container_id="${AI_LAB_CTID:-102}"
+container_id="${AI_LAB_CTID:?}"
 ssh_key="${AI_LAB_SSH_KEY:?}"
 
 ssh -i "${ssh_key}" "${target_host}" "pct exec '${container_id}' -- bash -s" <<'REMOTE'

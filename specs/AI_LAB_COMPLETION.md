@@ -127,8 +127,8 @@ indefinitely, and a text timeout must not make valid image jobs fail.
 
 AI-Lab exposes two configured model roots:
 
-- `core`: the internal Lexar store used by production models;
-- `benchmark`: `/test_models` on the external Corsair SSD.
+- `core`: the store on the internal disk, used by production models;
+- `benchmark`: `/test_models` on an external disk.
 
 The benchmark root is optional and may be disabled on a machine. New test
 downloads default to it when enabled. Production downloads require an explicit
@@ -149,8 +149,8 @@ catalog scans both enabled roots and identifies each model's storage tier. A
 ComfyUI `extra_model_paths` configuration maps both roots without duplicating
 weights.
 
-The Linux deployment adds `/mnt/corsair-4tb/test_models` on the Proxmox host as
-the container's `/test_models`. The existing `/models` mount remains the core
+The Linux deployment mounts a benchmark folder from the Proxmox host as the
+container's `/test_models`. The existing `/models` mount remains the core
 root. No currently running media-copy job may be disturbed.
 
 ## Security and operational requirements
@@ -216,7 +216,7 @@ machine or a log review are listed as not checked.
 | Named workflow profiles from configuration; no graphs from clients | Done | `images/jobs.py`; `config_validation.py` |
 | Pollable, cancellable image jobs; results expire | Done | `images/jobs.py`; `/api/image-jobs` |
 | Per-task timeouts | Partly — per task there is a first-byte limit and a between-bytes limit, not a total-execution limit | `config_policy.py` `GatewayPolicy.task_timeouts` |
-| Upload byte, pixel and dimension limits; type read from the file's first bytes | Done | `api/uploads.py`; `config_policy.py` |
+| Upload byte, pixel and dimension limits; type read from the file's first bytes | Done | `uploads.py`; `config_policy.py` |
 | `core` and `benchmark` model roots; downloads go to the configured `download_root` | Done | `config.py` `ModelRoot`; `application/downloads.py` |
 | Managed moves: copy, SHA-256 check, publish, then delete the source | Done | `application/model_storage.py` |
 | Move refused for a model used by an active image or media job | Not done — only a loaded or loading model is refused | `application/model_storage.py` `_reject_if_busy` |

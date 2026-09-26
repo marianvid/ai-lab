@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.api.multipart import MultipartBody
+from ai_lab.multipart import MultipartBody
 
 
 BOUNDARY = "----ai-lab-test"

@@ -27,6 +27,49 @@ Which shapes each entry answers is in `GET /v1/models`, so a client can look
 rather than guess. The engine declares it, so adding a shape — or an engine
 that speaks one — is a line in that engine's file and nothing else changes.
 
+### Finding out what a model can do, before using it
+
+Two read-only requests. Neither loads anything.
+
+`GET /v1/models` lists every configured model, loaded or not. The list is in
+the OpenAI shape, so an OpenAI client reads it as usual. Each entry also has an
+`ai_lab` object with this project's details:
+
+```json
+{
+  "id": "qwen36-general",
+  "object": "model",
+  "owned_by": "llamacpp",
+  "ai_lab": {
+    "loaded": false,
+    "ready": false,
+    "port": 8080,
+    "shapes": ["/v1/chat/completions", "/v1/completions"],
+    "task": "text-generation",
+    "capabilities": ["images", "tools"]
+  }
+}
+```
+
+| Field | What it says |
+|---|---|
+| `owned_by` | The engine: the program that runs the model (llama.cpp, vLLM, Kokoro…). |
+| `loaded`, `ready` | Whether the model is in memory now, and whether it answers yet. A model that is not loaded can still be asked for; it is loaded first. |
+| `shapes` | The request addresses this model answers. |
+| `task` | The kind of work: `text-generation`, `transcription`, `speech-synthesis`, `music-generation`, `video-generation` and so on. |
+| `capabilities` | What a text model can do beyond text. `images`: it can read pictures sent in the chat. `tools`: it can ask for tool calls (function calling). Read from the model's own files, not configured. A model started with the setting `language_model_only` loads without its picture reader, so `images` is left out for it. Empty when neither applies, or when the model's files cannot be read. |
+
+`GET /v1/models/{id}` returns one model in the same shape. Its `ai_lab` object
+has more:
+
+- `model_id`: where the model's files are, relative to the model store.
+- `params`: the settings the model will be started with, the engine's defaults
+  filled in.
+- `speech_form`, `music_form` or `video_form`, for those tasks: which request
+  fields this particular model accepts.
+
+An unknown id answers 404 with the list of ids that exist.
+
 ### Audio is multipart
 
 Transcription uses the OpenAI-compatible endpoint and sends the configured

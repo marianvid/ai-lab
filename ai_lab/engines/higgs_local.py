@@ -61,7 +61,9 @@ class HiggsLocalEngine:
             self.binary, self.server, "--backend", "higgs",
             "--model-path", str(model_dir), "--port", str(port),
             "--max-batch", str(self.max_batch),
-            "--batch-window-ms", str(self.batch_window_ms)],
+            "--batch-window-ms", str(self.batch_window_ms),
+            # The upstream Higgs playground page, for direct use in a browser.
+            "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})

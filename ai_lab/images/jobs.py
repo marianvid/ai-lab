@@ -15,8 +15,8 @@ import uuid
 import hashlib
 from pathlib import Path
 
-from ..api.multipart import MultipartBody
-from ..api.uploads import validate_image
+from ..multipart import MultipartBody
+from ..uploads import validate_image
 from ..types import ChangeEvent, Task
 
 FINAL = frozenset({"succeeded", "failed", "cancelled"})

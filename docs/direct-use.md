@@ -11,7 +11,7 @@ is ready. A stopped instance shows a disabled action; it starts no UI process.
 | ComfyUI music | Music | Native ComfyUI with the MiniMax Music 3 template adapted to INT8 | Linux |
 | ACE-Step 1.5 | Music | Upstream Gradio playground using the already-loaded AI-Lab model | both |
 | Qwen3-TTS VoiceDesign / CustomVoice | Speak | Upstream Gradio demo using the already-loaded AI-Lab model | both |
-| Higgs TTS 3 | Speak | Official SGLang-Omni playground connected to the already-loaded Higgs worker | Linux |
+| Higgs TTS 3 | Speak | Official SGLang-Omni playground connected to the already-loaded Higgs worker (Linux), or the same page answered by the in-process model (Mac) | both |
 | VoxCPM2 | Speak | Upstream Gradio editor using the already-loaded model | macOS |
 | Kokoro | Speak | Upstream Gradio editor using the already-loaded model | macOS |
 | Khala | Music | Full Khala Studio frontend and its native queued Mac worker | macOS |
@@ -20,8 +20,8 @@ is ready. A stopped instance shows a disabled action; it starts no UI process.
 
 "Host" says where the engine is offered at all: the Linux host, the Mac, or
 both (`hosts/linux.py`, `hosts/darwin.py`). On the Mac, Higgs runs as the
-separate "Higgs TTS (transformers)" engine. It has no playground, so it has no
-Speak button; use it through the API.
+separate "Higgs TTS (transformers)" engine (`higgs_local`). It gets the same
+Speak button and the same playground page; see below.
 
 Other engines remain available to API clients through AI-Lab's gateway, but
 AI-Lab does not substitute small browser forms for their full interfaces.
@@ -42,6 +42,18 @@ the existing Higgs worker; it does not load another checkpoint. Unloading
 Higgs stops both the playground and the worker. Its browser interface allows
 reference-audio uploads and generation controls that the AI-Lab gateway does
 not expose.
+
+On the Mac, `higgs_local` has no separate worker and no SGLang-Omni, so the
+speech host itself serves the same playground files on the instance port plus
+10000 (`speech/higgs_playground.py`) and answers them from the model it
+already holds. What differs from Linux:
+
+- the page's temperature, top-p, top-k and length controls apply to that one
+  request only; the gateway always uses the defaults;
+- a reference clip may be uploaded or recorded (it is converted to WAV first),
+  but a reference given as a URL is refused;
+- the "stream" option returns the whole line in one piece, because the
+  transformers port produces a line all at once.
 
 VoxCPM2 uses its upstream Gradio editor on the instance port plus 10000.
 Kokoro uses its upstream Gradio editor on the instance port plus 10000 and

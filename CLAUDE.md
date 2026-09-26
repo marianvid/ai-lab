@@ -59,19 +59,21 @@ to approve routine steps.
 
 The one limit is system health. Still ask before:
 
-- changing Proxmox networking without a recovery plan;
-- detaching or resetting the NVIDIA PCI device while services run;
-- hot-plugging OCuLink;
+- changing host networking without a recovery plan;
+- detaching or resetting the GPU while services run;
+- hot-plugging the link the GPU is attached through;
 - deleting model files that are in use;
-- disturbing the media-migration rsync jobs.
+- disturbing long-running jobs on the host that are not AI-Lab's.
 
-The separate `home-lab` LCD dashboard project is out of scope.
+The concrete list for the owner's machines — which jobs, which other projects
+are out of scope — is in the private half, `opts/CLAUDE.md`.
 
 ## Rule 4 — Verify, do not assume
 
 Report what was measured, not what was expected. If something was not checked,
-say so. Free disk space says nothing about whether a disk is available — the
-internal `lexar-2` looks empty but is reserved for real-time data capture.
+say so. Free disk space says nothing about whether a disk is available — a disk
+can look empty and still be reserved for other work. Which disks are reserved
+is in `opts/CLAUDE.md`.
 
 ## Project facts worth knowing
 

@@ -422,7 +422,7 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertIn(SETTINGS_FIELD, str(caught.exception))
 
     def test_audio_multipart_is_forwarded_without_becoming_a_json_body(self):
-        from ai_lab.api.multipart import MultipartBody
+        from ai_lab.multipart import MultipartBody
         from ai_lab.api.routes.gateway import _forwarder
         boundary = "----ai-lab-route-test"
         data = (
@@ -455,7 +455,7 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertEqual(forwarded["kwargs"]["content_type"], body.content_type)
 
     def _ocr_upload(self, image: bytes) -> "MultipartBody":
-        from ai_lab.api.multipart import MultipartBody
+        from ai_lab.multipart import MultipartBody
         boundary = "----ai-lab-ocr-test"
         data = (
             f"--{boundary}\r\n"

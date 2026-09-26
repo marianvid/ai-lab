@@ -25,6 +25,8 @@ class HiggsLocalEngineTests(unittest.TestCase):
         self.assertEqual(self.engine.needs_mb(self.model, {}, 0), 12000)
         self.assertEqual(self.engine.concurrency({}), 1)
         self.assertEqual(plan.argv[plan.argv.index('--max-batch') + 1], '1')
+        # The browser playground sits on the instance port plus 10000.
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18125')
 
     def test_batch_size_sets_gateway_concurrency(self):
         engine = HiggsLocalEngine(

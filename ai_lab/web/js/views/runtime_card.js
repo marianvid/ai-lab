@@ -276,7 +276,10 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     const comfy = ['comfyui', 'comfy_music', 'comfy_video'].includes(instance.engine);
     const ace = instance.engine === 'acestep' && task === 'music-generation';
     const qwenTts = instance.engine === 'qwentts' && task === 'speech-synthesis';
-    const higgs = instance.engine === 'higgs' && task === 'speech-synthesis';
+    // Both Higgs engines open the same upstream playground: the SGLang worker
+    // on Linux, and the in-process transformers port (higgs_local) on a Mac.
+    const higgs = ['higgs', 'higgs_local'].includes(instance.engine)
+      && task === 'speech-synthesis';
     const voxcpm = instance.engine === 'voxcpm' && task === 'speech-synthesis';
     const kokoro = instance.engine === 'kokoro' && task === 'speech-synthesis';
     const khala = instance.engine === 'khala' && task === 'music-generation';

@@ -137,58 +137,7 @@
     "state_dir": "/var/lib/ai-lab/image-jobs",
     "client_wait_s": 1800,
     "result_ttl_s": 86400,
-    "profiles": {
-      "comic-character": {
-        "description": "Character-consistent comic panel generation",
-        "version": "1",
-        "task": "generation",
-        "model": "image-comic",
-        "workflow": "comic-character-api.json",
-        "inputs": {
-          "prompt": [
-            "6",
-            "text"
-          ],
-          "negative_prompt": [
-            "7",
-            "text"
-          ],
-          "seed": [
-            "3",
-            "seed"
-          ],
-          "width": [
-            "5",
-            "width"
-          ],
-          "height": [
-            "5",
-            "height"
-          ]
-        }
-      },
-      "comic-edit": {
-        "description": "Reference-guided comic panel edit",
-        "version": "1",
-        "task": "edit",
-        "model": "image-comic-edit",
-        "workflow": "comic-edit-api.json",
-        "inputs": {
-          "prompt": [
-            "6",
-            "text"
-          ],
-          "image": [
-            "10",
-            "image"
-          ],
-          "seed": [
-            "3",
-            "seed"
-          ]
-        }
-      }
-    }
+    "profiles": {}
   },
   "gateway": {
     "max_upload_bytes": 26214400,
@@ -322,13 +271,6 @@
       "engine": "comfyui",
       "model_id": "images-comfyui-generation/comic-model",
       "port": 8093,
-      "params": {}
-    },
-    {
-      "id": "image-comic-edit",
-      "engine": "comfyui",
-      "model_id": "images-comfyui-edit/comic-edit-model",
-      "port": 8094,
       "params": {}
     }
   ],
