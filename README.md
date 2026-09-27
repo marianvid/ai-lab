@@ -45,7 +45,8 @@ side supports:
   different engine on each.
 - **Linux only:** vLLM, NVIDIA NeMo Speech, HeartMuLa, MuLaCover, and ComfyUI
   for music and for video.
-- **macOS only:** MLX LM (text models in Apple's MLX format), MLX Whisper,
+- **macOS only:** MLX LM (text models in Apple's MLX format), MLX VLM (the
+  same models reading pictures as well as text), MLX Whisper,
   Kokoro, VoxCPM, Khala and the Qwen forced aligner.
 
 An engine the machine supports but has not installed stays visible but

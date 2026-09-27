@@ -12,6 +12,22 @@ import urllib.error
 import urllib.request
 
 
+def http_json(port: int, path: str, timeout: float = 1.0) -> dict:
+    """The JSON an engine answers with, or {} when it does not answer yet.
+
+    For engines whose health page says more than "ok" — mlx-vlm names the
+    model it has loaded, and that name is the real sign of readiness.
+    """
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout) as response:
+            if response.status != 200:
+                return {}
+            payload = json.loads(response.read())
+    except (OSError, urllib.error.URLError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def http_ok(port: int, path: str = "/health", timeout: float = 1.0) -> bool:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout) as response:

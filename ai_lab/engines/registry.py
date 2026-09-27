@@ -19,6 +19,7 @@ from ..types import Capabilities, Task
 from .base import Engine
 from .llamacpp import LlamaCppEngine
 from .mlxlm import MlxLmEngine
+from .mlxvlm import MlxVlmEngine
 from .mlxwhisper import MlxWhisperEngine
 from .nemo import NemoEngine
 from .onnx import OnnxEngine
@@ -55,6 +56,9 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         MlxLmEngine.id: MlxLmEngine(
             binary=settings.get(MlxLmEngine.id, {}).get("binary"),
             server=settings.get(MlxLmEngine.id, {}).get("server")),
+        MlxVlmEngine.id: MlxVlmEngine(
+            binary=settings.get(MlxVlmEngine.id, {}).get("binary"),
+            server=settings.get(MlxVlmEngine.id, {}).get("server")),
         MlxWhisperEngine.id: MlxWhisperEngine(
             binary=settings.get(MlxWhisperEngine.id, {}).get("binary"),
             server=settings.get(MlxWhisperEngine.id, {}).get("server")),
@@ -148,7 +152,7 @@ def _reason(engine_id: str, capabilities: Capabilities) -> str:
         return "Requires an NVIDIA GPU"
     if engine_id == "nemo" and capabilities.accelerator_kind != "cuda":
         return "Requires an NVIDIA GPU"
-    if engine_id in ("vllm", "nemo", "mlxlm", "mlxwhisper", "onnx", "pyannote",
+    if engine_id in ("vllm", "nemo", "mlxlm", "mlxvlm", "mlxwhisper", "onnx", "pyannote",
                      "paddleocr", "comfyui", "acestep", "qwentts", "kokoro"):
         return "Not installed"
     return "Binary not found"

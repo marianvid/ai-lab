@@ -39,6 +39,7 @@ def current_host(engines: dict | None = None) -> Host:
             yue2_binary=settings.get("yue2", {}).get("binary"),
             higgs_local_binary=settings.get("higgs_local", {}).get("binary"),
             mlxlm_binary=settings.get("mlxlm", {}).get("binary"),
+            mlxvlm_binary=settings.get("mlxvlm", {}).get("binary"),
         )
     from .linux import LinuxHost
 

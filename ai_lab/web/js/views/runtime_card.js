@@ -23,8 +23,10 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
       [`port ${instance.port}`,
        settings.context_size ? `ctx ${settings.context_size}` : null,
        settings.parallel ? `${settings.parallel} slot${settings.parallel === 1 ? '' : 's'}` : null,
-       // MLX LM has no slots: it produces several answers in the same step.
+       // The MLX engines have no slots: they produce several answers in the
+       // same step. MLX LM and MLX VLM name that setting differently.
        settings.decode_concurrency ? `${settings.decode_concurrency} at once` : null,
+       settings.max_num_seqs ? `${settings.max_num_seqs} at once` : null,
        settings.temperature !== undefined ? `temp ${settings.temperature}` : null,
       ].filter(Boolean).join(' · '),
       instance.ready ? 'ready' : instance.running ? 'starting' : 'stopped',

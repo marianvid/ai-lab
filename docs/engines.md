@@ -174,6 +174,46 @@ What differs from llama.cpp, in the settings:
 - **Cache precision** is fixed at the model's own 16 bits; mlx-lm has no
   option to shrink it.
 
+### MLX VLM: the same MLX models, with pictures
+
+mlx-vlm is a second MLX program. It reads the same `mlx` folders as MLX LM
+and also loads the part of a model that reads pictures (the "vision tower"),
+when the folder has one. So the same folder can be run two ways: MLX LM for
+text only, MLX VLM for text and pictures. A picture travels inside an ordinary
+chat request, as an `image_url` part — a web address, or a `data:` URL with
+the picture itself inside the request:
+
+```json
+{"model": "bench-qwen36-mlxvlm-4bit",
+ "messages": [{"role": "user", "content": [
+   {"type": "text", "text": "What is written here?"},
+   {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]}]}
+```
+
+The gateway passes such a request on unchanged.
+
+It is installed the same way as mlx-lm (`source.package` is `mlx-vlm`) and
+started through AI-Lab's launcher, `ai_lab/text/mlxvlm_server.py`. mlx-vlm's
+server was built to load whatever model a request names, so the launcher
+adjusts every request before mlx-vlm reads it:
+
+- **Model name.** Replaced with the folder this process loaded, so mlx-vlm
+  never tries to download a model by the short name the gateway sends.
+- **Thinking.** mlx-vlm's own switch is a top-level `enable_thinking` field.
+  The field the other engines use, `"chat_template_kwargs":
+  {"enable_thinking": false}`, is copied into it, so one field works on all
+  three engines. mlx-vlm turns thinking off unless told otherwise; the
+  Thinking setting's "auto" therefore starts it with thinking on, which is
+  what Qwen 3.6 and Gemma 4 do by default on the other engines.
+- **Sampling defaults.** mlx-vlm has no start-up option for temperature,
+  top-p, top-k or min-p, so the launcher fills them into requests that leave
+  them out.
+
+"Answers produced together" (`max_num_seqs`) works as MLX LM's does, and the
+cache stays at 16 bits (mlx-vlm can shrink it, but AI-Lab does not offer that
+yet). The health page names the loaded model; that name, not just an answer,
+is what tells the manager the load finished.
+
 ### Which engines have an update row
 
 An engine gets an update row only when its configuration has a `source`
@@ -182,8 +222,8 @@ section (`builds.py`, `installs.py`):
 - `source.path` — a git checkout compiled here, such as llama.cpp. See
   [Source build versions](source-builds.md).
 - `source.package` — a Python package installed into its own environment,
-  such as vLLM, NeMo, the Silero ONNX adapter, pyannote.audio, PaddleOCR or
-  mlx-lm.
+  such as vLLM, NeMo, the Silero ONNX adapter, pyannote.audio, PaddleOCR,
+  mlx-lm or mlx-vlm.
   See [Package-installed engine versions](package-installs.md).
 - `source.kind: "git-app"` — a complete git application such as ComfyUI, as
   described above.
