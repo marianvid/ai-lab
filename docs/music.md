@@ -8,7 +8,6 @@ address, so a caller does not need to know which engine is behind a model name.
 |---|---|---|---|---|
 | ACE-Step 1.5 | Song or instrumental from a style prompt and optional lyrics | yes | yes | ACE-Step's own Gradio page |
 | HeartMuLa | Song from style tags and lyrics | yes | no | HeartMuse Studio |
-| LeVo2 | Song from lyrics and a style prompt; uses GGUF models (F16/F32) | yes | no | `levo-cli` / `levo-render` CLI |
 | YuE2 | Song from a style and lyrics; also writes an ABC score | yes | yes | ds-yue-webui Studio |
 | MuLaCover | New vocal version (a "cover") of an uploaded WAV | yes | no | none |
 | Khala | Song or instrumental, length chosen as a "bucket" | no | yes | Khala Studio |
@@ -59,7 +58,6 @@ with an error, not silently dropped.
 |---|---|---|
 | ACE-Step | `lyrics`, `duration`, `instrumental`, `vocal_language` | duration 5–180 s, default 30 |
 | HeartMuLa | `lyrics`, `duration`, `instrumental` | lyrics required; `instrumental` must be `false`; duration 5–180 s, default 60 |
-| LeVo2 | `lyrics`, `duration` | lyrics required; duration 5–180 s, default 30 |
 | YuE2 | `lyrics`, `instrumental`, `abc` | lyrics required; `instrumental` must be `false`; no duration |
 | MuLaCover | `lyrics`, `instrumental`, `reference_audio_base64` | lyrics and a WAV of at most 25 MiB required; `instrumental` must be `false` |
 | Khala | `lyrics`, `instrumental`, `vocal_language`, `length_bucket` | language one of Chinese, English, Japanese, Korean, Cantonese |
@@ -67,14 +65,6 @@ with an error, not silently dropped.
 
 A few engine-specific details:
 
-- **LeVo2** uses GGUF models (F16 for the language model, F32 for the flow model,
-  F16 for the VAE) totalling about 12 GB. It runs a two-step pipeline:
-  `levo-cli` generates intermediate token arrays (`.npy`) from lyrics and style,
-  then `levo-render` converts them to WAV audio. Both binaries are compiled with
-  CUDA and run on Linux NVIDIA GPUs. The model weights are stored as `.gguf` files
-  in the configured GGUF repository (e.g. `gguf-levo2/LeVo2-v2-large-F16`).
-  Unlike other music engines, LeVo2 does not support instrumental mode — lyrics
-  are always required.
 - **YuE2** can take an ABC score in `abc`. ABC is a plain-text way of writing
   down music notes. The answer returns the score it used in `score_abc`, and
   a `truncated` flag. YuE2 reports truncation per stage; `truncated` is true
