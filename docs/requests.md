@@ -196,6 +196,7 @@ loads. The ones worth knowing:
 | `gpu_layers` | llama.cpp | `-1` all on the card, `-2` fit what you can and leave the rest in system memory, a number to set it yourself |
 | `cache_type_k`, `cache_type_v` | llama.cpp | how the context cache is stored. `q4_0` costs a fraction of `f16` |
 | `tool_parser` | vLLM | which family's tool-call format to expect. Empty means tools are refused |
+| `reasoning_parser` | vLLM | which family's thinking markers to expect (`qwen3`, `gemma4`), so the thinking comes back as `reasoning_content` instead of inside the answer. Empty means it arrives inside the answer |
 
 Two examples of the second row, which is the one that matters for fitting more
 than one model:
@@ -306,7 +307,9 @@ a tool call. A model does not return structured data when it wants to use a
 tool; it writes text, and every model family writes it differently. vLLM has to
 be told which to expect, and refuses tool use outright until it is. That is the
 **Tool calling** setting on the entry: empty means off, otherwise it names the
-model's family — `qwen3_coder`, `gemma4`, `glm47`.
+model's family — `qwen3_coder`, `gemma4`, `glm47`. A model that thinks before it
+answers also wants the **Thinking parser** setting (`qwen3` for Qwen3 and later);
+without it the agent receives the reasoning as part of the answer.
 
 With that set, and a context window big enough for the agent's own prompt:
 

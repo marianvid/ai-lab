@@ -99,7 +99,8 @@ class PlanTests(unittest.TestCase):
     def test_a_transcription_plan_omits_text_only_settings(self):
         argv = self.engine.plan(model(task=Task.TRANSCRIPTION), 8082, {}).argv
         for flag in ("--max-model-len", "--language-model-only",
-                     "--kv-cache-dtype", "--tool-call-parser"):
+                     "--kv-cache-dtype", "--tool-call-parser",
+                     "--reasoning-parser"):
             self.assertNotIn(flag, argv)
         self.assertEqual(argv[argv.index("--max-num-seqs") + 1], "8")
 
@@ -166,6 +167,39 @@ class ToolCallingTests(unittest.TestCase):
     def test_parser_name_cannot_be_a_path_or_command(self):
         with self.assertRaisesRegex(ValueError, "Tool calling"):
             self.argv({"tool_parser": "../parser"})
+
+
+class ReasoningParserTests(unittest.TestCase):
+    """Keeping a model's thinking out of its answer.
+
+    A thinking model writes its reasoning before the answer, between markers
+    its family chooses. Unless vLLM is told which markers, the reasoning is
+    returned as part of the answer and an agent shows it, or acts on it.
+    """
+
+    def setUp(self):
+        self.engine = VllmEngine(binary="/opt/ai/vllm/.venv/bin/vllm")
+
+    def argv(self, params=None):
+        return self.engine.plan(model(), 8082, params or {}).argv
+
+    def test_off_by_default(self):
+        self.assertNotIn("--reasoning-parser", self.argv())
+
+    def test_naming_a_parser_reaches_the_command_line(self):
+        argv = self.argv({"reasoning_parser": "qwen3"})
+        self.assertEqual(argv[argv.index("--reasoning-parser") + 1], "qwen3")
+
+    def test_it_is_independent_of_tool_calling(self):
+        argv = self.argv({"reasoning_parser": "qwen3"})
+        self.assertNotIn("--enable-auto-tool-choice", argv)
+        argv = self.argv({"reasoning_parser": "qwen3", "tool_parser": "qwen3_coder"})
+        self.assertIn("--enable-auto-tool-choice", argv)
+        self.assertIn("--reasoning-parser", argv)
+
+    def test_parser_name_cannot_be_a_path_or_command(self):
+        with self.assertRaisesRegex(ValueError, "Thinking parser"):
+            self.argv({"reasoning_parser": "qwen3;rm"})
 
 
 class MemorySettingsTests(unittest.TestCase):

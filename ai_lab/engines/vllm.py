@@ -108,6 +108,18 @@ PARAMS = (
                    "--enable-auto-tool-choice. Picking the wrong one is not "
                    "silent: the model answers, and its tool calls arrive as "
                    "text nobody acts on."),
+    ParamSpec("reasoning_parser", "Thinking parser", "identifier", "",
+              group="memory",
+              help="How this model marks its thinking, so vLLM can return it "
+                   "apart from the answer (`reasoning_content`). Empty means "
+                   "the thinking arrives inside the answer text. Measured here "
+                   "on Qwen3.6-35B-A3B without it: the answer to a one-line "
+                   "question began with paragraphs of English reasoning and a "
+                   "stray </think>. Enter a parser name supported by the "
+                   "installed vLLM version: qwen3 for Qwen3 and later, "
+                   "gemma4 for Gemma-4. It does not switch thinking on or off; "
+                   "a request does that with "
+                   "chat_template_kwargs.enable_thinking."),
 )
 
 # Speech recognition has no text context window, tool parser or text-only
@@ -186,6 +198,8 @@ class VllmEngine:
         if model.task is Task.TEXT_GENERATION and settings["tool_parser"]:
             argv += ["--enable-auto-tool-choice",
                      "--tool-call-parser", settings["tool_parser"]]
+        if model.task is Task.TEXT_GENERATION and settings["reasoning_parser"]:
+            argv += ["--reasoning-parser", settings["reasoning_parser"]]
         # No chat page: vLLM serves an API and nothing a person can open.
         return LaunchPlan(argv=argv, env={}, health_path="/health", web_ui=False)
 
