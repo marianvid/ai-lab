@@ -8,7 +8,13 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-config="${AI_LAB_CONFIG:-${HOME}/.ai-lab/config.json}"
+# The configuration lives in the private opts/ checkout when there is one;
+# AI_LAB_CONFIG overrides it, ~/.ai-lab/config.json is the fallback.
+default_config="${HOME}/.ai-lab/config.json"
+if [ -f "${project_dir}/opts/macos/config.json" ] && [ "$(uname -s)" = "Darwin" ]; then
+  default_config="${project_dir}/opts/macos/config.json"
+fi
+config="${AI_LAB_CONFIG:-${default_config}}"
 
 if [ ! -f "${config}" ]; then
   echo "No configuration at ${config}" >&2
