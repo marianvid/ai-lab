@@ -6,7 +6,7 @@ Executable by a runtime-specific Python environment, the same way
 only this small HTTP contract is shared with it.
 
 The response is AI-Lab's own stable OCR schema, not PaddleOCR's native
-output shape — Data-Lab and every other client depend on this shape, not on
+output shape — every client depends on this shape, not on
 whatever PaddleOCR happens to return this version.
 """
 
