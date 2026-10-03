@@ -38,6 +38,10 @@ class StableAudio3Backend:
         model.lora_names = []
         self.model = StableAudioModel(model, config, device, half)
         self.sample_rate = int(config["sample_rate"])
+        # The longest audio the model is configured for (380 s for Medium).
+        # generate() defaults to 120 s and silently cuts anything longer, so
+        # the configured length is passed explicitly, as the upstream CLI does.
+        self.sample_size = int(config["sample_size"])
         self.model_name = model_dir.name
         self.steps = steps
         self.cfg_scale = cfg_scale
@@ -50,7 +54,8 @@ class StableAudio3Backend:
                 prompt=request["prompt"],
                 negative_prompt=request["negative_prompt"] or None,
                 duration=request["duration"], steps=self.steps,
-                cfg_scale=self.cfg_scale, seed=request["seed"])
+                cfg_scale=self.cfg_scale, seed=request["seed"],
+                sample_size=self.sample_size)
         wav, seconds = to_wav(audio, self.sample_rate)
         return {"model": self.model_name, "seed": request["seed"],
                 "duration": seconds, "instrumental": True,
