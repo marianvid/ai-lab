@@ -35,6 +35,8 @@ from .higgs import HiggsEngine
 from .higgs_local import HiggsLocalEngine
 from .heartmula import HeartMulaEngine
 from .yue2 import Yue2Engine
+from .levo2 import Levo2Engine
+from .stableaudio3 import StableAudio3Engine
 from .comfy_music import ComfyMusicEngine
 from .mulacover import MulaCoverEngine
 from .comfy_video import ComfyVideoEngine
@@ -92,6 +94,8 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         HiggsLocalEngine.id: HiggsLocalEngine(**settings.get(HiggsLocalEngine.id, {})),
         HeartMulaEngine.id: HeartMulaEngine(**settings.get(HeartMulaEngine.id, {})),
         Yue2Engine.id: Yue2Engine(**settings.get(Yue2Engine.id, {})),
+        Levo2Engine.id: Levo2Engine(**settings.get(Levo2Engine.id, {})),
+        StableAudio3Engine.id: StableAudio3Engine(**settings.get(StableAudio3Engine.id, {})),
         ComfyMusicEngine.id: ComfyMusicEngine(**settings.get(ComfyMusicEngine.id, {})),
         MulaCoverEngine.id: MulaCoverEngine(**settings.get(MulaCoverEngine.id, {})),
         ComfyVideoEngine.id: ComfyVideoEngine(**settings.get(ComfyVideoEngine.id, {})),

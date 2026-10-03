@@ -57,7 +57,9 @@ class LinuxHost:
                  yue2_binary: str | None = None,
                  comfy_music_binary: str | None = None,
                  mulacover_binary: str | None = None,
-                 comfy_video_binary: str | None = None) -> None:
+                 comfy_video_binary: str | None = None,
+                 levo2_binary: str | None = None,
+                 stableaudio3_binary: str | None = None) -> None:
         self.control_helper = control_helper
         # Passed in from the engines section of config.json, because a
         # virtualenv install is invisible to PATH.
@@ -75,6 +77,8 @@ class LinuxHost:
         self.comfy_music_binary = comfy_music_binary
         self.mulacover_binary = mulacover_binary
         self.comfy_video_binary = comfy_video_binary
+        self.levo2_binary = levo2_binary
+        self.stableaudio3_binary = stableaudio3_binary
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -116,6 +120,10 @@ class LinuxHost:
             engines.add("mulacover")
         if self.comfy_video_binary:
             engines.add("comfy_video")
+        if self.levo2_binary:
+            engines.add("levo2")
+        if self.stableaudio3_binary:
+            engines.add("stableaudio3")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),
@@ -124,7 +132,8 @@ class LinuxHost:
             operating_system="Linux",
             supported_engines=frozenset({"llamacpp", "vllm", "nemo", "onnx",
                                          "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
-                                         "higgs", "heartmula", "yue2", "comfy_music", "mulacover", "comfy_video"}),
+                                         "higgs", "heartmula", "yue2", "comfy_music", "mulacover", "comfy_video",
+                                         "levo2", "stableaudio3"}),
         )
 
     def _accelerator_kind(self) -> str:

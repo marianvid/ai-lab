@@ -14,7 +14,9 @@ MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "heartmula": "model_options", "yue2": "model_options",
                     "comfy_music": "model_options",
                     "mulacover": "model_options",
-                    "comfy_video": "model_options"}
+                    "comfy_video": "model_options",
+                    "levo2": "model_options",
+                    "stableaudio3": "model_options"}
 
 
 def validate_configuration(config: Config, engine_ids: set[str],
@@ -158,6 +160,26 @@ def validate_configuration(config: Config, engine_ids: set[str],
                     type(options.get("memory_reservation_mb")) in (int, float) and
                     options["memory_reservation_mb"] > 0):
                     errors.append(f"{item.id}: ComfyUI video settings are invalid")
+            elif item.engine == "levo2":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    all(isinstance(options.get(key), str) and options[key] and
+                        Path(options[key]).name == options[key]
+                        for key in ("lm", "flow", "vae")) and
+                    type(options.get("steps")) is int and 1 <= options["steps"] <= 200 and
+                    type(options.get("cfg")) in (int, float) and 0 < options["cfg"] <= 10 and
+                    type(options.get("memory_reservation_mb")) in (int, float) and
+                    options["memory_reservation_mb"] > 0):
+                    errors.append(f"{item.id}: LeVo 2 settings are invalid")
+            elif item.engine == "stableaudio3":
+                options = configured[model_name]
+                if not isinstance(options, dict) or not (
+                    type(options.get("steps")) is int and 1 <= options["steps"] <= 100 and
+                    type(options.get("cfg_scale")) in (int, float) and
+                    0 < options["cfg_scale"] <= 10 and
+                    type(options.get("memory_reservation_mb")) in (int, float) and
+                    options["memory_reservation_mb"] > 0):
+                    errors.append(f"{item.id}: Stable Audio 3 settings are invalid")
         repository_id = item.model_id.split("/", 1)[0]
         if repository_id not in repository_ids:
             errors.append(f"{item.id}: unknown repository {repository_id}")
