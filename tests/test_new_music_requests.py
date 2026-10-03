@@ -41,3 +41,42 @@ class StableAudio3RequestTests(unittest.TestCase):
         local = stableaudio3_backend.local_config(config, Path("/models/sa3"))
         prompt = local["model"]["conditioning"]["configs"][0]["config"]
         self.assertEqual(prompt, {"model_path": "/models/sa3", "subfolder": "enc"})
+
+
+class StableAudio3SourceAudioTests(unittest.TestCase):
+    def wav(self):
+        import base64, io, struct, wave
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as out:
+            out.setnchannels(1); out.setsampwidth(2); out.setframerate(8000)
+            out.writeframes(struct.pack("<4h", 0, 1, 2, 3))
+        return base64.b64encode(buffer.getvalue()).decode()
+
+    def test_init_audio_with_noise_level(self):
+        request = stableaudio3_backend.validate(
+            {"prompt": "jazz", "init_audio": self.wav(), "init_noise_level": 0.3}, "m")
+        self.assertTrue(request["init_audio"].startswith(b"RIFF"))
+        self.assertEqual(request["init_noise_level"], 0.3)
+
+    def test_noise_level_needs_audio_and_range(self):
+        with self.assertRaisesRegex(ValueError, "needs init_audio"):
+            stableaudio3_backend.validate({"prompt": "jazz", "init_noise_level": 0.3}, "m")
+        with self.assertRaisesRegex(ValueError, "0 to 1"):
+            stableaudio3_backend.validate(
+                {"prompt": "jazz", "init_audio": self.wav(), "init_noise_level": 2}, "m")
+
+    def test_inpaint_regions(self):
+        request = stableaudio3_backend.validate(
+            {"prompt": "jazz", "duration": 30, "inpaint_audio": self.wav(),
+             "inpaint_mask_start_seconds": [4, 20], "inpaint_mask_end_seconds": [8, 25]}, "m")
+        self.assertEqual(request["inpaint_starts"], [4.0, 20.0])
+        with self.assertRaisesRegex(ValueError, "same length"):
+            stableaudio3_backend.validate(
+                {"prompt": "jazz", "duration": 30, "inpaint_audio": self.wav(),
+                 "inpaint_mask_start_seconds": [4, 20], "inpaint_mask_end_seconds": [8]}, "m")
+
+    def test_not_a_wav_is_refused(self):
+        import base64
+        with self.assertRaisesRegex(ValueError, "WAV"):
+            stableaudio3_backend.validate(
+                {"prompt": "jazz", "init_audio": base64.b64encode(b"MP3!").decode()}, "m")

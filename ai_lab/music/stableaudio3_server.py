@@ -24,7 +24,8 @@ def main() -> None:
     args = parser.parse_args()
     backend = StableAudio3Backend(args.model_path, args.steps, args.cfg_scale)
     launch_native_ui(backend, args.ui_port)
-    serve(backend, args.port)
+    # Room for the base64 source recordings (two WAVs of up to 25 MiB).
+    serve(backend, args.port, max_body_bytes=72 * 1024 * 1024)
 
 
 def launch_native_ui(backend: StableAudio3Backend, port: int) -> None:

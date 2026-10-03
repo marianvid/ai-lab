@@ -7,6 +7,7 @@ the configuration is pointed at it before loading.
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import secrets
 from io import BytesIO
@@ -14,7 +15,13 @@ from pathlib import Path
 from threading import Lock
 
 ALLOWED_FIELDS = {"model", "prompt", "negative_prompt", "duration", "seed",
-                  "instrumental", "lyrics"}
+                  "instrumental", "lyrics", "init_audio", "init_noise_level",
+                  "inpaint_audio", "inpaint_mask_start_seconds",
+                  "inpaint_mask_end_seconds"}
+# One source recording, as a WAV: 25 MiB is about 2.5 minutes of 16-bit
+# stereo at 44.1 kHz. Both sources together must also fit the media job
+# input limit (`media.max_input_bytes`, 40 MiB by default).
+MAX_SOURCE_BYTES = 25 * 1024 * 1024
 
 
 class StableAudio3Backend:
@@ -56,13 +63,21 @@ class StableAudio3Backend:
 
     def generate(self, body: dict) -> dict:
         request = validate(body, self.model_name)
+        extra = {}
+        if request["init_audio"] is not None:
+            extra["init_audio"] = read_wav(request["init_audio"])
+            extra["init_noise_level"] = request["init_noise_level"]
+        if request["inpaint_audio"] is not None:
+            extra["inpaint_audio"] = read_wav(request["inpaint_audio"])
+            extra["inpaint_mask_start_seconds"] = request["inpaint_starts"]
+            extra["inpaint_mask_end_seconds"] = request["inpaint_ends"]
         with self.lock:
             audio = self.model.generate(
                 prompt=request["prompt"],
                 negative_prompt=request["negative_prompt"] or None,
                 duration=request["duration"], steps=self.steps,
                 cfg_scale=self.cfg_scale, seed=request["seed"],
-                sample_size=self.sample_size)
+                sample_size=self.sample_size, **extra)
         wav, seconds = to_wav(audio, self.sample_rate)
         return {"model": self.model_name, "seed": request["seed"],
                 "duration": seconds, "instrumental": True,
@@ -102,8 +117,67 @@ def validate(body: dict, model_name: str) -> dict:
     seed = body.get("seed", secrets.randbelow(2**31))
     if type(seed) is not int or not 0 <= seed <= 2**32 - 1:
         raise ValueError("seed must be a 32-bit unsigned integer")
+    init_audio = source_wav(body, "init_audio")
+    noise = body.get("init_noise_level")
+    if noise is not None and init_audio is None:
+        raise ValueError("init_noise_level needs init_audio")
+    if init_audio is not None:
+        noise = 1.0 if noise is None else noise
+        if type(noise) not in (int, float) or not 0 <= noise <= 1:
+            raise ValueError("init_noise_level must be a number from 0 to 1")
+    inpaint_audio = source_wav(body, "inpaint_audio")
+    starts = body.get("inpaint_mask_start_seconds")
+    ends = body.get("inpaint_mask_end_seconds")
+    if inpaint_audio is None and (starts is not None or ends is not None):
+        raise ValueError("inpaint_mask_*_seconds need inpaint_audio")
+    if inpaint_audio is not None:
+        starts, ends = mask_regions(starts, ends, duration)
     return {"prompt": prompt.strip(), "negative_prompt": negative.strip(),
-            "duration": duration, "seed": seed}
+            "duration": duration, "seed": seed,
+            "init_audio": init_audio, "init_noise_level": noise,
+            "inpaint_audio": inpaint_audio, "inpaint_starts": starts,
+            "inpaint_ends": ends}
+
+
+def source_wav(body: dict, field: str) -> bytes | None:
+    """A base64 WAV from the request, checked but not yet decoded to samples."""
+    encoded = body.get(field)
+    if encoded is None:
+        return None
+    if not isinstance(encoded, str) or not encoded or \
+            len(encoded) > MAX_SOURCE_BYTES * 4 // 3 + 4:
+        raise ValueError(f"{field} must be a base64 WAV of at most 25 MiB")
+    try:
+        audio = base64.b64decode(encoded, validate=True)
+    except binascii.Error:
+        raise ValueError(f"{field} is not valid base64") from None
+    if not audio.startswith(b"RIFF") or len(audio) > MAX_SOURCE_BYTES:
+        raise ValueError(f"{field} must be a WAV of at most 25 MiB")
+    return audio
+
+
+def mask_regions(starts, ends, duration: float) -> tuple[list, list]:
+    """Regions to regenerate: one number each, or two lists of equal length."""
+    if starts is None or ends is None:
+        raise ValueError("inpaint_audio needs inpaint_mask_start_seconds and "
+                         "inpaint_mask_end_seconds")
+    starts = starts if isinstance(starts, list) else [starts]
+    ends = ends if isinstance(ends, list) else [ends]
+    if not starts or len(starts) != len(ends):
+        raise ValueError("inpaint mask starts and ends must have the same length")
+    for start, end in zip(starts, ends):
+        if type(start) not in (int, float) or type(end) not in (int, float) \
+                or not 0 <= start < end <= duration:
+            raise ValueError("each inpaint region needs 0 <= start < end <= duration")
+    return [float(x) for x in starts], [float(x) for x in ends]
+
+
+def read_wav(data: bytes):
+    """WAV bytes → (sample_rate, tensor [channels, samples]), as generate() wants."""
+    import soundfile as sf
+    import torch
+    samples, rate = sf.read(BytesIO(data), dtype="float32", always_2d=True)
+    return rate, torch.from_numpy(samples.T.copy())
 
 
 def to_wav(audio, sample_rate: int) -> tuple[bytes, float]:
