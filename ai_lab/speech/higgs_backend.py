@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import socket
 import subprocess
 import time
 import urllib.error
@@ -11,6 +13,25 @@ from pathlib import Path
 from threading import BoundedSemaphore
 
 from .contract import ReferenceFile, validate_payload
+
+
+def wait_for_free_port(port: int, timeout_s: float = 120) -> None:
+    """Wait until `port` on 127.0.0.1 can be bound, the way the worker checks.
+
+    No SO_REUSEADDR, on purpose: the worker binds without it, so a port in
+    TIME_WAIT counts as taken for it, and must count as taken here too.
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"Higgs worker port {port} is still in use") from None
+        time.sleep(1)
 
 
 class HiggsBackend:
@@ -29,11 +50,17 @@ class HiggsBackend:
         # handed at once, as the gateway does, for callers that reach this
         # host without going through the gateway.
         self.slots = BoundedSemaphore(max_parallel)
+        # A worker stopped moments ago leaves its port held by the kernel for
+        # about a minute. The worker then quietly picks another port, and this
+        # host would wait ten minutes on the old one. So wait for the port
+        # first, and tell the worker to stop rather than move if it is taken.
+        wait_for_free_port(worker_port)
         self.process = subprocess.Popen([
             str(worker_binary), "serve", "--model-path", str(model_path),
             "--host", "127.0.0.1", "--port", str(worker_port),
             "--mem-fraction-static", str(mem_fraction_static),
-            "--log-level", "info"])
+            "--log-level", "info"],
+            env={**os.environ, "SGLANG_OMNI_STRICT_PORT": "1"})
         try:
             self._wait_ready()
         except Exception:

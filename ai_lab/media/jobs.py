@@ -6,6 +6,7 @@ import json
 import queue
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -20,6 +21,22 @@ PATHS = {
     Task.SPEECH_SYNTHESIS.value: SPEECH_PATHS[0],
     Task.VIDEO_GENERATION.value: VIDEO_PATHS[0],
 }
+
+
+def engine_refusal(error: urllib.error.HTTPError) -> str:
+    """The engine's own reason for refusing a job, not just its status line.
+
+    Engines answer `{"error": {"message": ...}}`. Keeping that message is what
+    tells the caller which field to fix; "HTTP Error 400: Bad Request" alone
+    does not.
+    """
+    try:
+        body = json.loads(error.read(65536) or b"{}")
+        message = body.get("error", {}).get("message") or ""
+    except Exception:
+        message = ""
+    status = f"HTTP {error.code}"
+    return f"{status}: {message}" if message else f"{status}: {error.reason}"
 
 
 class MediaJobs:
@@ -142,8 +159,11 @@ class MediaJobs:
                         data=json.dumps(outgoing).encode(), method="POST",
                         headers={"Content-Type": "application/json"})
                     first, _ = self.gateway.timeouts_for(Task(job["task"]))
-                    with urllib.request.urlopen(request, timeout=first) as response:
-                        raw = response.read(self.max_result_bytes + 1)
+                    try:
+                        with urllib.request.urlopen(request, timeout=first) as response:
+                            raw = response.read(self.max_result_bytes + 1)
+                    except urllib.error.HTTPError as error:
+                        raise RuntimeError(engine_refusal(error)) from error
                     if len(raw) > self.max_result_bytes:
                         raise ValueError("Media result exceeds the configured limit")
                     result = json.loads(raw)

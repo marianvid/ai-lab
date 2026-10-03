@@ -5,7 +5,9 @@ from pathlib import Path
 from threading import BoundedSemaphore
 from unittest.mock import patch
 
-from ai_lab.speech.higgs_backend import HiggsBackend
+import socket
+
+from ai_lab.speech.higgs_backend import HiggsBackend, wait_for_free_port
 
 
 class FakeResponse:
@@ -44,3 +46,18 @@ class HiggsRequestTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WorkerPortTests(unittest.TestCase):
+    def test_a_free_port_is_accepted_at_once(self):
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            port = probe.getsockname()[1]
+        wait_for_free_port(port, timeout_s=1)
+
+    def test_a_held_port_is_reported_instead_of_silently_moved(self):
+        with socket.socket() as holder:
+            holder.bind(('127.0.0.1', 0))
+            holder.listen()
+            with self.assertRaisesRegex(RuntimeError, 'still in use'):
+                wait_for_free_port(holder.getsockname()[1], timeout_s=0)

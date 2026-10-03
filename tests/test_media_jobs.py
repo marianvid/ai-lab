@@ -14,6 +14,7 @@ from ai_lab.types import Task
 class Handler(BaseHTTPRequestHandler):
     requests = []
     block = None
+    refuse = None
 
     def do_POST(self):
         if self.path.endswith('/cancel'):
@@ -24,6 +25,13 @@ class Handler(BaseHTTPRequestHandler):
         self.requests.append((self.path, body))
         if self.block is not None:
             self.block.wait(3)
+        if self.refuse is not None:
+            data = json.dumps({'error': {'message': self.refuse}}).encode()
+            self.send_response(400)
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         data = json.dumps({'data': [{'b64_wav': base64.b64encode(b'RIFF').decode()}]}).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -69,6 +77,7 @@ class MediaJobTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         Handler.requests = []
         Handler.block = None
+        Handler.refuse = None
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -148,3 +157,9 @@ class MediaJobTests(unittest.TestCase):
             self.jobs.submit({'model': 'missing',
                 'task': Task.MUSIC_GENERATION.value, 'input': {}})
         self.assertEqual(self.jobs.list(), [])
+
+    def test_a_refused_job_keeps_the_engines_reason(self):
+        Handler.refuse = 'Unknown YuE2 fields: duration'
+        job = self.submit()
+        failed = self.wait_for(job['id'], 'failed')
+        self.assertEqual(failed['error'], 'HTTP 400: Unknown YuE2 fields: duration')
