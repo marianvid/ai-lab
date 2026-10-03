@@ -40,6 +40,7 @@ def current_host(engines: dict | None = None) -> Host:
             higgs_local_binary=settings.get("higgs_local", {}).get("binary"),
             mlxlm_binary=settings.get("mlxlm", {}).get("binary"),
             mlxvlm_binary=settings.get("mlxvlm", {}).get("binary"),
+            stableaudio3_binary=settings.get("stableaudio3", {}).get("binary"),
         )
     from .linux import LinuxHost
 

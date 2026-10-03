@@ -30,7 +30,14 @@ class StableAudio3Backend:
         if not 1 <= steps <= 100 or not 0 < cfg_scale <= 10:
             raise ValueError("Stable Audio 3 settings are invalid")
         config = local_config(json.loads(config_path.read_text()), model_dir)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        # The NVIDIA card on Linux, Metal on a Mac. Half precision only on
+        # CUDA: Metal runs the model in full precision, as the library does.
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
         half = device == "cuda"
         model = load_diffusion_cond(config, str(checkpoint), device=device,
                                     model_half=half)

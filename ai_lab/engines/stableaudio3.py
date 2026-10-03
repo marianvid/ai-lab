@@ -52,6 +52,9 @@ class StableAudio3Engine:
             "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "GRADIO_ANALYTICS_ENABLED": "False",
+                 # On a Mac, let an operation Metal lacks run on the CPU
+                 # instead of failing the song. Ignored on Linux.
+                 "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
             web_ui=True)
 
