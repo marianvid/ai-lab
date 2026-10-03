@@ -48,9 +48,16 @@ class StableAudio3Engine:
         return LaunchPlan(argv=[
             self.binary, self.server, "--model-path", str(model_dir),
             "--steps", str(options["steps"]),
-            "--cfg-scale", str(options["cfg_scale"]), "--port", str(port)],
+            "--cfg-scale", str(options["cfg_scale"]), "--port", str(port),
+            "--ui-port", str(port + 10000)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
-                 "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
+                 "GRADIO_ANALYTICS_ENABLED": "False",
+                 "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
+            web_ui=True)
+
+    def web_ui(self) -> str:
+        # Stability's official Gradio page, on the instance port + 10000.
+        return "native"
 
     def ready(self, port: int) -> bool:
         return http_ok(port)

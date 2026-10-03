@@ -290,11 +290,12 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     const khala = instance.engine === 'khala' && task === 'music-generation';
     const yue2 = instance.engine === 'yue2' && task === 'music-generation';
     const heartmula = instance.engine === 'heartmula' && task === 'music-generation';
+    const sa3 = instance.engine === 'stableaudio3' && task === 'music-generation';
     const llama = instance.engine === 'llamacpp' && task === 'text-generation';
-    if (!comfy && !ace && !qwenTts && !higgs && !voxcpm && !kokoro && !khala && !yue2 && !heartmula && !llama) return null;
+    if (!comfy && !ace && !qwenTts && !higgs && !voxcpm && !kokoro && !khala && !yue2 && !heartmula && !sa3 && !llama) return null;
     const label = comfy ? ({ 'image-generation': 'Create', 'image-edit': 'Edit',
       'music-generation': 'Music', 'video-generation': 'Video' }[task] || 'ComfyUI')
-      : ace || khala || yue2 || heartmula ? 'Music' : qwenTts || higgs || voxcpm || kokoro ? 'Speak' : 'Chat';
+      : ace || khala || yue2 || heartmula || sa3 ? 'Music' : qwenTts || higgs || voxcpm || kokoro ? 'Speak' : 'Chat';
     if (!instance.ready) return element('button', {
       class: 'pill chat-link', type: 'button', disabled: 'disabled',
       title: instance.running ? 'Wait for the model to finish loading'
@@ -304,7 +305,7 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     return element('a', {
       class: 'pill chat-link', target: '_blank', rel: 'noopener',
       href: `${window.location.protocol}//${window.location.hostname}:`
-        + `${instance.port + (comfy || ace || qwenTts || higgs || voxcpm || kokoro || khala || yue2 || heartmula ? 10000 : 0)}/`
+        + `${instance.port + (comfy || ace || qwenTts || higgs || voxcpm || kokoro || khala || yue2 || heartmula || sa3 ? 10000 : 0)}/`
         + (comfy ? '?ai_lab_preset=1' : ''),
       title: comfy ? 'Open this model in ComfyUI with its configured workflow'
         : ace ? 'Open the official ACE-Step editor using this loaded model'
@@ -315,6 +316,7 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
         : khala ? 'Open Khala Studio using this loaded model'
         : yue2 ? 'Open the full YuE2 Studio using this loaded model'
         : heartmula ? 'Open the full HeartMuse Studio using this loaded model'
+        : sa3 ? 'Open the official Stable Audio 3 page using this loaded model'
         : 'Open the chat page served by llama.cpp',
       text: label,
     });

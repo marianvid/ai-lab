@@ -22,6 +22,12 @@ class StableAudio3EngineTests(unittest.TestCase):
                          "/models/audio/music/stable-audio-3-medium")
         self.assertEqual(plan.env["HF_HUB_OFFLINE"], "1")
 
+    def test_official_page_is_on_port_plus_ten_thousand(self):
+        plan = self.engine.plan(model(), 8131, {})
+        self.assertEqual(plan.argv[plan.argv.index("--ui-port") + 1], "18131")
+        self.assertTrue(plan.web_ui)
+        self.assertEqual(self.engine.web_ui(), "native")
+
     def test_instance_settings_are_refused(self):
         with self.assertRaises(ValueError):
             self.engine.plan(model(), 8131, {"steps": 4})
