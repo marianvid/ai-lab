@@ -61,7 +61,7 @@ class Levo2Backend:
                     "--checkpoint", str(root / "song.resume"),
                     "--output", str(output),
                     "--lm", str(self.files["lm"]), "--dit", str(self.files["dit"]),
-                    "--vae", str(self.files["vae"]), "--progress", "none"],
+                    "--vae", str(self.files["vae"])],
                     capture_output=True, text=True, timeout=self.timeout_s)
             if run.returncode != 0 or not output.is_file():
                 tail = (run.stderr or run.stdout).strip().splitlines()[-5:]

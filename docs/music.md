@@ -12,6 +12,8 @@ address, so a caller does not need to know which engine is behind a model name.
 | MuLaCover | New vocal version (a "cover") of an uploaded WAV | yes | no | none |
 | Khala | Song or instrumental, length chosen as a "bucket" | no | yes | Khala Studio |
 | ComfyUI Music | Runs a ComfyUI workflow, such as MiniMax Music 3 | yes | no | Native ComfyUI |
+| LeVo 2 | Song, or an instrumental when no lyrics are sent. **Research licence only: never for broadcast or any commercial use** | yes | no | none |
+| Stable Audio 3 | Instrumental music or sound from a text prompt, up to 380 s | yes | no | none |
 
 "Linux" and "macOS" say which host the engine is offered on
 (`hosts/linux.py` and `hosts/darwin.py`). An engine still needs its runtime
@@ -62,6 +64,8 @@ with an error, not silently dropped.
 | MuLaCover | `lyrics`, `instrumental`, `reference_audio_base64` | lyrics and a WAV of at most 25 MiB required; `instrumental` must be `false` |
 | Khala | `lyrics`, `instrumental`, `vocal_language`, `length_bucket` | language one of Chinese, English, Japanese, Korean, Cantonese |
 | ComfyUI Music | `lyrics`, `instrumental`, `duration` | `instrumental` (true or false) must be sent; lyrics required unless instrumental; duration 5–120 s, default 30 |
+| LeVo 2 | `lyrics`, `instrumental`, `duration` | lyrics required unless `instrumental: true`; duration 5–300 s, default 60 |
+| Stable Audio 3 | `instrumental`, `duration`, `negative_prompt` | instrumentals only (`instrumental` may be omitted or `true`, no `lyrics`); duration 1–380 s, default 30; put the tempo (BPM) in the prompt |
 
 A few engine-specific details:
 
