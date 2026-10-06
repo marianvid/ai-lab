@@ -73,24 +73,30 @@ def status_for(error: Exception) -> HTTPStatus:
 
 
 class Handler(BaseHTTPRequestHandler):
+    """One HTTP request: route it, call the operation, write the answer."""
+
     router: Router
     bus: EventBus
     protocol_version = "HTTP/1.1"
 
-    def do_GET(self):
+    def do_GET(self) -> None:
+        """The event stream, an API route, or a file of the page, in that order."""
         parsed = urlparse(self.path)
         if parsed.path == "/api/events":
-            return self._events()
-        if not self._dispatch("GET", parsed):
+            self._events()
+        elif not self._dispatch("GET", parsed):
             self._static(parsed.path)
 
-    def do_POST(self):
+    def do_POST(self) -> None:
+        """An API route; anything else is not found."""
         self._dispatch("POST", urlparse(self.path), required=True)
 
-    def do_PATCH(self):
+    def do_PATCH(self) -> None:
+        """An API route; anything else is not found."""
         self._dispatch("PATCH", urlparse(self.path), required=True)
 
-    def do_DELETE(self):
+    def do_DELETE(self) -> None:
+        """An API route; anything else is not found."""
         self._dispatch("DELETE", urlparse(self.path), required=True)
 
     # -- dispatch ----------------------------------------------------------
@@ -168,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
         """
         status = status_for(error)
         detail = getattr(error, "detail", None)
-        payload = {"error": _message(error)}
+        payload: dict[str, object] = {"error": _message(error)}
         if isinstance(detail, dict):
             payload.update(detail)
         # Two audiences, two conventions. The browser reads `error` as a
@@ -239,24 +245,41 @@ class Handler(BaseHTTPRequestHandler):
         relative = "index.html" if path in {"", "/"} else path.lstrip("/")
         target = (WEB_ROOT / relative).resolve()
         if WEB_ROOT.resolve() not in target.parents or not target.is_file():
-            return self._error(FileNotFoundError(path))
+            self._error(FileNotFoundError(path))
+            return
         data = target.read_bytes()
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self._head(HTTPStatus.OK, content_type, len(data))
         self.wfile.write(data)
 
     def log_message(self, _format, *_args):
-        pass
+        """Silent: one line per request would bury the log that matters."""
 
 
 def build_router(operations: Operations, model_gateway=None) -> Router:
+    """Every API route, bound to the operations and the model gateway."""
     router = Router()
     register_all(router, operations, model_gateway)
     return router
 
 
+class GatewayServer(ThreadingHTTPServer):
+    """A threaded server whose kernel queue survives a burst of connections.
+
+    The standard library listens with a backlog of 5: at most five new
+    connections may wait for `accept()`. A client that opens 48 connections at
+    the same instant (radio-lab/ingest, 2026-10-06) overflowed it, and the
+    kernel reset about two thirds of them before any handler saw them
+    (`TcpExtListenOverflows` rose by 73 in one burst). 1024 is capped by the
+    kernel's own limit (`net.core.somaxconn`, 4096 on Linux, 128 on macOS).
+    """
+
+    request_queue_size = 1024
+
+
 def serve(operations: Operations, bus: EventBus, host: str, port: int,
           model_gateway=None) -> None:
+    """Listen on `host:port` and answer until the process stops."""
     handler = type("ConfiguredHandler", (Handler,),
                    {"router": build_router(operations, model_gateway), "bus": bus})
-    ThreadingHTTPServer((host, port), handler).serve_forever()
+    GatewayServer((host, port), handler).serve_forever()
