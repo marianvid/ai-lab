@@ -20,5 +20,9 @@ include = ["ai_lab*"]
 ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*",
           "comfyui_custom_nodes/ai_lab_preset/web/*",
           "comfyui_templates/*.json",
-          "native_ui/sglang_omni/playground/higgs/frontend/*",
-          "native_ui/voxcpm_upstream/assets/*"]
+          "vendor/sglang_omni/playground/higgs/frontend/*",
+          "vendor/voxcpm_upstream/assets/*"]
+
+[tool.coverage.run]
+# Code copied from other projects is not ours to test; see ai_lab/vendor/__init__.py.
+omit = ["ai_lab/vendor/*"]

@@ -75,7 +75,7 @@ there is exactly one place to look.
 | `images/` | `server.py`: isolated PaddleOCR adapter. `comfyui_server.py`: isolated bridge to a private ComfyUI. `jobs.py`: named image workflows run as jobs that survive a restart | Arbitrary workflow graphs from clients |
 | `media/` | `jobs.py` and `job_store.py`: music and speech jobs that can be cancelled and survive a restart. `http_host.py`: the small JSON server the isolated media adapters share | Choosing a model — the gateway does that |
 | `comfyui_templates/`, `comfyui_custom_nodes/` | Workflow files for ComfyUI's own editor, one per model, and the ComfyUI extension that loads the entry's workflow into it | Python logic beyond finding the right file |
-| `native_ui/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000. The Higgs page is used by both Higgs engines | AI-Lab rules — it is vendored code |
+| `vendor/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000. The Higgs page is used by both Higgs engines | AI-Lab rules — it is vendored code |
 | `catalog.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
 | `capabilities.py` | Reading a model's own files to find out whether it can call tools or read pictures, and remembering the answer | Which engine will run it, and what any setting says |
 | `runtime.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |

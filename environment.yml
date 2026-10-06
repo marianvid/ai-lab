@@ -1,0 +1,15 @@
+# AI-Lab manager environment (the program behind the web page and the gateway).
+#   conda env create -f environment.yml      (or: conda env update -f environment.yml)
+#   conda activate ai-lab
+#
+# The manager itself uses only Python's standard library. Each inference
+# engine runs in its own environment (configured in opts/), never in this one.
+# Exact versions installed on the Mac: environment.lock.yml.
+name: ai-lab
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pytest            # runs the tests
+  - pytest-cov        # measures test coverage (enforced floor in pytest.ini)
+  - pip

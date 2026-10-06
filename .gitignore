@@ -27,3 +27,4 @@ node_modules/
 opts/
 # Public benchmark study.
 benchmark/
+.coverage

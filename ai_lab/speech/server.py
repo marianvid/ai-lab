@@ -114,7 +114,7 @@ def launch_native_qwen_ui(backend: QwenTtsBackend, model_path: Path,
 def launch_native_voxcpm_ui(backend: VoxCpmBackend, model_path: Path,
                             port: int) -> None:
     """Use the full upstream VoxCPM editor and its already-loaded model."""
-    from ai_lab.native_ui.voxcpm_upstream import app as upstream
+    from ai_lab.vendor.voxcpm_upstream import app as upstream
 
     demo = upstream.VoxCPMDemo(model_id=str(model_path))
     demo.voxcpm_model = backend.model
@@ -129,7 +129,7 @@ def launch_native_voxcpm_ui(backend: VoxCpmBackend, model_path: Path,
 def launch_native_kokoro_ui(backend: KokoroBackend, model_path: Path,
                             port: int) -> None:
     """Use Kokoro's full upstream editor with the resident AI-Lab model."""
-    from ai_lab.native_ui.kokoro_upstream.app import create_demo
+    from ai_lab.vendor.kokoro_upstream.app import create_demo
 
     interface = create_demo(backend, model_path)
     interface.queue(max_size=10, default_concurrency_limit=1).launch(

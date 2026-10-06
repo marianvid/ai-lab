@@ -68,7 +68,7 @@ def main():
                            args.worker_port, args.mem_fraction_static,
                            args.max_parallel)
     Handler.backend = backend
-    playground_root = Path(__file__).resolve().parents[1] / "native_ui" / "sglang_omni"
+    playground_root = Path(__file__).resolve().parents[1] / "vendor" / "sglang_omni"
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (
         str(playground_root), env.get("PYTHONPATH", ""))))

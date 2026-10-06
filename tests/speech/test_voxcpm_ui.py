@@ -21,7 +21,7 @@ class VoxCpmNativeUiTests(unittest.TestCase):
         interface = types.SimpleNamespace(
             queue=lambda **kwargs: seen.setdefault("queue", kwargs) and interface,
             launch=lambda **kwargs: seen.setdefault("launch", kwargs))
-        module = types.ModuleType("ai_lab.native_ui.voxcpm_upstream.app")
+        module = types.ModuleType("ai_lab.vendor.voxcpm_upstream.app")
         module.VoxCPMDemo = Demo
         module.create_demo_interface = lambda demo: seen.setdefault("demo", demo) and interface
         module.I18N = object()
@@ -29,7 +29,7 @@ class VoxCpmNativeUiTests(unittest.TestCase):
         module._CUSTOM_CSS = ""
         backend = types.SimpleNamespace(model=object())
 
-        with patch.dict(sys.modules, {"ai_lab.native_ui.voxcpm_upstream.app": module}):
+        with patch.dict(sys.modules, {"ai_lab.vendor.voxcpm_upstream.app": module}):
             launch_native_voxcpm_ui(backend, Path("/models/voxcpm"), 18113)
 
         self.assertEqual(seen["model_id"], "/models/voxcpm")

@@ -8,7 +8,7 @@ file serves the same page itself and answers the page's two requests by
 calling the already-loaded model. The checkpoint is never loaded twice.
 
 What is reused unchanged: the page's HTML, JavaScript and styles, from
-`native_ui/sglang_omni/playground/higgs/frontend/`. What this file replaces:
+`vendor/sglang_omni/playground/higgs/frontend/`. What this file replaces:
 only the upstream FastAPI program, because that program needs FastAPI,
 uvicorn and SGLang-Omni itself, none of which the Mac runtime has. This one
 uses nothing beyond the standard library.
@@ -43,7 +43,7 @@ from ai_lab.multipart import MultipartBody
 
 from .higgs_local_backend import sampling_settings
 
-FRONTEND = (Path(__file__).resolve().parents[1] / "native_ui" / "sglang_omni"
+FRONTEND = (Path(__file__).resolve().parents[1] / "vendor" / "sglang_omni"
             / "playground" / "higgs" / "frontend")
 # A form carries the text and one reference clip. Compressed clips are small;
 # a minute of uncompressed studio WAV is about 11 MB.
