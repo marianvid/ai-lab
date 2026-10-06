@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 User=ai-lab-manager
 Group=ai-lab-manager
+# Where the manager may write; read by ai_lab/hosts/launch.py.
+Environment=AI_LAB_STATE_DIR=/var/lib/ai-lab
 ExecStart=/opt/ai-lab/.venv/bin/ai-lab --config /etc/ai-lab/config.json
 Restart=on-failure
 RestartSec=3

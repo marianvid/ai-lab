@@ -20,6 +20,7 @@ from pathlib import Path
 from threading import Lock
 
 from ai_lab.comfyui_templates import for_model
+from ai_lab.network import ALL_INTERFACES, LOOPBACK
 
 
 class Backend:
@@ -27,7 +28,7 @@ class Backend:
                  state: Path, port: int, timeout: float = 1800,
                  vram_mode: str = "normal", workflow: Path | None = None,
                  ui_workflow: Path | None = None) -> None:
-        self.base = f"http://127.0.0.1:{port}"
+        self.base = f"http://{LOOPBACK}:{port}"
         self.timeout = timeout
         self.lock = Lock()
         state.mkdir(parents=True, exist_ok=True)
@@ -46,7 +47,7 @@ class Backend:
         with extra.open("a") as output:
             output.write(f"ai_lab_preset:\n  base_path: {json.dumps(str(preset_nodes))}\n"
                          "  custom_nodes: .\n")
-        command = [python, comfyui, "--listen", "0.0.0.0", "--port", str(port),
+        command = [python, comfyui, "--listen", ALL_INTERFACES, "--port", str(port),
                    "--extra-model-paths-config", str(extra),
                    "--output-directory", str(state / "output"),
                    "--temp-directory", str(state / "temp")]
@@ -209,7 +210,7 @@ def main() -> None:
     parser.add_argument("--model-root", required=True)
     parser.add_argument("--extra-model-root", action="append", default=[])
     parser.add_argument("--name", required=True)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=LOOPBACK)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--workflow", type=Path)
     memory = parser.add_mutually_exclusive_group()

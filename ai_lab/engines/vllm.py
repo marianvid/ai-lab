@@ -27,6 +27,7 @@ from ..hosts.command import which
 from .base import (ANTHROPIC_PATHS, OPENAI_PATHS, TRANSCRIPTION_PATHS,
                    LaunchPlan, ParamSpec, validate)
 from .probe import http_ok
+from ..network import ALL_INTERFACES
 
 # Every one of these was arrived at by running it on this machine. The help
 # text says what it costs, because on a single 32 GB card these settings trade
@@ -174,7 +175,7 @@ class VllmEngine:
         argv = [
             self.binary, "serve", model.entrypoint,
             "--served-model-name", model.name,
-            "--host", "0.0.0.0",
+            "--host", ALL_INTERFACES,
             "--port", str(port),
             "--gpu-memory-utilization", str(settings["gpu_memory_fraction"]),
             "--max-num-seqs", str(settings["max_sequences"]),

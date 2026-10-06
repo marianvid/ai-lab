@@ -7,6 +7,7 @@ from pathlib import Path
 from ..hosts.command import which
 from ..types import Format, ModelSet, Task
 from .base import LaunchPlan, OCR_PATHS, validate
+from ..network import ALL_INTERFACES
 
 PARAMS = ()
 
@@ -39,7 +40,7 @@ class PaddleOcrEngine:
                                 "--backend", "paddleocr",
                                 "--model", model.entrypoint,
                                 "--name", model.name,
-                                "--host", "0.0.0.0", "--port", str(port)],
+                                "--host", ALL_INTERFACES, "--port", str(port)],
                           env={"PYTHONUNBUFFERED": "1"})
 
     def ready(self, port: int) -> bool:

@@ -18,6 +18,8 @@ StopWhenUnneeded=no
 Type=simple
 User=ai-lab-manager
 Group=ai-lab-manager
+# Where the manager may write; read by ai_lab/hosts/launch.py.
+Environment=AI_LAB_STATE_DIR=/var/lib/ai-lab
 # Say where the home directory is, instead of trusting the account's entry in
 # /etc/passwd. vLLM needs one: FlashInfer creates a working directory under
 # $HOME before it will start, and llama.cpp never noticed because it writes

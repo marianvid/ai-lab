@@ -13,6 +13,7 @@ from pathlib import Path
 from threading import BoundedSemaphore
 
 from .contract import ReferenceFile, validate_payload
+from ..network import LOOPBACK
 
 
 def wait_for_free_port(port: int, timeout_s: float = 120) -> None:
@@ -25,7 +26,7 @@ def wait_for_free_port(port: int, timeout_s: float = 120) -> None:
     while True:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             try:
-                probe.bind(("127.0.0.1", port))
+                probe.bind((LOOPBACK, port))
                 return
             except OSError:
                 if time.monotonic() >= deadline:
@@ -57,7 +58,7 @@ class HiggsBackend:
         wait_for_free_port(worker_port)
         self.process = subprocess.Popen([
             str(worker_binary), "serve", "--model-path", str(model_path),
-            "--host", "127.0.0.1", "--port", str(worker_port),
+            "--host", LOOPBACK, "--port", str(worker_port),
             "--mem-fraction-static", str(mem_fraction_static),
             "--log-level", "info"],
             env={**os.environ, "SGLANG_OMNI_STRICT_PORT": "1"})
@@ -74,7 +75,7 @@ class HiggsBackend:
                 raise RuntimeError("Higgs worker exited during startup")
             try:
                 with urllib.request.urlopen(
-                        f"http://127.0.0.1:{self.worker_port}/health",
+                        f"http://{LOOPBACK}:{self.worker_port}/health",
                         timeout=2) as response:
                     if response.status == 200:
                         return
@@ -101,7 +102,7 @@ class HiggsBackend:
                 fields["references"] = [{"audio_path": reference,
                                          "text": request["reference_text"] or None}]
             call = urllib.request.Request(
-                f"http://127.0.0.1:{self.worker_port}/v1/audio/speech",
+                f"http://{LOOPBACK}:{self.worker_port}/v1/audio/speech",
                 data=json.dumps(fields).encode(),
                 headers={"Content-Type": "application/json"})
             with self.slots, urllib.request.urlopen(call, timeout=600) as response:

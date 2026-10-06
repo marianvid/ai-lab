@@ -12,6 +12,8 @@ whatever PaddleOCR happens to return this version.
 
 from __future__ import annotations
 
+import sys
+
 import argparse
 import json
 import tempfile
@@ -20,6 +22,10 @@ from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+# This file is launched directly by the runtime's own Python environment.
+# Give it access to the small shared modules beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from ai_lab.network import LOOPBACK
 
 
 class PaddleOcrBackend:
@@ -168,7 +174,7 @@ def main() -> None:
     parser.add_argument("--backend", choices=("paddleocr",), required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--name", required=True)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=LOOPBACK)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"),
                         default="fp32")

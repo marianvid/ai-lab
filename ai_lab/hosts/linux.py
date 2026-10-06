@@ -20,9 +20,6 @@ from . import launch
 from .command import run, which
 
 CONTROL_HELPER = "/usr/local/sbin/ai-lab-control"
-# Where the deployment gives the manager somewhere to write. The launch
-# files live under it too — see `launch.py`.
-STATE_DIR = Path("/var/lib/ai-lab")
 UNIT = "ai-lab-engine@{instance_id}.service"
 
 # `systemctl stop` blocks until the unit is actually stopped, and the unit
@@ -159,8 +156,8 @@ class LinuxHost:
             return 0.0, 0.0
 
     def state_dir(self) -> Path:
-        """The directory the unit files already give the manager to write in."""
-        return STATE_DIR
+        """The directory the unit files give the manager to write in."""
+        return launch.state_dir()
 
     # -- processes ---------------------------------------------------------
 

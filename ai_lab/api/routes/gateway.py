@@ -25,6 +25,7 @@ from ...types import Task
 from ..multipart import MultipartBody
 from ..passthrough import forward
 from ..uploads import UploadRejected, validate_image
+from ...network import LOOPBACK
 
 # Every shape any engine here can answer. Registered as routes whatever is
 # configured: a path that exists and explains why this model cannot serve it is
@@ -166,7 +167,7 @@ def _forwarder(gateway: Gateway, path: str):
                 outgoing["model"] = lease.model_name or wanted
                 content_type = "application/json"
 
-            url = f"http://127.0.0.1:{lease.port}{path}"
+            url = f"http://{LOOPBACK}:{lease.port}{path}"
             # Time to the first token, but only when streaming was asked for.
             # Without it an engine sends nothing until the answer is finished,
             # so its first byte is the whole generation and the two averaged

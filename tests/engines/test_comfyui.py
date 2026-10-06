@@ -30,8 +30,13 @@ class ComfyUiEngineTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--model-root") + 1], "/models/flux")
         self.assertEqual(argv.count("--extra-model-root"), 2)
 
+    def test_an_unconfigured_comfyui_path_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "not configured"):
+            ComfyUiEngine().plan(self.model, 8093, {})
+
     def test_configured_preset_belongs_to_this_model(self):
-        engine = ComfyUiEngine(preset_workflows={self.model.id: "/workflows/flux.json"})
+        engine = ComfyUiEngine(comfyui="/opt/ComfyUI/main.py",
+                               preset_workflows={self.model.id: "/workflows/flux.json"})
         plan = engine.plan(self.model, 8093, {})
         self.assertEqual(plan.argv[plan.argv.index("--workflow") + 1],
                          "/workflows/flux.json")

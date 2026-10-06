@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ..network import ALL_INTERFACES
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -47,4 +48,4 @@ def serve(backend, port: int, max_body_bytes: int = 65536,
     Handler.backend = backend
     Handler.max_body_bytes = max_body_bytes
     Handler.request_path = request_path
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    ThreadingHTTPServer((ALL_INTERFACES, port), Handler).serve_forever()

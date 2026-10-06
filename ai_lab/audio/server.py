@@ -23,6 +23,7 @@ from threading import Lock
 # Give those environments access to the small adapter beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ai_lab.audio.aligner import QwenAlignBackend
+from ai_lab.network import LOOPBACK
 
 
 def _torch_device(torch):
@@ -309,7 +310,7 @@ def main() -> None:
                         required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--name", required=True)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=LOOPBACK)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"),
                         default="bf16")

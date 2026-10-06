@@ -8,6 +8,7 @@ from ..hosts.command import which
 from ..types import Format, ModelSet, Task
 from .base import DIARIZATION_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
+from ..network import ALL_INTERFACES
 
 
 PARAMS = ()
@@ -41,7 +42,7 @@ class PyannoteEngine:
                                 "--backend", "pyannote",
                                 "--model", model.entrypoint,
                                 "--name", model.name,
-                                "--host", "0.0.0.0", "--port", str(port)],
+                                "--host", ALL_INTERFACES, "--port", str(port)],
                           env={"PYTHONUNBUFFERED": "1"})
 
     def ready(self, port: int) -> bool:

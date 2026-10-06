@@ -8,6 +8,7 @@ from ..hosts.command import which
 from ..types import Format, ModelSet, Task
 from .base import LaunchPlan, TRANSCRIPTION_PATHS
 from .probe import http_ok
+from ..network import ALL_INTERFACES
 
 
 class MlxWhisperEngine:
@@ -39,7 +40,7 @@ class MlxWhisperEngine:
         return LaunchPlan(
             argv=[self.binary, self.server, "--backend", "mlx-whisper",
                   "--model", model.entrypoint, "--name", model.name,
-                  "--host", "0.0.0.0", "--port", str(port)],
+                  "--host", ALL_INTERFACES, "--port", str(port)],
             env={"PYTHONUNBUFFERED": "1"},
         )
 

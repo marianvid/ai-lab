@@ -35,6 +35,7 @@ from typing import Iterator
 
 from .config_migrations import SCHEMA_VERSION, migrate
 from .config_policy import GatewayPolicy, MediaPolicy
+from .network import ALL_INTERFACES
 
 
 @dataclass(slots=True)
@@ -113,7 +114,7 @@ class Instance:
 class Config:
     schema_version: int = SCHEMA_VERSION
     title: str = "AI-Lab"
-    host: str = "0.0.0.0"
+    host: str = ALL_INTERFACES
     port: int = 8090
     repositories: list[Repository] = field(default_factory=list)
     instances: list[Instance] = field(default_factory=list)
@@ -225,7 +226,7 @@ class ConfigStore:
         return Config(
             schema_version=raw["schema_version"],
             title=raw.get("title", "AI-Lab"),
-            host=raw.get("host", "0.0.0.0"),
+            host=raw.get("host", ALL_INTERFACES),
             port=int(raw.get("port", 8090)),
             models_root=root,
             repositories=repositories,

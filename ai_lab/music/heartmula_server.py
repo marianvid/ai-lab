@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ai_lab.music.heartmula_backend import HeartMulaBackend
 from ai_lab.media.http_host import serve
+from ai_lab.network import ALL_INTERFACES
 
 
 def main() -> None:
@@ -41,7 +42,7 @@ def launch_heartmuse(backend: HeartMulaBackend, args) -> None:
         "CKPT_DIR": str(args.bundle_root),
         "OUTPUT_DIR": str(args.output_root / "heartmuse"),
         "MODEL_VARIANT": "base", "LAZY_LOAD": "true",
-        "HF_HUB_OFFLINE": "1", "SERVER_HOST": "0.0.0.0",
+        "HF_HUB_OFFLINE": "1", "SERVER_HOST": ALL_INTERFACES,
         "SERVER_PORT": str(args.ui_port), "STYLE_TRANSFER": "true",
         "TRANSCRIPTION": "true",
     })
@@ -65,7 +66,7 @@ def launch_heartmuse(backend: HeartMulaBackend, args) -> None:
     generator.unload_pipeline = lambda: None
     import app as heartmuse
     heartmuse.app.queue(default_concurrency_limit=1).launch(
-        server_name="0.0.0.0", server_port=args.ui_port,
+        server_name=ALL_INTERFACES, server_port=args.ui_port,
         allowed_paths=[heart_config.OUTPUT_DIR], js=heartmuse.PLAYLIST_JS,
         share=False, inbrowser=False, prevent_thread_lock=True,
         show_error=True)

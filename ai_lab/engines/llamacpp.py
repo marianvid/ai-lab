@@ -16,6 +16,7 @@ from ..types import Format, ModelSet, Task
 from ..hosts.command import which
 from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
+from ..network import ALL_INTERFACES
 
 # Two kinds of setting, and mixing them would mislead. The "memory" group
 # decides how much is reserved on the accelerator when the model starts, so
@@ -190,7 +191,7 @@ class LlamaCppEngine:
             self.binary,
             "--model", model.entrypoint,
             "--alias", model.name,
-            "--host", "0.0.0.0",
+            "--host", ALL_INTERFACES,
             "--port", str(port),
             "--jinja",
             "--ctx-size", str(settings["context_size"]),

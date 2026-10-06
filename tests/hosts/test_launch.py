@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -41,6 +42,24 @@ class LaunchSpecTests(unittest.TestCase):
     def test_the_file_is_plain_json_the_launcher_can_read(self):
         path = launch.write_spec(ProcessSpec("qwen", ["a", "b"], {}), self.directory)
         self.assertEqual(json.loads(path.read_text())["argv"], ["a", "b"])
+
+
+class StateDirTests(unittest.TestCase):
+    def test_the_directory_comes_from_the_environment(self):
+        with mock.patch.dict("os.environ", {launch.STATE_DIR_VARIABLE: "/srv/lab"}):
+            self.assertEqual(launch.state_dir(), Path("/srv/lab"))
+            self.assertEqual(launch.launch_dir(), Path("/srv/lab/launch"))
+
+    def test_an_unset_variable_fails_loudly(self):
+        with mock.patch.dict("os.environ", {launch.STATE_DIR_VARIABLE: ""}):
+            with self.assertRaisesRegex(RuntimeError, launch.STATE_DIR_VARIABLE):
+                launch.state_dir()
+
+    def test_the_default_directory_is_used_without_an_argument(self):
+        with TemporaryDirectory() as root, \
+                mock.patch.dict("os.environ", {launch.STATE_DIR_VARIABLE: root}):
+            launch.write_spec(ProcessSpec(instance_id="x1", argv=["a"], env={}))
+            self.assertEqual(launch.read_spec("x1"), (["a"], {}))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from pathlib import Path
 from ..types import Format, ModelSet, Task
 from .base import ALIGNMENT_PATHS, LaunchPlan
 from .probe import http_ok
+from ..network import ALL_INTERFACES
 
 
 class QwenAlignEngine:
@@ -37,7 +38,7 @@ class QwenAlignEngine:
         return LaunchPlan(argv=[
             self.binary, self.server, "--backend", "qwen-align",
             "--model", str(model_dir), "--name", model.name,
-            "--host", "0.0.0.0", "--port", str(port)],
+            "--host", ALL_INTERFACES, "--port", str(port)],
             env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
                  "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
 

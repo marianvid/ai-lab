@@ -18,6 +18,7 @@ from pathlib import Path
 from ..multipart import MultipartBody
 from ..uploads import validate_image
 from ..types import ChangeEvent, Task
+from ..network import LOOPBACK
 
 FINAL = frozenset({"succeeded", "failed", "cancelled"})
 ALLOWED = frozenset({"profile", "model", "prompt", "negative_prompt", "seed",
@@ -176,7 +177,7 @@ class ImageJobs:
                     with self.lock:
                         self.running_port = lease.port
                     request = urllib.request.Request(
-                        f"http://127.0.0.1:{lease.port}{path}",
+                        f"http://{LOOPBACK}:{lease.port}{path}",
                         data=json.dumps(work).encode(), method="POST",
                         headers={"Content-Type": "application/json"})
                     first, _ = self.gateway.timeouts_for(Task(job["task"]))
@@ -260,7 +261,7 @@ class ImageJobs:
             if port is None:
                 return
             request = urllib.request.Request(
-                f"http://127.0.0.1:{port}/api/jobs/current/cancel",
+                f"http://{LOOPBACK}:{port}/api/jobs/current/cancel",
                 data=b"{}", method="POST", headers={"Content-Type": "application/json"})
             urllib.request.urlopen(request, timeout=5).close()
         except Exception:

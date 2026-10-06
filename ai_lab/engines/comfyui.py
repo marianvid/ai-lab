@@ -8,6 +8,7 @@ from ..hosts.command import which
 from ..types import Format, ModelSet, Task
 from .base import (IMAGE_EDIT_PATHS, IMAGE_GENERATION_PATHS, LaunchPlan,
                    ParamSpec, validate)
+from ..network import ALL_INTERFACES
 
 PARAMS = (
     ParamSpec(
@@ -30,7 +31,7 @@ class ComfyUiEngine:
         self.binary = binary or which("python") or "python"
         self.server = server or str(
             Path(__file__).resolve().parents[1] / "images" / "comfyui_server.py")
-        self.comfyui = comfyui or "/opt/ComfyUI/main.py"
+        self.comfyui = comfyui
         self.model_paths = list(model_paths or [])
         self.preset_workflows = dict(preset_workflows or {})
 
@@ -48,10 +49,12 @@ class ComfyUiEngine:
             raise ValueError(f"ComfyUI cannot load {model.format.value} models")
         if model.task not in self.tasks():
             raise ValueError(f"ComfyUI cannot perform {model.task.value}")
+        if not self.comfyui:
+            raise ValueError("ComfyUI path is not configured (engine_settings.comfyui.comfyui)")
         settings = validate(PARAMS, params)
         argv = [self.binary, self.server, "--comfyui", self.comfyui,
                   "--model-root", model.entrypoint, "--name", model.name,
-                  "--host", "0.0.0.0", "--port", str(port)]
+                  "--host", ALL_INTERFACES, "--port", str(port)]
         mode = settings["vram_mode"]
         if mode == "low":
             argv.append("--lowvram")

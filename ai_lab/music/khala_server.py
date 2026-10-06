@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ai_lab.music.khala_backend import KhalaBackend
 from ai_lab.media.http_host import serve
+from ai_lab.network import ALL_INTERFACES, LOOPBACK
 
 
 def main():
@@ -79,14 +80,14 @@ def launch_official_ui(project_root: Path, model_path: Path,
     start([str(python), str(project_root / "backend" / "backend_worker.py"),
            "--worker-port", str(worker_port), "--runtime-mode", "keep_loaded"],
           project_root)
-    _wait_json(f"http://127.0.0.1:{worker_port}/health", "status", "idle", 360)
+    _wait_json(f"http://{LOOPBACK}:{worker_port}/health", "status", "idle", 360)
     start([str(python), str(project_root / "backend" / "backend_api.py"),
            "--port", str(api_port), "--num-workers", "1",
            "--worker-base-port", str(worker_port)], project_root)
-    _wait_json(f"http://127.0.0.1:{api_port}/status", "total_gpus", 1, 30)
-    start(["npm", "run", "dev", "--", "--host", "0.0.0.0",
+    _wait_json(f"http://{LOOPBACK}:{api_port}/status", "total_gpus", 1, 30)
+    start(["npm", "run", "dev", "--", "--host", ALL_INTERFACES,
            "--port", str(ui_port)], frontend)
-    _wait_json(f"http://127.0.0.1:{ui_port}/", None, None, 30)
+    _wait_json(f"http://{LOOPBACK}:{ui_port}/", None, None, 30)
 
 
 def _wait_json(url: str, key: str | None, expected, timeout: float) -> None:

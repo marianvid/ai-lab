@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from ..network import LOOPBACK
 
 
 def http_json(port: int, path: str, timeout: float = 1.0) -> dict:
@@ -19,7 +20,7 @@ def http_json(port: int, path: str, timeout: float = 1.0) -> dict:
     model it has loaded, and that name is the real sign of readiness.
     """
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout) as response:
+        with urllib.request.urlopen(f"http://{LOOPBACK}:{port}{path}", timeout=timeout) as response:
             if response.status != 200:
                 return {}
             payload = json.loads(response.read())
@@ -30,7 +31,7 @@ def http_json(port: int, path: str, timeout: float = 1.0) -> dict:
 
 def http_ok(port: int, path: str = "/health", timeout: float = 1.0) -> bool:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=timeout) as response:
+        with urllib.request.urlopen(f"http://{LOOPBACK}:{port}{path}", timeout=timeout) as response:
             if response.status != 200:
                 return False
             body = response.read()

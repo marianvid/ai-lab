@@ -15,6 +15,7 @@ from ..config_policy import MediaPolicy
 from ..engines.base import MUSIC_PATHS, SPEECH_PATHS
 from ..types import ChangeEvent, Task
 from .job_store import FINAL, JobStore
+from ..network import LOOPBACK
 
 PATHS = {
     Task.MUSIC_GENERATION.value: MUSIC_PATHS[0],
@@ -154,7 +155,7 @@ class MediaJobs:
                             raise RuntimeError("cancelled")
                     outgoing = {**payload, "model": lease.model_name or job["model"]}
                     request = urllib.request.Request(
-                        f"http://127.0.0.1:{lease.port}{path}",
+                        f"http://{LOOPBACK}:{lease.port}{path}",
                         data=json.dumps(outgoing).encode(), method="POST",
                         headers={"Content-Type": "application/json"})
                     first, _ = self.gateway.timeouts_for(Task(job["task"]))
@@ -195,7 +196,7 @@ class MediaJobs:
         # their lease stays held until they do, even after a cancellation.
         try:
             request = urllib.request.Request(
-                f"http://127.0.0.1:{port}/api/jobs/current/cancel",
+                f"http://{LOOPBACK}:{port}/api/jobs/current/cancel",
                 data=b"{}", method="POST",
                 headers={"Content-Type": "application/json"})
             urllib.request.urlopen(request, timeout=5).close()

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ai_lab.media.http_host import serve
 from ai_lab.music.yue2_web_backend import Yue2WebBackend
+from ai_lab.network import ALL_INTERFACES, LOOPBACK
 
 
 def main() -> None:
@@ -28,7 +29,7 @@ def main() -> None:
     parser.add_argument("--webui-root", type=Path, required=True)
     parser.add_argument("--device", choices=("cuda", "mps"), default="cuda")
     args = parser.parse_args()
-    ui_url = f"http://127.0.0.1:{args.ui_port}"
+    ui_url = f"http://{LOOPBACK}:{args.ui_port}"
     launch_studio(args, ui_url)
     backend = Yue2WebBackend(ui_url, args.model_path.name, args.cot)
     serve(backend, args.port)
@@ -50,7 +51,7 @@ def launch_studio(args, ui_url: str) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     config = data_dir / "config.yaml"
     config.write_text(
-        "host: 0.0.0.0\n"
+        f"host: {ALL_INTERFACES}\n"
         f"port: {args.ui_port}\n"
         f"data_dir: {data_dir}\n"
         "residency: always\nrelease_idle_minutes: 0\noffline: true\n"
@@ -65,7 +66,7 @@ def launch_studio(args, ui_url: str) -> None:
         f"  python_sheetsage2: {os.sys.executable}\n")
     child = subprocess.Popen(
         [os.sys.executable, "-m", "server", "--config", str(config),
-         "--host", "0.0.0.0", "--port", str(args.ui_port)],
+         "--host", ALL_INTERFACES, "--port", str(args.ui_port)],
         cwd=args.webui_root, env=studio_env(args.device))
 
     def stop() -> None:

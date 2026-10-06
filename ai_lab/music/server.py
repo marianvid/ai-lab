@@ -7,6 +7,8 @@ runtime stays in its own environment and can be replaced independently.
 """
 from __future__ import annotations
 
+import sys
+
 import argparse
 import base64
 import json
@@ -16,6 +18,10 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+# This file is launched directly by the runtime's own Python environment.
+# Give it access to the small shared modules beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from ai_lab.network import ALL_INTERFACES
 
 PATH = "/v1/audio/music/generations"
 
@@ -160,7 +166,7 @@ def main() -> None:
                                      args.model_path, args.output_root)
     launch_native_ui(Handler.backend, args.config_name, args.model_path,
                      args.ui_port)
-    ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
+    ThreadingHTTPServer((ALL_INTERFACES, args.port), Handler).serve_forever()
 
 
 def launch_native_ui(backend: AceStepBackend, config_name: str,
@@ -195,7 +201,7 @@ def launch_native_ui(backend: AceStepBackend, config_name: str,
         "default_batch_size": 1,
     }, language="en")
     demo.queue(max_size=20, default_concurrency_limit=1)
-    demo.launch(server_name="0.0.0.0", server_port=port,
+    demo.launch(server_name=ALL_INTERFACES, server_port=port,
                 share=False, inbrowser=False, prevent_thread_lock=True,
                 show_error=True, allowed_paths=[str(backend.output_root)])
 

@@ -28,6 +28,7 @@ from ..hosts.command import which
 from ..types import Format, ModelSet, Task
 from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_json
+from ..network import ALL_INTERFACES
 
 PARAMS = (
     # -- memory: decided when the model starts ------------------------------
@@ -121,7 +122,7 @@ class MlxVlmEngine:
         argv = [
             self.binary, self.server,
             "--model", model.entrypoint,
-            "--host", "0.0.0.0",
+            "--host", ALL_INTERFACES,
             "--port", str(port),
             "--max-num-seqs", str(settings["max_num_seqs"]),
             "--prefill-step-size", str(settings["prefill_step_size"]),

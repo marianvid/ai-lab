@@ -11,12 +11,10 @@ from pathlib import Path
 from .api.server import serve
 from .wiring import build
 
-DEFAULT_CONFIG = Path("/etc/ai-lab/config.json")
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="AI-Lab manager")
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
+    parser.add_argument("--config", type=Path, required=True,
                         help="path to config.json")
     parser.add_argument("--host", help="override the listen address")
     parser.add_argument("--port", type=int, help="override the listen port")

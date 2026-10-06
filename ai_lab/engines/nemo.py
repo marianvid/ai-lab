@@ -9,6 +9,7 @@ from ..types import Format, ModelSet, Task
 from .base import (DIARIZATION_PATHS, LaunchPlan, ParamSpec,
                    TRANSCRIPTION_PATHS, validate)
 from .probe import http_ok
+from ..network import ALL_INTERFACES
 
 
 PARAMS = (
@@ -53,7 +54,7 @@ class NemoEngine:
                                 else "nemo"),
                   "--model", model.entrypoint,
                   "--name", model.name,
-                  "--host", "0.0.0.0",
+                  "--host", ALL_INTERFACES,
                   "--port", str(port),
                   "--precision", str(settings["precision"])],
             env={"PYTHONUNBUFFERED": "1"},

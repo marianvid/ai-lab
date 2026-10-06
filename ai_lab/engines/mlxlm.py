@@ -40,6 +40,7 @@ from ..hosts.command import which
 from ..types import Format, ModelSet, Task
 from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
+from ..network import ALL_INTERFACES
 
 PARAMS = (
     # -- memory: decided when the model starts ------------------------------
@@ -145,7 +146,7 @@ class MlxLmEngine:
         argv = [
             self.binary, self.server,
             "--model", model.entrypoint,
-            "--host", "0.0.0.0",
+            "--host", ALL_INTERFACES,
             "--port", str(port),
             "--decode-concurrency", str(settings["decode_concurrency"]),
             "--prompt-concurrency", str(settings["prompt_concurrency"]),

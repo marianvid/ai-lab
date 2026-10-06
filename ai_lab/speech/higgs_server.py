@@ -17,6 +17,7 @@ from threading import Thread
 
 from ai_lab.speech.contract import MAX_REQUEST_BYTES
 from ai_lab.speech.higgs_backend import HiggsBackend
+from ai_lab.network import ALL_INTERFACES, LOOPBACK
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -75,7 +76,7 @@ def main():
     try:
         playground = subprocess.Popen([
             sys.executable, "-m", "playground.higgs.app", "--api-base",
-            f"http://127.0.0.1:{args.worker_port}", "--port", str(args.ui_port)],
+            f"http://{LOOPBACK}:{args.worker_port}", "--port", str(args.ui_port)],
             env=env)
     except Exception:
         backend.close()
@@ -87,7 +88,7 @@ def main():
                 raise RuntimeError("Higgs playground exited during startup")
             try:
                 with urllib.request.urlopen(
-                        f"http://127.0.0.1:{args.ui_port}/healthz", timeout=2) as response:
+                        f"http://{LOOPBACK}:{args.ui_port}/healthz", timeout=2) as response:
                     if response.status == 200:
                         break
             except (OSError, urllib.error.URLError):
@@ -95,7 +96,7 @@ def main():
             time.sleep(0.5)
         else:
             raise TimeoutError("Higgs playground did not become ready")
-        server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+        server = ThreadingHTTPServer((ALL_INTERFACES, args.port), Handler)
     except Exception:
         if playground.poll() is None:
             playground.terminate()
