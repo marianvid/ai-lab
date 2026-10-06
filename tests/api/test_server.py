@@ -13,6 +13,7 @@ from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 
 from ai_lab.api.server import Handler, build_router
+from ai_lab.multipart import MultipartBody
 from ai_lab.api.server import status_for
 from ai_lab.gateway import CardBusy, NotConfigured
 from ai_lab.events import EventBus

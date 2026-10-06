@@ -1,11 +1,31 @@
-"""Static configuration checks before the manager starts any background work."""
+"""Static configuration checks before the manager starts any background work.
+
+How it is built (Chain of Responsibility + Strategy):
+
+- `validate_configuration` runs a fixed chain of section checkers — storage
+  roots, repositories, the manager port, each instance, the policies, the
+  image profiles. Each checker adds plain-language messages to one shared
+  `_Report`, so the person reading the error sees every problem at once.
+- How an engine's per-model options are judged is a table, `ENGINE_RULES`:
+  one entry per engine, a short message and a tuple of small rules such as
+  "`steps` is a whole number from 1 to 200". Adding an engine is one entry,
+  not a new branch in a long function.
+
+Model files are checked by the catalog when loaded. This validation only uses
+the declared configuration, so it also works against a snapshot on a machine
+that does not host the weights.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from .config import Config
 from .types import Task
+
+Rule = Callable[[dict], bool]
 
 MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "kokoro": "model_options", "voxcpm": "model_options",
@@ -18,188 +38,258 @@ MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "stableaudio3": "model_options"}
 
 
-def validate_configuration(config: Config, engine_ids: set[str],
-                           *, check_workflows: bool = False) -> None:
-    """Reject broken references and conflicting ports with one useful report.
+# -- small rules, each about one option --------------------------------------
 
-    Model files are checked by the catalog when loaded. This validation only
-    uses the declared configuration, so it also works against a snapshot on a
-    machine that does not host the weights.
-    """
-    errors: list[str] = []
-    roots = {item.id for item in config.model_roots}
-    if config.download_root not in roots:
-        errors.append(f"Unknown download root: {config.download_root}")
-    repository_ids = [item.id for item in config.repositories]
-    if len(repository_ids) != len(set(repository_ids)):
-        errors.append("Repository IDs must be unique")
-    instance_ids: set[str] = set()
-    ports = {config.port}
-    if not 1 <= config.port <= 65535:
-        errors.append("Manager port must be between 1 and 65535")
-    for item in config.instances:
-        if item.id in instance_ids:
-            errors.append(f"Duplicate instance ID: {item.id}")
-        instance_ids.add(item.id)
-        if item.engine not in engine_ids:
-            errors.append(f"{item.id}: unknown engine {item.engine}")
-        if item.engine in MODEL_MAP_FIELDS:
-            field = MODEL_MAP_FIELDS[item.engine]
-            configured = config.engines.get(item.engine, {}).get(field, {})
-            model_name = item.model_id.rsplit("/", 1)[-1]
-            if model_name not in configured:
-                errors.append(f"{item.id}: {item.engine} has no configured checkpoint")
-            elif item.engine == "kokoro":
-                options = configured[model_name]
-                required = ("language_code", "default_voice", "repo_id")
-                if not isinstance(options, dict) or any(
-                        not isinstance(options.get(key), str) or not options[key]
-                        for key in required):
-                    errors.append(f"{item.id}: Kokoro model options are incomplete")
-            elif item.engine == "voxcpm":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    type(options.get("cfg_value")) in (int, float) and
-                    0 < options["cfg_value"] <= 10 and
-                    type(options.get("inference_timesteps")) is int and
-                    1 <= options["inference_timesteps"] <= 100):
-                    errors.append(f"{item.id}: VoxCPM inference settings are invalid")
-            elif item.engine == "khala":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    type(options.get("default_bucket")) is int and
-                    type(options.get("maximum_bucket")) is int and
-                    0 <= options["default_bucket"] <= options["maximum_bucket"] <= 20):
-                    errors.append(f"{item.id}: Khala length buckets are invalid")
-            elif item.engine == "higgs":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    type(options.get("worker_port")) is int and
-                    1 <= options["worker_port"] <= 65535 and
-                    options["worker_port"] != item.port and
-                    options["worker_port"] not in ports and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0 and
-                    type(options.get("mem_fraction_static")) in (int, float) and
-                    0 < options["mem_fraction_static"] < 1):
-                    errors.append(f"{item.id}: Higgs worker settings are invalid")
-                else:
-                    ports.add(options["worker_port"])
-            elif item.engine == "higgs_local":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: Higgs (transformers) settings are invalid")
-            elif item.engine == "heartmula":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    isinstance(options.get("version"), str) and options["version"] and
-                    isinstance(options.get("checkpoint_subdir"), str) and
-                    options["checkpoint_subdir"] and
-                    Path(options["checkpoint_subdir"]).name == options["checkpoint_subdir"] and
-                    type(options.get("topk")) is int and 1 <= options["topk"] <= 1000 and
-                    type(options.get("temperature")) in (int, float) and
-                    0 <= options["temperature"] <= 5 and
-                    type(options.get("cfg_scale")) in (int, float) and
-                    0 < options["cfg_scale"] <= 10 and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: HeartMuLa settings are invalid")
-            elif item.engine == "yue2":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    options.get("cot") in {"full", "melody"} and
-                    type(options.get("memory_budget_gib")) in (int, float) and
-                    4 <= options["memory_budget_gib"] <= 64 and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: YuE2 settings are invalid")
-            elif item.engine == "comfy_music":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    isinstance(options.get("workflow"), str) and
-                    Path(options["workflow"]).is_absolute() and
-                    isinstance(options.get("component_subdirs"), list) and
-                    bool(options["component_subdirs"]) and
-                    all(isinstance(path, str) and path and
-                        Path(path).name == path
-                        for path in options["component_subdirs"]) and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: ComfyUI music settings are invalid")
-            elif item.engine == "mulacover":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    isinstance(options.get("checkpoint_subdir"), str) and
-                    options["checkpoint_subdir"] and
-                    Path(options["checkpoint_subdir"]).name == options["checkpoint_subdir"] and
-                    type(options.get("topk")) is int and 1 <= options["topk"] <= 1000 and
-                    type(options.get("temperature")) in (int, float) and
-                    0 <= options["temperature"] <= 5 and
-                    type(options.get("cfg_scale")) in (int, float) and
-                    0 < options["cfg_scale"] <= 10 and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: MuLaCover settings are invalid")
-            elif item.engine == "levo2":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    all(isinstance(options.get(key), str) and options[key] and
-                        Path(options[key]).name == options[key]
-                        for key in ("lm", "flow", "vae")) and
-                    type(options.get("steps")) is int and 1 <= options["steps"] <= 200 and
-                    type(options.get("cfg")) in (int, float) and 0 < options["cfg"] <= 10 and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: LeVo 2 settings are invalid")
-            elif item.engine == "stableaudio3":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    type(options.get("steps")) is int and 1 <= options["steps"] <= 100 and
-                    type(options.get("cfg_scale")) in (int, float) and
-                    0 < options["cfg_scale"] <= 10 and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: Stable Audio 3 settings are invalid")
-        repository_id = item.model_id.split("/", 1)[0]
-        if repository_id not in repository_ids:
-            errors.append(f"{item.id}: unknown repository {repository_id}")
-        if item.port in ports:
-            errors.append(f"{item.id}: port {item.port} is already assigned")
-        if not 1 <= item.port <= 65535:
-            errors.append(f"{item.id}: port must be between 1 and 65535")
-        ports.add(item.port)
+def _is_number(value) -> bool:
+    # bool is an int in Python; a setting of `true` is not a number here.
+    return type(value) in (int, float)
 
+
+def text(key: str) -> Rule:
+    """A non-empty string."""
+    return lambda options: isinstance(options.get(key), str) and bool(options[key])
+
+
+def file_name(key: str) -> Rule:
+    """A bare file or folder name, never a path."""
+    return lambda options: text(key)(options) and Path(options[key]).name == options[key]
+
+
+def absolute_path(key: str) -> Rule:
+    return lambda options: (isinstance(options.get(key), str)
+                            and Path(options[key]).is_absolute())
+
+
+def file_names(key: str) -> Rule:
+    """A non-empty list of bare names."""
+    def check(options: dict) -> bool:
+        values = options.get(key)
+        return (isinstance(values, list) and bool(values)
+                and all(isinstance(value, str) and value and Path(value).name == value
+                        for value in values))
+    return check
+
+
+def whole(key: str, low: int, high: int) -> Rule:
+    """A whole number from `low` to `high`, both included."""
+    return lambda options: type(options.get(key)) is int and low <= options[key] <= high
+
+
+def number(key: str, low: float, high: float, *, above_low: bool = False,
+           below_high: bool = False) -> Rule:
+    """A number between `low` and `high`; either end may be excluded."""
+    def check(options: dict) -> bool:
+        value = options.get(key)
+        if not _is_number(value):
+            return False
+        low_ok = value > low if above_low else value >= low
+        high_ok = value < high if below_high else value <= high
+        return low_ok and high_ok
+    return check
+
+
+def positive(key: str) -> Rule:
+    return lambda options: _is_number(options.get(key)) and options[key] > 0
+
+
+def one_of(key: str, allowed: set[str]) -> Rule:
+    """One of the listed words (a list or other unhashable value is simply wrong)."""
+    return lambda options: isinstance(options.get(key), str) and options[key] in allowed
+
+
+def bucket_range(options: dict) -> bool:
+    """Khala's default length bucket lies within 0 and its maximum (≤ 20)."""
+    default, maximum = options.get("default_bucket"), options.get("maximum_bucket")
+    return (type(default) is int and type(maximum) is int
+            and 0 <= default <= maximum <= 20)
+
+
+MEMORY = positive("memory_reservation_mb")
+GUIDANCE = number("cfg_scale", 0, 10, above_low=True)
+TOP_K = whole("topk", 1, 1000)
+TEMPERATURE = number("temperature", 0, 5)
+
+# Engine → (message when its options fail, the rules they must pass).
+ENGINE_RULES: dict[str, tuple[str, tuple[Rule, ...]]] = {
+    "kokoro": ("Kokoro model options are incomplete",
+               (text("language_code"), text("default_voice"), text("repo_id"))),
+    "voxcpm": ("VoxCPM inference settings are invalid",
+               (number("cfg_value", 0, 10, above_low=True),
+                whole("inference_timesteps", 1, 100))),
+    "khala": ("Khala length buckets are invalid", (bucket_range,)),
+    "higgs": ("Higgs worker settings are invalid",
+              (whole("worker_port", 1, 65535), MEMORY,
+               number("mem_fraction_static", 0, 1, above_low=True, below_high=True))),
+    "higgs_local": ("Higgs (transformers) settings are invalid", (MEMORY,)),
+    "heartmula": ("HeartMuLa settings are invalid",
+                  (text("version"), file_name("checkpoint_subdir"), TOP_K,
+                   TEMPERATURE, GUIDANCE, MEMORY)),
+    "yue2": ("YuE2 settings are invalid",
+             (one_of("cot", {"full", "melody"}),
+              number("memory_budget_gib", 4, 64), MEMORY)),
+    "comfy_music": ("ComfyUI music settings are invalid",
+                    (absolute_path("workflow"), file_names("component_subdirs"), MEMORY)),
+    "mulacover": ("MuLaCover settings are invalid",
+                  (file_name("checkpoint_subdir"), TOP_K, TEMPERATURE, GUIDANCE, MEMORY)),
+    "levo2": ("LeVo 2 settings are invalid",
+              (file_name("lm"), file_name("flow"), file_name("vae"),
+               whole("steps", 1, 200), number("cfg", 0, 10, above_low=True), MEMORY)),
+    "stableaudio3": ("Stable Audio 3 settings are invalid",
+                     (whole("steps", 1, 100), GUIDANCE, MEMORY)),
+}
+
+
+def options_pass(engine: str, options) -> bool:
+    """Whether one model's options satisfy its engine's rules."""
+    if engine not in ENGINE_RULES:
+        return True
+    _, rules = ENGINE_RULES[engine]
+    return isinstance(options, dict) and all(rule(options) for rule in rules)
+
+
+# -- the report every checker writes into -------------------------------------
+
+@dataclass
+class _Report:
+    config: Config
+    engine_ids: set[str]
+    check_workflows: bool
+    errors: list[str] = field(default_factory=list)
+    instance_ids: set[str] = field(default_factory=set)
+    ports: set[int] = field(default_factory=set)
+    repository_ids: list[str] = field(default_factory=list)
+
+    def add(self, message: str) -> None:
+        self.errors.append(message)
+
+
+# -- the chain ----------------------------------------------------------------
+
+def _check_roots(report: _Report) -> None:
+    roots = {item.id for item in report.config.model_roots}
+    if report.config.download_root not in roots:
+        report.add(f"Unknown download root: {report.config.download_root}")
+
+
+def _check_repositories(report: _Report) -> None:
+    report.repository_ids = [item.id for item in report.config.repositories]
+    if len(report.repository_ids) != len(set(report.repository_ids)):
+        report.add("Repository IDs must be unique")
+
+
+def _check_manager_port(report: _Report) -> None:
+    report.ports.add(report.config.port)
+    if not 1 <= report.config.port <= 65535:
+        report.add("Manager port must be between 1 and 65535")
+
+
+def _check_instances(report: _Report) -> None:
+    for item in report.config.instances:
+        _check_identity(report, item)
+        _check_engine_options(report, item)
+        _check_placement(report, item)
+
+
+def _check_identity(report: _Report, item) -> None:
+    if item.id in report.instance_ids:
+        report.add(f"Duplicate instance ID: {item.id}")
+    report.instance_ids.add(item.id)
+    if item.engine not in report.engine_ids:
+        report.add(f"{item.id}: unknown engine {item.engine}")
+
+
+def _check_engine_options(report: _Report, item) -> None:
+    """The model's entry in its engine's option map, judged by `ENGINE_RULES`."""
+    if item.engine not in MODEL_MAP_FIELDS:
+        return
+    field_name = MODEL_MAP_FIELDS[item.engine]
+    configured = report.config.engines.get(item.engine, {}).get(field_name, {})
+    model_name = item.model_id.rsplit("/", 1)[-1]
+    if model_name not in configured:
+        report.add(f"{item.id}: {item.engine} has no configured checkpoint")
+        return
+    options = configured[model_name]
+    if not options_pass(item.engine, options):
+        report.add(f"{item.id}: {ENGINE_RULES[item.engine][0]}")
+    elif item.engine == "higgs":
+        _claim_worker_port(report, item, options)
+
+
+def _claim_worker_port(report: _Report, item, options: dict) -> None:
+    """Higgs runs a second process on its own port, which must be free too."""
+    worker_port = options["worker_port"]
+    if worker_port == item.port or worker_port in report.ports:
+        report.add(f"{item.id}: {ENGINE_RULES['higgs'][0]}")
+    else:
+        report.ports.add(worker_port)
+
+
+def _check_placement(report: _Report, item) -> None:
+    repository_id = item.model_id.split("/", 1)[0]
+    if repository_id not in report.repository_ids:
+        report.add(f"{item.id}: unknown repository {repository_id}")
+    if item.port in report.ports:
+        report.add(f"{item.id}: port {item.port} is already assigned")
+    if not 1 <= item.port <= 65535:
+        report.add(f"{item.id}: port must be between 1 and 65535")
+    report.ports.add(item.port)
+
+
+def _check_policies(report: _Report) -> None:
     for policy_name in ("gateway_policy", "media_policy"):
         try:
-            getattr(config, policy_name)
+            getattr(report.config, policy_name)
         except ValueError as error:
-            errors.append(str(error))
+            report.add(str(error))
 
-    images = config.images
-    profiles = images.get("profiles", {})
+
+def _check_image_profiles(report: _Report) -> None:
+    images = report.config.images
     workflow_root = Path(images.get("workflow_root", ""))
-    for profile_id, profile in profiles.items():
-        model_id = profile.get("model", "")
-        if model_id not in instance_ids:
-            errors.append(f"Image profile {profile_id}: unknown instance {model_id}")
-            continue
-        task = profile.get("task", "generation")
-        if task not in {"generation", "edit"}:
-            errors.append(f"Image profile {profile_id}: unsupported task {task}")
-            continue
-        instance = config.instance(model_id)
-        repository = config.repository(instance.model_id.split("/", 1)[0])
-        expected = (Task.IMAGE_EDIT if task == "edit" else
-                    Task.IMAGE_GENERATION).value
-        if repository.task != expected:
-            errors.append(f"Image profile {profile_id}: {model_id} is configured "
-                          f"for {repository.task}, expected {expected}")
-        workflow = profile.get("workflow", "")
-        if not workflow or Path(workflow).name != workflow:
-            errors.append(f"Image profile {profile_id}: invalid workflow name")
-        elif check_workflows and not (workflow_root / workflow).is_file():
-            errors.append(f"Image profile {profile_id}: workflow file is absent")
-    if errors:
-        raise ValueError("Invalid AI-Lab configuration:\n- " + "\n- ".join(errors))
+    for profile_id, profile in images.get("profiles", {}).items():
+        _check_image_profile(report, profile_id, profile, workflow_root)
+
+
+def _check_image_profile(report: _Report, profile_id: str, profile: dict,
+                         workflow_root: Path) -> None:
+    model_id = profile.get("model", "")
+    if model_id not in report.instance_ids:
+        report.add(f"Image profile {profile_id}: unknown instance {model_id}")
+        return
+    task = profile.get("task", "generation")
+    if task not in {"generation", "edit"}:
+        report.add(f"Image profile {profile_id}: unsupported task {task}")
+        return
+    _check_profile_task(report, profile_id, model_id, task)
+    _check_profile_workflow(report, profile_id, profile.get("workflow", ""), workflow_root)
+
+
+def _check_profile_task(report: _Report, profile_id: str, model_id: str, task: str) -> None:
+    instance = report.config.instance(model_id)
+    repository = report.config.repository(instance.model_id.split("/", 1)[0])
+    expected = (Task.IMAGE_EDIT if task == "edit" else Task.IMAGE_GENERATION).value
+    if repository.task != expected:
+        report.add(f"Image profile {profile_id}: {model_id} is configured "
+                   f"for {repository.task}, expected {expected}")
+
+
+def _check_profile_workflow(report: _Report, profile_id: str, workflow: str,
+                            workflow_root: Path) -> None:
+    if not workflow or Path(workflow).name != workflow:
+        report.add(f"Image profile {profile_id}: invalid workflow name")
+    elif report.check_workflows and not (workflow_root / workflow).is_file():
+        report.add(f"Image profile {profile_id}: workflow file is absent")
+
+
+CHAIN = (_check_roots, _check_repositories, _check_manager_port,
+         _check_instances, _check_policies, _check_image_profiles)
+
+
+def validate_configuration(config: Config, engine_ids: set[str],
+                           *, check_workflows: bool = False) -> None:
+    """Reject broken references and conflicting ports with one useful report."""
+    report = _Report(config, engine_ids, check_workflows)
+    for checker in CHAIN:
+        checker(report)
+    if report.errors:
+        raise ValueError("Invalid AI-Lab configuration:\n- " + "\n- ".join(report.errors))

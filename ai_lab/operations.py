@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # Where port suggestions start. Engines sit above the manager's own 8090 by
 # convention, so the numbers read in the order things were added.
@@ -40,6 +41,9 @@ from .runtime import Operation, Runtime
 from .types import ChangeEvent, Interests, LogEvent, Task
 from .settings import Settings
 from .storage import Storage
+
+if TYPE_CHECKING:
+    from .installs import Installs
 
 
 class Operations:

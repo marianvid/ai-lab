@@ -40,6 +40,15 @@ GPU_QUERY = "name,memory.used,memory.total,temperature.gpu,utilization.gpu"
 APPS_QUERY = "pid,used_gpu_memory"
 
 
+# Engines whose own program name is looked up on PATH when none is configured.
+_FOUND_ON_PATH = {"vllm": "vllm", "nemo": "nemo", "onnx": "onnxruntime"}
+
+SUPPORTED_ENGINES = frozenset({"llamacpp", "vllm", "nemo", "onnx", "pyannote",
+                               "paddleocr", "comfyui", "acestep", "qwentts", "higgs",
+                               "heartmula", "yue2", "comfy_music", "mulacover",
+                               "levo2", "stableaudio3"})
+
+
 class LinuxHost:
     """See `base.Host` for what each method promises."""
 
@@ -84,53 +93,33 @@ class LinuxHost:
     # -- capabilities ------------------------------------------------------
 
     def capabilities(self) -> Capabilities:
-        engines = set()
+        # An engine counts as installed when its program is configured.
+        # vLLM, NeMo and ONNX live in their own virtual environments, normally
+        # absent from PATH even when present, so PATH is only their fallback.
+        engines = {engine for engine, binary in self._configured_binaries().items()
+                   if binary or (engine in _FOUND_ON_PATH
+                                 and which(_FOUND_ON_PATH[engine]))}
         if which("llama-server"):
             engines.add("llamacpp")
-        # vLLM is installed in its own virtual environment, so it is normally
-        # absent from PATH even when present. A configured path counts as
-        # installed; PATH is only the fallback.
-        if self.vllm_binary or which("vllm"):
-            engines.add("vllm")
-        if self.nemo_binary or which("nemo"):
-            engines.add("nemo")
-        if self.onnx_binary or which("onnxruntime"):
-            engines.add("onnx")
-        if self.pyannote_binary:
-            engines.add("pyannote")
-        if self.paddleocr_binary:
-            engines.add("paddleocr")
-        if self.comfyui_binary:
-            engines.add("comfyui")
-        if self.acestep_binary:
-            engines.add("acestep")
-        if self.qwentts_binary:
-            engines.add("qwentts")
-        if self.higgs_binary:
-            engines.add("higgs")
-        if self.heartmula_binary:
-            engines.add("heartmula")
-        if self.yue2_binary:
-            engines.add("yue2")
-        if self.comfy_music_binary:
-            engines.add("comfy_music")
-        if self.mulacover_binary:
-            engines.add("mulacover")
-        if self.levo2_binary:
-            engines.add("levo2")
-        if self.stableaudio3_binary:
-            engines.add("stableaudio3")
         return Capabilities(
             supervisor="systemd",
             engines=frozenset(engines),
             accelerator_kind=self._accelerator_kind(),
             can_configure_accelerator=False,
             operating_system="Linux",
-            supported_engines=frozenset({"llamacpp", "vllm", "nemo", "onnx",
-                                         "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
-                                         "higgs", "heartmula", "yue2", "comfy_music", "mulacover",
-                                         "levo2", "stableaudio3"}),
+            supported_engines=SUPPORTED_ENGINES,
         )
+
+    def _configured_binaries(self) -> dict[str, str | None]:
+        """Engine id → the program configured for it in config.json."""
+        return {"vllm": self.vllm_binary, "nemo": self.nemo_binary,
+                "onnx": self.onnx_binary, "pyannote": self.pyannote_binary,
+                "paddleocr": self.paddleocr_binary, "comfyui": self.comfyui_binary,
+                "acestep": self.acestep_binary, "qwentts": self.qwentts_binary,
+                "higgs": self.higgs_binary, "heartmula": self.heartmula_binary,
+                "yue2": self.yue2_binary, "comfy_music": self.comfy_music_binary,
+                "mulacover": self.mulacover_binary, "levo2": self.levo2_binary,
+                "stableaudio3": self.stableaudio3_binary}
 
     def _accelerator_kind(self) -> str:
         """Whether there is a card here, remembered once it says yes.

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from ..capabilities import IMAGES, TOOLS
 from ..changes import Reader, counted
 from ..types import Interests
+
+if TYPE_CHECKING:
+    from ..installs import Installs
 
 
 class EngineMaintenanceService:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..hosts.command import which
 from ..types import Format, ModelSet, Task
-from .base import DIARIZATION_PATHS, LaunchPlan, validate
+from .base import DIARIZATION_PATHS, LaunchPlan, ParamSpec, validate
 from .probe import http_ok
 
 

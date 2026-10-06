@@ -96,47 +96,80 @@ def local_config(config: dict, model_dir: Path) -> dict:
 
 
 def validate(body: dict, model_name: str) -> dict:
+    """Check a request and return it in the form `generate` uses."""
+    _refuse_unknown_fields(body, model_name)
+    duration = _duration(body)
+    init_audio, noise = _restyle_source(body)
+    inpaint_audio, starts, ends = _inpaint_source(body, duration)
+    return {"prompt": _text(body, "prompt", required=True),
+            "negative_prompt": _text(body, "negative_prompt", required=False),
+            "duration": duration, "seed": _seed(body),
+            "init_audio": init_audio, "init_noise_level": noise,
+            "inpaint_audio": inpaint_audio, "inpaint_starts": starts,
+            "inpaint_ends": ends}
+
+
+def _refuse_unknown_fields(body: dict, model_name: str) -> None:
     unknown = set(body) - ALLOWED_FIELDS
     if unknown:
         raise ValueError("Unknown Stable Audio 3 fields: " + ", ".join(sorted(unknown)))
     if body.get("model") not in (None, model_name):
         raise ValueError(f"this engine serves {model_name}")
-    prompt = body.get("prompt", "")
-    if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 4000:
-        raise ValueError("prompt must contain 1–4000 characters")
-    negative = body.get("negative_prompt", "")
-    if not isinstance(negative, str) or len(negative) > 4000:
-        raise ValueError("negative_prompt must be text of at most 4000 characters")
     if body.get("instrumental", True) is not True:
         raise ValueError("Stable Audio 3 makes instrumentals only; send instrumental: true")
     if str(body.get("lyrics", "")).strip():
         raise ValueError("Stable Audio 3 does not sing; leave lyrics out")
+
+
+def _text(body: dict, field: str, *, required: bool) -> str:
+    value = body.get(field, "")
+    shortest = 1 if required else 0
+    if not isinstance(value, str) or not shortest <= len(value.strip()) <= 4000:
+        if required:
+            raise ValueError(f"{field} must contain 1–4000 characters")
+        raise ValueError(f"{field} must be text of at most 4000 characters")
+    return value.strip()
+
+
+def _duration(body: dict) -> float:
     duration = body.get("duration", 30)
     if type(duration) not in (int, float) or not 1 <= duration <= 380:
         raise ValueError("duration must be between 1 and 380 seconds")
+    return duration
+
+
+def _seed(body: dict) -> int:
     seed = body.get("seed", secrets.randbelow(2**31))
     if type(seed) is not int or not 0 <= seed <= 2**32 - 1:
         raise ValueError("seed must be a 32-bit unsigned integer")
-    init_audio = source_wav(body, "init_audio")
+    return seed
+
+
+def _restyle_source(body: dict) -> tuple[bytes | None, float | None]:
+    """`init_audio` and how far the result may move from it (0–1, default 1)."""
+    audio = source_wav(body, "init_audio")
     noise = body.get("init_noise_level")
-    if noise is not None and init_audio is None:
+    if noise is not None and audio is None:
         raise ValueError("init_noise_level needs init_audio")
-    if init_audio is not None:
-        noise = 1.0 if noise is None else noise
-        if type(noise) not in (int, float) or not 0 <= noise <= 1:
-            raise ValueError("init_noise_level must be a number from 0 to 1")
-    inpaint_audio = source_wav(body, "inpaint_audio")
+    if audio is None:
+        return None, noise
+    noise = 1.0 if noise is None else noise
+    if type(noise) not in (int, float) or not 0 <= noise <= 1:
+        raise ValueError("init_noise_level must be a number from 0 to 1")
+    return audio, noise
+
+
+def _inpaint_source(body: dict, duration: float) -> tuple[bytes | None, list | None, list | None]:
+    """`inpaint_audio` and the regions of it to regenerate."""
+    audio = source_wav(body, "inpaint_audio")
     starts = body.get("inpaint_mask_start_seconds")
     ends = body.get("inpaint_mask_end_seconds")
-    if inpaint_audio is None and (starts is not None or ends is not None):
-        raise ValueError("inpaint_mask_*_seconds need inpaint_audio")
-    if inpaint_audio is not None:
-        starts, ends = mask_regions(starts, ends, duration)
-    return {"prompt": prompt.strip(), "negative_prompt": negative.strip(),
-            "duration": duration, "seed": seed,
-            "init_audio": init_audio, "init_noise_level": noise,
-            "inpaint_audio": inpaint_audio, "inpaint_starts": starts,
-            "inpaint_ends": ends}
+    if audio is None:
+        if starts is not None or ends is not None:
+            raise ValueError("inpaint_mask_*_seconds need inpaint_audio")
+        return None, starts, ends
+    starts, ends = mask_regions(starts, ends, duration)
+    return audio, starts, ends
 
 
 def source_wav(body: dict, field: str) -> bytes | None:
