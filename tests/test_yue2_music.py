@@ -1,11 +1,11 @@
 import unittest
 
-from ai_lab.music.yue2_backend import Yue2Backend
+from ai_lab.music.yue2_web_backend import Yue2WebBackend
 
 
 class Yue2RequestTests(unittest.TestCase):
     def setUp(self):
-        self.backend = Yue2Backend.__new__(Yue2Backend)
+        self.backend = Yue2WebBackend.__new__(Yue2WebBackend)
         self.backend.model_name = 'next-checkpoint'
 
     def test_editable_score_and_lyrics_reach_pipeline(self):

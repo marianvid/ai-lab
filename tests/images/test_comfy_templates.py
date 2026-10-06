@@ -12,8 +12,6 @@ class NativeTemplatesTests(unittest.TestCase):
             "qwen-image-2512-nvfp4": "qwen_image_nvfp4.safetensors",
             "qwen-image-edit-2511-fp8mixed": "qwen_image_edit_2511_fp8mixed.safetensors",
             "flux2-klein-4b-bf16": "flux-2-klein-4b.safetensors",
-            "minimax-h3": "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
-            "ltx-2.5-nvfp4": "ltx-2.5-22b-distilled-transformer-nvfp4.safetensors",
             "minimax-music3": "minimax_music3_dit_int8_convrot.safetensors",
         }
         for name, checkpoint in variants.items():
@@ -43,7 +41,7 @@ class NativeTemplatesTests(unittest.TestCase):
     def test_adapted_graphs_have_connected_links_and_no_missing_optional_branches(self):
         names = [
             "qwen-image-2512-nvfp4", "qwen-image-edit-2511-fp8mixed",
-            "flux2-klein-4b-bf16", "minimax-h3", "ltx-2.5-nvfp4",
+            "flux2-klein-4b-bf16",
             "minimax-music3", "flux2-dev-q8-0",
         ]
         for name in names:

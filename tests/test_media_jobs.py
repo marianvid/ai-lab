@@ -111,13 +111,6 @@ class MediaJobTests(unittest.TestCase):
         self.assertEqual(restored.get(job['id'])['status'], 'succeeded')
         self.assertEqual(restored.get(job['id'])['result'], completed['result'])
 
-    def test_video_job_uses_the_video_shape(self):
-        job = self.jobs.submit({'model': 'music',
-            'task': Task.VIDEO_GENERATION.value,
-            'input': {'prompt': 'slow camera'}})
-        self.wait_for(job['id'], 'succeeded')
-        self.assertEqual(Handler.requests[0][0], '/v1/videos/generations')
-
     def test_expired_result_and_metadata_are_removed(self):
         job = self.submit()
         self.wait_for(job['id'], 'succeeded')

@@ -1,4 +1,4 @@
-"""Durable, cancellable jobs for music, speech, and video generation."""
+"""Durable, cancellable jobs for music and speech generation."""
 
 from __future__ import annotations
 
@@ -12,14 +12,13 @@ import uuid
 from pathlib import Path
 
 from ..config_policy import MediaPolicy
-from ..engines.base import MUSIC_PATHS, SPEECH_PATHS, VIDEO_PATHS
+from ..engines.base import MUSIC_PATHS, SPEECH_PATHS
 from ..types import ChangeEvent, Task
 from .job_store import FINAL, JobStore
 
 PATHS = {
     Task.MUSIC_GENERATION.value: MUSIC_PATHS[0],
     Task.SPEECH_SYNTHESIS.value: SPEECH_PATHS[0],
-    Task.VIDEO_GENERATION.value: VIDEO_PATHS[0],
 }
 
 

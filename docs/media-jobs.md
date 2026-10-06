@@ -1,8 +1,8 @@
 # Media jobs
 
-Music, speech and video models can be called synchronously by an agent
-through their `/v1/...` routes: `/v1/audio/music/generations`,
-`/v1/audio/speech/generations` and `/v1/videos/generations`. The connection
+Music and speech models can be called synchronously by an agent
+through their `/v1/...` routes: `/v1/audio/music/generations` and
+`/v1/audio/speech/generations`. The connection
 then stays open until the file is made. A media job is the other way: the
 request returns at once with a job ID, the work runs in the background, and the
 result is kept on disk to be fetched later — also after the caller has gone
@@ -23,7 +23,7 @@ its task, and the same engine input body used by the direct route:
  "input":{"prompt":"quiet piano","duration":20}}
 ```
 
-Tasks are `music-generation`, `speech-synthesis`, and `video-generation`.
+Tasks are `music-generation` and `speech-synthesis`.
 A model name nobody serves is refused at once, not turned into a job that fails
 later. The response is the job itself: `id`, `model`, `task`, `status` and
 timestamps. `GET /api/media-jobs` lists metadata without

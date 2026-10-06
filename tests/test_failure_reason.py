@@ -14,7 +14,7 @@ three faults below was invisible against a tidier example.
 import unittest
 from pathlib import Path
 
-from ai_lab.runtime import Runtime
+from ai_lab.runtime_diagnostics import RuntimeDiagnostics
 
 JOURNALS = Path(__file__).resolve().parent / "support" / "journals"
 
@@ -25,7 +25,7 @@ def journal(name):
 
 class RealFailuresTests(unittest.TestCase):
     def cause(self, name):
-        return Runtime._cause(journal(name))
+        return RuntimeDiagnostics.cause(journal(name))
 
     def test_a_context_that_will_not_fit_says_so(self):
         # What actually happened: 128k was asked for on a 32 GB card. vLLM
@@ -88,7 +88,7 @@ class HeuristicTests(unittest.TestCase):
             "Traceback (most recent call last):",
             "RuntimeError: Engine core initialization failed. See root cause above.",
         ]
-        self.assertIn("the real reason", Runtime._cause(lines))
+        self.assertIn("the real reason", RuntimeDiagnostics.cause(lines))
 
     def test_lines_before_this_run_are_ignored(self):
         lines = [
@@ -96,24 +96,24 @@ class HeuristicTests(unittest.TestCase):
             "Started ai-lab-engine@x.service - AI-Lab inference instance x.",
             "RuntimeError: what went wrong now",
         ]
-        self.assertIn("what went wrong now", Runtime._cause(lines))
+        self.assertIn("what went wrong now", RuntimeDiagnostics.cause(lines))
 
     def test_everything_is_searched_when_there_is_no_start_line(self):
         # A truncated log, or a host that writes no such line. Better a cause
         # that might be stale than none at all.
-        self.assertIn("something", Runtime._cause(["ValueError: something"]))
+        self.assertIn("something", RuntimeDiagnostics.cause(["ValueError: something"]))
 
     def test_a_death_with_no_exception_still_says_what_it_can(self):
         lines = [
             "Started ai-lab-engine@x.service - AI-Lab inference instance x.",
             "error while loading shared libraries: libcuda.so.1",
         ]
-        self.assertIn("libcuda", Runtime._cause(lines))
+        self.assertIn("libcuda", RuntimeDiagnostics.cause(lines))
 
     def test_silence_is_reported_as_silence(self):
         lines = ["Started ai-lab-engine@x.service - AI-Lab inference instance x.",
                  "loading weights", "reading tensors"]
-        self.assertEqual(Runtime._cause(lines), "")
+        self.assertEqual(RuntimeDiagnostics.cause(lines), "")
 
 
 if __name__ == "__main__":

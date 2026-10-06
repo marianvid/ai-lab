@@ -44,7 +44,7 @@ side supports:
   PaddleOCR, ACE-Step, Qwen3-TTS and YuE2. Higgs TTS runs on both, through a
   different engine on each.
 - **Linux only:** vLLM, NVIDIA NeMo Speech, HeartMuLa, MuLaCover, and ComfyUI
-  for music and for video.
+  for music.
 - **macOS only:** MLX LM (text models in Apple's MLX format), MLX VLM (the
   same models reading pictures as well as text), MLX Whisper,
   Kokoro, VoxCPM, Khala and the Qwen forced aligner.
@@ -76,7 +76,7 @@ before it says how it works.
 | [Music generation](docs/music.md) | The six music engines (ACE-Step, HeartMuLa, YuE2, MuLaCover, Khala, ComfyUI), what each accepts, direct use and agent API. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
 | [Audio](docs/audio.md) | Speech-to-text, VAD, speaker diarization, transcript alignment and speech synthesis, and their endpoints. |
-| [Media jobs](docs/media-jobs.md) | Music, speech and video requests that run in the background: submit, poll, cancel. For agents and scripts. |
+| [Media jobs](docs/media-jobs.md) | Music and speech requests that run in the background: submit, poll, cancel. For agents and scripts. |
 
 **How it works inside**
 

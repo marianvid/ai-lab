@@ -1,7 +1,7 @@
 # Writing a request
 
 Everything below is about the request itself: chat, transcription and VAD,
-speech, video and alignment, the one field that is this project's own, and what
+speech and alignment, the one field that is this project's own, and what
 comes back when a model cannot be served.
 
 The examples use `localhost:8090`. From another machine, put that machine's
@@ -56,7 +56,7 @@ the OpenAI shape, so an OpenAI client reads it as usual. Each entry also has an
 | `owned_by` | The engine: the program that runs the model (llama.cpp, vLLM, Kokoro…). |
 | `loaded`, `ready` | Whether the model is in memory now, and whether it answers yet. A model that is not loaded can still be asked for; it is loaded first. |
 | `shapes` | The request addresses this model answers. |
-| `task` | The kind of work: `text-generation`, `transcription`, `speech-synthesis`, `music-generation`, `video-generation` and so on. |
+| `task` | The kind of work: `text-generation`, `transcription`, `speech-synthesis`, `music-generation` and so on. |
 | `capabilities` | What a text model can do beyond text. `images`: it can read pictures sent in the chat. `tools`: it can ask for tool calls (function calling). Read from the model's own files, not configured. A model started with the setting `language_model_only` loads without its picture reader, so `images` is left out for it. Empty when neither applies, or when the model's files cannot be read. |
 
 `GET /v1/models/{id}` returns one model in the same shape. Its `ai_lab` object
@@ -65,7 +65,7 @@ has more:
 - `model_id`: where the model's files are, relative to the model store.
 - `params`: the settings the model will be started with, the engine's defaults
   filled in.
-- `speech_form`, `music_form` or `video_form`, for those tasks: which request
+- `speech_form` or `music_form`, for those tasks: which request
   fields this particular model accepts.
 
 An unknown id answers 404 with the list of ids that exist.
@@ -151,14 +151,10 @@ be kept. The same seed gives the same voice and delivery, but a line decoded
 next to others may come out very slightly different from the same line
 decoded alone — the arithmetic of a batch is not bit-identical.
 
-### Music and video
+### Music
 
 Music goes to `POST /v1/audio/music/generations`; its fields are in
-[Music generation](music.md). Video goes to `POST /v1/videos/generations` as
-JSON: `model`, `prompt` (1 to 4,000 characters), `image_base64` — a PNG of
-at most 25 MiB that the clip starts from, required — and optionally `seed`
-(0 to 4,294,967,295). The answer
-carries the `seed` used and `data[0].b64_mp4`, the MP4 file in base64.
+[Music generation](music.md).
 
 Both can take minutes. To get a job ID back at once instead of holding the
 connection open, use [Media jobs](media-jobs.md).

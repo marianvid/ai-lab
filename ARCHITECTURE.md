@@ -37,7 +37,7 @@ Three kinds of file sit outside the line:
 - **The job queues** `images/jobs.py` and `media/jobs.py`. They are handed the
   gateway when the application is built, so they sit beside `api/`, above the
   gateway, and send their work through it like any other client.
-- **The isolated runtime adapters** — `audio/`, `speech/`, `music/`, `video/`,
+- **The isolated runtime adapters** — `audio/`, `speech/`, `music/`,
   and the servers in `images/`. The manager never imports them. An engine
   starts one as a separate program, with the engine's own Python, so its
   heavy libraries never load into the manager.
@@ -67,14 +67,13 @@ there is exactly one place to look.
 | `engines/nemo.py`, `onnx.py`, `pyannote.py`, `qwenalign.py`, `mlxwhisper.py` | Transcription, voice detection, speaker diarization, transcript alignment, and Whisper on Apple silicon | — |
 | `engines/kokoro.py`, `qwentts.py`, `voxcpm.py`, `higgs.py`, `higgs_local.py` | Speech synthesis. Two Higgs files: one through the SGLang-Omni server, one through the plain transformers port for machines without it | — |
 | `engines/acestep.py`, `khala.py`, `heartmula.py`, `yue2.py`, `mulacover.py`, `comfy_music.py` | Music generation | — |
-| `engines/comfyui.py`, `comfy_video.py`, `paddleocr.py` | Image workflows, image-to-video workflows, and text recognition in images | — |
+| `engines/comfyui.py`, `paddleocr.py` | Image workflows and text recognition in images | — |
 | `text/` | `mlxlm_server.py`: the launcher for mlx-lm's own server, run in the mlx-lm environment. It keeps `/health` at "not yet" until the weights are in memory, and makes any model name in a request mean the one model loaded. `mlxvlm_server.py`: the same for mlx-vlm, whose requests it adjusts before mlx-vlm reads them — the model name, the shared thinking switch, sampling defaults | Anything the manager imports |
 | `audio/` | Isolated adapters: an OpenAI-shaped HTTP server for audio runtimes that ship none (`server.py`), and transcript alignment (`aligner.py`) | Scheduling, configuration, model discovery |
 | `speech/` | Isolated adapters for speech synthesis: one HTTP host (`server.py`, and `higgs_server.py` for the Higgs worker), one backend file per engine (`kokoro_backend.py`, `voxcpm_backend.py`, `qwen.py`, `higgs_backend.py`, `higgs_local_backend.py`), the shared request check and WAV answer (`contract.py`), grouping requests that arrive together into one model pass (`batching.py`), and `higgs_playground.py`, which serves the upstream Higgs playground page from the in-process `higgs_local` model | Anything the manager imports |
 | `music/` | Isolated adapters for music: `server.py` for ACE-Step, and for each other engine a `<engine>_server.py` host with a `<engine>_backend.py` that does the work (Khala, HeartMuLa, YuE2, MuLaCover, ComfyUI). `yue2_web_backend.py` drives YuE2 through its own resident web worker | Anything the manager imports |
-| `video/` | Isolated adapter for ComfyUI video from an uploaded picture: `comfy_server.py` host, `comfy_backend.py` work | Anything the manager imports |
 | `images/` | `server.py`: isolated PaddleOCR adapter. `comfyui_server.py`: isolated bridge to a private ComfyUI. `jobs.py`: named image workflows run as jobs that survive a restart | Arbitrary workflow graphs from clients |
-| `media/` | `jobs.py` and `job_store.py`: music, speech and video jobs that can be cancelled and survive a restart. `http_host.py`: the small JSON server the isolated media adapters share | Choosing a model — the gateway does that |
+| `media/` | `jobs.py` and `job_store.py`: music and speech jobs that can be cancelled and survive a restart. `http_host.py`: the small JSON server the isolated media adapters share | Choosing a model — the gateway does that |
 | `comfyui_templates/`, `comfyui_custom_nodes/` | Workflow files for ComfyUI's own editor, one per model, and the ComfyUI extension that loads the entry's workflow into it | Python logic beyond finding the right file |
 | `native_ui/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000. The Higgs page is used by both Higgs engines | AI-Lab rules — it is vendored code |
 | `catalog.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
@@ -633,7 +632,7 @@ with the flags you wanted — and PATH order is nobody's decision. This is why t
 rather than listing every engine's fields side by side, and why adding a text
 engine touches neither the schema nor the front end.
 
-The speech, music and video engines added later break that last part. Each one
+The speech and music engines added later break that last part. Each one
 names its checkpoints in its own block of settings, which
 `config_validation.py` checks field by field, and the Models page lists them by
 name to decide which get a button that opens their own page

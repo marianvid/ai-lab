@@ -278,7 +278,7 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
   // Direct use is the engine's own interface, never a reduced AI-Lab form.
   function useLink(instance) {
     const task = instance.task || 'text-generation';
-    const comfy = ['comfyui', 'comfy_music', 'comfy_video'].includes(instance.engine);
+    const comfy = ['comfyui', 'comfy_music'].includes(instance.engine);
     const ace = instance.engine === 'acestep' && task === 'music-generation';
     const qwenTts = instance.engine === 'qwentts' && task === 'speech-synthesis';
     // Both Higgs engines open the same upstream playground: the SGLang worker
@@ -294,7 +294,7 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     const llama = instance.engine === 'llamacpp' && task === 'text-generation';
     if (!comfy && !ace && !qwenTts && !higgs && !voxcpm && !kokoro && !khala && !yue2 && !heartmula && !sa3 && !llama) return null;
     const label = comfy ? ({ 'image-generation': 'Create', 'image-edit': 'Edit',
-      'music-generation': 'Music', 'video-generation': 'Video' }[task] || 'ComfyUI')
+      'music-generation': 'Music' }[task] || 'ComfyUI')
       : ace || khala || yue2 || heartmula || sa3 ? 'Music' : qwenTts || higgs || voxcpm || kokoro ? 'Speak' : 'Chat';
     if (!instance.ready) return element('button', {
       class: 'pill chat-link', type: 'button', disabled: 'disabled',

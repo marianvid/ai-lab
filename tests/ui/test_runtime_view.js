@@ -853,12 +853,11 @@ describe('the buttons line up down the page', () => {
   it('uses the task to name each native ComfyUI workflow', async () => {
     const cases = [
       ['image-generation', 'Create'], ['image-edit', 'Edit'],
-      ['music-generation', 'Music'], ['video-generation', 'Video'],
+      ['music-generation', 'Music'],
     ];
     for (const [task, label] of cases) {
       const { view } = await renderPage({ '/api/instances': [
-        { ...INSTANCE, task, engine: task === 'video-generation' ? 'comfy_video'
-          : task === 'music-generation' ? 'comfy_music' : 'comfyui' },
+        { ...INSTANCE, task, engine: task === 'music-generation' ? 'comfy_music' : 'comfyui' },
       ] });
       assert.equal(view.querySelector('.chat-link').textContent, label);
       assert.equal(view.querySelector('.chat-link').getAttribute('href'),
@@ -885,7 +884,6 @@ describe('the buttons line up down the page', () => {
                                   ['image-generation', 'comfyui'],
                                   ['image-edit', 'comfyui'],
                                   ['music-generation', 'comfy_music'],
-                                  ['video-generation', 'comfy_video'],
                                   ['music-generation', 'acestep'],
                                   ['speech-synthesis', 'qwentts']]) {
       const { view } = await renderPage({ '/api/instances': [

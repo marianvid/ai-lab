@@ -339,15 +339,6 @@ class Runtime:
     def _why(self, instance_id: str) -> str:
         return self.diagnostics.why(instance_id)
 
-    @staticmethod
-    def _cause(lines: list[str]) -> str:
-        # Kept for callers that used Runtime's original diagnostic helper.
-        return RuntimeDiagnostics.cause(lines)
-
-    @staticmethod
-    def _this_run(lines: list[str]) -> list[str]:
-        return RuntimeDiagnostics.this_run(lines)
-
     def _await_settled(self, instance_id: str, clock: "_Clock", timeout_s: float) -> None:
         """Wait for memory to stop falling.
 

@@ -7,7 +7,6 @@ is ready. A stopped instance shows a disabled action; it starts no UI process.
 |---|---|---|---|
 | llama.cpp | Chat | The engine's own chat page | both |
 | ComfyUI image/edit | Create / Edit | Native ComfyUI with a model-specific template adapted to installed weights | both |
-| ComfyUI video | Video | Native ComfyUI with a model-specific image-to-video template adapted to installed weights | Linux |
 | ComfyUI music | Music | Native ComfyUI with the MiniMax Music 3 template adapted to INT8 | Linux |
 | ACE-Step 1.5 | Music | Upstream Gradio playground using the already-loaded AI-Lab model | both |
 | Qwen3-TTS VoiceDesign / CustomVoice | Speak | Upstream Gradio demo using the already-loaded AI-Lab model | both |

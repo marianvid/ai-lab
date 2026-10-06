@@ -129,7 +129,7 @@ day.
 A slow kind of request should not share a text model's limits, so the
 configuration can also override the two waits per kind of request, under
 `task_timeouts`, keyed by the task name — `ocr`, `speech-synthesis`,
-`music-generation`, `video-generation`, `transcription` and so on:
+`music-generation`, `transcription` and so on:
 
 ```json
 "gateway": {

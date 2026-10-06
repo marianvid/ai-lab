@@ -46,7 +46,6 @@ class Task(str, Enum):
     OCR = "ocr"
     IMAGE_GENERATION = "image-generation"
     IMAGE_EDIT = "image-edit"
-    VIDEO_GENERATION = "video-generation"
 
 
 @dataclass(frozen=True, slots=True)

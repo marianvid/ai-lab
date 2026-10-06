@@ -39,7 +39,6 @@ from .levo2 import Levo2Engine
 from .stableaudio3 import StableAudio3Engine
 from .comfy_music import ComfyMusicEngine
 from .mulacover import MulaCoverEngine
-from .comfy_video import ComfyVideoEngine
 from .pyannote import PyannoteEngine
 from .vllm import VllmEngine
 
@@ -98,7 +97,6 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
         StableAudio3Engine.id: StableAudio3Engine(**settings.get(StableAudio3Engine.id, {})),
         ComfyMusicEngine.id: ComfyMusicEngine(**settings.get(ComfyMusicEngine.id, {})),
         MulaCoverEngine.id: MulaCoverEngine(**settings.get(MulaCoverEngine.id, {})),
-        ComfyVideoEngine.id: ComfyVideoEngine(**settings.get(ComfyVideoEngine.id, {})),
     }
 
 

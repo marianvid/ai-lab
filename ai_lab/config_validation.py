@@ -14,7 +14,6 @@ MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "heartmula": "model_options", "yue2": "model_options",
                     "comfy_music": "model_options",
                     "mulacover": "model_options",
-                    "comfy_video": "model_options",
                     "levo2": "model_options",
                     "stableaudio3": "model_options"}
 
@@ -143,23 +142,6 @@ def validate_configuration(config: Config, engine_ids: set[str],
                     type(options.get("memory_reservation_mb")) in (int, float) and
                     options["memory_reservation_mb"] > 0):
                     errors.append(f"{item.id}: MuLaCover settings are invalid")
-            elif item.engine == "comfy_video":
-                options = configured[model_name]
-                if not isinstance(options, dict) or not (
-                    isinstance(options.get("workflow"), str) and
-                    Path(options["workflow"]).is_absolute() and
-                    isinstance(options.get("model_root"), str) and
-                    Path(options["model_root"]).is_absolute() and
-                    isinstance(options.get("component_subdirs"), list) and
-                    bool(options["component_subdirs"]) and
-                    all(isinstance(path, str) and path and
-                        Path(path).name == path
-                        for path in options["component_subdirs"]) and
-                    type(options.get("clip_seconds")) in (int, float) and
-                    options["clip_seconds"] > 0 and
-                    type(options.get("memory_reservation_mb")) in (int, float) and
-                    options["memory_reservation_mb"] > 0):
-                    errors.append(f"{item.id}: ComfyUI video settings are invalid")
             elif item.engine == "levo2":
                 options = configured[model_name]
                 if not isinstance(options, dict) or not (

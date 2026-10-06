@@ -9,7 +9,7 @@ those, a client naming a model that happens not to be running gets a refused
 connection. The Gateway is one address in front of all of them. It exposes the
 OpenAI text and audio shapes supported by the configured engines, the
 Anthropic Messages shape where the engine supports it, and this project's own
-shapes for music, speech, video, alignment, OCR and images:
+shapes for music, speech, alignment, OCR and images:
 
 ```sh
 curl http://localhost:8090/v1/chat/completions \
@@ -33,8 +33,8 @@ It lists the endpoints available now and which configured models can answer
 each one. Depending on what is configured, that includes chat and completion
 requests, Anthropic messages and token counting, transcription, alignment
 (matching a transcript to the audio word by word), voice-activity detection,
-speaker diarization, OCR, image generation and editing, speech, music and
-video. The list is built from the configured models' engines, so an endpoint
+speaker diarization, OCR, image generation and editing, speech and music.
+The list is built from the configured models' engines, so an endpoint
 absent from this block has no model here that answers it. How to write each
 request is in [Writing a request](requests.md).
 
@@ -66,7 +66,7 @@ ComfyUI runs behind a private adapter and is deliberately single-concurrency:
 its interrupt endpoint affects the current global execution. Workflow files
 must be exported in API format and stored below `images.workflow_root`.
 
-Music, speech and video have their own background jobs, described in
+Music and speech have their own background jobs, described in
 [Media jobs](media-jobs.md).
 
 ![The gateway](screenshots/gateway.png)
@@ -188,7 +188,7 @@ llama.cpp the weights are taken as a floor and nothing more — measured at a
 32k context, the gap between file size and card usage ran from **−476 MiB to
 +6,663** across four models, so a computed cache figure would look precise and
 be wrong. Engines that run as a separate worker with a fixed appetite — Higgs,
-YuE2, HeartMuLa, MuLaCover, ComfyUI music and video — use a figure written per
+YuE2, HeartMuLa, MuLaCover, ComfyUI music — use a figure written per
 model in the configuration, `memory_reservation_mb`. Qwen-TTS, VoxCPM and
 Khala take their weights plus half again, and at least 2 GB more; the rest
 mostly take their weights. What a model took last time is knowledge about the

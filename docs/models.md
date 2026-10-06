@@ -21,7 +21,7 @@ When the model has a note written for it (see
 tooltip, and beside every model in the list you pick from. The tasks are text
 generation, transcription, alignment, voice activity detection, diarization,
 speech synthesis (text to speech), music generation, OCR (reading the text out
-of an image), image generation, image editing and video generation. The two
+of an image), image generation and image editing. The two
 small pictures on text models say whether they can call tools or read pictures.
 Those capabilities are not configured anywhere —
 both are read from the model's own files, once, and remembered. A directory of

@@ -100,7 +100,7 @@ class Catalog:
     def _declared_models(repository: Repository, root: Path) -> tuple[list[ModelSet], list[Path]]:
         """Read model trees whose pieces live in several nested folders.
 
-        ComfyUI video stacks and a few application caches are one usable model
+        Multi-folder ComfyUI stacks and a few application caches are one usable model
         even though their transformer, text encoder and VAEs sit in different
         subdirectories. A tiny manifest at the model root makes that boundary
         explicit instead of exposing each component as a separate model.

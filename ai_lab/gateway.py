@@ -104,14 +104,14 @@ class Gateway:
         """Everything a client needs to know about one model before using it.
 
         The listing row, plus the settings the model will start with and, for
-        speech, music and video, the fields a request may carry
-        (`speech_form`, `music_form`, `video_form`).
+        speech and music, the fields a request may carry
+        (`speech_form`, `music_form`).
         """
         instances = self.operations.instances()
         instance = self.resolve(wanted, instances)
         row = self._rows([instance])[0]
         row["params"] = instance.get("params", {})
-        for form in ("speech_form", "music_form", "video_form"):
+        for form in ("speech_form", "music_form"):
             if form in instance:
                 row[form] = instance[form]
         return row
