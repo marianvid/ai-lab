@@ -97,8 +97,8 @@ document. See `opts/README.md` for why there are two repositories.
    the coverage floor in `pytest.ini`), and the interface tests with
    `node --test tests/ui/test_*.js`.
 2. The reviewer's gate, which checks the changed files against the golden
-   rules (`apps/radio-lab/reviewer/GOLDEN_RULES.md`) and changes nothing:
-   `conda run -n radio-lab-reviewer --cwd ../../apps/radio-lab/reviewer python -m reviewer gate --umbrella /Volumes/Marian_Backup/work/platform --repo ai-lab`.
+   rules (`apps/reviewer/GOLDEN_RULES.md`) and changes nothing:
+   `conda run -n radio-lab-reviewer --cwd ../../apps/reviewer python -m reviewer gate --umbrella /Volumes/Marian_Backup/work/platform --repo ai-lab`.
    Do not commit while it fails.
 
 Code copied from other projects lives in `ai_lab/vendor/`, one folder per
