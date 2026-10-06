@@ -192,6 +192,34 @@ class Config:
         return found
 
 
+def _model_roots(items: list[dict], root: str) -> list[ModelRoot]:
+    """The storage tiers, with `core` always present and first if added here."""
+    roots = [ModelRoot(**item) for item in items]
+    if not any(item.id == "core" for item in roots):
+        roots.insert(0, ModelRoot(id="core", name="Core", path=root))
+    core = next(item for item in roots if item.id == "core")
+    core.path = root or core.path
+    return roots
+
+
+def _repositories(items: list[dict], roots: list[ModelRoot]) -> list[Repository]:
+    """The stored core repositories, then one mirror of each in every other tier."""
+    root_map = {item.id: item for item in roots}
+    stored = [item for item in items if item.get("root_id", "core") == "core"]
+    mirrors = [{**item, "id": f"{model_root.id}-{item['id']}",
+                "root_id": model_root.id, "base_id": item["id"]}
+               for model_root in roots if model_root.id != "core"
+               for item in stored]
+    return [_under(root_map, item) for item in stored + mirrors]
+
+
+def _instances(items: list[dict]) -> list[Instance]:
+    # `name` is dropped rather than rejected: a configuration written before
+    # the label was removed still loads, and loses only the label.
+    return [Instance(**{key: value for key, value in item.items() if key != "name"})
+            for item in items]
+
+
 class ConfigStore:
     """Loads and saves the configuration file."""
 
@@ -200,42 +228,21 @@ class ConfigStore:
         self._lock = RLock()
 
     def load(self) -> Config:
+        """Read, migrate and expand the file into a `Config`."""
         with self._lock:
             raw = json.loads(self.path.read_text())
         raw = migrate(raw)
         root = raw.get("models_root") or _root_of(raw.get("repositories", []))
-        roots = [ModelRoot(**item) for item in raw.get("model_roots", [])]
-        if not roots:
-            roots = [ModelRoot(id="core", name="Core", path=root)]
-        elif not any(item.id == "core" for item in roots):
-            roots.insert(0, ModelRoot(id="core", name="Core", path=root))
-        core = next(item for item in roots if item.id == "core")
-        core.path = root or core.path
+        roots = _model_roots(raw.get("model_roots", []), root)
         validate_distinct_roots(roots)
-        root_map = {item.id: item for item in roots}
-        stored = [item for item in raw.get("repositories", [])
-                  if item.get("root_id", "core") == "core"]
-        repositories = [_under(root_map, item) for item in stored]
-        for model_root in roots:
-            if model_root.id == "core":
-                continue
-            for item in stored:
-                clone = {**item, "id": f"{model_root.id}-{item['id']}",
-                         "root_id": model_root.id, "base_id": item["id"]}
-                repositories.append(_under(root_map, clone))
         return Config(
             schema_version=raw["schema_version"],
             title=raw.get("title", "AI-Lab"),
             host=raw.get("host", ALL_INTERFACES),
             port=int(raw.get("port", 8090)),
             models_root=root,
-            repositories=repositories,
-            # `name` is dropped rather than rejected: a configuration written
-            # before the label was removed still loads, and loses only the
-            # label.
-            instances=[Instance(**{key: value for key, value in item.items()
-                                   if key != "name"})
-                       for item in raw.get("instances", [])],
+            repositories=_repositories(raw.get("repositories", []), roots),
+            instances=_instances(raw.get("instances", [])),
             engines=raw.get("engines", {}),
             gateway=raw.get("gateway", {}),
             memory=raw.get("memory", {}),

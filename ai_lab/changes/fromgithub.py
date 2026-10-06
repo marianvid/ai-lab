@@ -57,39 +57,43 @@ def between(repo: str, installed: str, latest: str) -> tuple[str, str]:
     # `b10448` and `v0.2.0` are both llama.cpp, both real, and on different
     # scales — the first is a count of builds, the second a version. Reading
     # one as the other would silently pick the wrong releases, so when the
-    # shapes differ the floor is dropped and only the target is described.
+    # shapes differ only the target itself is described.
     crossing = _shape(installed) != _shape(latest)
-    floor = None if crossing else _version(installed)
-    ceiling = _version(latest)
-
-    wanted = []
-    for release in releases:
-        here = _version(release.get("tag_name") or "")
-        if here is None or (floor is not None and here <= floor):
-            continue
-        if ceiling is not None and here > ceiling:
-            continue
-        if crossing and (release.get("tag_name") or "") != latest:
-            continue
-        wanted.append(release)
-
-    crossed = ""
-    if crossing and wanted:
-        crossed = (f"{installed} and {latest} are on different lines, so what "
-                   f"follows describes {latest} itself rather than everything "
-                   "between the two.")
-
+    if crossing:
+        wanted = [release for release in releases
+                  if _tag(release) == latest and _version(latest) is not None]
+    else:
+        wanted = [release for release in releases
+                  if _after(_version(_tag(release)), _version(installed),
+                            _version(latest))]
     if not wanted:
         return "", ("No release notes cover this update — upstream publishes "
                     "none for the version installed here.")
+    crossed = (f"{installed} and {latest} are on different lines, so what "
+               f"follows describes {latest} itself rather than everything "
+               "between the two.") if crossing else ""
+    return _render(wanted), crossed
 
+
+def _tag(release: dict) -> str:
+    return release.get("tag_name") or ""
+
+
+def _after(here, floor, ceiling) -> bool:
+    """`here` is above what is installed and not above the target."""
+    if here is None or (floor is not None and here <= floor):
+        return False
+    return ceiling is None or here <= ceiling
+
+
+def _render(releases: list[dict]) -> str:
     parts = []
-    for release in wanted:                    # newest first, as they arrive
-        title = release.get("name") or release.get("tag_name") or ""
+    for release in releases:                  # newest first, as they arrive
+        title = release.get("name") or _tag(release)
         body = (release.get("body") or "").strip()
         parts.append(f"# {title}\n\n{body}" if body
                      else f"# {title}\n\n_No notes were written for this release._")
-    return "\n\n---\n\n".join(parts), crossed
+    return "\n\n---\n\n".join(parts)
 
 
 def _releases(repo: str) -> list[dict]:
