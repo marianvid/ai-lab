@@ -328,6 +328,41 @@ something else.
 The refusal travels as `409` with a `busy` object, because a page cannot act on
 a message it would have to match on the words of.
 
+### Why `providers/` exists
+
+Some work needs a frontier model, and the owner's subscriptions reach those
+only through their command line programs: Claude Code (`claude -p`) and Codex
+(`codex exec`). The gateway serves them under names of their own
+(`claude/sonnet`, `codex/gpt-5.6-terra`, …) on the same
+`POST /v1/chat/completions`, so a caller changes nothing but the name.
+Decision and measured limits: `docs/decisions/0001-subscription-providers.md`.
+
+They are a lane beside the scheduler, not inside it. The scheduler exists to
+share one card; a CLI call uses none, so it must neither wait behind a model
+being loaded nor hold one up. The front door asks `ProviderPool.serves(name)`
+before it asks `Gateway` for a lease, and a subscription name never takes one.
+
+```
+request ──▶ routes/gateway.py ──┬─▶ ProviderPool ──▶ VendorGate ──▶ Dialect (claude | codex) ──▶ CLI process
+                                └─▶ Gateway (lease) ──▶ engine on the card
+```
+
+- `settings.py` — the `providers` section: vendors (dialect, binary, home,
+  limits) and model names. Checked at start-up with the other policies.
+- `gate.py` — one `VendorGate` per vendor, because the allowance is the
+  vendor's: places in flight, spacing between launches, and one shared pause
+  after a rate limit.
+- `errors.py` — a CLI says what went wrong only in prose, so the text decides:
+  rate limit (pause, retry the same model), fatal (answer `502` at once, so
+  the caller's fallback takes over), transient (retry after each configured
+  wait). A spent allowance answers `429`.
+- `dialects.py` — Strategy: how each CLI is called and where its answer is.
+  The prompt goes in on standard input, in an empty scratch directory.
+- `prompt.py` — chat messages to one prompt, the answer back to the OpenAI
+  shape. No streaming, text only.
+- `usage.py` — requests and failures per vendor per day, shown under
+  `providers` in `GET /api/gateway`.
+
 ### Why `naming.py` exists
 
 The catalog applies shard rules to files on disk; the downloader applies the

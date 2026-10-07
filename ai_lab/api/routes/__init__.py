@@ -11,14 +11,25 @@ Both work without it — a router built for a test has no gateway, and then
 nothing is guarded because nothing is being served.
 """
 
-from . import catalog, downloads, gateway, huggingface, images, media, runtime, settings, storage
+from . import (
+    catalog,
+    downloads,
+    gateway,
+    huggingface,
+    images,
+    media,
+    runtime,
+    settings,
+    storage,
+)
 
 MODULES = (settings, storage, catalog, downloads, huggingface, images, media)
 
 
-def register_all(router, operations, model_gateway=None) -> None:
+def register_all(router, operations, model_gateway=None, providers=None) -> None:
+    """Every module's routes; the gateway's only when there is a gateway."""
     for module in MODULES:
         module.register(router, operations)
     runtime.register(router, operations, model_gateway)
     if model_gateway is not None:
-        gateway.register(router, operations, model_gateway)
+        gateway.register(router, operations, model_gateway, providers)

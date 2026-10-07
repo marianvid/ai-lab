@@ -9,16 +9,23 @@ import threading
 from pathlib import Path
 
 from .api.server import serve
+from .providers import ProviderPool
 from .wiring import build
 
 
-def main() -> None:
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """The command line: a configuration file, and optional listen overrides."""
     parser = argparse.ArgumentParser(description="AI-Lab manager")
     parser.add_argument("--config", type=Path, required=True,
                         help="path to config.json")
     parser.add_argument("--host", help="override the listen address")
     parser.add_argument("--port", type=int, help="override the listen port")
-    arguments = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    """Build the manager from its configuration and serve until stopped."""
+    arguments = parse_arguments()
 
     if not arguments.config.is_file():
         sys.exit(f"No configuration at {arguments.config}")
@@ -27,6 +34,9 @@ def main() -> None:
     config = store.load()
     host = arguments.host or config.host
     port = arguments.port or config.port
+    # Subscription models (Claude Code, Codex): a lane of their own beside
+    # the card, counting their usage where the host keeps its state.
+    providers = ProviderPool.from_config(config.providers, operations.host.state_dir())
 
     _install_shutdown(operations)
 
@@ -35,7 +45,7 @@ def main() -> None:
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
-        serve(operations, bus, host, port, model_gateway)
+        serve(operations, bus, (host, port), model_gateway, providers)
     finally:
         operations.host.stop_all()
 

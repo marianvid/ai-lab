@@ -27,15 +27,16 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from threading import RLock
-from typing import Iterator
 
 from .config_migrations import SCHEMA_VERSION, migrate
 from .config_policy import GatewayPolicy, MediaPolicy
 from .network import ALL_INTERFACES
+from .providers.settings import ProvidersConfig
 
 
 @dataclass(slots=True)
@@ -112,6 +113,8 @@ class Instance:
 
 @dataclass(slots=True)
 class Config:
+    """Everything `config.json` holds, as loaded and as it will be saved."""
+
     schema_version: int = SCHEMA_VERSION
     title: str = "AI-Lab"
     host: str = ALL_INTERFACES
@@ -150,6 +153,9 @@ class Config:
     # Names, rather than repository-qualified ids, deliberately survive moving
     # a model between benchmark and core storage.
     model_notes: dict = field(default_factory=dict)
+    # Subscription models served through their vendors' CLIs (Claude Code,
+    # Codex): vendors, limits and model names. See `providers/settings.py`.
+    providers: dict = field(default_factory=dict)
     # The one directory every model lives under. Each repository is a
     # folder in it, named after the format.
     models_root: str = ""
@@ -167,25 +173,35 @@ class Config:
 
     @property
     def gateway_policy(self) -> GatewayPolicy:
+        """The front door's limits, checked."""
         return GatewayPolicy.from_mapping(self.gateway)
 
     @property
     def media_policy(self) -> MediaPolicy:
+        """The music and speech job settings, checked."""
         return MediaPolicy.from_mapping(self.media)
 
+    @property
+    def provider_policy(self) -> ProvidersConfig:
+        """The subscription providers, checked."""
+        return ProvidersConfig.from_mapping(self.providers)
+
     def repository(self, repository_id: str) -> Repository:
+        """One repository by id; KeyError when there is none."""
         found = next((item for item in self.repositories if item.id == repository_id), None)
         if found is None:
             raise KeyError(f"Unknown repository: {repository_id}")
         return found
 
     def model_root(self, root_id: str) -> ModelRoot:
+        """One storage tier by id; KeyError when there is none."""
         found = next((item for item in self.model_roots if item.id == root_id), None)
         if found is None:
             raise KeyError(f"Unknown model root: {root_id}")
         return found
 
     def instance(self, instance_id: str) -> Instance:
+        """One model entry by id; KeyError when there is none."""
         found = next((item for item in self.instances if item.id == instance_id), None)
         if found is None:
             raise KeyError(f"Unknown instance: {instance_id}")
@@ -251,6 +267,7 @@ class ConfigStore:
             media=raw.get("media", {}),
             downloads=raw.get("downloads", {}),
             model_notes=raw.get("model_notes", {}),
+            providers=raw.get("providers", {}),
             model_roots=roots,
             download_root=raw.get("download_root", "core"),
             extra_fields={key: value for key, value in raw.items()
@@ -258,6 +275,7 @@ class ConfigStore:
         )
 
     def save(self, config: Config) -> None:
+        """Write atomically; the mirrored repositories are not stored."""
         if config.schema_version != SCHEMA_VERSION:
             raise ValueError(f"Cannot save unsupported configuration schema {config.schema_version}")
         with self._lock:

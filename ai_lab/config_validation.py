@@ -18,14 +18,18 @@ that does not host the weights.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from .config import Config
 from .types import Task
 
 Rule = Callable[[dict], bool]
+
+MAX_PORT = 65535
+# Khala's largest length bucket.
+KHALA_MAX_BUCKET = 20
 
 MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
                     "kokoro": "model_options", "voxcpm": "model_options",
@@ -56,6 +60,7 @@ def file_name(key: str) -> Rule:
 
 
 def absolute_path(key: str) -> Rule:
+    """An absolute path, written as text."""
     return lambda options: (isinstance(options.get(key), str)
                             and Path(options[key]).is_absolute())
 
@@ -80,7 +85,7 @@ def number(key: str, low: float, high: float, *, above_low: bool = False,
     """A number between `low` and `high`; either end may be excluded."""
     def check(options: dict) -> bool:
         value = options.get(key)
-        if not _is_number(value):
+        if isinstance(value, bool) or not isinstance(value, int | float):
             return False
         low_ok = value > low if above_low else value >= low
         high_ok = value < high if below_high else value <= high
@@ -89,6 +94,7 @@ def number(key: str, low: float, high: float, *, above_low: bool = False,
 
 
 def positive(key: str) -> Rule:
+    """A number above zero."""
     return lambda options: _is_number(options.get(key)) and options[key] > 0
 
 
@@ -101,7 +107,7 @@ def bucket_range(options: dict) -> bool:
     """Khala's default length bucket lies within 0 and its maximum (≤ 20)."""
     default, maximum = options.get("default_bucket"), options.get("maximum_bucket")
     return (type(default) is int and type(maximum) is int
-            and 0 <= default <= maximum <= 20)
+            and 0 <= default <= maximum <= KHALA_MAX_BUCKET)
 
 
 MEMORY = positive("memory_reservation_mb")
@@ -179,8 +185,8 @@ def _check_repositories(report: _Report) -> None:
 
 def _check_manager_port(report: _Report) -> None:
     report.ports.add(report.config.port)
-    if not 1 <= report.config.port <= 65535:
-        report.add("Manager port must be between 1 and 65535")
+    if not 1 <= report.config.port <= MAX_PORT:
+        report.add(f"Manager port must be between 1 and {MAX_PORT}")
 
 
 def _check_instances(report: _Report) -> None:
@@ -230,13 +236,13 @@ def _check_placement(report: _Report, item) -> None:
         report.add(f"{item.id}: unknown repository {repository_id}")
     if item.port in report.ports:
         report.add(f"{item.id}: port {item.port} is already assigned")
-    if not 1 <= item.port <= 65535:
-        report.add(f"{item.id}: port must be between 1 and 65535")
+    if not 1 <= item.port <= MAX_PORT:
+        report.add(f"{item.id}: port must be between 1 and {MAX_PORT}")
     report.ports.add(item.port)
 
 
 def _check_policies(report: _Report) -> None:
-    for policy_name in ("gateway_policy", "media_policy"):
+    for policy_name in ("gateway_policy", "media_policy", "provider_policy"):
         try:
             getattr(report.config, policy_name)
         except ValueError as error:

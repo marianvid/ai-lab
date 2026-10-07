@@ -21,9 +21,10 @@ from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
 from ..gateway import CardBusy
-from ..operations import Operations
-from . import sse
 from ..multipart import MultipartBody
+from ..operations import Operations
+from ..providers import ProviderPool, ProviderRateLimitError, ProviderUnavailableError
+from . import sse
 from .passthrough import Passthrough
 from .router import Router
 from .routes import register_all
@@ -38,6 +39,10 @@ STATUS = {
     NotImplementedError: HTTPStatus.NOT_IMPLEMENTED,
     # Not a bad request: the same request will succeed once the card is free.
     CardBusy: HTTPStatus.CONFLICT,
+    # A subscription's allowance is spent: the caller may retry later.
+    ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
+    # The vendor's CLI could not answer: the caller's fallback should take over.
+    ProviderUnavailableError: HTTPStatus.BAD_GATEWAY,
 }
 
 
@@ -256,10 +261,11 @@ class Handler(BaseHTTPRequestHandler):
         """Silent: one line per request would bury the log that matters."""
 
 
-def build_router(operations: Operations, model_gateway=None) -> Router:
-    """Every API route, bound to the operations and the model gateway."""
+def build_router(operations: Operations, model_gateway=None,
+                 providers: ProviderPool | None = None) -> Router:
+    """Every API route, bound to the operations, the gateway and the providers."""
     router = Router()
-    register_all(router, operations, model_gateway)
+    register_all(router, operations, model_gateway, providers)
     return router
 
 
@@ -277,9 +283,9 @@ class GatewayServer(ThreadingHTTPServer):
     request_queue_size = 1024
 
 
-def serve(operations: Operations, bus: EventBus, host: str, port: int,
-          model_gateway=None) -> None:
-    """Listen on `host:port` and answer until the process stops."""
-    handler = type("ConfiguredHandler", (Handler,),
-                   {"router": build_router(operations, model_gateway), "bus": bus})
-    GatewayServer((host, port), handler).serve_forever()
+def serve(operations: Operations, bus: EventBus, address: tuple[str, int],
+          model_gateway=None, providers: ProviderPool | None = None) -> None:
+    """Listen on `address` (host, port) and answer until the process stops."""
+    router = build_router(operations, model_gateway, providers)
+    handler = type("ConfiguredHandler", (Handler,), {"router": router, "bus": bus})
+    GatewayServer(address, handler).serve_forever()

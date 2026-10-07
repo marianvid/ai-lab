@@ -12,20 +12,30 @@ path the client never chose.
 
 This file decides nothing about models. It reads the name out of the body, asks
 `Gateway` for a lease, and forwards the request to whichever port that lease
-points at.
+points at. A name that belongs to a subscription model (Claude Code, Codex)
+goes to `ProviderPool` instead: those use no card, so they never take a lease.
 """
 
 from __future__ import annotations
 
-from ...engines.base import (ALIGNMENT_PATHS, ANTHROPIC_PATHS, DIARIZATION_PATHS, OCR_PATHS,
-                             OPENAI_PATHS, TRANSCRIPTION_PATHS, VAD_PATHS, MUSIC_PATHS,
-                             SPEECH_PATHS)
+from ...engines.base import (
+    ALIGNMENT_PATHS,
+    ANTHROPIC_PATHS,
+    DIARIZATION_PATHS,
+    MUSIC_PATHS,
+    OCR_PATHS,
+    OPENAI_PATHS,
+    SPEECH_PATHS,
+    TRANSCRIPTION_PATHS,
+    VAD_PATHS,
+)
 from ...gateway import Gateway
+from ...network import LOOPBACK
+from ...providers import ProviderPool
 from ...types import Task
 from ..multipart import MultipartBody
 from ..passthrough import forward
 from ..uploads import UploadRejected, validate_image
-from ...network import LOOPBACK
 
 # Every shape any engine here can answer. Registered as routes whatever is
 # configured: a path that exists and explains why this model cannot serve it is
@@ -41,14 +51,14 @@ FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
 # are not ambiguous in practice: this map is only consulted for the paths
 # that are unique to a task.
 _TASK_OF_PATH = {
-    **{path: Task.TEXT_GENERATION for path in OPENAI_PATHS + ANTHROPIC_PATHS},
+    **dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS, Task.TEXT_GENERATION),
     "/v1/audio/transcriptions": Task.TRANSCRIPTION,
-    **{path: Task.VAD for path in VAD_PATHS},
-    **{path: Task.DIARIZATION for path in DIARIZATION_PATHS},
-    **{path: Task.OCR for path in OCR_PATHS},
-    **{path: Task.MUSIC_GENERATION for path in MUSIC_PATHS},
-    **{path: Task.SPEECH_SYNTHESIS for path in SPEECH_PATHS},
-    **{path: Task.ALIGNMENT for path in ALIGNMENT_PATHS},
+    **dict.fromkeys(VAD_PATHS, Task.VAD),
+    **dict.fromkeys(DIARIZATION_PATHS, Task.DIARIZATION),
+    **dict.fromkeys(OCR_PATHS, Task.OCR),
+    **dict.fromkeys(MUSIC_PATHS, Task.MUSIC_GENERATION),
+    **dict.fromkeys(SPEECH_PATHS, Task.SPEECH_SYNTHESIS),
+    **dict.fromkeys(ALIGNMENT_PATHS, Task.ALIGNMENT),
 }
 
 # Paths whose upload is an image and must pass the configured byte/pixel/
@@ -56,32 +66,51 @@ _TASK_OF_PATH = {
 _IMAGE_UPLOAD_PATHS = frozenset(OCR_PATHS)
 
 
-def register(router, operations, gateway: Gateway) -> None:
-    router.add("GET", "/v1/models", lambda **_: _catalogue(gateway))
+def register(router, operations, gateway: Gateway,
+             providers: ProviderPool | None = None) -> None:
+    """The model routes, the catalogue, and the front door's own settings."""
+    router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, providers))
     router.add("GET", "/v1/models/{model}",
-               lambda model, **_: _one_model(gateway.describe(model),
-                                                 detailed=True))
-    router.add("GET", "/api/gateway", lambda **_: gateway.stats())
+               lambda model, **_: _describe(gateway, providers, model))
+    router.add("GET", "/api/gateway", lambda **_: _stats(gateway, providers))
 
     def settings(body=None, **_):
         """Change the front door's own limits, and use them at once."""
         saved = operations.update_gateway(body or {})
         gateway.apply_settings(saved)
-        return gateway.stats()
+        return _stats(gateway, providers)
 
     router.add("PATCH", "/api/gateway", settings)
     for path in FORWARDED:
-        router.add("POST", path, _forwarder(gateway, path))
+        router.add("POST", path, _forwarder(gateway, path, providers))
 
 
-def _catalogue(gateway: Gateway) -> dict:
+def _stats(gateway: Gateway, providers: ProviderPool | None) -> dict:
+    """The card's queue, and each subscription vendor's places and usage."""
+    stats = gateway.stats()
+    if providers is not None:
+        stats["providers"] = providers.stats()
+    return stats
+
+
+def _catalogue(gateway: Gateway, providers: ProviderPool | None) -> dict:
     """Every configured model, in the shape an OpenAI client expects.
 
     Models that are not loaded are listed too. That is the point: a client is
-    supposed to be able to ask for one of them.
+    supposed to be able to ask for one of them. Subscription models follow
+    the local ones.
     """
-    return {"object": "list",
-            "data": [_one_model(row) for row in gateway.catalogue()]}
+    rows = [_one_model(row) for row in gateway.catalogue()]
+    if providers is not None:
+        rows += providers.catalogue()
+    return {"object": "list", "data": rows}
+
+
+def _describe(gateway: Gateway, providers: ProviderPool | None, name: str) -> dict:
+    """One model, local or subscription, with its details."""
+    if providers is not None and providers.serves(name):
+        return next(row for row in providers.catalogue() if row["id"] == name)
+    return _one_model(gateway.describe(name), detailed=True)
 
 
 # Extra details only `GET /v1/models/{model}` carries: too long for a listing.
@@ -111,78 +140,90 @@ def _one_model(row: dict, detailed: bool = False) -> dict:
 SETTINGS_FIELD = "ai_lab"
 
 
-def _forwarder(gateway: Gateway, path: str):
+def _forwarder(gateway: Gateway, path: str, providers: ProviderPool | None = None):
+    """The handler for one forwarded path."""
     def handle(body=None, alive=None, **_):
         payload = body or {}
-        wanted = (payload.field("model") if isinstance(payload, MultipartBody)
-                  else payload.get("model"))
-        if not wanted:
-            raise ValueError("the request must name a model")
-
-        if path in _IMAGE_UPLOAD_PATHS and isinstance(payload, MultipartBody):
-            uploaded = payload.raw("file")
-            if uploaded is None:
-                raise ValueError("the request must contain an image file")
-            try:
-                validate_image(
-                    uploaded,
-                    max_bytes=gateway.max_upload_bytes,
-                    max_pixels=gateway.max_upload_pixels,
-                    max_dimension=gateway.max_upload_dimension)
-            except UploadRejected as error:
-                raise ValueError(str(error)) from None
-
-        # Settings that decide how the model starts — context size and the
-        # rest — cannot be part of the request the engine sees: the engine does
-        # not know them, and would ignore them without a word. They travel in a
-        # field of ours, which is read here and removed before forwarding, so
-        # what reaches the engine is exactly what would have reached it before.
-        settings = (None if isinstance(payload, MultipartBody)
-                    else payload.get(SETTINGS_FIELD) or None)
-        if settings is not None and not isinstance(settings, dict):
-            raise ValueError(f"{SETTINGS_FIELD} must be an object of settings")
-
+        wanted = _model_name(payload)
+        if providers is not None and providers.serves(wanted):
+            if isinstance(payload, MultipartBody):
+                raise ValueError("subscription models take a JSON chat request")
+            return providers.complete(path, payload)
+        _check_upload(gateway, path, payload)
         # The lease is held until the last byte of the answer has been read, so
         # a swap cannot pull the model out from under a stream in progress.
         # `path` goes with it: an entry whose engine does not answer this shape
         # is refused before anything is loaded, not after.
-        lease = gateway.acquire(wanted, shape=path, settings=settings,
+        lease = gateway.acquire(wanted, shape=path, settings=_start_settings(payload),
                                 still_wanted=alive)
-
-        # Everything from here gives the place back if it fails. It is a few
-        # lines that look incapable of failing, which is exactly the shape of
-        # thing that leaks a place on the card and is never found: nothing
-        # breaks visibly, the card simply has one fewer place for ever.
+        # Everything from here gives the place back if it fails: a leaked place
+        # breaks nothing visibly, the card simply has one fewer place for ever.
         try:
-            # The engine knows its own model by a different name than the entry
-            # does, and rejects a name it does not recognise. Ask by the name it
-            # reports rather than passing ours through. The lease carries it, so
-            # this costs nothing.
-            if isinstance(payload, MultipartBody):
-                outgoing = payload.replace("model", lease.model_name or wanted)
-                content_type = payload.content_type
-            else:
-                outgoing = dict(payload)
-                outgoing.pop(SETTINGS_FIELD, None)
-                outgoing["model"] = lease.model_name or wanted
-                content_type = "application/json"
-
-            url = f"http://{LOOPBACK}:{lease.port}{path}"
-            # Time to the first token, but only when streaming was asked for.
-            # Without it an engine sends nothing until the answer is finished,
-            # so its first byte is the whole generation and the two averaged
-            # together measure neither.
-            streaming = (False if isinstance(payload, MultipartBody)
-                         else bool(payload.get("stream")))
-            timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
-                     if streaming else None)
-            task = _TASK_OF_PATH.get(path, Task.TEXT_GENERATION)
-            first_byte_s, between_bytes_s = gateway.timeouts_for(task)
-            return forward(url, outgoing, on_close=lease.release,
-                           first_byte_s=first_byte_s,
-                           between_bytes_s=between_bytes_s,
-                           on_first_chunk=timed, content_type=content_type)
+            return _forward(gateway, lease, path, payload, wanted)
         except BaseException:
             lease.release()
             raise
     return handle
+
+
+def _model_name(payload) -> str:
+    wanted = (payload.field("model") if isinstance(payload, MultipartBody)
+              else payload.get("model"))
+    if not wanted:
+        raise ValueError("the request must name a model")
+    return wanted
+
+
+def _check_upload(gateway: Gateway, path: str, payload) -> None:
+    """An uploaded image must pass the configured size limits first."""
+    if path not in _IMAGE_UPLOAD_PATHS or not isinstance(payload, MultipartBody):
+        return
+    uploaded = payload.raw("file")
+    if uploaded is None:
+        raise ValueError("the request must contain an image file")
+    try:
+        validate_image(uploaded, max_bytes=gateway.max_upload_bytes,
+                       max_pixels=gateway.max_upload_pixels,
+                       max_dimension=gateway.max_upload_dimension)
+    except UploadRejected as error:
+        raise ValueError(str(error)) from None
+
+
+def _start_settings(payload) -> dict | None:
+    """Settings the model must be started with, carried in our own field.
+
+    The engine does not know them and would ignore them without a word, so
+    they are read here and removed before forwarding.
+    """
+    settings = (None if isinstance(payload, MultipartBody)
+                else payload.get(SETTINGS_FIELD) or None)
+    if settings is not None and not isinstance(settings, dict):
+        raise ValueError(f"{SETTINGS_FIELD} must be an object of settings")
+    return settings
+
+
+def _forward(gateway: Gateway, lease, path: str, payload, wanted: str):
+    """Send the request to the leased engine, by the name that engine knows."""
+    # The engine knows its own model by a different name than the entry does,
+    # and rejects a name it does not recognise. The lease carries it.
+    name = lease.model_name or wanted
+    if isinstance(payload, MultipartBody):
+        outgoing: bytes | dict = payload.replace("model", name)
+        content_type = payload.content_type
+        streaming = False
+    else:
+        request = {key: value for key, value in payload.items() if key != SETTINGS_FIELD}
+        request["model"] = name
+        outgoing = request
+        content_type = "application/json"
+        streaming = bool(payload.get("stream"))
+    # Time to the first token only when streaming was asked for: otherwise the
+    # first byte is the whole generation and the average measures neither.
+    timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
+             if streaming else None)
+    first_byte_s, between_bytes_s = gateway.timeouts_for(
+        _TASK_OF_PATH.get(path, Task.TEXT_GENERATION))
+    return forward(f"http://{LOOPBACK}:{lease.port}{path}", outgoing,
+                   on_close=lease.release, first_byte_s=first_byte_s,
+                   between_bytes_s=between_bytes_s, on_first_chunk=timed,
+                   content_type=content_type)
