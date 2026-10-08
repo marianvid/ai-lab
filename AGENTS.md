@@ -5,20 +5,20 @@
 **EXPLAIN THINGS IN PLAIN LANGUAGE. NO JARGON WITHOUT A PLAIN-WORDS EXPLANATION
 RIGHT NEXT TO IT.**
 
-Marian is a programmer, but nobody knows every field. Language that assumes a
-specialist reader is language he has to decode instead of judge, and he cannot
-review a decision he had to decode first.
+The owner is a programmer, but nobody knows every field. Language that assumes a
+specialist reader has to be decoded instead of judged, and a decision that has
+to be decoded first cannot be reviewed.
 
-**Calibrate correctly: he is an experienced programmer, not a beginner.**
+**Calibrate correctly: the owner is an experienced programmer, not a beginner.**
 Assume general programming literacy — HTTP, REST, classes, modules, processes,
-threads, databases, git. Never explain those. What he does not have is depth in
+threads, databases, git. Never explain those. What the owner lacks is depth in
 every *specialty*: software-architecture vocabulary, LXC and container
 internals, CUDA and quantisation formats, systemd details, GPU memory
 management. Those are what need plain explanation.
 
 The test: is this word general programming knowledge, or is it vocabulary from
 one particular niche? Explain the second kind. Explaining the first kind is
-condescending and wastes his time.
+condescending and wastes the owner's time.
 
 What this means in practice:
 
@@ -38,8 +38,8 @@ one every time.
 
 ## Rule 2 — Modular, never monolithic
 
-One module, one job. Marian follows this project and intervenes in it, so he
-must be able to open one file and understand one thing.
+One module, one job. The owner follows this project and intervenes in it, so
+one file opened must explain one thing.
 
 - No business decisions in the web-server layer.
 - Modules import downward only. No service imports another service.
@@ -53,9 +53,9 @@ unrelated concerns as something to fix now, not later.
 
 ## Rule 3 — Act, do not ask for permission
 
-Marian granted standing authorization for this project and for the `ai-lab`
-container, local and remote. Execute and report at the end; do not interrupt him
-to approve routine steps.
+Decided: standing authorization for this project and for the `ai-lab`
+container, local and remote. Execute and report at the end; do not interrupt the
+owner to approve routine steps.
 
 The one limit is system health. Still ask before:
 
@@ -77,7 +77,7 @@ is in `opts/CLAUDE.md`.
 
 ## Project facts worth knowing
 
-- **ParallaxVox is Marian's company.** It belongs only as a branding label in
+- **ParallaxVox is the owner's company.** It belongs only as a branding label in
   the web page header — never in package names, paths, or unit names. The
   application itself is called AI-Lab.
 - Model weights live on their own disk, organised by weight format. See
@@ -98,7 +98,7 @@ document. See `opts/README.md` for why there are two repositories.
    `node --test tests/ui/test_*.js`.
 2. The reviewer's gate, which checks the changed files against the golden
    rules (`apps/reviewer/GOLDEN_RULES.md`) and changes nothing:
-   `conda run -n radio-lab-reviewer --cwd ../../apps/reviewer python -m reviewer gate --umbrella /Volumes/Marian_Backup/work/platform --repo ai-lab`.
+   `../../apps/reviewer/tools/gate.sh --umbrella /Volumes/Marian_Backup/work/platform --repo ai-lab` (exit 0 = passed, 1 = blocked, 2 = not run; never `conda run`, which can exit 0 without running the gate).
    Do not commit while it fails.
 
 Code copied from other projects lives in `ai_lab/vendor/`, one folder per
