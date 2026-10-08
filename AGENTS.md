@@ -101,6 +101,14 @@ document. See `opts/README.md` for why there are two repositories.
    `../../apps/reviewer/tools/gate.sh --umbrella /Volumes/Marian_Backup/work/platform --repo ai-lab` (exit 0 = passed, 1 = blocked, 2 = not run; never `conda run`, which can exit 0 without running the gate).
    Do not commit while it fails.
 
+**Push and review only with the owner's approval** (decided 2026-10-08):
+
+- Commit locally, with the gate passing. Push nothing — no branch, no
+  repository — until the owner approves that push in the ai-lab discussion.
+  Each approval covers one push.
+- A review or audit of ai-lab happens only at the owner's request.
+- The gate above is not a review: it still runs before every commit.
+
 Code copied from other projects lives in `ai_lab/vendor/`, one folder per
 project with its licence and a NOTICE.md (upstream URL, commit, changes).
 It is excluded from the golden rules and from coverage.
