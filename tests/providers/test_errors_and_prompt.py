@@ -15,6 +15,9 @@ class ClassifyTests(unittest.TestCase):
             ("error: unknown model gpt-9", ErrorKind.FATAL, "unknown model"),
             ("cannot start the CLI: [Errno 2] No such file", ErrorKind.FATAL,
              "cannot start the cli"),
+            ('{"type":"invalid_request_error","message":"The \'gpt-5.6-sol\' model is not '
+             'supported when using Codex with a ChatGPT account."}', ErrorKind.FATAL,
+             "is not supported"),
         ]
         for text, kind, label in cases:
             with self.subTest(text=text):

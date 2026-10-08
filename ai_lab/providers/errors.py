@@ -39,6 +39,9 @@ FATAL_MARKERS = (
     "not logged in", "unauthorized", "invalid api key", "no such model",
     "unknown model", "permission denied", "forbidden", "please run /login",
     "cannot start the cli",
+    # Codex, asked for a model the subscription does not include (seen live
+    # with gpt-5.6-sol on a ChatGPT account): retrying only wastes 20 s.
+    "is not supported", "invalid_request_error",
 )
 
 
