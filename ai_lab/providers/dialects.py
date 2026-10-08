@@ -11,6 +11,7 @@ would pass Linux's limit on the length of one argument (128 KiB).
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -22,6 +23,9 @@ from .settings import Vendor
 
 # Where Codex writes its final message. Read back from the scratch directory.
 CODEX_ANSWER_FILE = "answer.txt"
+# Merged over opencode's own configuration for every call: every tool asks for
+# a permission, and every permission is refused, so the agent can only answer.
+OPENCODE_NO_TOOLS = json.dumps({"permission": {"*": "deny"}})
 
 
 @dataclass(frozen=True)
@@ -101,7 +105,33 @@ class CodexCli:
         return path.read_text(errors="ignore").strip() if path.exists() else ""
 
 
-DIALECTS: dict[str, Dialect] = {"claude": ClaudeCli(), "codex": CodexCli()}
+class OpencodeCli:
+    """opencode: `opencode run -m <provider/model>`; the reply is standard output.
+
+    opencode is the gate to open-source models run in the cloud. Which
+    providers and models exist is opencode's own configuration, kept by the
+    owner in the vendor's home; an entry here only names one of them. Every
+    tool is denied for the call (`OPENCODE_NO_TOOLS`).
+    """
+
+    def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
+                   workdir: Path) -> Invocation:
+        """`opencode run`, reading the prompt from standard input."""
+        argv = [vendor.binary, "run", "-m", model]
+        if effort:
+            argv += ["--variant", effort]
+        env = {"OPENCODE_CONFIG_CONTENT": OPENCODE_NO_TOOLS}
+        if vendor.home:
+            env["HOME"] = vendor.home
+        return Invocation(argv=argv, prompt=prompt, env=env)
+
+    def answer(self, stdout: str, workdir: Path) -> str:
+        """Everything printed is the reply; the banner goes to standard error."""
+        return stdout.strip()
+
+
+DIALECTS: dict[str, Dialect] = {"claude": ClaudeCli(), "codex": CodexCli(),
+                                "opencode": OpencodeCli()}
 
 
 def run(dialect: Dialect, vendor: Vendor, model: str, prompt: str,

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.providers.dialects import ClaudeCli, CodexCli, run
+from ai_lab.providers.dialects import OPENCODE_NO_TOOLS, ClaudeCli, CodexCli, OpencodeCli, run
 from ai_lab.providers.settings import Vendor, VendorLimits
 
 FAKE_CLAUDE = """#!/bin/sh
@@ -25,6 +25,11 @@ printf '\\ncodex_home=%s' "$CODEX_HOME" >> "$out"
 FAILING = """#!/bin/sh
 echo "Claude AI usage limit reached" >&2
 exit 1
+"""
+FAKE_OPENCODE = """#!/bin/sh
+prompt=$(cat)
+echo "banner" >&2
+echo "args=$* config=$OPENCODE_CONFIG_CONTENT prompt=$prompt"
 """
 SLOW = """#!/bin/sh
 sleep 5
@@ -63,6 +68,17 @@ class DialectTests(unittest.TestCase):
         argv = CodexCli().invocation(vendor, "gpt-5.6-terra", "x", "high", self.root).argv
         self.assertIn('model_reasoning_effort="high"', argv)
         self.assertEqual(argv[-1], "-")
+
+    def test_opencode_denies_every_tool_and_answers_on_standard_output(self):
+        vendor = self.vendor(self.script("opencode", FAKE_OPENCODE), dialect="opencode")
+        outcome = run(OpencodeCli(), vendor, "zen/kimi-k2", "Hello", effort="high")
+        self.assertTrue(outcome.succeeded)
+        self.assertEqual(outcome.answer, "args=run -m zen/kimi-k2 --variant high "
+                                         f"config={OPENCODE_NO_TOOLS} prompt=Hello")
+        call = OpencodeCli().invocation(self.vendor("/b", home="/srv/oc"), "m", "x", "",
+                                        self.root)
+        self.assertEqual(call.env["HOME"], "/srv/oc")
+        self.assertNotIn("--variant", call.argv)
 
     def test_codex_with_no_file_has_no_answer(self):
         self.assertEqual(CodexCli().answer("printed", self.root), "")

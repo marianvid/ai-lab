@@ -332,7 +332,10 @@ a message it would have to match on the words of.
 
 Some work needs a frontier model, and the owner's subscriptions reach those
 only through their command line programs: Claude Code (`claude -p`) and Codex
-(`codex exec`). The gateway serves them under names of their own
+(`codex exec`). Open-source models run in the cloud come through opencode
+(`opencode run`), whose own configuration lists them
+(`docs/decisions/0002-opencode-provider.md`). All three run in the container
+on its CPU, never on the graphics card. The gateway serves them under names of their own
 (`claude/sonnet`, `codex/gpt-5.6-terra`, …) on the same
 `POST /v1/chat/completions`, so a caller changes nothing but the name.
 Decision and measured limits: `docs/decisions/0001-subscription-providers.md`.
@@ -343,7 +346,7 @@ being loaded nor hold one up. The front door asks `ProviderPool.serves(name)`
 before it asks `Gateway` for a lease, and a subscription name never takes one.
 
 ```
-request ──▶ routes/gateway.py ──┬─▶ ProviderPool ──▶ VendorGate ──▶ Dialect (claude | codex) ──▶ CLI process
+request ──▶ routes/gateway.py ──┬─▶ ProviderPool ──▶ VendorGate ──▶ Dialect (claude | codex | opencode) ──▶ CLI process
                                 └─▶ Gateway (lease) ──▶ engine on the card
 ```
 

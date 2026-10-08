@@ -7,13 +7,20 @@ Shape in `config.json`::
         "anthropic": {"dialect": "claude", "binary": "/opt/ai/cli/bin/claude",
                       "home": "/var/lib/ai-lab/cli/anthropic", "concurrency": 6},
         "openai":    {"dialect": "codex", "binary": "/opt/ai/cli/bin/codex",
-                      "home": "/var/lib/ai-lab/cli/openai"}
+                      "home": "/var/lib/ai-lab/cli/openai"},
+        "opencode":  {"dialect": "opencode",
+                      "binary": "/opt/ai/cli/opencode/bin/opencode",
+                      "home": "/var/lib/ai-lab/cli/opencode"}
       },
       "models": {
         "claude/sonnet":       {"vendor": "anthropic", "model": "sonnet"},
-        "codex/gpt-5.6-terra": {"vendor": "openai", "model": "gpt-5.6-terra"}
+        "codex/gpt-5.6-terra": {"vendor": "openai", "model": "gpt-5.6-terra"},
+        "opencode/kimi-k2":    {"vendor": "opencode", "model": "<provider>/<model>"}
       }
     }
+
+For opencode, `model` is a `provider/model` name from opencode's own
+configuration in its home; the gateway does not repeat that configuration.
 
 Every limit is optional; the defaults are the values measured in production
 (see `docs/decisions/0001-subscription-providers.md`).
@@ -24,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-DIALECTS = ("claude", "codex")
+DIALECTS = ("claude", "codex", "opencode")
 
 
 @dataclass(frozen=True)

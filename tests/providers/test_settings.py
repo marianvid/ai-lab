@@ -36,6 +36,7 @@ class ProvidersConfigTests(unittest.TestCase):
     def test_impossible_values_are_refused_by_name(self):
         cases: list[tuple[Any, str]] = [
             ({"vendors": {"x": {"dialect": "gemini", "binary": "/b"}}}, "dialect"),
+            ({"vendors": {"x": {"dialect": "opencode", "binary": "b"}}}, "absolute"),
             ({"vendors": {"x": {"dialect": "claude", "binary": "claude"}}}, "absolute"),
             ({"vendors": {"x": {"dialect": "claude", "binary": "/b", "concurrency": 0}}},
              "concurrency"),
