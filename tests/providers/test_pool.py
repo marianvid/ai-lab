@@ -97,6 +97,29 @@ class ProviderPoolTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             pool.complete(CHAT, {**REQUEST, "stream": True})
 
+    def test_an_effort_claude_does_not_know_is_refused_before_any_call(self):
+        pool = self.pool()
+        with self.assertRaisesRegex(ValueError, "low, medium, high, xhigh, max"):
+            pool.complete(CHAT, {**REQUEST, "reasoning_effort": "bogus"})
+        self.assertEqual(self.runner.calls, [])
+
+    def test_every_effort_claude_knows_reaches_the_cli(self):
+        pool = self.pool(*[ok()] * 5)
+        for effort in ("low", "medium", "high", "xhigh", "max"):
+            pool.complete(CHAT, {**REQUEST, "reasoning_effort": effort})
+        self.assertEqual([call[4] for call in self.runner.calls],
+                         ["low", "medium", "high", "xhigh", "max"])
+
+    def test_an_opencode_variant_is_left_to_opencode(self):
+        raw = {"vendors": {"cloud": {"dialect": "opencode", "binary": "/opt/cli/opencode",
+                                     "launch_spacing_s": 0}},
+               "models": {"oc/kimi": {"vendor": "cloud", "model": "moonshot/kimi"}}}
+        self.runner = ScriptedRunner(ok())
+        pool = ProviderPool(ProvidersConfig.from_mapping(raw),
+                            UsageLog(Path(self._temporary.name)), runner=self.runner)
+        pool.complete(CHAT, {**REQUEST, "model": "oc/kimi", "reasoning_effort": "turbo"})
+        self.assertEqual(self.runner.calls[0][4], "turbo")
+
     def test_catalogue_and_stats_name_every_model(self):
         pool = self.pool()
         self.assertEqual([row["id"] for row in pool.catalogue()], ["claude/sonnet"])

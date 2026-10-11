@@ -73,6 +73,10 @@ class ProviderPool:
         model = self.config.models[payload["model"]]
         text = prompt.render(payload)
         effort = str(payload.get("reasoning_effort") or "")
+        accepted = DIALECTS[self.config.vendors[model.vendor].dialect].efforts
+        if effort and accepted and effort not in accepted:
+            raise ValueError(f"{model.name}: reasoning_effort must be one of "
+                             f"{', '.join(accepted)}, not {effort!r}")
         return prompt.completion(model.name, self._answer(model, text, effort))
 
     def _answer(self, model: ProviderModel, text: str, effort: str) -> str:

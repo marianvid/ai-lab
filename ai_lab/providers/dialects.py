@@ -56,7 +56,13 @@ class Outcome:
 
 
 class Dialect(Protocol):
-    """One CLI's way of being called and of answering."""
+    """One CLI's way of being called and of answering.
+
+    `efforts` lists the reasoning efforts the CLI accepts; empty means the
+    CLI itself is the judge.
+    """
+
+    efforts: tuple[str, ...]
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
@@ -68,6 +74,10 @@ class Dialect(Protocol):
 
 class ClaudeCli:
     """Claude Code: `claude -p --model <m>`; the reply is standard output."""
+
+    # Claude Code ignores any other value with only a warning, so a typo
+    # would quietly run at the default effort; the gateway refuses it instead.
+    efforts: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
@@ -92,6 +102,8 @@ class CodexCli:
     an `AGENTS.md` into the prompt; `CODEX_HOME` points at a configuration
     with no plugins, so a headless call starts nothing it does not need.
     """
+
+    efforts: tuple[str, ...] = ()
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
@@ -118,6 +130,9 @@ class OpencodeCli:
     owner in the vendor's home; an entry here only names one of them. Every
     tool is denied for the call (`OPENCODE_NO_TOOLS`).
     """
+
+    # A variant's name belongs to the provider behind opencode.
+    efforts: tuple[str, ...] = ()
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
