@@ -48,6 +48,10 @@ vendor will be refused too.
 7. Requests and failures are counted per vendor per day in the state
    directory and shown in `GET /api/gateway`, so the shared allowance is
    watched in one place.
+8. `reasoning_effort` is passed to the CLI. A request that names none gets
+   the vendor's `default_effort` (`medium` for Claude Code on Linux). An
+   effort a CLI lists as unknown is refused with 400 rather than sent on:
+   Claude Code ignores one with only a warning and runs at another effort.
 
 ## Consequences
 

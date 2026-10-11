@@ -70,13 +70,18 @@ class VendorLimits:
 
 @dataclass(frozen=True)
 class Vendor:
-    """One subscription: which CLI speaks for it, where it lives, its limits."""
+    """One subscription: which CLI speaks for it, where it lives, its limits.
+
+    `default_effort` is the reasoning effort of a request that names none;
+    empty leaves the choice to the CLI.
+    """
 
     id: str
     dialect: str
     binary: str
     home: str = ""
     limits: VendorLimits = field(default_factory=VendorLimits)
+    default_effort: str = ""
 
     @classmethod
     def from_mapping(cls, name: str, raw: dict) -> Vendor:
@@ -88,8 +93,12 @@ class Vendor:
             raise ValueError(f"providers.vendors.{name}.dialect must be one of {DIALECTS}")
         binary = _absolute(name, "binary", raw.get("binary"))
         home = _absolute(name, "home", raw["home"]) if raw.get("home") else ""
+        default_effort = raw.get("default_effort") or ""
+        if not isinstance(default_effort, str):
+            raise ValueError(f"providers.vendors.{name}.default_effort must be text")
         return cls(id=name, dialect=dialect, binary=binary, home=home,
-                   limits=VendorLimits.from_mapping(name, raw))
+                   limits=VendorLimits.from_mapping(name, raw),
+                   default_effort=default_effort.strip())
 
 
 @dataclass(frozen=True)

@@ -46,6 +46,10 @@ class ProviderPool:
         self._sleep = sleep
         self._gates = {name: VendorGate(vendor.limits)
                        for name, vendor in config.vendors.items()}
+        # A wrong default fails at start-up, not on every request.
+        for vendor in config.vendors.values():
+            _check_effort(f"providers.vendors.{vendor.id}.default_effort",
+                          vendor, vendor.default_effort)
 
     @classmethod
     def from_config(cls, raw: dict | None, state_dir: Path) -> ProviderPool:
@@ -72,11 +76,9 @@ class ProviderPool:
                                       "send the request without stream")
         model = self.config.models[payload["model"]]
         text = prompt.render(payload)
-        effort = str(payload.get("reasoning_effort") or "")
-        accepted = DIALECTS[self.config.vendors[model.vendor].dialect].efforts
-        if effort and accepted and effort not in accepted:
-            raise ValueError(f"{model.name}: reasoning_effort must be one of "
-                             f"{', '.join(accepted)}, not {effort!r}")
+        vendor = self.config.vendors[model.vendor]
+        effort = str(payload.get("reasoning_effort") or vendor.default_effort)
+        _check_effort(model.name, vendor, effort)
         return prompt.completion(model.name, self._answer(model, text, effort))
 
     def _answer(self, model: ProviderModel, text: str, effort: str) -> str:
@@ -112,9 +114,18 @@ class ProviderPool:
         """Per vendor: places, any pause, and today's counts."""
         today = self.usage.today()
         return {name: {**gate.state(), "today": today.get(name, {}),
+                       "default_effort": self.config.vendors[name].default_effort,
                        "models": sorted(item.name for item in self.config.models.values()
                                         if item.vendor == name)}
                 for name, gate in self._gates.items()}
+
+
+def _check_effort(where: str, vendor: Vendor, effort: str) -> None:
+    """Refuse an effort the vendor's CLI would ignore; it would run at another."""
+    accepted = DIALECTS[vendor.dialect].efforts
+    if effort and accepted and effort not in accepted:
+        raise ValueError(f"{where}: reasoning_effort must be one of "
+                         f"{', '.join(accepted)}, not {effort!r}")
 
 
 def _tail(text: str, length: int = 300) -> str:

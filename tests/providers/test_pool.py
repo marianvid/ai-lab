@@ -8,12 +8,19 @@ from ai_lab.providers.pool import ProviderPool
 from ai_lab.providers.settings import ProvidersConfig
 from ai_lab.providers.usage import UsageLog
 
-RAW = {
-    "vendors": {"anthropic": {"dialect": "claude", "binary": "/opt/cli/claude",
-                              "launch_spacing_s": 0, "rate_limit_waits_s": [0],
-                              "rate_limit_retries": 2, "network_waits_s": [5, 15]}},
-    "models": {"claude/sonnet": {"vendor": "anthropic", "model": "sonnet"}},
-}
+ANTHROPIC = {"dialect": "claude", "binary": "/opt/cli/claude",
+             "launch_spacing_s": 0, "rate_limit_waits_s": [0],
+             "rate_limit_retries": 2, "network_waits_s": [5, 15]}
+MODELS = {"claude/sonnet": {"vendor": "anthropic", "model": "sonnet"}}
+RAW = {"vendors": {"anthropic": ANTHROPIC}, "models": MODELS}
+
+
+def with_default(effort):
+    """The same configuration, with a default reasoning effort."""
+    return {"vendors": {"anthropic": {**ANTHROPIC, "default_effort": effort}},
+            "models": MODELS}
+
+
 CHAT = "/v1/chat/completions"
 REQUEST = {"model": "claude/sonnet", "messages": [{"role": "user", "content": "Hi"}],
            "reasoning_effort": "low"}
@@ -109,6 +116,31 @@ class ProviderPoolTests(unittest.TestCase):
             pool.complete(CHAT, {**REQUEST, "reasoning_effort": effort})
         self.assertEqual([call[4] for call in self.runner.calls],
                          ["low", "medium", "high", "xhigh", "max"])
+
+    def test_a_request_with_no_effort_gets_the_vendor_default(self):
+        self.runner = ScriptedRunner(ok(), ok())
+        pool = ProviderPool(ProvidersConfig.from_mapping(with_default("medium")),
+                            UsageLog(Path(self._temporary.name)), runner=self.runner)
+        without = {key: value for key, value in REQUEST.items() if key != "reasoning_effort"}
+        pool.complete(CHAT, without)
+        pool.complete(CHAT, {**REQUEST, "reasoning_effort": "high"})
+        self.assertEqual([call[4] for call in self.runner.calls], ["medium", "high"])
+        self.assertEqual(pool.stats()["anthropic"]["default_effort"], "medium")
+
+    def test_no_default_and_no_effort_leaves_the_choice_to_the_cli(self):
+        pool = self.pool(ok())
+        pool.complete(CHAT, {key: value for key, value in REQUEST.items()
+                             if key != "reasoning_effort"})
+        self.assertEqual(self.runner.calls[0][4], "")
+
+    def test_a_default_claude_does_not_know_stops_the_start(self):
+        with self.assertRaisesRegex(ValueError, "default_effort"):
+            ProviderPool(ProvidersConfig.from_mapping(with_default("medum")),
+                         UsageLog(Path(self._temporary.name)))
+
+    def test_a_default_effort_must_be_text(self):
+        with self.assertRaisesRegex(ValueError, "must be text"):
+            ProvidersConfig.from_mapping(with_default(3))
 
     def test_an_opencode_variant_is_left_to_opencode(self):
         raw = {"vendors": {"cloud": {"dialect": "opencode", "binary": "/opt/cli/opencode",
