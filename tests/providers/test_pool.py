@@ -142,6 +142,14 @@ class ProviderPoolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be text"):
             ProvidersConfig.from_mapping(with_default(3))
 
+    def test_a_fenced_json_answer_comes_back_plain_only_when_json_was_asked(self):
+        fenced = '```json\n{"answers": []}\n```'
+        pool = self.pool(ok(fenced), ok(fenced))
+        asked = pool.complete(CHAT, {**REQUEST, "response_format": {"type": "json_object"}})
+        plain = pool.complete(CHAT, REQUEST)
+        self.assertEqual(asked["choices"][0]["message"]["content"], '{"answers": []}')
+        self.assertEqual(plain["choices"][0]["message"]["content"], fenced)
+
     def test_an_opencode_variant_is_left_to_opencode(self):
         raw = {"vendors": {"cloud": {"dialect": "opencode", "binary": "/opt/cli/opencode",
                                      "launch_spacing_s": 0}},

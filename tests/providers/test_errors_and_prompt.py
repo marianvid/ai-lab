@@ -3,7 +3,14 @@ import unittest
 from typing import Any
 
 from ai_lab.providers.errors import ErrorKind, classify
-from ai_lab.providers.prompt import JSON_ONLY, NO_TOOLS, completion, render
+from ai_lab.providers.prompt import (
+    JSON_ONLY,
+    NO_TOOLS,
+    completion,
+    render,
+    unfence,
+    wants_json,
+)
 
 
 class ClassifyTests(unittest.TestCase):
@@ -68,6 +75,32 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(answer["model"], "claude/sonnet")
         self.assertEqual(answer["choices"][0]["message"],
                          {"role": "assistant", "content": "Yes."})
+
+
+class UnfenceTests(unittest.TestCase):
+    def test_one_fenced_block_gives_its_inside(self):
+        cases = {
+            '```json\n{"answers": [1]}\n```': '{"answers": [1]}',
+            '```\n[1, 2]\n```': "[1, 2]",
+            '  ```JSON \n{"a": 1}\n\n```\n': '{"a": 1}',
+            '```json\n{"a": 1}```': '{"a": 1}',
+        }
+        for fenced, plain in cases.items():
+            with self.subTest(fenced=fenced):
+                self.assertEqual(unfence(fenced), plain)
+
+    def test_anything_else_is_left_as_it_is(self):
+        for text in ('{"a": 1}', 'Here it is:\n```json\n{"a": 1}\n```',
+                     '```json\n{"a": 1}\n```\nDone.', '```json\n{"a": "```"}\n```',
+                     "```json {}```"):
+            with self.subTest(text=text):
+                self.assertEqual(unfence(text), text)
+
+    def test_only_a_json_response_format_asks_for_json(self):
+        self.assertTrue(wants_json({"response_format": {"type": "json_object"}}))
+        self.assertTrue(wants_json({"response_format": {"type": "json_schema"}}))
+        self.assertFalse(wants_json({"response_format": {"type": "text"}}))
+        self.assertFalse(wants_json({}))
 
 
 if __name__ == "__main__":

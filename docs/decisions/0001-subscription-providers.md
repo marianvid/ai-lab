@@ -52,6 +52,11 @@ vendor will be refused too.
    the vendor's `default_effort` (`medium` for Claude Code on Linux). An
    effort a CLI lists as unknown is refused with 400 rather than sent on:
    Claude Code ignores one with only a warning and runs at another effort.
+9. When `response_format` asks for JSON and a model still answers with one
+   Markdown code block (```` ```json … ``` ````), the gateway returns only the
+   inside. Measured on 2026-10-11: a small model did it in 3 of 49 answers,
+   and a client expecting plain JSON could not read them. Any other answer is
+   passed on unchanged.
 
 ## Consequences
 

@@ -2,18 +2,40 @@
 
 A CLI takes one block of text. The conversation is written out with its roles,
 system instructions first; a request for JSON becomes an instruction, since a
-CLI has no `response_format`.
+CLI has no `response_format`. A model may still wrap the JSON in a Markdown
+code fence; `unfence` takes it off, so the caller gets plain JSON as the
+OpenAI shape promises.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 
 NO_TOOLS = "Do not use any tools. Answer directly."
 JSON_ONLY = "Answer with one JSON value only, no prose and no code fences."
 SYSTEM_ROLES = ("system", "developer")
+JSON_FORMATS = ("json_object", "json_schema")
+FENCE = "```"
+# The whole answer is one fenced block: an opening fence with an optional
+# language word, the body, a closing fence.
+FENCED = re.compile(r"\A```[\w-]*[ \t]*\n(?P<body>.*?)\n?```\Z", re.DOTALL)
+
+
+def wants_json(payload: dict) -> bool:
+    """Whether the request asked for a JSON answer through `response_format`."""
+    response_format = payload.get("response_format")
+    return isinstance(response_format, dict) and response_format.get("type") in JSON_FORMATS
+
+
+def unfence(text: str) -> str:
+    """The inside of an answer that is one Markdown code block; anything else as it is."""
+    match = FENCED.match(text.strip())
+    if not match or FENCE in match.group("body"):
+        return text
+    return match.group("body").strip()
 
 
 def render(payload: dict) -> str:

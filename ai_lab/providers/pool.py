@@ -79,7 +79,10 @@ class ProviderPool:
         vendor = self.config.vendors[model.vendor]
         effort = str(payload.get("reasoning_effort") or vendor.default_effort)
         _check_effort(model.name, vendor, effort)
-        return prompt.completion(model.name, self._answer(model, text, effort))
+        answer = self._answer(model, text, effort)
+        if prompt.wants_json(payload):
+            answer = prompt.unfence(answer)
+        return prompt.completion(model.name, answer)
 
     def _answer(self, model: ProviderModel, text: str, effort: str) -> str:
         vendor = self.config.vendors[model.vendor]
