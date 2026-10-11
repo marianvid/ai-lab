@@ -26,6 +26,9 @@ CODEX_ANSWER_FILE = "answer.txt"
 # Merged over opencode's own configuration for every call: every tool asks for
 # a permission, and every permission is refused, so the agent can only answer.
 OPENCODE_NO_TOOLS = json.dumps({"permission": {"*": "deny"}})
+# Claude Code updates itself in the background unless told not to; the
+# installed version is changed by hand, so every call runs the same binary.
+CLAUDE_NO_SELF_UPDATE = {"DISABLE_AUTOUPDATER": "1"}
 
 
 @dataclass(frozen=True)
@@ -72,7 +75,9 @@ class ClaudeCli:
         argv = [vendor.binary, "-p", "--model", model]
         if effort:
             argv += ["--effort", effort]
-        env = {"HOME": vendor.home} if vendor.home else {}
+        env = dict(CLAUDE_NO_SELF_UPDATE)
+        if vendor.home:
+            env["HOME"] = vendor.home
         return Invocation(argv=argv, prompt=prompt, env=env)
 
     def answer(self, stdout: str, workdir: Path) -> str:

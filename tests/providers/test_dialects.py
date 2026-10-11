@@ -1,4 +1,4 @@
-"""The two CLIs, run for real against small stand-in scripts."""
+"""The three CLIs, run for real against small stand-in scripts."""
 
 import os
 import stat
@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.providers.dialects import OPENCODE_NO_TOOLS, ClaudeCli, CodexCli, OpencodeCli, run
+from ai_lab.providers.dialects import (
+    CLAUDE_NO_SELF_UPDATE,
+    OPENCODE_NO_TOOLS,
+    ClaudeCli,
+    CodexCli,
+    OpencodeCli,
+    run,
+)
 from ai_lab.providers.settings import Vendor, VendorLimits
 
 FAKE_CLAUDE = """#!/bin/sh
@@ -98,9 +105,9 @@ class DialectTests(unittest.TestCase):
         outcome = run(ClaudeCli(), self.vendor(str(self.root / "absent")), "opus", "x")
         self.assertIn("cannot start the CLI", outcome.errors)
 
-    def test_no_home_leaves_the_environment_alone(self):
+    def test_no_home_sets_only_the_no_self_update_switch(self):
         call = ClaudeCli().invocation(self.vendor("/b"), "opus", "x", "", self.root)
-        self.assertEqual(call.env, {})
+        self.assertEqual(call.env, CLAUDE_NO_SELF_UPDATE)
         self.assertNotIn("--effort", call.argv)
         self.assertIn("HOME", os.environ)
 
