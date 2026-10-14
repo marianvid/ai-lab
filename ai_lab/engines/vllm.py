@@ -133,9 +133,10 @@ PARAMS = (
 )
 
 # vLLM's structured-outputs setting that forbids free whitespace in a forced
-# JSON answer. The backend stays vLLM's own choice (`auto`): both backends it
-# picks from, xgrammar and guidance, honour the switch.
-COMPACT_JSON = '{"disable_any_whitespace": true}'
+# JSON answer. The backend has to be named: vLLM 0.26 refuses to start with
+# the switch and its default backend `auto`, since only xgrammar and guidance
+# honour it. xgrammar is the one `auto` picks first anyway.
+COMPACT_JSON = '{"backend": "xgrammar", "disable_any_whitespace": true}'
 
 # Speech recognition has no text context window, tool parser or text-only
 # switch. Showing those settings on an ASR model suggests knobs that either do

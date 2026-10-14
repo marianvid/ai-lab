@@ -107,7 +107,7 @@ class PlanTests(unittest.TestCase):
 
     def test_forced_json_is_compact_by_default(self):
         self.assertEqual(json.loads(self.flag("--structured-outputs-config")),
-                         {"disable_any_whitespace": True})
+                         {"backend": "xgrammar", "disable_any_whitespace": True})
 
     def test_compact_json_can_be_switched_off_to_compare(self):
         self.assertNotIn("--structured-outputs-config",
