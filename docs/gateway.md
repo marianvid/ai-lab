@@ -69,6 +69,37 @@ must be exported in API format and stored below `images.workflow_root`.
 Music and speech have their own background jobs, described in
 [Media jobs](media-jobs.md).
 
+### Models that never touch the card
+
+Two kinds of model are served through the same address but never take a
+place on the card, never wait behind a model being loaded and never hold one
+up. Each has a queue of its own, and both appear in `GET /v1/models` beside
+the card's models:
+
+| Kind | Names | Path | Where it runs | Queue |
+|---|---|---|---|---|
+| Subscription models | `claude/sonnet`, `claude/opus`, `claude/haiku`, … (configured under `providers`) | `POST /v1/chat/completions` | the vendor's CLI (Claude Code, Codex, opencode), in the manager's machine, answered by the vendor | one per vendor: 6 calls at once by default, a shared pause after a rate limit |
+| Processor models | `bge-m3` (configured under `cpu_models`) | `POST /v1/embeddings` | `llama-server --embedding` on the processor, from RAM; the card is hidden from it | one per model: 4 requests at once by default |
+
+A subscription model answers text only, without streaming. A request that
+names no `reasoning_effort` runs at the vendor's `default_effort`; an effort
+the CLI does not know is refused. A JSON answer wrapped in a Markdown fence
+comes back plain. A spent allowance answers 429, a CLI that cannot answer
+502. Why and how: [ADR 0001](decisions/0001-subscription-providers.md),
+[ADR 0002](decisions/0002-opencode-provider.md).
+
+A processor model is started by its first request (a second or two, longer
+when its file is not cached) and stopped after `idle_stop_s` without use
+(30 minutes by default). `POST /api/cpu-models/{name}/start` and `/stop` do
+the same by hand. One text may have at most `context / parallel` tokens
+(2,048 by default). Short texts are fastest sent many in one call, one call
+at a time. Why and how, with measurements: [ADR 0003](decisions/0003-processor-models.md).
+
+`GET /api/gateway` shows both: `providers` (per vendor: places, any pause,
+today's requests and failures) and `cpu_models` (per model: running or not,
+in flight, waiting, requests, failures, seconds idle). How to write the
+requests is in [Writing a request](requests.md#models-that-never-touch-the-card).
+
 ![The gateway](screenshots/gateway.png)
 
 The rest of the page is what is happening now, and every figure on it says what

@@ -159,6 +159,40 @@ Music goes to `POST /v1/audio/music/generations`; its fields are in
 Both can take minutes. To get a job ID back at once instead of holding the
 connection open, use [Media jobs](media-jobs.md).
 
+### Models that never touch the card
+
+Subscription and processor models are asked for by name, like any other; the
+gateway sends them to their own lanes ([The Gateway](gateway.md#models-that-never-touch-the-card)).
+
+A **subscription model** takes an ordinary chat request. `reasoning_effort`
+picks how long it thinks (`low`, `medium`, `high`, `xhigh`, `max` for Claude
+Code); without it, the vendor's default applies:
+
+```sh
+curl http://localhost:8090/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "claude/sonnet", "reasoning_effort": "high",
+       "messages": [{"role": "user", "content": "Summarise this in one line: …"}]}'
+```
+
+No `stream`, no images, no tools. `response_format` with a JSON schema becomes
+an instruction to the model, and the answer comes back as plain JSON.
+
+A **processor model** makes embeddings: one vector per text, compared by
+cosine. Send many short texts in one call rather than several calls at once:
+
+```sh
+curl http://localhost:8090/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "bge-m3", "input": ["Heavy rain flooded Valencia.", "Ploile au inundat Valencia."]}'
+```
+
+The answer is the OpenAI shape, `{"data": [{"index": 0, "embedding": [...]}, ...]}`;
+read the order from `index`. The vectors are not normalised. A text longer
+than the model's limit (2,048 tokens by default) is refused with a 400 that
+says so. The first request after a quiet spell starts the model and takes a
+few seconds longer.
+
 ### The `ai_lab` field: asking for a model started a particular way
 
 Some settings go in a request — temperature, top-p, how many tokens to write.
