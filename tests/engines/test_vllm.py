@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from ai_lab.engines.vllm import VllmEngine
@@ -100,9 +101,17 @@ class PlanTests(unittest.TestCase):
         argv = self.engine.plan(model(task=Task.TRANSCRIPTION), 8082, {}).argv
         for flag in ("--max-model-len", "--language-model-only",
                      "--kv-cache-dtype", "--tool-call-parser",
-                     "--reasoning-parser"):
+                     "--reasoning-parser", "--structured-outputs-config"):
             self.assertNotIn(flag, argv)
         self.assertEqual(argv[argv.index("--max-num-seqs") + 1], "8")
+
+    def test_forced_json_is_compact_by_default(self):
+        self.assertEqual(json.loads(self.flag("--structured-outputs-config")),
+                         {"disable_any_whitespace": True})
+
+    def test_compact_json_can_be_switched_off_to_compare(self):
+        self.assertNotIn("--structured-outputs-config",
+                         self.argv({"compact_json": False}))
 
 
 class ParamTests(unittest.TestCase):

@@ -17,6 +17,7 @@ import socket
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
@@ -44,6 +45,19 @@ STATUS = {
     # The vendor's CLI could not answer: the caller's fallback should take over.
     ProviderUnavailableError: HTTPStatus.BAD_GATEWAY,
 }
+TIMEOUT_MESSAGE = "the engine did not answer within the gateway's time limit"
+
+
+def _timed_out(error: Exception) -> bool:
+    """A timeout, whether raised as it is or wrapped by urllib while connecting.
+
+    The engine did not answer within the gateway's limit: a 504, not the
+    client's fault. Answered as a 400 it made a client split a batch,
+    thinking one of its items had been refused.
+    """
+    reason = getattr(error, "reason", None)
+    return isinstance(error, TimeoutError) or (
+        isinstance(error, URLError) and isinstance(reason, TimeoutError))
 
 
 def _message(error: Exception) -> str:
@@ -59,6 +73,8 @@ def _message(error: Exception) -> str:
     if isinstance(error, KeyError) and len(error.args) == 1 \
             and isinstance(error.args[0], str):
         return error.args[0]
+    if _timed_out(error):
+        return TIMEOUT_MESSAGE
     return str(error) or error.__class__.__name__
 
 
@@ -71,10 +87,19 @@ def status_for(error: Exception) -> HTTPStatus:
     exact type it would leave as a bad request, which tells an agent the wrong
     thing about its own request.
     """
+    if _timed_out(error):
+        return HTTPStatus.GATEWAY_TIMEOUT
     for kind, status in STATUS.items():
         if isinstance(error, kind):
             return status
     return HTTPStatus.BAD_REQUEST
+
+
+def error_kind(error: Exception) -> str:
+    """The OpenAI error `type`: what the error says it is, else a timeout or a bad request."""
+    if _timed_out(error):
+        return "timeout_error"
+    return getattr(error, "kind", "invalid_request_error")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -190,7 +215,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/v1/"):
             payload["error"] = {
                 "message": _message(error),
-                "type": getattr(error, "kind", "invalid_request_error"),
+                "type": error_kind(error),
                 "code": getattr(error, "code", None),
             }
         self._json(payload, status)

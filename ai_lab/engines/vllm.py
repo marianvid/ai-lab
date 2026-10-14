@@ -121,7 +121,21 @@ PARAMS = (
                    "gemma4 for Gemma-4. It does not switch thinking on or off; "
                    "a request does that with "
                    "chat_template_kwargs.enable_thinking."),
+    ParamSpec("compact_json", "Compact forced JSON", "bool", True,
+              group="memory",
+              help="When a request forces a JSON answer (response_format), "
+                   "allow no free whitespace inside it. vLLM's default grammar "
+                   "lets a model write any amount of space between JSON "
+                   "tokens. Measured here on Qwen3.6-35B-A3B: it sometimes "
+                   "opened the JSON and then wrote only blank lines until the "
+                   "request timed out (2 of 3 Japanese articles). Compact JSON "
+                   "leaves nothing to loop on. Off only to compare."),
 )
+
+# vLLM's structured-outputs setting that forbids free whitespace in a forced
+# JSON answer. The backend stays vLLM's own choice (`auto`): both backends it
+# picks from, xgrammar and guidance, honour the switch.
+COMPACT_JSON = '{"disable_any_whitespace": true}'
 
 # Speech recognition has no text context window, tool parser or text-only
 # switch. Showing those settings on an ASR model suggests knobs that either do
@@ -145,7 +159,33 @@ FORMATS = frozenset({Format.SAFETENSORS, Format.FP8, Format.NVFP4,
                      Format.AWQ, Format.GPTQ})
 
 
+def _text_flags(settings: dict) -> list[str]:
+    """The command-line flags only a text model takes."""
+    flags = ["--max-model-len", str(settings["context_size"])]
+    if settings["language_model_only"]:
+        flags.append("--language-model-only")
+    # `auto` is vLLM's own default, so saying it changes nothing and leaving
+    # the flag off keeps the command line to what was chosen.
+    if settings["kv_cache_dtype"] != "auto":
+        flags += ["--kv-cache-dtype", settings["kv_cache_dtype"]]
+    if settings["prefix_caching"]:
+        flags.append("--enable-prefix-caching")
+    # The two flags go together. vLLM refuses "auto" tool choice unless it has
+    # both, so one setting sets both and there is no way to configure half of
+    # it.
+    if settings["tool_parser"]:
+        flags += ["--enable-auto-tool-choice",
+                  "--tool-call-parser", settings["tool_parser"]]
+    if settings["reasoning_parser"]:
+        flags += ["--reasoning-parser", settings["reasoning_parser"]]
+    if settings["compact_json"]:
+        flags += ["--structured-outputs-config", COMPACT_JSON]
+    return flags
+
+
 class VllmEngine:
+    """vLLM as an AI-Lab engine: text and speech models, many requests at once."""
+
     id = "vllm"
     display_name = "vLLM"
 
@@ -156,15 +196,19 @@ class VllmEngine:
         self.binary = binary or which("vllm") or "vllm"
 
     def formats(self) -> frozenset[Format]:
+        """The model formats vLLM reads."""
         return FORMATS
 
     def tasks(self) -> frozenset[Task]:
+        """Text generation and speech recognition."""
         return frozenset({Task.TEXT_GENERATION, Task.TRANSCRIPTION})
 
     def params(self, task: Task = Task.TEXT_GENERATION) -> tuple[ParamSpec, ...]:
+        """The settings a model of this task offers."""
         return TRANSCRIPTION_PARAMS if task is Task.TRANSCRIPTION else PARAMS
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
+        """The `vllm serve` command for this model, port and settings."""
         if model.format not in FORMATS:
             raise ValueError(f"vLLM cannot load {model.format.value} models")
         if model.task not in self.tasks():
@@ -181,30 +225,14 @@ class VllmEngine:
             "--max-num-seqs", str(settings["max_sequences"]),
         ]
         if model.task is Task.TEXT_GENERATION:
-            argv += ["--max-model-len", str(settings["context_size"])]
-        if model.task is Task.TEXT_GENERATION:
-            if settings["language_model_only"]:
-                argv.append("--language-model-only")
-            # `auto` is vLLM's own default, so saying it changes nothing and
-            # leaving the flag off keeps the command line to what was chosen.
-            if settings["kv_cache_dtype"] != "auto":
-                argv += ["--kv-cache-dtype", settings["kv_cache_dtype"]]
-            if settings["prefix_caching"]:
-                argv.append("--enable-prefix-caching")
+            argv += _text_flags(settings)
         if settings["enforce_eager"]:
             argv.append("--enforce-eager")
-        # The two flags go together. vLLM refuses "auto" tool choice unless it
-        # has both, so one setting sets both and there is no way to configure
-        # half of it.
-        if model.task is Task.TEXT_GENERATION and settings["tool_parser"]:
-            argv += ["--enable-auto-tool-choice",
-                     "--tool-call-parser", settings["tool_parser"]]
-        if model.task is Task.TEXT_GENERATION and settings["reasoning_parser"]:
-            argv += ["--reasoning-parser", settings["reasoning_parser"]]
         # No chat page: vLLM serves an API and nothing a person can open.
         return LaunchPlan(argv=argv, env={}, health_path="/health", web_ui=False)
 
     def ready(self, port: int) -> bool:
+        """Whether the server answers its health check."""
         return http_ok(port, "/health")
 
     def withholds(self, params: dict) -> frozenset[str]:
