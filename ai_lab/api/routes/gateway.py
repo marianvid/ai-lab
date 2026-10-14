@@ -13,11 +13,13 @@ path the client never chose.
 This file decides nothing about models. It reads the name out of the body, asks
 `Gateway` for a lease, and forwards the request to whichever port that lease
 points at. A name that belongs to a subscription model (Claude Code, Codex)
-goes to `ProviderPool` instead: those use no card, so they never take a lease.
+goes to `ProviderPool` instead, and a processor model (embeddings) to
+`CpuLane`: those use no card, so they never take a lease.
 """
 
 from __future__ import annotations
 
+from ...cpu_models import EMBEDDINGS_PATH
 from ...engines.base import (
     ALIGNMENT_PATHS,
     ANTHROPIC_PATHS,
@@ -30,8 +32,8 @@ from ...engines.base import (
     VAD_PATHS,
 )
 from ...gateway import Gateway
+from ...lanes import SideLanes
 from ...network import LOOPBACK
-from ...providers import ProviderPool
 from ...types import Task
 from ..multipart import MultipartBody
 from ..passthrough import forward
@@ -43,7 +45,9 @@ from ..uploads import UploadRejected, validate_image
 FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
                                 + TRANSCRIPTION_PATHS + VAD_PATHS
                                 + DIARIZATION_PATHS + OCR_PATHS + MUSIC_PATHS
-                                + SPEECH_PATHS + ALIGNMENT_PATHS))
+                                + SPEECH_PATHS + ALIGNMENT_PATHS
+                                + (EMBEDDINGS_PATH,)))
+NO_LANES = SideLanes()
 
 # Which task a request path belongs to, for per-task timeouts (see
 # `Gateway.timeouts_for`) and for which uploads get image validation. Paths
@@ -66,51 +70,54 @@ _TASK_OF_PATH = {
 _IMAGE_UPLOAD_PATHS = frozenset(OCR_PATHS)
 
 
-def register(router, operations, gateway: Gateway,
-             providers: ProviderPool | None = None) -> None:
+def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) -> None:
     """The model routes, the catalogue, and the front door's own settings."""
-    router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, providers))
+    router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, lanes))
     router.add("GET", "/v1/models/{model}",
-               lambda model, **_: _describe(gateway, providers, model))
-    router.add("GET", "/api/gateway", lambda **_: _stats(gateway, providers))
+               lambda model, **_: _describe(gateway, lanes, model))
+    router.add("GET", "/api/gateway", lambda **_: _stats(gateway, lanes))
 
     def settings(body=None, **_):
         """Change the front door's own limits, and use them at once."""
         saved = operations.update_gateway(body or {})
         gateway.apply_settings(saved)
-        return _stats(gateway, providers)
+        return _stats(gateway, lanes)
 
     router.add("PATCH", "/api/gateway", settings)
     for path in FORWARDED:
-        router.add("POST", path, _forwarder(gateway, path, providers))
+        router.add("POST", path, _forwarder(gateway, path, lanes))
+    if lanes.cpu is not None:
+        cpu = lanes.cpu
+        router.add("POST", "/api/cpu-models/{name}/start",
+                   lambda name, **_: cpu.start(name))
+        router.add("POST", "/api/cpu-models/{name}/stop",
+                   lambda name, **_: cpu.stop(name))
 
 
-def _stats(gateway: Gateway, providers: ProviderPool | None) -> dict:
-    """The card's queue, and each subscription vendor's places and usage."""
+def _stats(gateway: Gateway, lanes: SideLanes) -> dict:
+    """The card's queue, each subscription vendor's, and each processor model's."""
     stats = gateway.stats()
-    if providers is not None:
-        stats["providers"] = providers.stats()
+    if lanes.providers is not None:
+        stats["providers"] = lanes.providers.stats()
+    if lanes.cpu is not None:
+        stats["cpu_models"] = lanes.cpu.stats()
     return stats
 
 
-def _catalogue(gateway: Gateway, providers: ProviderPool | None) -> dict:
+def _catalogue(gateway: Gateway, lanes: SideLanes) -> dict:
     """Every configured model, in the shape an OpenAI client expects.
 
     Models that are not loaded are listed too. That is the point: a client is
-    supposed to be able to ask for one of them. Subscription models follow
-    the local ones.
+    supposed to be able to ask for one of them. Subscription and processor
+    models follow the card's.
     """
-    rows = [_one_model(row) for row in gateway.catalogue()]
-    if providers is not None:
-        rows += providers.catalogue()
+    rows = [_one_model(row) for row in gateway.catalogue()] + lanes.catalogue()
     return {"object": "list", "data": rows}
 
 
-def _describe(gateway: Gateway, providers: ProviderPool | None, name: str) -> dict:
-    """One model, local or subscription, with its details."""
-    if providers is not None and providers.serves(name):
-        return next(row for row in providers.catalogue() if row["id"] == name)
-    return _one_model(gateway.describe(name), detailed=True)
+def _describe(gateway: Gateway, lanes: SideLanes, name: str) -> dict:
+    """One model, on the card, by subscription or on the processor, with its details."""
+    return lanes.describe(name) or _one_model(gateway.describe(name), detailed=True)
 
 
 # Extra details only `GET /v1/models/{model}` carries: too long for a listing.
@@ -140,15 +147,14 @@ def _one_model(row: dict, detailed: bool = False) -> dict:
 SETTINGS_FIELD = "ai_lab"
 
 
-def _forwarder(gateway: Gateway, path: str, providers: ProviderPool | None = None):
+def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
     """The handler for one forwarded path."""
     def handle(body=None, alive=None, **_):
         payload = body or {}
         wanted = _model_name(payload)
-        if providers is not None and providers.serves(wanted):
-            if isinstance(payload, MultipartBody):
-                raise ValueError("subscription models take a JSON chat request")
-            return providers.complete(path, payload)
+        side = _side_lane(lanes, path, payload, wanted)
+        if side is not None:
+            return side
         _check_upload(gateway, path, payload)
         # The lease is held until the last byte of the answer has been read, so
         # a swap cannot pull the model out from under a stream in progress.
@@ -164,6 +170,17 @@ def _forwarder(gateway: Gateway, path: str, providers: ProviderPool | None = Non
             lease.release()
             raise
     return handle
+
+
+def _side_lane(lanes: SideLanes, path: str, payload, wanted: str) -> dict | None:
+    """The answer from a lane beside the card, or None when the card serves this name."""
+    for lane, method, what in ((lanes.providers, "complete", "subscription"),
+                               (lanes.cpu, "embed", "processor")):
+        if lane is not None and lane.serves(wanted):
+            if isinstance(payload, MultipartBody):
+                raise ValueError(f"{what} models take a JSON request")
+            return getattr(lane, method)(path, payload)
+    return None
 
 
 def _model_name(payload) -> str:

@@ -242,11 +242,24 @@ def _check_placement(report: _Report, item) -> None:
 
 
 def _check_policies(report: _Report) -> None:
-    for policy_name in ("gateway_policy", "media_policy", "provider_policy"):
+    for policy_name in ("gateway_policy", "media_policy", "provider_policy",
+                        "cpu_model_policy"):
         try:
             getattr(report.config, policy_name)
         except ValueError as error:
             report.add(str(error))
+
+
+def _check_cpu_model_ports(report: _Report) -> None:
+    """A processor model must not take a port the manager or an instance has."""
+    try:
+        models = report.config.cpu_model_policy.models.values()
+    except ValueError:
+        return  # already reported by `_check_policies`
+    for model in models:
+        if model.port in report.ports:
+            report.add(f"cpu model {model.name}: port {model.port} is already assigned")
+        report.ports.add(model.port)
 
 
 def _check_image_profiles(report: _Report) -> None:
@@ -288,7 +301,8 @@ def _check_profile_workflow(report: _Report, profile_id: str, workflow: str,
 
 
 CHAIN = (_check_roots, _check_repositories, _check_manager_port,
-         _check_instances, _check_policies, _check_image_profiles)
+         _check_instances, _check_policies, _check_cpu_model_ports,
+         _check_image_profiles)
 
 
 def validate_configuration(config: Config, engine_ids: set[str],

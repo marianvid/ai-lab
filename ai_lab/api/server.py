@@ -22,15 +22,17 @@ from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
 from ..gateway import CardBusy
+from ..lanes import SideLanes
 from ..multipart import MultipartBody
 from ..operations import Operations
-from ..providers import ProviderPool, ProviderRateLimitError, ProviderUnavailableError
+from ..providers import ProviderRateLimitError, ProviderUnavailableError
 from . import sse
 from .passthrough import Passthrough
 from .router import Router
 from .routes import register_all
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
+NO_LANES = SideLanes()
 
 # Which exception means which status. Everything else is a bad request, since
 # the alternative — a 500 with a stack trace — tells the user nothing.
@@ -287,10 +289,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def build_router(operations: Operations, model_gateway=None,
-                 providers: ProviderPool | None = None) -> Router:
-    """Every API route, bound to the operations, the gateway and the providers."""
+                 lanes: SideLanes = NO_LANES) -> Router:
+    """Every API route, bound to the operations, the gateway and the side lanes."""
     router = Router()
-    register_all(router, operations, model_gateway, providers)
+    register_all(router, operations, model_gateway, lanes)
     return router
 
 
@@ -309,8 +311,8 @@ class GatewayServer(ThreadingHTTPServer):
 
 
 def serve(operations: Operations, bus: EventBus, address: tuple[str, int],
-          model_gateway=None, providers: ProviderPool | None = None) -> None:
+          model_gateway=None, lanes: SideLanes = NO_LANES) -> None:
     """Listen on `address` (host, port) and answer until the process stops."""
-    router = build_router(operations, model_gateway, providers)
+    router = build_router(operations, model_gateway, lanes)
     handler = type("ConfiguredHandler", (Handler,), {"router": router, "bus": bus})
     GatewayServer(address, handler).serve_forever()

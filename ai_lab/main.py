@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 
 from .api.server import serve
+from .cpu_models import CpuLane
+from .lanes import SideLanes
 from .providers import ProviderPool
 from .wiring import build
 
@@ -34,19 +36,25 @@ def main() -> None:
     config = store.load()
     host = arguments.host or config.host
     port = arguments.port or config.port
-    # Subscription models (Claude Code, Codex): a lane of their own beside
-    # the card, counting their usage where the host keeps its state.
-    providers = ProviderPool.from_config(config.providers, operations.host.state_dir())
+    # Two lanes of their own beside the card: subscription models (Claude
+    # Code, Codex, opencode), counting their usage where the host keeps its
+    # state, and processor models (embeddings), logging there too.
+    state_dir = operations.host.state_dir()
+    lanes = SideLanes(providers=ProviderPool.from_config(config.providers, state_dir),
+                      cpu=CpuLane.from_config(config.cpu_models, state_dir))
+    if lanes.cpu is not None and lanes.cpu.servers:
+        lanes.cpu.start_reaper()
 
-    _install_shutdown(operations)
+    _install_shutdown(operations, lanes)
 
     operations.recover_moves()
     _restore_last_model(operations)
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
-        serve(operations, bus, (host, port), model_gateway, providers)
+        serve(operations, bus, (host, port), model_gateway, lanes)
     finally:
+        lanes.stop_all()
         operations.host.stop_all()
 
 
@@ -65,15 +73,17 @@ def _restore_last_model(operations) -> None:
     thread.start()
 
 
-def _install_shutdown(operations) -> None:
-    """Stop the engines when we are asked to quit.
+def _install_shutdown(operations, lanes: SideLanes) -> None:
+    """Stop the engines and the processor models when we are asked to quit.
 
     Python does not run its exit handlers on SIGTERM, so a plain `kill` would
     otherwise leave engines running and holding their ports. The next manager
     would then find a stranger answering its health probe. Where systemd owns
-    the engines this is a no-op, because there they are meant to survive.
+    the engines this is a no-op, because there they are meant to survive. The
+    processor models are the manager's own children and always stop with it.
     """
     def shutdown(_signal, _frame):
+        lanes.stop_all()
         operations.host.stop_all()
         sys.exit(0)
 
