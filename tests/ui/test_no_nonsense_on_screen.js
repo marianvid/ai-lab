@@ -44,7 +44,7 @@ const EMPTY = {
   '/api/hf/sets': [],
 };
 
-const VIEWS = ['runtime', 'library', 'settings', 'gateway', 'storage'];
+const VIEWS = ['runtime', 'library', 'settings', 'gateway', 'lanes', 'storage'];
 
 describe('words that are never an answer', () => {
   let dom;

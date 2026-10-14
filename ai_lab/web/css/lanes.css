@@ -1,0 +1,12 @@
+/* The Cloud & CPU page: models that never touch the card. One panel per
+   vendor or processor model, two to a row; the explanation and the address
+   across the top. The panels themselves use the shared .section and .card. */
+.lanes {
+  display: grid; gap: 0 1.5rem;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+.lanes > p { grid-column: 1 / -1; }
+@media (max-width: 60rem) {
+  .lanes { grid-template-columns: 1fr; }
+}

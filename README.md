@@ -29,6 +29,11 @@ memory allows, so the common case costs nothing: measured here, two models
 served together answered in 0.04 and 0.08 seconds where alternating between
 them used to cost a 3-second and a 7-second load.
 
+The same address also serves models that never use the card: subscription
+models answered in the cloud through their vendors' command line programs, and
+small models run on the processor, such as embeddings. They have queues of
+their own and never wait for the card — see [Cloud & CPU](docs/cloud-cpu.md).
+
 **One thing is not standard and cannot be.** Some settings decide how a model
 *process* starts — how much context it will hold, how much of the card it may
 claim — and no chat API has a field for them. They travel in an `ai_lab` object
@@ -64,6 +69,7 @@ before it says how it works.
 | [Models](docs/models.md) | One row per configured model: what it runs, what it can do, whether it is loaded and how long the last load took. Where models are started, stopped, set up and opened in their own interface. |
 | [Library](docs/library.md) | What is on disk, per weight format, in production or benchmark storage, and a search of Hugging Face to download more. |
 | [Gateway](docs/gateway.md) | The address an agent talks to. What is loaded, what is queued, and **the rules by which models are loaded and unloaded** — the part nobody can guess. |
+| [Cloud & CPU](docs/cloud-cpu.md) | Models that never touch the card: subscription models answered in the cloud (Claude Code, Codex, opencode) and models run on the processor (embeddings). Each with its own queue. |
 | [Storage](docs/storage.md) | Cache, incomplete files and inactive engine versions whose space can be reclaimed. Model deletion stays in Library. |
 | [Settings](docs/settings.md) | What this machine is, how much of its memory models may use, engine updates, and where the two model stores live. |
 

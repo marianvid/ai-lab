@@ -97,6 +97,9 @@ there is exactly one place to look.
 | `gateway.py` | One address for an agent: which entry serves a name, and putting that model on the card | HTTP of any kind — forwarding is the web layer's job |
 | `gateway_state.py`, `gateway_control.py`, `gateway_resources.py`, `gateway_stats.py`, `gateway_errors.py` | The gateway's parts: a held place and a model-plus-settings shape; the guard for the page's buttons; memory readings and waiting for the card to empty; the read-only report the Gateway page shows; the refusals the web layer turns into HTTP answers | HTTP |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
+| `providers/` | Subscription models answered through their vendors' CLIs: one queue per vendor, errors read from the CLI's words, usage per day | The card, its leases or its scheduler |
+| `cpu_models/` | Models run on the processor (embeddings): their `llama-server` processes, started on demand and stopped when idle, and one queue per model | The card, its leases or its scheduler |
+| `lanes.py` | `SideLanes`: the two lanes beside the card, bundled so the front door is handed one object | Decisions — it only holds and lists them |
 | `lastloaded.py` | One record on disk: which models were loaded, in order, and how each was started | Deciding anything — it remembers and is read |
 | `api/` | HTTP routing (`server.py`, `router.py`, one file per group of URLs in `routes/`), JSON bodies, the event stream (`sse.py`), forwarding to an engine (`passthrough.py`). `multipart.py` and `uploads.py` here only pass through the shared files of the same name | Any decision about models, engines or formats |
 | `web/` | The browser interface. One file per page under `web/js/views/`, split further where a page grew large | — |
@@ -365,6 +368,42 @@ request ──▶ routes/gateway.py ──┬─▶ ProviderPool ──▶ Vendo
   shape. No streaming, text only.
 - `usage.py` — requests and failures per vendor per day, shown under
   `providers` in `GET /api/gateway`.
+
+### Why `cpu_models/` exists
+
+Some models are small enough to run on the processor, from RAM, and are
+needed beside whatever is on the card: embeddings, which turn a text into a
+vector to compare with others. Putting them on the card would cost a place and
+a load for a model that needs neither. They run as `llama-server --embedding`
+with the card hidden from it (`CUDA_VISIBLE_DEVICES` empty, no layer offloaded)
+and are served on `POST /v1/embeddings`. Decision and measurements:
+`docs/decisions/0003-processor-models.md`.
+
+Like the providers, they are a lane beside the scheduler, with a queue of
+their own per model. The front door asks the lanes first, through
+`SideLanes`, and only a name neither serves goes to `Gateway` for a lease:
+
+```
+request ──▶ routes/gateway.py ──┬─▶ ProviderPool ──▶ CLI process (cloud)
+                                ├─▶ CpuLane ──▶ queue per model ──▶ llama-server (processor)
+                                └─▶ Gateway (lease) ──▶ engine on the card
+```
+
+- `settings.py` — the `cpu_models` section: the `llama-server` binary, and per
+  model its file, pooling, port, places, threads, context and idle limit.
+  Checked at start-up; a port already used by an instance is refused.
+- `server.py` — `CpuServer`: one model's process. Started by the first request
+  and waited for until `/health` answers; stopped after `idle_stop_s` unused,
+  by hand, or with the manager. The manager runs it as its own child: it holds
+  no card memory and starts in seconds, so systemd adds nothing.
+- `lane.py` — `CpuLane`: the queue per model (a bounded semaphore of
+  `parallel` places), the call to the model's server, the counts shown under
+  `cpu_models` in `GET /api/gateway`, `POST /api/cpu-models/{name}/start|stop`,
+  and the background check that stops idle models.
+
+Both lanes have a page of their own in the interface, **Cloud & CPU**
+(`web/js/views/lanes.js`), apart from the Gateway page, whose figures are all
+about the card.
 
 ### Why `naming.py` exists
 

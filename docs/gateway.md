@@ -97,8 +97,10 @@ at a time. Why and how, with measurements: [ADR 0003](decisions/0003-processor-m
 
 `GET /api/gateway` shows both: `providers` (per vendor: places, any pause,
 today's requests and failures) and `cpu_models` (per model: running or not,
-in flight, waiting, requests, failures, seconds idle). How to write the
-requests is in [Writing a request](requests.md#models-that-never-touch-the-card).
+in flight, waiting, requests, failures, seconds idle). The interface shows
+them on a page of their own, [Cloud & CPU](cloud-cpu.md), not on this one.
+How to write the requests is in
+[Writing a request](requests.md#models-that-never-touch-the-card).
 
 ![The gateway](screenshots/gateway.png)
 

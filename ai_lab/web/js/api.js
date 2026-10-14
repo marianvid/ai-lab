@@ -71,6 +71,11 @@ export const api = {
             force ? { ...changes, force: true } : changes),
   gateway: () => request('GET', '/api/gateway'),
   updateGateway: (changes) => request('PATCH', '/api/gateway', changes),
+  // Processor models start on their own and stop when idle; these do it now.
+  startCpuModel: (name) =>
+    request('POST', `/api/cpu-models/${encodeURIComponent(name)}/start`),
+  stopCpuModel: (name) =>
+    request('POST', `/api/cpu-models/${encodeURIComponent(name)}/stop`),
   logs: (id) => request('GET', `/api/instances/${encodeURIComponent(id)}/logs`),
   update: (id, changes) =>
     request('PATCH', `/api/instances/${encodeURIComponent(id)}`, changes),

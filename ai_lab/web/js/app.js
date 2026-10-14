@@ -14,6 +14,8 @@ import { render as renderLibrary } from './views/library.js';
 import { render as renderRuntime } from './views/runtime.js';
 import { render as renderGateway,
          stopRefreshing as stopGatewayRefreshing } from './views/gateway.js';
+import { render as renderLanes,
+         stopRefreshing as stopLanesRefreshing } from './views/lanes.js';
 import { render as renderStorage } from './views/storage.js';
 
 // "Models" is the list you run; "Library" is what is on disk. They were both
@@ -35,6 +37,11 @@ const VIEWS = [
   // itself fresh on a timer of its own rather than waiting to be told.
   { id: 'gateway', label: 'Gateway', render: renderGateway,
     leave: stopGatewayRefreshing, topics: ['instances'] },
+  // Models that never touch the card — subscriptions and processor models —
+  // on a page of their own, since nothing about the card's queue applies to
+  // them. Refreshed on a timer for the same reason as the Gateway page.
+  { id: 'lanes', label: 'Cloud & CPU', render: renderLanes,
+    leave: stopLanesRefreshing, topics: [] },
   { id: 'storage', label: 'Storage', render: renderStorage,
     topics: ['storage', 'engines'] },
   { id: 'settings', label: 'Settings', render: renderSettings,
