@@ -25,7 +25,10 @@ DEFAULT_PARALLEL = 4
 DEFAULT_THREADS = 12
 # Long enough for one run of a client, short enough not to hold RAM all day.
 DEFAULT_IDLE_STOP_S = 1800.0
-# Longest text one request may embed, in tokens; bge-m3 reads up to 8192.
+# Tokens shared by the `parallel` places: each text may have context / parallel
+# tokens (2048 with the defaults). Measured with bge-m3: 4 × 8192 holds
+# 8.5 GB of RAM and takes 13 s for one text of 2,800 tokens; 8192 holds about
+# 2.6 GB, and sentences, titles and leads never come near 2048.
 DEFAULT_CONTEXT = 8192
 MIN_PORT, MAX_PORT = 1024, 65535
 
