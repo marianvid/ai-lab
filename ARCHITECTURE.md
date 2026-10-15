@@ -98,7 +98,8 @@ there is exactly one place to look.
 | `gateway_state.py`, `gateway_control.py`, `gateway_resources.py`, `gateway_stats.py`, `gateway_errors.py` | The gateway's parts: a held place and a model-plus-settings shape; the guard for the page's buttons; memory readings and waiting for the card to empty; the read-only report the Gateway page shows; the refusals the web layer turns into HTTP answers | HTTP |
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
 | `providers/` | Subscription models answered through their vendors' CLIs: one queue per vendor, errors read from the CLI's words, usage per day | The card, its leases or its scheduler |
-| `cpu_models/` | Models run on the processor (embeddings): their `llama-server` processes, started on demand and stopped when idle, and one queue per model | The card, its leases or its scheduler |
+| `cpu_models/` | Embeddings models: their `llama-server` processes (processor, or the card while it has room), started on demand and stopped when idle, and one queue per model | The card's leases or its scheduler |
+| `card_sharing.py` | `CardNeighbours`: what a card load asks of whoever borrows the card (step aside, it is over, how much you hold) | Who the neighbour is |
 | `lanes.py` | `SideLanes`: the two lanes beside the card, bundled so the front door is handed one object | Decisions — it only holds and lists them |
 | `lastloaded.py` | One record on disk: which models were loaded, in order, and how each was started | Deciding anything — it remembers and is read |
 | `api/` | HTTP routing (`server.py`, `router.py`, one file per group of URLs in `routes/`), JSON bodies, the event stream (`sse.py`), forwarding to an engine (`passthrough.py`). `multipart.py` and `uploads.py` here only pass through the shared files of the same name | Any decision about models, engines or formats |
@@ -385,17 +386,24 @@ their own per model. The front door asks the lanes first, through
 
 ```
 request ──▶ routes/gateway.py ──┬─▶ ProviderPool ──▶ CLI process (cloud)
-                                ├─▶ CpuLane ──▶ queue per model ──▶ llama-server (processor)
+                                ├─▶ CpuLane ──▶ queue per model ──▶ llama-server (card if room, else processor)
                                 └─▶ Gateway (lease) ──▶ engine on the card
 ```
 
 - `settings.py` — the `cpu_models` section: the `llama-server` binary, and per
   model its file, pooling, port, places, threads, context and idle limit.
   Checked at start-up; a port already used by an instance is refused.
-- `server.py` — `CpuServer`: one model's process. Started by the first request
+- `server.py` — `CpuServer`: one model's process on one device. Started by the first request
   and waited for until `/health` answers; stopped after `idle_stop_s` unused,
   by hand, or with the manager. The manager runs it as its own child: it holds
   no card memory and starts in seconds, so systemd adds nothing.
+- `placement.py` — `Placement`: card or processor for each request. The card
+  when it has room, the processor otherwise; steps off the card before any
+  card model loads and comes back after (`docs/decisions/0004-embeddings-borrow-the-card.md`).
+  `GatewayResources._wait_until_quiet` and `InstanceService.load` (wrapped by
+  `card_sharing.guard_loads` at start-up) call it
+  through `card_sharing.CardNeighbours`, so the gateway, the Load button and
+  the restore all follow the same rule; `main.py` connects them.
 - `lane.py` — `CpuLane`: the queue per model (a bounded semaphore of
   `parallel` places), the call to the model's server, the counts shown under
   `cpu_models` in `GET /api/gateway`, `POST /api/cpu-models/{name}/start|stop`,

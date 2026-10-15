@@ -9,16 +9,23 @@ from pathlib import Path
 from typing import Any, cast
 
 from ai_lab.cpu_models import EMBEDDINGS_PATH, CpuLane, CpuModelsConfig
-from ai_lab.cpu_models.lane import _post
+from ai_lab.cpu_models.lane import LaneTools, _post
 
 RAW = {"binary": "/bin/llama-server",
        "models": {"bge-m3": {"path": "/m/bge.gguf", "port": 8390, "parallel": 2}}}
 REQUEST = {"model": "bge-m3", "input": ["a text"]}
 
 
+SHARED = {"binary": "/bin/llama-server",
+          "models": {"bge-m3": {"path": "/m/bge.gguf", "port": 8390, "parallel": 2,
+                                "card": {"port": 8391, "needs_mb": 1300}}}}
+
+
 class FakeServer:
-    def __init__(self, binary, model, log_dir):
+    def __init__(self, binary, model, log_dir, device):
         self.model = model
+        self.device = device
+        self.port = model.card.port if device == "card" else model.port
         self.running = False
         self.last_used = 0.0
         self.starts = self.stops = 0
@@ -45,9 +52,13 @@ class FakeServer:
 class CpuLaneTests(unittest.TestCase):
     def setUp(self):
         self.posted = []
-        self.lane = CpuLane(CpuModelsConfig.from_mapping(RAW), Path(tempfile.mkdtemp()),
-                            poster=self.post, server_factory=cast(Any, FakeServer),
-                            clock=lambda: 10.0)
+        self.free = None
+        self.lane = self.make(RAW)
+
+    def make(self, raw):
+        tools = LaneTools(poster=self.post, server_factory=cast(Any, FakeServer),
+                          card_free_mb=lambda: self.free, clock=lambda: 10.0)
+        return CpuLane(CpuModelsConfig.from_mapping(raw), Path(tempfile.mkdtemp()), tools)
 
     def post(self, port, payload):
         self.posted.append((port, payload))
@@ -56,10 +67,11 @@ class CpuLaneTests(unittest.TestCase):
     def test_a_request_starts_the_model_and_gets_its_answer(self):
         answer = self.lane.embed(EMBEDDINGS_PATH, REQUEST)
         self.assertEqual(answer["model"], "bge-m3")
+        self.assertEqual(answer["ai_lab"], {"device": "cpu"})
         self.assertEqual(self.posted, [(8390, REQUEST)])
         stats = self.lane.stats()["bge-m3"]
         self.assertEqual((stats["running"], stats["requests"], stats["in_flight"]), (True, 1, 0))
-        self.assertEqual((stats["places"], stats["idle_s"]), (2, 5.0))
+        self.assertEqual((stats["places"], stats["idle_s"]), (2, 0.0))
 
     def test_only_embeddings(self):
         with self.assertRaisesRegex(ValueError, "only /v1/embeddings"):
@@ -96,7 +108,7 @@ class CpuLaneTests(unittest.TestCase):
 
     def test_start_stop_by_hand_and_idle_reaping(self):
         self.assertTrue(self.lane.start("bge-m3")["running"])
-        self.assertEqual(self.lane.reap_idle(), ["bge-m3"])
+        self.assertEqual(self.lane.reap_idle(), ["bge-m3/cpu"])
         self.lane.start("bge-m3")
         self.assertFalse(self.lane.stop("bge-m3")["running"])
         with self.assertRaises(KeyError):
@@ -117,7 +129,27 @@ class CpuLaneTests(unittest.TestCase):
 
     def test_built_from_configuration(self):
         lane = CpuLane.from_config(RAW, Path(tempfile.mkdtemp()))
-        self.assertEqual(list(lane.servers), ["bge-m3"])
+        self.assertEqual(list(lane.placements), ["bge-m3"])
+        self.assertEqual(lane.reclaimable_mb(), 0.0)
+
+    def test_with_room_on_the_card_it_answers_there_and_gives_it_back(self):
+        self.free = 4000.0
+        lane = self.make(SHARED)
+        answer = lane.embed(EMBEDDINGS_PATH, REQUEST)
+        self.assertEqual((answer["ai_lab"]["device"], self.posted[-1][0]), ("card", 8391))
+        stats = lane.stats()["bge-m3"]
+        self.assertEqual((stats["device"], stats["card"], stats["card_port"],
+                          stats["card_in_flight"]), ("card", True, 8391, 0))
+        self.assertEqual(lane.reclaimable_mb(), 1300.0)
+        lane.make_way()
+        self.assertEqual(lane.reclaimable_mb(), 0.0)
+        self.assertEqual(lane.embed(EMBEDDINGS_PATH, REQUEST)["ai_lab"]["device"], "cpu")
+        lane.settled()          # back to the card, in the background
+        for _ in range(200):
+            if lane.catalogue()[0]["ai_lab"]["device"] == "card":
+                break
+            threading.Event().wait(0.01)
+        self.assertEqual(lane.catalogue()[0]["ai_lab"]["device"], "card")
 
 
 class Embeddings(BaseHTTPRequestHandler):

@@ -251,15 +251,16 @@ def _check_policies(report: _Report) -> None:
 
 
 def _check_cpu_model_ports(report: _Report) -> None:
-    """A processor model must not take a port the manager or an instance has."""
+    """An embeddings model's ports (processor, card) must not be the manager's or an instance's."""
     try:
         models = report.config.cpu_model_policy.models.values()
     except ValueError:
         return  # already reported by `_check_policies`
     for model in models:
-        if model.port in report.ports:
-            report.add(f"cpu model {model.name}: port {model.port} is already assigned")
-        report.ports.add(model.port)
+        for port in model.ports:
+            if port in report.ports:
+                report.add(f"cpu model {model.name}: port {port} is already assigned")
+            report.ports.add(port)
 
 
 def _check_image_profiles(report: _Report) -> None:

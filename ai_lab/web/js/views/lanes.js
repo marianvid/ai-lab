@@ -70,6 +70,17 @@ function vendor(name, stats) {
 
 // One processor model: whether its server is up, its queue, and the buttons to
 // start or stop it by hand.
+// Where the next request goes: the card, the processor, or nowhere yet.
+function where(stats) {
+  const device = stats.device || (stats.running ? 'cpu' : 'stopped');
+  if (device === 'card') {
+    const busy = Number(stats.card_in_flight) ? ` · ${figure(stats.card_in_flight)} there now` : '';
+    return `card${busy}`;
+  }
+  if (device === 'cpu') return stats.card ? 'processor (the card is full or loading a model)' : 'processor';
+  return stats.card ? 'card if there is room, else processor' : 'processor';
+}
+
 function processorModel(name, stats, redraw) {
   const running = Boolean(stats.running);
   const act = element('button', {
@@ -86,10 +97,15 @@ function processorModel(name, stats, redraw) {
     },
   });
   const idleStop = Number(stats.idle_stop_s);
-  return section(`Processor · ${name}`, [
+  return section(`Embeddings · ${name}`, [
     line('Status', running ? 'running' : 'stopped',
          'Started by the first request that names it, stopped when nothing '
-         + 'has used it for the idle limit. Runs from RAM; the card is never used.'),
+         + 'has used it for the idle limit.'),
+    line('Answers on', where(stats),
+         stats.card
+           ? 'On the card while it has room; the card’s own models come first, and '
+             + 'it moves to the processor whenever one of them is loaded.'
+           : 'The processor, from RAM; the card is never used.'),
     line('Processing', `${figure(stats.in_flight)} from ${figure(stats.places)}`,
          'Requests at the model now, against how many may be at once.'),
     line('Queued', figure(stats.waiting),

@@ -32,10 +32,24 @@ class CpuModelsConfigTests(unittest.TestCase):
             ({"binary": BINARY, "models": {"m": {**BGE, "idle_stop_s": -1}}}, "idle_stop_s"),
             ({"binary": "llama-server", "models": {"m": BGE}}, "binary"),
             ({"binary": BINARY, "models": {"a": BGE, "b": BGE}}, "share a port"),
+            ({"binary": BINARY, "models": {"m": {**BGE, "card": 1}}}, "card must be an object"),
+            ({"binary": BINARY, "models": {"m": {**BGE, "card": {"port": 8390,
+                                                                 "needs_mb": 1300}}}},
+             "must differ"),
+            ({"binary": BINARY, "models": {"m": {**BGE, "card": {"port": 8391}}}}, "needs_mb"),
+            ({"binary": BINARY, "models": {"a": {**BGE, "card": {"port": 8391, "needs_mb": 1}},
+                                           "b": {**BGE, "port": 8391}}}, "share a port"),
         ]
         for raw, words in cases:
             with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, words):
                 CpuModelsConfig.from_mapping(raw)  # type: ignore[arg-type]
+
+    def test_a_card_entry_gives_a_second_port_and_the_room_it_needs(self):
+        raw = {**BGE, "card": {"port": 8391, "needs_mb": 1300}}
+        model = CpuModelsConfig.from_mapping({"binary": BINARY, "models": {"m": raw}}).models["m"]
+        self.assertEqual(model.ports, (8390, 8391))
+        self.assertIsNotNone(model.card)
+        self.assertEqual(model.card.room_mb if model.card else 0, 1800)
 
     def test_the_configuration_carries_the_section(self):
         config = Config(cpu_models={"binary": BINARY, "models": {"bge-m3": BGE}})

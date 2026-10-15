@@ -191,7 +191,8 @@ The answer is the OpenAI shape, `{"data": [{"index": 0, "embedding": [...]}, ...
 read the order from `index`. The vectors are not normalised. A text longer
 than the model's limit (2,048 tokens by default) is refused with a 400 that
 says so. The first request after a quiet spell starts the model and takes a
-few seconds longer.
+few seconds longer. `ai_lab.device` in the answer says where it was made:
+`card` (about 20 times faster) or `cpu`; the vectors are the same either way.
 
 ### The `ai_lab` field: asking for a model started a particular way
 

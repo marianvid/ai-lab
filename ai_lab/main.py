@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 
 from .api.server import serve
+from .card_sharing import guard_loads
 from .cpu_models import CpuLane
 from .lanes import SideLanes
 from .providers import ProviderPool
@@ -40,10 +41,15 @@ def main() -> None:
     # Code, Codex, opencode), counting their usage where the host keeps its
     # state, and processor models (embeddings), logging there too.
     state_dir = operations.host.state_dir()
-    lanes = SideLanes(providers=ProviderPool.from_config(config.providers, state_dir),
-                      cpu=CpuLane.from_config(config.cpu_models, state_dir))
-    if lanes.cpu is not None and lanes.cpu.servers:
-        lanes.cpu.start_reaper()
+    cpu = CpuLane.from_config(config.cpu_models, state_dir,
+                              card_free_mb=lambda: _card_free_mb(operations.host))
+    lanes = SideLanes(providers=ProviderPool.from_config(config.providers, state_dir), cpu=cpu)
+    if cpu.placements:
+        cpu.start_reaper()
+        # Embeddings may borrow the card; its own models come first, through
+        # the gateway and the Load button alike.
+        model_gateway.resources.neighbours = cpu
+        guard_loads(operations.instance_service, cpu)
 
     _install_shutdown(operations, lanes)
 
@@ -56,6 +62,17 @@ def main() -> None:
     finally:
         lanes.stop_all()
         operations.host.stop_all()
+
+
+def _card_free_mb(host) -> float | None:
+    """Free memory on a card of its own, or None (no card, or unified memory)."""
+    try:
+        snapshot = host.accelerator()
+    except Exception:
+        return None
+    if snapshot.memory_kind != "dedicated" or not snapshot.memory_total_mb:
+        return None
+    return float(snapshot.memory_total_mb - snapshot.memory_used_mb)
 
 
 def _restore_last_model(operations) -> None:

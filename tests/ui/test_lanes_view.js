@@ -17,7 +17,8 @@ const STATS = {
   },
   cpu_models: {
     'bge-m3': { running: true, port: 8390, places: 4, in_flight: 1, waiting: 3,
-                requests: 40, failures: 0, idle_s: 0.4, idle_stop_s: 1800 },
+                requests: 40, failures: 0, idle_s: 0.4, idle_stop_s: 1800,
+                device: 'card', card: true, card_port: 8391, card_in_flight: 1 },
   },
 };
 
@@ -50,10 +51,27 @@ describe('the Cloud & CPU page', () => {
     assert.match(text, /claude\/haiku, claude\/sonnet/);
     assert.match(text, /2 from 6/);
     assert.match(text, /not logged in ×1/);
-    assert.match(text, /Processor · bge-m3/);
+    assert.match(text, /Embeddings · bge-m3/);
+    assert.match(text, /card · 1 there now/);
     assert.match(text, /1 from 4/);
     assert.match(text, /30 min idle/);
     assert.match(text, /POST \/embeddings/);
+  });
+
+  it('says where the next request goes', async () => {
+    const model = STATS.cpu_models['bge-m3'];
+    const cases = [
+      [{ ...model, device: 'cpu' }, /processor \(the card is full or loading a model\)/],
+      [{ ...model, device: 'stopped', running: false }, /card if there is room, else processor/],
+      [{ ...model, device: undefined, card: false }, /Answers onprocessor/],
+    ];
+    for (const [stats, expected] of cases) {
+      open?.view.stopRefreshing();
+      open?.context.window.close();
+      const { view } = await renderPage({ '/api/gateway': {
+        ...STATS, cpu_models: { 'bge-m3': stats } } });
+      assert.match(view.textContent, expected);
+    }
   });
 
   it('stops a running processor model by hand', async () => {

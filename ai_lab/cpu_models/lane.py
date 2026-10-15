@@ -1,13 +1,21 @@
-"""The processor lane of the gateway: embeddings, with a queue of their own.
+"""The embeddings lane of the gateway, with a queue of its own.
 
-`CpuLane` is what the front door asks when a request names a processor model.
-It never takes a card lease, so it neither waits behind a model loading on
-the card nor holds one up. Each model has its own queue: at most `parallel`
+`CpuLane` is what the front door asks when a request names one of these
+models. It never takes a card lease, so it neither waits behind a model loading
+on the card nor holds one up. Each model has its own queue: at most `parallel`
 requests reach its server at once; the rest wait here.
+
+Where a request is answered — on the card when there is room, else on the
+processor — is `Placement`'s decision (`placement.py`). The answer says which,
+in `ai_lab.device`.
 
 A model is started by its first request (a second or two) and stopped when
 nothing has used it for `idle_stop_s`. It can also be started and stopped by
 hand (`POST /api/cpu-models/{name}/start|stop`).
+
+The lane is also the card's neighbour (`card_sharing.CardNeighbours`): the
+card's scheduler calls `make_way` before loading a card model and `settled`
+after, and counts `reclaimable_mb` as memory it may have.
 """
 
 from __future__ import annotations
@@ -21,9 +29,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..engines.probe import http_ok
 from ..network import LOOPBACK
-from .server import CpuServer
+from .placement import CardRoom, Placement
+from .server import CARD, CPU, CpuServer
 from .settings import CpuModel, CpuModelsConfig
 
 EMBEDDINGS_PATH = "/v1/embeddings"
@@ -33,12 +41,17 @@ CALL_LIMIT_S = 600.0
 REAP_EVERY_S = 30.0
 
 Poster = Callable[[int, dict], dict]
-ServerFactory = Callable[[str, CpuModel, Path], CpuServer]
+ServerFactory = Callable[[str, CpuModel, Path, str], CpuServer]
 
 
-def _server(binary: str, model: CpuModel, log_dir: Path) -> CpuServer:
-    """The real server, ready when its `/health` answers."""
-    return CpuServer(binary, model, log_dir, http_ok)
+def _server(binary: str, model: CpuModel, log_dir: Path, device: str) -> CpuServer:
+    """The real server on that device, ready when its `/health` answers."""
+    return CpuServer(binary, model, log_dir, device=device)
+
+
+def _no_card() -> float | None:
+    """No card to borrow: everything answers on the processor."""
+    return None
 
 
 def _post(port: int, payload: dict) -> dict:
@@ -55,6 +68,20 @@ def _post(port: int, payload: dict) -> dict:
         raise ValueError(error.read().decode(errors="replace")) from None
 
 
+@dataclass(frozen=True)
+class LaneTools:
+    """What the lane talks to: servers, the card's free memory, and time.
+
+    A test swaps in stand-ins.
+    """
+
+    poster: Poster = _post
+    server_factory: ServerFactory = _server
+    card_free_mb: CardRoom = _no_card
+    clock: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+
+
 @dataclass
 class _Queue:
     """One model's places and counters."""
@@ -67,72 +94,101 @@ class _Queue:
 
 
 class CpuLane:
-    """Every processor model, each behind its own queue."""
+    """Every embeddings model, each behind its own queue."""
 
-    def __init__(self, config: CpuModelsConfig, log_dir: Path, poster: Poster = _post,
-                 server_factory: ServerFactory = _server,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, config: CpuModelsConfig, log_dir: Path,
+                 tools: LaneTools | None = None) -> None:
+        tools = tools or LaneTools()
         self.config = config
-        self._post = poster
-        self._clock = clock
+        self._post = tools.poster
+        self._clock = tools.clock
         self._count = threading.Lock()
-        self.servers = {name: server_factory(config.binary, model, log_dir)
-                        for name, model in config.models.items()}
+        self.placements = {name: self._placement(model, log_dir, tools)
+                           for name, model in config.models.items()}
         self._queues = {name: _Queue(threading.BoundedSemaphore(model.parallel))
                         for name, model in config.models.items()}
 
+    def _placement(self, model: CpuModel, log_dir: Path, tools: LaneTools) -> Placement:
+        make = tools.server_factory
+        cpu = make(self.config.binary, model, log_dir, CPU)
+        card = make(self.config.binary, model, log_dir, CARD) if model.card else None
+        return Placement(cpu, card, tools.card_free_mb, tools.clock, tools.sleep)
+
     @classmethod
-    def from_config(cls, raw: dict | None, log_dir: Path) -> CpuLane:
+    def from_config(cls, raw: dict | None, log_dir: Path,
+                    card_free_mb: CardRoom = _no_card) -> CpuLane:
         """Built from the `cpu_models` section, logging into `log_dir`."""
-        return cls(CpuModelsConfig.from_mapping(raw), log_dir)
+        return cls(CpuModelsConfig.from_mapping(raw), log_dir,
+                   LaneTools(card_free_mb=card_free_mb))
 
     def serves(self, name: str) -> bool:
-        """Whether this name is a processor model."""
-        return name in self.servers
+        """Whether this name is one of these models."""
+        return name in self.placements
 
     def embed(self, path: str, payload: dict) -> dict:
         """Answer one embeddings request through the model's own server."""
         if path != EMBEDDINGS_PATH:
             raise ValueError(f"processor models answer only {EMBEDDINGS_PATH}")
         name = payload["model"]
-        server, queue = self.servers[name], self._queues[name]
+        placement, queue = self.placements[name], self._queues[name]
         self._change(queue, waiting=1)
         with queue.places:
             self._change(queue, waiting=-1, in_flight=1, requests=1)
             try:
-                server.ensure_started()
-                answer = self._post(server.model.port, payload)
+                server = placement.take()
+                try:
+                    answer = self._post(server.port, payload)
+                finally:
+                    placement.give_back(server)
             except BaseException:
                 self._change(queue, failures=1)
                 raise
             finally:
-                server.touch()
                 self._change(queue, in_flight=-1)
         answer["model"] = name
+        answer["ai_lab"] = {"device": server.device}
         return answer
+
+    # -- the card's neighbour -------------------------------------------------
+
+    def make_way(self) -> None:
+        """A card model is about to load: every model leaves the card."""
+        for placement in self.placements.values():
+            placement.make_way()
+
+    def settled(self) -> None:
+        """That load is over: models still in use come back if there is room."""
+        for placement in self.placements.values():
+            placement.settled()
+
+    def reclaimable_mb(self) -> float:
+        """Card memory these models hold and give back to any card model."""
+        return sum(placement.reclaimable_mb() for placement in self.placements.values())
+
+    # -- by hand, and when idle ----------------------------------------------
 
     def start(self, name: str) -> dict:
         """Start a model by hand; it answers at once afterwards."""
-        self._known(name).ensure_started()
+        self._known(name).start()
         return self.stats()[name]
 
     def stop(self, name: str) -> dict:
         """Stop a model by hand, unless a request is using it."""
-        server, queue = self._known(name), self._queues[name]
-        if queue.in_flight or queue.waiting:
+        placement = self._known(name)
+        if self._busy(name):
             raise ValueError(f"{name} is answering requests; stop it when they are done")
-        server.stop()
+        placement.stop()
         return self.stats()[name]
 
     def stop_all(self) -> None:
         """Stop every server, when the manager quits."""
-        for server in self.servers.values():
-            server.stop()
+        for placement in self.placements.values():
+            placement.stop()
 
     def reap_idle(self) -> list[str]:
-        """Stop every model nothing has used for its idle limit; names stopped."""
-        return [name for name, server in self.servers.items()
-                if server.stop_if_idle(busy=self._busy(name))]
+        """Stop every server nothing has used for its idle limit; `name/device` stopped."""
+        return [f"{name}/{device}" for name, placement in self.placements.items()
+                for device in placement.stop_if_idle(busy=self._busy(name))]
 
     def start_reaper(self) -> threading.Thread:
         """Check for idle models in the background, every `REAP_EVERY_S`."""
@@ -144,31 +200,37 @@ class CpuLane:
         thread.start()
         return thread
 
+    # -- what it says about itself --------------------------------------------
+
     def catalogue(self) -> list[dict]:
         """One row per model, in the shape `GET /v1/models` lists."""
         return [{"id": name, "object": "model", "owned_by": "llama.cpp",
-                 "ai_lab": {"lane": "cpu", "loaded": server.running,
-                            "ready": server.running, "shapes": [EMBEDDINGS_PATH],
-                            "task": "embeddings"}}
-                for name, server in self.servers.items()]
+                 "ai_lab": {"lane": "cpu", "loaded": placement.running,
+                            "ready": placement.running, "device": placement.device(),
+                            "shapes": [EMBEDDINGS_PATH], "task": "embeddings"}}
+                for name, placement in self.placements.items()]
 
     def stats(self) -> dict:
-        """Per model: running or not, its queue, and its counts since start."""
-        now = self._clock()
-        return {name: {"running": server.running, "port": server.model.port,
-                       "places": server.model.parallel,
-                       "in_flight": self._queues[name].in_flight,
-                       "waiting": self._queues[name].waiting,
-                       "requests": self._queues[name].requests,
-                       "failures": self._queues[name].failures,
-                       "idle_s": round(now - server.last_used, 1) if server.last_used else None,
-                       "idle_stop_s": server.model.idle_stop_s}
-                for name, server in self.servers.items()}
+        """Per model: where it answers, its queue, and its counts since start."""
+        return {name: self._stats(name, placement)
+                for name, placement in self.placements.items()}
 
-    def _known(self, name: str) -> CpuServer:
-        if name not in self.servers:
+    def _stats(self, name: str, placement: Placement) -> dict:
+        queue, model = self._queues[name], placement.model
+        last = placement.last_used or placement.cpu.last_used
+        return {"running": placement.running, "device": placement.device(),
+                "port": model.port, "card": bool(model.card),
+                "card_port": model.card.port if model.card else None,
+                "card_in_flight": placement.on_card(), "places": model.parallel,
+                "in_flight": queue.in_flight, "waiting": queue.waiting,
+                "requests": queue.requests, "failures": queue.failures,
+                "idle_s": round(self._clock() - last, 1) if last else None,
+                "idle_stop_s": model.idle_stop_s}
+
+    def _known(self, name: str) -> Placement:
+        if name not in self.placements:
             raise KeyError(f"Unknown processor model: {name}")
-        return self.servers[name]
+        return self.placements[name]
 
     def _busy(self, name: str) -> bool:
         queue = self._queues[name]

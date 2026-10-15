@@ -5,16 +5,22 @@ from __future__ import annotations
 import time
 
 from . import budget
+from .card_sharing import CardNeighbours, NoNeighbours
 from .gateway_errors import CouldNotLoad
 
 
 class GatewayResources:
+    """What the card holds and what a model needs, read for the scheduler."""
+
     def __init__(self, operations, quiet_mb: float, quiet_timeout_s: float,
                  poll_s: float) -> None:
         self.operations = operations
         self.quiet_mb = quiet_mb
         self.quiet_timeout_s = quiet_timeout_s
         self.poll_s = poll_s
+        # Whoever borrows the card beside its models (the embeddings lane);
+        # set once at start-up, in `main`.
+        self.neighbours: CardNeighbours = NoNeighbours()
 
     def needs_mb(self, shape, card_total_mb: float) -> float:
         """Ask the selected engine how much this request shape needs."""
@@ -28,6 +34,7 @@ class GatewayResources:
             return 0.0
 
     def card_total_mb(self) -> float:
+        """The card's whole memory, or 0 when it cannot be read."""
         try:
             return float(self.operations.host.accelerator().memory_total_mb)
         except Exception:
@@ -35,13 +42,17 @@ class GatewayResources:
 
     @staticmethod
     def pool(pools: dict) -> dict:
+        """The pool models load into: the card's, else the machine's."""
         return pools.get(budget.CARD) or pools.get(budget.MACHINE) or {}
 
     def capacity_mb(self, pools: dict) -> float:
+        """What models may use of that pool, all told."""
         return float(self.pool(pools).get("for_models_mb", 0.0))
 
     def free_mb(self, pools: dict) -> float:
-        return float(self.pool(pools).get("available_mb", 0.0))
+        """What a card model may take: what is free, plus what a neighbour gives back."""
+        available = float(self.pool(pools).get("available_mb", 0.0))
+        return available + self.neighbours.reclaimable_mb()
 
     def read_pools(self) -> dict:
         """Read outside the scheduler lock; a failed probe keeps old readings."""
@@ -59,7 +70,11 @@ class GatewayResources:
         memory budget, other models stay loaded and their memory is not coming
         back. What has to be gone is the processes that were stopped, and that
         is a question with an exact answer.
+
+        Neighbours borrowing the card leave it first, whatever was stopped: the
+        card is read right after this, and must be read without them.
         """
+        self.neighbours.make_way()
         if not stopped:
             return
         snapshot = self.operations.host.accelerator()

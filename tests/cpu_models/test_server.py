@@ -6,9 +6,12 @@ import unittest
 from pathlib import Path
 
 from ai_lab.cpu_models import CpuModel
-from ai_lab.cpu_models.server import CpuServer, ProcessTools, command
+from ai_lab.cpu_models.server import CARD, CpuServer, ProcessTools, command
+from ai_lab.cpu_models.settings import CardUse
 
 MODEL = CpuModel(name="bge-m3", path="/m/bge.gguf", port=8390, idle_stop_s=60.0)
+SHARED = CpuModel(name="bge-m3", path="/m/bge.gguf", port=8390,
+                  card=CardUse(port=8391, needs_mb=1300))
 
 
 class FakeProcess:
@@ -62,9 +65,10 @@ class CpuServerTests(unittest.TestCase):
         self.healthy_after -= 1
         return self.healthy_after < 0
 
-    def server(self, model=MODEL):
-        tools = ProcessTools(launch=self.launcher, clock=self.clock, sleep=self.clock.sleep)
-        return CpuServer("/bin/llama-server", model, self.folder, self.probe, tools)
+    def server(self, model=MODEL, device="cpu"):
+        tools = ProcessTools(launch=self.launcher, probe=self.probe, clock=self.clock,
+                             sleep=self.clock.sleep)
+        return CpuServer("/bin/llama-server", model, self.folder, tools, device)
 
     def test_the_command_keeps_the_card_out_of_it(self):
         argv = command("/bin/llama-server", MODEL)
@@ -72,6 +76,19 @@ class CpuServerTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("-ngl") + 1], "0")
         self.assertEqual(argv[argv.index("--pooling") + 1], "cls")
         self.assertEqual(argv[argv.index("--port") + 1], "8390")
+
+    def test_on_the_card_every_layer_goes_there_on_its_own_port(self):
+        argv = command("/bin/llama-server", SHARED, CARD)
+        self.assertEqual(argv[argv.index("-ngl") + 1], "99")
+        self.assertEqual(argv[argv.index("--port") + 1], "8391")
+        self.assertEqual(command("/bin/llama-server", MODEL, CARD)[6:8], ["-ngl", "0"])
+
+    def test_the_card_server_keeps_the_card_visible(self):
+        server = self.server(SHARED, CARD)
+        server.ensure_started()
+        argv, env, log = self.launched[0]
+        self.assertNotEqual(env.get("CUDA_VISIBLE_DEVICES"), "")
+        self.assertEqual((server.port, server.device, log.name), (8391, CARD, "card-bge-m3.log"))
 
     def test_started_once_and_waited_for(self):
         self.healthy_after = 3
@@ -121,7 +138,8 @@ class CpuServerTests(unittest.TestCase):
         server.stop()
 
     def test_the_real_launcher_logs_to_the_folder(self):
-        server = CpuServer("/bin/sleep", MODEL, self.folder, lambda _port: True)
+        server = CpuServer("/bin/sleep", MODEL, self.folder,
+                           ProcessTools(probe=lambda _port: True))
         server.ensure_started()
         server.stop()
         self.assertTrue((self.folder / "cpu-bge-m3.log").exists())
