@@ -6,7 +6,8 @@ Shape::
       "binary": "/opt/ai/llama.cpp/build/bin/llama-server",
       "models": {
         "bge-m3": {"path": "/models/embeddings/bge-m3-FP16.gguf",
-                   "pooling": "cls", "port": 8390,
+                   "pooling": "cls", "port": 8390, "parallel": 32,
+                   "kv_unified": true,
                    "card": {"port": 8391, "needs_mb": 1300}}
       }
     }
@@ -33,6 +34,12 @@ DEFAULT_IDLE_STOP_S = 1800.0
 # 8.5 GB of RAM and takes 13 s for one text of 2,800 tokens; 8192 holds about
 # 2.6 GB, and sentences, titles and leads never come near 2048.
 DEFAULT_CONTEXT = 8192
+# `kv_unified`: the places share one pool of `context` tokens instead of an
+# equal slice each, so many places cost no more memory and one text may use
+# the whole pool. With short texts, more places means more texts computed in
+# one pass: bge-m3 on the card, 300-sentence calls, 8 calls at once went from
+# 1,325 texts/s with 8 places to 1,510 with 32 (2026-10-15); 64 and more were
+# slower and unsteady.
 # Room kept free on the card beyond what the model needs, so borrowing it never
 # leaves the card with nothing for a driver or a small worker.
 DEFAULT_CARD_MARGIN_MB = 500
@@ -69,6 +76,7 @@ class CpuModel:
     threads: int = DEFAULT_THREADS
     context: int = DEFAULT_CONTEXT
     idle_stop_s: float = DEFAULT_IDLE_STOP_S
+    kv_unified: bool = False
     card: CardUse | None = None
 
     @classmethod
@@ -88,6 +96,7 @@ class CpuModel:
                    threads=_whole(name, "threads", raw.get("threads", DEFAULT_THREADS), 1, 256),
                    context=_whole(name, "context", raw.get("context", DEFAULT_CONTEXT), 512, 131072),
                    idle_stop_s=_seconds(name, raw.get("idle_stop_s", DEFAULT_IDLE_STOP_S)),
+                   kv_unified=_flag(name, "kv_unified", raw.get("kv_unified", False)),
                    card=_card(name, raw.get("card"), port))
 
     @property
@@ -143,6 +152,12 @@ def _whole(name: str, key: str, value, low: int, high: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
         raise ValueError(f"cpu_models.models.{name}.{key} must be a whole number "
                          f"from {low} to {high}")
+    return value
+
+
+def _flag(name: str, key: str, value) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"cpu_models.models.{name}.{key} must be true or false")
     return value
 
 

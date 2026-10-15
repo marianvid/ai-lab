@@ -33,6 +33,7 @@ class CpuModelsConfigTests(unittest.TestCase):
             ({"binary": "llama-server", "models": {"m": BGE}}, "binary"),
             ({"binary": BINARY, "models": {"a": BGE, "b": BGE}}, "share a port"),
             ({"binary": BINARY, "models": {"m": {**BGE, "card": 1}}}, "card must be an object"),
+            ({"binary": BINARY, "models": {"m": {**BGE, "kv_unified": "yes"}}}, "true or false"),
             ({"binary": BINARY, "models": {"m": {**BGE, "card": {"port": 8390,
                                                                  "needs_mb": 1300}}}},
              "must differ"),

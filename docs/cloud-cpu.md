@@ -63,3 +63,10 @@ A `card` entry lets a model borrow the card:
 card memory it was measured to take; it goes there only with that much plus
 `margin_mb` (500 by default) free. The rule is in
 [ADR 0004](decisions/0004-embeddings-borrow-the-card.md).
+
+`parallel` is how many texts the server computes together in one pass — not
+how many calls: every call is split into its texts. With short texts, more
+places fill the card better; `"kv_unified": true` lets them share one pool of
+`context` tokens so they cost no more memory. Measured on CT 102 with bge-m3 on
+the card (300-sentence calls, 8 calls at once): 8 places 1,325 texts/s, 32
+places 1,510, 64 places 1,320, 128 places 996 — so bge-m3 runs with 32.

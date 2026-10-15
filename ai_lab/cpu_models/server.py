@@ -38,10 +38,12 @@ def command(binary: str, model: CpuModel, device: str = CPU) -> list[str]:
     """`llama-server` serving embeddings for this model, on the given device."""
     on_card = device == CARD and model.card is not None
     port = model.card.port if on_card and model.card else model.port
+    shared = ["--kv-unified"] if model.kv_unified else []
     return [binary, "-m", model.path, "--embedding", "--pooling", model.pooling,
             "-ngl", ALL_LAYERS if on_card else "0", "--host", LOOPBACK, "--port", str(port),
             "-c", str(model.context), "-b", str(model.context), "-ub", str(model.context),
-            "-t", str(model.threads), "--parallel", str(model.parallel), "--no-webui"]
+            "-t", str(model.threads), "--parallel", str(model.parallel), *shared,
+            "--no-webui"]
 
 
 def _launch(argv: list[str], env: dict, log: Path) -> subprocess.Popen:

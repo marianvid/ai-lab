@@ -39,7 +39,10 @@ llama.cpp on the processor only, texts of about 300 tokens:
 ## Consequences
 
 - One text may have at most `context / parallel` tokens (2048 with the
-  defaults); a longer one is refused with the server's own 400. Raising it
+  defaults); a longer one is refused with the server's own 400. With
+  `"kv_unified": true` the places share one pool of `context` tokens instead:
+  a text may use up to the whole pool (the model's own limit is 8,192), and
+  more places cost no more memory. Raising the pool
   costs dearly on the processor: 4 × 8192 held 8.5 GB of RAM and embedded one
   text of 2,800 tokens in 13 s.
 - Short texts are fastest in one large call: 300 sentences (8,100 tokens) took

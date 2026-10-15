@@ -83,6 +83,13 @@ class CpuServerTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--port") + 1], "8391")
         self.assertEqual(command("/bin/llama-server", MODEL, CARD)[6:8], ["-ngl", "0"])
 
+    def test_places_share_one_pool_only_when_asked(self):
+        self.assertNotIn("--kv-unified", command("/bin/llama-server", MODEL))
+        shared = CpuModel(name="m", path="/m", port=8390, parallel=32, kv_unified=True)
+        argv = command("/bin/llama-server", shared, CARD)
+        self.assertIn("--kv-unified", argv)
+        self.assertEqual(argv[argv.index("--parallel") + 1], "32")
+
     def test_the_card_server_keeps_the_card_visible(self):
         server = self.server(SHARED, CARD)
         server.ensure_started()
