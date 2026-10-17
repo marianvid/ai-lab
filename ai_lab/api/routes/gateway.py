@@ -34,6 +34,7 @@ from ...engines.base import (
 from ...gateway import Gateway
 from ...lanes import SideLanes
 from ...network import LOOPBACK
+from ...reservations import ReservationBook
 from ...types import Task
 from ..multipart import MultipartBody
 from ..passthrough import forward
@@ -48,6 +49,8 @@ FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
                                 + SPEECH_PATHS + ALIGNMENT_PATHS
                                 + (EMBEDDINGS_PATH,)))
 NO_LANES = SideLanes()
+# The header a call under a reservation carries: the reservation's id.
+RESERVATION_HEADER = "X-AI-Lab-Reservation"
 
 # Which task a request path belongs to, for per-task timeouts (see
 # `Gateway.timeouts_for`) and for which uploads get image validation. Paths
@@ -70,7 +73,8 @@ _TASK_OF_PATH = {
 _IMAGE_UPLOAD_PATHS = frozenset(OCR_PATHS)
 
 
-def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) -> None:
+def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES,
+             book: ReservationBook | None = None) -> None:
     """The model routes, the catalogue, and the front door's own settings."""
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, lanes))
     router.add("GET", "/v1/models/{model}",
@@ -85,7 +89,7 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) 
 
     router.add("PATCH", "/api/gateway", settings)
     for path in FORWARDED:
-        router.add("POST", path, _forwarder(gateway, path, lanes))
+        router.add("POST", path, _forwarder(gateway, path, lanes, book))
     if lanes.cpu is not None:
         cpu = lanes.cpu
         router.add("POST", "/api/cpu-models/{name}/start",
@@ -147,11 +151,18 @@ def _one_model(row: dict, detailed: bool = False) -> dict:
 SETTINGS_FIELD = "ai_lab"
 
 
-def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
+def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
+               book: ReservationBook | None = None):
     """The handler for one forwarded path."""
-    def handle(body=None, alive=None, **_):
+    def handle(body=None, alive=None, headers=None, **_):
         payload = body or {}
         wanted = _model_name(payload)
+        # The card's reservations come first (ADR 0005): a call reaches a model
+        # on this machine — the card's or an embeddings model — only under the
+        # holder's reservation, or when the card is not reserved. Subscription
+        # models run in the cloud and are never held back.
+        if book is not None and not _in_the_cloud(lanes, wanted):
+            book.admit((headers or {}).get(RESERVATION_HEADER), alive)
         side = _side_lane(lanes, path, payload, wanted)
         if side is not None:
             return side
@@ -170,6 +181,11 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
             lease.release()
             raise
     return handle
+
+
+def _in_the_cloud(lanes: SideLanes, wanted: str) -> bool:
+    """Whether a subscription vendor answers this name (no reservation applies)."""
+    return lanes.providers is not None and lanes.providers.serves(wanted)
 
 
 def _side_lane(lanes: SideLanes, path: str, payload, wanted: str) -> dict | None:

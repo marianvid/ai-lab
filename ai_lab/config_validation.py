@@ -243,7 +243,7 @@ def _check_placement(report: _Report, item) -> None:
 
 def _check_policies(report: _Report) -> None:
     for policy_name in ("gateway_policy", "media_policy", "provider_policy",
-                        "cpu_model_policy"):
+                        "cpu_model_policy", "reservation_policy"):
         try:
             getattr(report.config, policy_name)
         except ValueError as error:

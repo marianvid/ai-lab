@@ -13,40 +13,16 @@ first and sends `force` only if the person says so.
 
 from __future__ import annotations
 
+from ...reservations import CardReservedError
 
-def register(router, operations, gateway=None) -> None:
+
+def register(router, operations, gateway=None, book=None) -> None:
+    """The model list's routes; Load, Unload and Apply are guarded."""
     def guard(action: str, instance_id: str, body: dict) -> dict:
-        """Refuse to interrupt work in progress, and strip the override.
-
-        `force` is an instruction to this layer, not a setting to be saved, so
-        it never reaches `operations` — `apply` would otherwise store it beside
-        the engine's own settings.
-
-        Forcing means a clean slate rather than a half-forced one: the engine
-        is about to be stopped under whoever was using it, so the queue behind
-        it is describing a world that will not exist a second from now. Every
-        waiting request is turned away instead of being left to wake up into
-        it.
-        """
-        rest = {key: value for key, value in body.items() if key != "force"}
-        if gateway is None:
-            return rest
-        if body.get("force"):
-            gateway.reset(f"{instance_id} was stopped by hand")
-        else:
-            gateway.guard(action, instance_id)
-        return rest
+        return _guard(gateway, book, (action, instance_id), body)
 
     def done(result):
-        """Tell the gateway the card is not what it was.
-
-        These routes move models without going through the queue, so the thing
-        that decides who goes next has to be told, or it admits a request onto
-        a card holding something else.
-        """
-        if gateway is not None:
-            gateway.card_changed()
-        return result
+        return _done(gateway, result)
 
     def load(id, body=None, **_):
         guard("load", id, body or {})
@@ -60,6 +36,15 @@ def register(router, operations, gateway=None) -> None:
         changes = guard("apply & reload", id, body or {})
         return done(operations.apply_and_reload(id, changes))
 
+    _register_list(router, operations)
+    router.add("POST", "/api/instances/{id}/load", load)
+    router.add("POST", "/api/instances/{id}/unload", unload)
+    # Saving settings and restarting with them, as one action.
+    router.add("POST", "/api/instances/{id}/apply", apply)
+
+
+def _register_list(router, operations) -> None:
+    """The unguarded routes: reading the list, adding, editing and deleting entries."""
     router.add("GET", "/api/instances", lambda **_: operations.instances())
     router.add("GET", "/api/instances/{id}/logs",
                lambda id, query=None, **_: operations.logs(
@@ -73,7 +58,53 @@ def register(router, operations, gateway=None) -> None:
     # so there is never an answer in progress to interrupt.
     router.add("DELETE", "/api/instances/{id}",
                lambda id, **_: operations.delete_instance(id) or {"ok": True})
-    router.add("POST", "/api/instances/{id}/load", load)
-    router.add("POST", "/api/instances/{id}/unload", unload)
-    # Saving settings and restarting with them, as one action.
-    router.add("POST", "/api/instances/{id}/apply", apply)
+
+
+def _guard(gateway, book, target: tuple[str, str], body: dict) -> dict:
+    """Refuse to interrupt work in progress, and strip the override.
+
+    `target` is the action and the entry it acts on. `force` is an instruction
+    to this layer, not a setting to be saved, so it never reaches `operations`
+    — `apply` would otherwise store it beside the engine's own settings.
+
+    Forcing means a clean slate rather than a half-forced one: the engine is
+    about to be stopped under whoever was using it, so the queue behind it is
+    describing a world that will not exist a second from now. Every waiting
+    request is turned away instead of being left to wake up into it.
+    """
+    action, instance_id = target
+    rest = {key: value for key, value in body.items() if key != "force"}
+    _refuse_while_reserved(book, action, instance_id)
+    if gateway is None:
+        return rest
+    if body.get("force"):
+        gateway.reset(f"{instance_id} was stopped by hand")
+    else:
+        gateway.guard(action, instance_id)
+    return rest
+
+
+def _done(gateway, result):
+    """Tell the gateway the card is not what it was.
+
+    These routes move models without going through the queue, so the thing
+    that decides who goes next has to be told, or it admits a request onto a
+    card holding something else.
+    """
+    if gateway is not None:
+        gateway.card_changed()
+    return result
+
+
+def _refuse_while_reserved(book, action: str, instance_id: str) -> None:
+    """A reserved card is its holder's: the buttons wait until it is released or cancelled.
+
+    Not even `force` goes past it (ADR 0005): cancel the reservation on the
+    Reservations page first, so the holder is told why its card changed.
+    """
+    held = None if book is None else book.holder()
+    if held is not None:
+        who = held["team"] + (f" @ {held['instance']}" if held["instance"] else "")
+        raise CardReservedError(f"cannot {action} {instance_id}: the card is reserved by {who}; "
+                           "cancel the reservation on the Reservations page first",
+                           {"holder": held})

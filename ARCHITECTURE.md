@@ -99,6 +99,7 @@ there is exactly one place to look.
 | `scheduler.py` | Who gets the card next: the queue, the places, the decision to swap | Anything about models, engines or ports — a shape is an opaque key |
 | `providers/` | Subscription models answered through their vendors' CLIs: one queue per vendor, errors read from the CLI's words, usage per day | The card, its leases or its scheduler |
 | `cpu_models/` | Embeddings models: their `llama-server` processes (processor, or the card while it has room), started on demand and stopped when idle, and one queue per model | The card's leases or its scheduler |
+| `reservations/` | Card reservations (ADR 0005): who holds the card for a run, the queue by priority with aging, heartbeats, expiry, the saved book; `admit` is asked before every call to this machine's models | Who the clients are |
 | `card_sharing.py` | `CardNeighbours`: what a card load asks of whoever borrows the card (step aside, it is over, how much you hold) | Who the neighbour is |
 | `lanes.py` | `SideLanes`: the two lanes beside the card, bundled so the front door is handed one object | Decisions — it only holds and lists them |
 | `lastloaded.py` | One record on disk: which models were loaded, in order, and how each was started | Deciding anything — it remembers and is read |

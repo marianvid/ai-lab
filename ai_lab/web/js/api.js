@@ -76,6 +76,12 @@ export const api = {
     request('POST', `/api/cpu-models/${encodeURIComponent(name)}/start`),
   stopCpuModel: (name) =>
     request('POST', `/api/cpu-models/${encodeURIComponent(name)}/stop`),
+  // Card reservations (ADR 0005): who holds the card, who waits, the settings.
+  reservations: () => request('GET', '/api/reservations'),
+  cancelReservation: (id) =>
+    request('POST', `/api/reservations/${encodeURIComponent(id)}/cancel`),
+  updateReservationSettings: (changes) =>
+    request('PATCH', '/api/reservations/settings', changes),
   logs: (id) => request('GET', `/api/instances/${encodeURIComponent(id)}/logs`),
   update: (id, changes) =>
     request('PATCH', `/api/instances/${encodeURIComponent(id)}`, changes),

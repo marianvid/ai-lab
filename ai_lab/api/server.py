@@ -26,6 +26,7 @@ from ..lanes import SideLanes
 from ..multipart import MultipartBody
 from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
+from ..reservations import ReservationBook, ReservationConflictError, ReservationRequiredError
 from . import sse
 from .passthrough import Passthrough
 from .router import Router
@@ -46,6 +47,9 @@ STATUS = {
     ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
     # The vendor's CLI could not answer: the caller's fallback should take over.
     ProviderUnavailableError: HTTPStatus.BAD_GATEWAY,
+    # The card is reserved, or the reservation named has ended (ADR 0005).
+    ReservationConflictError: HTTPStatus.CONFLICT,
+    ReservationRequiredError: HTTPStatus.PRECONDITION_REQUIRED,
 }
 TIMEOUT_MESSAGE = "the engine did not answer within the gateway's time limit"
 
@@ -142,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         handler, captured = matched
         try:
             query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
-            result = handler(query=query, body=self._body(),
+            result = handler(query=query, body=self._body(), headers=self.headers,
                              alive=self._client_alive, **captured)
             if isinstance(result, Passthrough):
                 self._passthrough(result)
@@ -289,10 +293,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def build_router(operations: Operations, model_gateway=None,
-                 lanes: SideLanes = NO_LANES) -> Router:
-    """Every API route, bound to the operations, the gateway and the side lanes."""
+                 lanes: SideLanes = NO_LANES,
+                 reservations: ReservationBook | None = None) -> Router:
+    """Every API route, bound to the operations, the gateway, the side lanes and the reservations."""
     router = Router()
-    register_all(router, operations, model_gateway, lanes)
+    register_all(router, operations, model_gateway, lanes, reservations)
     return router
 
 
@@ -310,9 +315,7 @@ class GatewayServer(ThreadingHTTPServer):
     request_queue_size = 1024
 
 
-def serve(operations: Operations, bus: EventBus, address: tuple[str, int],
-          model_gateway=None, lanes: SideLanes = NO_LANES) -> None:
-    """Listen on `address` (host, port) and answer until the process stops."""
-    router = build_router(operations, model_gateway, lanes)
+def serve(router: Router, bus: EventBus, address: tuple[str, int]) -> None:
+    """Listen on `address` (host, port) with `router`'s routes until the process stops."""
     handler = type("ConfiguredHandler", (Handler,), {"router": router, "bus": bus})
     GatewayServer(address, handler).serve_forever()

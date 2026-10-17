@@ -38,6 +38,7 @@ from .config_policy import GatewayPolicy, MediaPolicy
 from .cpu_models.settings import CpuModelsConfig
 from .network import ALL_INTERFACES
 from .providers.settings import ProvidersConfig
+from .reservations.settings import ReservationPolicy
 
 
 @dataclass(slots=True)
@@ -160,6 +161,9 @@ class Config:
     # Models run on the processor, from RAM (embeddings): the llama.cpp server
     # and each model's file, port and limits. See `cpu_models/settings.py`.
     cpu_models: dict = field(default_factory=dict)
+    # Card reservations (ADR 0005): heartbeat, durations, aging, whether they
+    # are required. See `reservations/settings.py`.
+    reservations: dict = field(default_factory=dict)
     # The one directory every model lives under. Each repository is a
     # folder in it, named after the format.
     models_root: str = ""
@@ -194,6 +198,11 @@ class Config:
     def cpu_model_policy(self) -> CpuModelsConfig:
         """The processor models, checked."""
         return CpuModelsConfig.from_mapping(self.cpu_models)
+
+    @property
+    def reservation_policy(self) -> ReservationPolicy:
+        """The card reservations' settings, checked."""
+        return ReservationPolicy.from_mapping(self.reservations)
 
     def repository(self, repository_id: str) -> Repository:
         """One repository by id; KeyError when there is none."""
@@ -278,6 +287,7 @@ class ConfigStore:
             model_notes=raw.get("model_notes", {}),
             providers=raw.get("providers", {}),
             cpu_models=raw.get("cpu_models", {}),
+            reservations=raw.get("reservations", {}),
             model_roots=roots,
             download_root=raw.get("download_root", "core"),
             extra_fields={key: value for key, value in raw.items()

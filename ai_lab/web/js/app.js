@@ -16,6 +16,8 @@ import { render as renderGateway,
          stopRefreshing as stopGatewayRefreshing } from './views/gateway.js';
 import { render as renderLanes,
          stopRefreshing as stopLanesRefreshing } from './views/lanes.js';
+import { render as renderReservations,
+         stopRefreshing as stopReservationsRefreshing } from './views/reservations.js';
 import { render as renderStorage } from './views/storage.js';
 
 // "Models" is the list you run; "Library" is what is on disk. They were both
@@ -42,6 +44,9 @@ const VIEWS = [
   // them. Refreshed on a timer for the same reason as the Gateway page.
   { id: 'lanes', label: 'Cloud & CPU', render: renderLanes,
     leave: stopLanesRefreshing, topics: [] },
+  // Who holds the card for a whole run, who waits, and the settings (ADR 0005).
+  { id: 'reservations', label: 'Reservations', render: renderReservations,
+    leave: stopReservationsRefreshing, topics: [] },
   { id: 'storage', label: 'Storage', render: renderStorage,
     topics: ['storage', 'engines'] },
   { id: 'settings', label: 'Settings', render: renderSettings,

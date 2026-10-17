@@ -8,11 +8,12 @@ import sys
 import threading
 from pathlib import Path
 
-from .api.server import serve
+from .api.server import build_router, serve
 from .card_sharing import guard_loads
 from .cpu_models import CpuLane
 from .lanes import SideLanes
 from .providers import ProviderPool
+from .reservations import ReservationBook
 from .wiring import build
 
 
@@ -37,9 +38,33 @@ def main() -> None:
     config = store.load()
     host = arguments.host or config.host
     port = arguments.port or config.port
-    # Two lanes of their own beside the card: subscription models (Claude
-    # Code, Codex, opencode), counting their usage where the host keeps its
-    # state, and processor models (embeddings), logging there too.
+    state_dir = operations.host.state_dir()
+    lanes = _side_lanes(config, operations, model_gateway)
+
+    # Card reservations (ADR 0005): kept where the host keeps its state, so a
+    # restart restores who held the card; the reaper frees a silent holder.
+    book = ReservationBook(config.reservation_policy, state_dir / "reservations.json")
+    book.start_reaper()
+
+    _install_shutdown(operations, lanes)
+
+    operations.recover_moves()
+    _restore_last_model(operations)
+
+    print(f"AI-Lab listening on http://{host}:{port}", flush=True)
+    try:
+        serve(build_router(operations, model_gateway, lanes, book), bus, (host, port))
+    finally:
+        lanes.stop_all()
+        operations.host.stop_all()
+
+
+def _side_lanes(config, operations, model_gateway) -> SideLanes:
+    """Two lanes of their own beside the card.
+
+    Subscription models (Claude Code, Codex, opencode) count their usage where
+    the host keeps its state; processor models (embeddings) log there too.
+    """
     state_dir = operations.host.state_dir()
     cpu = CpuLane.from_config(config.cpu_models, state_dir,
                               card_free_mb=lambda: _card_free_mb(operations.host))
@@ -50,18 +75,7 @@ def main() -> None:
         # the gateway and the Load button alike.
         model_gateway.resources.neighbours = cpu
         guard_loads(operations.instance_service, cpu)
-
-    _install_shutdown(operations, lanes)
-
-    operations.recover_moves()
-    _restore_last_model(operations)
-
-    print(f"AI-Lab listening on http://{host}:{port}", flush=True)
-    try:
-        serve(operations, bus, (host, port), model_gateway, lanes)
-    finally:
-        lanes.stop_all()
-        operations.host.stop_all()
+    return lanes
 
 
 def _card_free_mb(host) -> float | None:
