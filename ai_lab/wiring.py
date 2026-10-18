@@ -11,7 +11,7 @@ If logic starts appearing in this file, it belongs in `operations.py`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 from .builds.core import Builds
 from .catalog.capabilities import Known
@@ -61,13 +61,27 @@ CONFIG_SECTIONS: dict[str, Section] = {
 }
 
 
-def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway, SideLanes]:
+class Manager(NamedTuple):
+    """The built manager: what `main` starts and the routes are bound to."""
+
+    operations: Operations
+    bus: EventBus
+    store: ConfigStore
+    gateway: Gateway
+    lanes: SideLanes
+    image_jobs: ImageJobs
+    media_jobs: MediaJobs
+
+
+def build(config_path: Path) -> Manager:
     """The whole manager, from the configuration at `config_path`.
 
-    Returns the operations the routes call, the event bus the page listens
-    on, the configuration store, the model gateway and the lanes beside the
-    card. The embeddings lane is built before the gateway: it borrows the
-    card, so the gateway's memory is built with it as the card's neighbour.
+    The operations the routes call, the event bus the page listens on, the
+    configuration store, the model gateway, the lanes beside the card and the
+    two job queues. The embeddings lane is built before the gateway: it
+    borrows the card, so the gateway's memory is built with it as the card's
+    neighbour. The job queues send their work through the gateway, so they
+    are built after it.
     """
     store = ConfigStore(config_path)
     bus = EventBus()
@@ -83,11 +97,9 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     memory = GatewayResources(operations, limits.quiet_mb, limits.quiet_timeout_s,
                               limits.poll_s, neighbours=lanes.cpu)
     model_gateway = Gateway(operations, limits, memory=memory)
-    operations.image_jobs = ImageJobs(
-        model_gateway, store.load().images, host.state_dir(), bus)
-    operations.media_jobs = MediaJobs(
-        model_gateway, host.state_dir(), bus, settings=config.media_policy)
-    return operations, bus, store, model_gateway, lanes
+    image_jobs = ImageJobs(model_gateway, store.load().images, host.state_dir(), bus)
+    media_jobs = MediaJobs(model_gateway, host.state_dir(), bus, settings=config.media_policy)
+    return Manager(operations, bus, store, model_gateway, lanes, image_jobs, media_jobs)
 
 
 def side_lanes(config: Config, operations: Operations) -> SideLanes:

@@ -16,6 +16,7 @@ from unittest import mock
 
 import ai_lab.api.routes.gateway as gateway_routes
 from ai_lab.api.router import Router
+from ai_lab.api.routes import RouteParts
 from ai_lab.api.server import Handler, build_router, status_for
 from ai_lab.events import EventBus
 from ai_lab.gateway.core import CardBusyError, NotConfiguredError
@@ -271,7 +272,7 @@ class BusyCardTests(LiveServer):
     def setUpClass(cls):
         cls.operations = FakeOperations()
         cls.gateway = cls.Gateway()
-        cls.start(build_router(cast(Any, cls.operations), cls.gateway))
+        cls.start(build_router(cast(Any, cls.operations), RouteParts(gateway=cls.gateway)))
 
     def setUp(self):
         self.gateway.holder = {"instance_id": "coder", "answering": True}

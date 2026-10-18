@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 
+from .api.routes import RouteParts
 from .api.server import build_router, serve
 from .lanes import SideLanes
 from .reservations import ReservationBook, ReservationPolicy
@@ -31,8 +32,9 @@ def main() -> None:
     if not arguments.config.is_file():
         sys.exit(f"No configuration at {arguments.config}")
 
-    operations, bus, store, model_gateway, lanes = build(arguments.config)
-    config = store.load()
+    manager = build(arguments.config)
+    operations, lanes = manager.operations, manager.lanes
+    config = manager.store.load()
     host = arguments.host or config.host
     port = arguments.port or config.port
     state_dir = operations.host.state_dir()
@@ -50,7 +52,9 @@ def main() -> None:
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
-        serve(build_router(operations, model_gateway, lanes, book), bus, (host, port))
+        parts = RouteParts(gateway=manager.gateway, lanes=lanes, book=book,
+                           image_jobs=manager.image_jobs, media_jobs=manager.media_jobs)
+        serve(build_router(operations, parts), manager.bus, (host, port))
     finally:
         lanes.stop_all()
         operations.host.stop_all()

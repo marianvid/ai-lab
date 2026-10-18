@@ -22,8 +22,6 @@ from .application import paths
 from .operations_services import OperationsParts, OperationsServices, build_services
 
 if TYPE_CHECKING:
-    from .media.image_jobs import ImageJobs
-    from .media.jobs import MediaJobs
     from .types import Interests
 
 
@@ -57,9 +55,6 @@ class Operations:
         self._downloads = services.model_downloads
         self._maintenance = services.engine_maintenance
         self._settings_changes = services.settings_changes
-        # Set by `wiring.build` once the gateway exists (they need it).
-        self.image_jobs: ImageJobs | None = None
-        self.media_jobs: MediaJobs | None = None
 
     @classmethod
     def assemble(cls, parts: OperationsParts) -> Operations:

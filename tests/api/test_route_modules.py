@@ -1,10 +1,10 @@
 """Each small route module sends its paths to the right operation."""
 
 import unittest
-from types import SimpleNamespace
 
 from ai_lab.api.router import Router
-from ai_lab.api.routes import catalog, downloads, huggingface, images, media, settings, storage
+from ai_lab.api.routes import (RouteParts, catalog, downloads, huggingface, images, media,
+                               register_all, settings, storage)
 from ai_lab.api.routes.jobs import register_jobs
 from ai_lab.types import Task
 
@@ -66,9 +66,8 @@ class RouteModuleTests(unittest.TestCase):
 class JobRouteTests(unittest.TestCase):
     def setUp(self):
         self.router = Router()
-        self.operations = SimpleNamespace(image_jobs=Jobs(), media_jobs=Jobs())
-        images.register(self.router, self.operations)
-        media.register(self.router, self.operations)
+        images.register(self.router, Jobs())
+        media.register(self.router, Jobs())
 
     def test_both_queues_list_read_and_cancel(self):
         for path in ("/api/image-jobs", "/api/media-jobs"):
@@ -76,15 +75,19 @@ class JobRouteTests(unittest.TestCase):
             self.assertEqual(call(self.router, "GET", path + "/j1")["args"], ["j1"])
             self.assertEqual(call(self.router, "DELETE", path + "/j1")["called"], "cancel")
 
-    def test_the_queue_is_looked_up_on_each_request(self):
-        self.operations.media_jobs = None
-        self.operations.media_jobs = Jobs()
-        self.assertEqual(call(self.router, "GET", "/api/media-jobs")["called"], "list")
-
     def test_any_queue_gets_the_three_routes(self):
         router = Router()
-        register_jobs(router, "/api/other-jobs", Jobs)
+        register_jobs(router, "/api/other-jobs", Jobs())
         self.assertEqual(call(router, "DELETE", "/api/other-jobs/j2")["args"], ["j2"])
+
+    def test_the_queues_routes_are_there_only_when_their_queue_is(self):
+        bare = Router()
+        register_all(bare, Recorder())
+        self.assertIsNone(bare.match("GET", "/api/media-jobs"))
+        both = Router()
+        register_all(both, Recorder(), RouteParts(image_jobs=Jobs(), media_jobs=Jobs()))
+        self.assertEqual(call(both, "GET", "/api/media-jobs")["called"], "list")
+        self.assertEqual(call(both, "GET", "/api/image-jobs/j1")["args"], ["j1"])
 
     def test_image_requests_carry_their_task(self):
         made = call(self.router, "POST", "/v1/images/edits", body={"prompt": "x"})

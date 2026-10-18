@@ -22,18 +22,16 @@ from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
 from ..gateway.core import CardBusyError
-from ..lanes import SideLanes
 from ..multipart import MultipartBody
 from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
-from ..reservations import ReservationBook, ReservationConflictError, ReservationRequiredError
+from ..reservations import ReservationConflictError, ReservationRequiredError
 from . import sse
 from .passthrough import Passthrough
 from .router import Router
-from .routes import register_all
+from .routes import RouteParts, register_all
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
-NO_LANES = SideLanes()
 
 # Which exception means which status. Everything else is a bad request, since
 # the alternative — a 500 with a stack trace — tells the user nothing.
@@ -292,12 +290,10 @@ class Handler(BaseHTTPRequestHandler):
         """Silent: one line per request would bury the log that matters."""
 
 
-def build_router(operations: Operations, model_gateway=None,
-                 lanes: SideLanes = NO_LANES,
-                 reservations: ReservationBook | None = None) -> Router:
-    """Every API route, bound to the operations, the gateway, the side lanes and the reservations."""
+def build_router(operations: Operations, parts: RouteParts | None = None) -> Router:
+    """Every API route, bound to the operations and to the parts that are there (`RouteParts`)."""
     router = Router()
-    register_all(router, operations, model_gateway, lanes, reservations)
+    register_all(router, operations, parts)
     return router
 
 
