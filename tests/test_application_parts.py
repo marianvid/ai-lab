@@ -195,29 +195,32 @@ class StateTests(unittest.TestCase):
         self.assertEqual(operation.json()["steps"], [{"phase": "ready", "elapsed_ms": 5}])
 
 
-class Checkout(GitCheckout):
+class OneAnswer:
+    """git that gives the same answer to every command."""
+
     def __init__(self, answer):
-        self.path = Path("/nowhere")
         self.answer = answer
 
-    def _git(self, *arguments, timeout=15):
+    def run(self, path, *arguments, timeout=15):
         return self.answer
+
+    def is_ancestor(self, path, tag, against):
+        return None
+
+
+def checkout_answering(answer):
+    return GitCheckout(Path("/nowhere"), OneAnswer(answer))
 
 
 class CheckoutTests(unittest.TestCase):
     def test_the_newest_tag_of_the_right_shape_is_taken(self):
-        checkout = Checkout("b10448\nv0.3.0\nv0.2.0-rc1\n")
+        checkout = checkout_answering("b10448\nv0.3.0\nv0.2.0-rc1\n")
         self.assertEqual(checkout.newest_on("stable"), "v0.3.0")
         self.assertEqual(checkout.newest_on("nightly"), "b10448")
 
 
-class Compiled(CompiledVersions):
-    def __init__(self, root):
-        self.build_root = root
-        self.legacy_build = None
-
-    def checkout_version(self):
-        return Version("")
+def compiled_under(root):
+    return CompiledVersions(root, None, GitCheckout(Path("/nowhere"), OneAnswer("")))
 
 
 class CompiledTests(unittest.TestCase):
@@ -228,7 +231,7 @@ class CompiledTests(unittest.TestCase):
                 (root / f"build-{tag}" / "bin").mkdir(parents=True)
                 (root / f"build-{tag}" / "bin" / "llama-server").write_text("x")
                 mark_version(root / f"build-{tag}", Version(tag, "c" + tag))
-            compiled = Compiled(root)
+            compiled = compiled_under(root)
             compiled.point_at(root / "build-b2")
             found = {item.version.tag: item.active for item in compiled.environments()}
         self.assertEqual(found, {"b1": False, "b2": True})

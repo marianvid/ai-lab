@@ -1,9 +1,11 @@
 """One source checkout: update, build, verify and select a version.
 
-`SourceBuild` is the checkout as the settings page sees it. What git says
-about it is `source_checkout.GitCheckout`; the compiled versions and which one
-runs are `source_compiled.CompiledVersions`; both are base classes of it.
-This file is the update itself: fetch, move to the newest tag on the line
+`SourceBuild` is the checkout as the settings page sees it. It holds what git
+says about the checkout (`source_checkout.GitCheckout`) and the compiled
+versions and which one runs (`source_compiled.CompiledVersions`), and runs the
+update's long commands through a `build_commands.CommandStream`; all three
+come in through the constructor (`BuildTools`), real by default. This file is
+the update itself: fetch, move to the newest tag on the line
 followed, compile (into its own folder when builds are versioned), check that
 the new binary starts, and switch to it — or put everything back on failure.
 """
@@ -11,7 +13,6 @@ the new binary starts, and switch to it — or put everything back on failure.
 from __future__ import annotations
 
 import shutil
-import subprocess
 import threading
 import time
 from collections import deque
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from ..disk import free_bytes
 from ..events import EventBus
+from .build_commands import BuildTools, SubprocessStream
 from .source_checkout import GitCheckout
 from .source_compiled import CHECKOUT_S, CompiledVersions
 from .source_versions import DEFAULT_LINE, LINES, Version, mark_version, marked_version
@@ -70,26 +72,79 @@ class _Attempt:
         return int((time.monotonic() - self.started) * 1000)
 
 
-class SourceBuild(GitCheckout, CompiledVersions):
-    """One engine's source checkout, and the ability to update it."""
+class SourceBuild:
+    """One engine's source checkout, and the ability to update it.
+
+    It alone owns its lock, which guards the update's state and log lines; its
+    checkout and compiled versions hold no state that needs one.
+    """
 
     def __init__(self, engine_id: str, path: str, bus: EventBus,
-                 options: BuildOptions | None = None) -> None:
+                 options: BuildOptions | None = None, tools: BuildTools | None = None) -> None:
         options = options or BuildOptions()
+        tools = tools or BuildTools()
         self.engine_id = engine_id
         self.line = options.line if options.line in LINES else DEFAULT_LINE
         self.path = Path(path)
         self.bus = bus
         self.jobs = options.jobs
-        self.build_root = Path(options.builds) if options.builds else None
-        self.legacy_build = Path(options.legacy_build) if options.legacy_build else None
         self.cmake_args = list(options.cmake_args)
+        self.checkout = GitCheckout(self.path, tools.git)
+        self.compiled = CompiledVersions(
+            Path(options.builds) if options.builds else None,
+            Path(options.legacy_build) if options.legacy_build else None, self.checkout)
+        self.commands = tools.commands or SubprocessStream()
         self._lines: deque[str] = deque(maxlen=LOG_LINES)
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._state = "idle"          # idle, running, done, failed
         self._error = ""
         self._latest: Version | None = None
+
+    # -- the checkout and the compiled versions, as before ------------------
+
+    @property
+    def build_root(self) -> Path | None:
+        """Where the compiled versions live; None for a single in-tree build."""
+        return self.compiled.build_root
+
+    @property
+    def legacy_build(self) -> Path | None:
+        """An in-tree build adopted into the versioned scheme, if any."""
+        return self.compiled.legacy_build
+
+    @property
+    def exists(self) -> bool:
+        """Whether there is a git checkout at the configured path."""
+        return self.checkout.exists
+
+    def checkout_version(self) -> Version:
+        """What source is checked out, independently of the active binary."""
+        return self.checkout.checkout_version()
+
+    def active(self) -> Path | None:
+        """The build folder the engine runs from now, or None."""
+        return self.compiled.active()
+
+    def environments(self, with_sizes: bool = True) -> list:
+        """The active source build and every compiled rollback beside it."""
+        return self.compiled.environments(with_sizes)
+
+    def point_at(self, build: Path) -> None:
+        """Make `build` the one the engine runs."""
+        self.compiled.point_at(build)
+
+    def activate(self, name: str) -> dict:
+        """Run the compiled build called `name`, with the checkout moved to its source."""
+        self.compiled.activate(name)
+        self._announce()
+        return self.status()
+
+    def remove(self, name: str) -> dict:
+        """Delete a compiled build that is not the one in use."""
+        self.compiled.remove(name)
+        self._announce()
+        return self.status()
 
     # -- reading -----------------------------------------------------------
 
@@ -103,8 +158,8 @@ class SourceBuild(GitCheckout, CompiledVersions):
             "exists": self.exists, "installed": installed.tag, "commit": installed.commit,
             "latest": latest.tag if latest else "", "line": self.line,
             "lines": list(LINES),
-            "update_available": self._update_available(installed, latest),
-            "note": self._note(installed), "state": self._state, "error": self._error,
+            "update_available": self.checkout.update_available(installed, latest),
+            "note": self.checkout.note(installed), "state": self._state, "error": self._error,
             "log": list(self._lines),
             "environments": [item.json() for item in environments],
             "spare_bytes": sum(item.size_bytes for item in environments
@@ -147,8 +202,8 @@ class SourceBuild(GitCheckout, CompiledVersions):
         """
         if not self.exists:
             raise ValueError(f"No git checkout at {self.path}")
-        self._git("fetch", "--tags", "--prune", timeout=CHECKOUT_S)
-        newest = self.newest_on(self.line)
+        self.checkout.run("fetch", "--tags", "--prune", timeout=CHECKOUT_S)
+        newest = self.checkout.newest_on(self.line)
         if not newest:
             raise ValueError(
                 f"The remote has no {self.line} tags"
@@ -204,12 +259,12 @@ class SourceBuild(GitCheckout, CompiledVersions):
         """
         self._say("status", f"Updating {self.path}", attempt.elapsed())
         self._stream(["git", "fetch", "--tags", "--prune"], attempt.elapsed, CHECKOUT_S)
-        target = self.newest_on(self.line)
+        target = self.checkout.newest_on(self.line)
         if not target:
             raise ValueError(f"No {self.line} tag to move to")
         self._say("status", f"Moving to {target}", attempt.elapsed())
         self._stream(["git", "checkout", "--force", target], attempt.elapsed, CHECKOUT_S)
-        source = self.checkout_version()
+        source = self.checkout.checkout_version()
         self._say("status", f"Now at {source.tag} ({source.commit})", attempt.elapsed())
         return target, source
 
@@ -261,31 +316,14 @@ class SourceBuild(GitCheckout, CompiledVersions):
         # back too, so update detection and change reading still compare
         # upstream with the binary that actually runs.
         if self.build_root:
-            self._back_to(attempt.previous)
+            self.compiled.back_to(attempt.previous)
         self._announce()
 
     def _stream(self, command: list[str], elapsed: Elapsed, timeout: int) -> None:
-        """Run a command, forwarding each line as it appears.
-
-        Output is merged and read line by line rather than collected at the
-        end, because a ten-minute compile with nothing on screen is
-        indistinguishable from a hang.
-        """
+        """Run a command in the checkout, forwarding each line as it appears."""
         self._say("status", "$ " + " ".join(command), elapsed())
-        process = subprocess.Popen(
-            command, cwd=self.path, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, bufsize=1,
-        )
-        deadline = time.monotonic() + timeout
-        assert process.stdout is not None
-        for line in process.stdout:
-            self._say("out", line.rstrip("\n"), elapsed())
-            if time.monotonic() > deadline:
-                process.kill()
-                raise TimeoutError(f"{command[0]} exceeded {timeout}s")
-        code = process.wait()
-        if code != 0:
-            raise RuntimeError(f"{' '.join(command)} failed with exit code {code}")
+        self.commands.run(command, self.path,
+                          lambda line: self._say("out", line, elapsed()), timeout)
 
     # -- internals ---------------------------------------------------------
 

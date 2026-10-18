@@ -1,8 +1,10 @@
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from ai_lab.builds.build_commands import BuildTools
 from ai_lab.builds.core import Builds
 from ai_lab.builds.source_build import BuildOptions, SourceBuild
 from ai_lab.builds.source_versions import Version, mark_version
@@ -14,6 +16,46 @@ def finish(build):
     """Wait for the build started in the background."""
     assert build._thread is not None
     build._thread.join(timeout=5)
+
+
+class FakeGit:
+    """git as these tests see it: answers in turn (like a mock's side_effect), every command recorded.
+
+    `ancestor` is git's answer to "is that tag already in this history?":
+    False means there is something new, True nothing, None that git cannot tell.
+    """
+
+    def __init__(self, side_effect=None, return_value="", ancestor=None):
+        self.calls = Mock(side_effect=side_effect, return_value=return_value)
+        self.ancestor = ancestor
+
+    def run(self, path, *arguments, timeout=15):
+        return self.calls(*arguments, timeout=timeout)
+
+    def is_ancestor(self, path, tag, against):
+        return self.ancestor
+
+
+class FakeStream:
+    """The long commands of an update: recorded, and `behaviour(command)` run for each."""
+
+    def __init__(self, behaviour=None, says=None):
+        self.commands = []
+        self.behaviour = behaviour
+        self.says = says
+
+    def run(self, command, cwd, on_line, timeout):
+        self.commands.append(command)
+        if self.says:
+            on_line(self.says(command))
+        if self.behaviour:
+            self.behaviour(command)
+
+
+def build_with(path, bus, git=None, stream=None, options=None):
+    """A SourceBuild whose git and long commands are the fakes given."""
+    return SourceBuild("llamacpp", str(path), bus, options,
+                       BuildTools(git=git, commands=stream))
 
 
 class VersionTests(unittest.TestCase):
@@ -49,7 +91,9 @@ class SourceBuildTests(unittest.TestCase):
         self.addCleanup(self._temporary.cleanup)
         (self.path / ".git").mkdir()
         self.bus = EventBus()
-        self.build = SourceBuild("llamacpp", str(self.path), self.bus)
+
+    def build(self, git=None, stream=None, options=None):
+        return build_with(self.path, self.bus, git, stream, options)
 
     def test_a_directory_without_git_is_reported_not_crashed(self):
         build = SourceBuild("llamacpp", "/nowhere", self.bus)
@@ -59,34 +103,27 @@ class SourceBuildTests(unittest.TestCase):
             build.check()
 
     def test_the_installed_version_comes_from_the_checkout(self):
-        with patch.object(SourceBuild, "_git", side_effect=["b10331\n", "7ba604f1c\n"]):
-            version = self.build.installed()
+        version = self.build(FakeGit(["b10331\n", "7ba604f1c\n"])).installed()
         self.assertEqual(version.tag, "b10331")
         self.assertEqual(version.commit, "7ba604f1c")
 
     def test_the_newest_tag_on_the_followed_line_wins(self):
         # check() fetches, lists the tags on its line, then reads the installed
         # version. git already sorts them, so the first match is the newest.
-        with patch.object(SourceBuild, "_git",
-                          side_effect=["", "v0.2.0\nv0.1.10\nv0.1.2\n",
-                                       "v0.1.2\n", "7ba604f1c\n"]), \
-             patch.object(SourceBuild, "_is_ahead", return_value=True):
-            status = self.build.check()
+        git = FakeGit(["", "v0.2.0\nv0.1.10\nv0.1.2\n", "v0.1.2\n", "7ba604f1c\n"],
+                      ancestor=False)
+        status = self.build(git).check()
         self.assertEqual(status["latest"], "v0.2.0")
         self.assertEqual(status["line"], "stable")
         self.assertTrue(status["update_available"])
 
     def test_the_nightly_line_is_followed_when_that_is_what_was_asked_for(self):
-        build = SourceBuild("llamacpp", str(self.path), self.bus, BuildOptions(line="nightly"))
-        with patch.object(SourceBuild, "_git",
-                          side_effect=["", "b10587\nb10448\n",
-                                       "b10448\n", "abc\n"]) as git, \
-             patch.object(SourceBuild, "_is_ahead", return_value=True):
-            status = build.check()
+        git = FakeGit(["", "b10587\nb10448\n", "b10448\n", "abc\n"], ancestor=False)
+        status = self.build(git, options=BuildOptions(line="nightly")).check()
         self.assertEqual(status["latest"], "b10587")
         self.assertEqual(status["line"], "nightly")
         # It asked for b tags, not v tags.
-        listing = [call for call in git.call_args_list
+        listing = [call for call in git.calls.call_args_list
                    if "for-each-ref" in call.args][0]
         self.assertIn("refs/tags/b*", listing.args)
 
@@ -97,59 +134,45 @@ class SourceBuildTests(unittest.TestCase):
     def test_tags_from_the_other_line_are_ignored(self):
         # `git for-each-ref refs/tags/v*` would also match a tag called
         # "vendor-something". Only a real version is taken.
-        with patch.object(SourceBuild, "_git",
-                          side_effect=["", "vendor-thing\nv0.1.2\n",
-                                       "v0.1.2\n", "abc\n"]), \
-             patch.object(SourceBuild, "_is_ahead", return_value=False):
-            status = self.build.check()
-        self.assertEqual(status["latest"], "v0.1.2")
+        git = FakeGit(["", "vendor-thing\nv0.1.2\n", "v0.1.2\n", "abc\n"], ancestor=True)
+        self.assertEqual(self.build(git).check()["latest"], "v0.1.2")
 
     def test_no_update_offered_when_the_tag_is_already_in_this_history(self):
         # The exact question, and the one that works across both lines:
         # somebody on b10448 moving to v0.2.0 is going to a *smaller* number
         # and a newer thing, so the numbers cannot decide this.
-        with patch.object(SourceBuild, "_git",
-                          side_effect=["", "v0.2.0\n", "v0.2.0\n", "abc\n"]), \
-             patch.object(SourceBuild, "_is_ahead", return_value=False):
-            status = self.build.check()
-        self.assertFalse(status["update_available"])
+        git = FakeGit(["", "v0.2.0\n", "v0.2.0\n", "abc\n"], ancestor=True)
+        self.assertFalse(self.build(git).check()["update_available"])
 
     def test_moving_from_a_nightly_to_a_stable_tag_is_offered(self):
-        with patch.object(SourceBuild, "_git",
-                          side_effect=["", "v0.2.0\n", "b10448\n", "abc\n"]), \
-             patch.object(SourceBuild, "_is_ahead", return_value=True):
-            status = self.build.check()
+        git = FakeGit(["", "v0.2.0\n", "b10448\n", "abc\n"], ancestor=False)
+        status = self.build(git).check()
         self.assertEqual(status["installed"], "b10448")
         self.assertEqual(status["latest"], "v0.2.0")
         self.assertTrue(status["update_available"],
                         "a smaller number on the other line is still an update")
 
     def test_a_remote_without_tags_on_that_line_is_an_error_not_a_silent_zero(self):
-        with patch.object(SourceBuild, "_git", return_value=""), \
-                self.assertRaises(ValueError):
-            self.build.check()
+        with self.assertRaises(ValueError):
+            self.build(FakeGit(return_value="")).check()
 
     def test_output_is_streamed_line_by_line_and_kept(self):
         """A ten-minute compile with nothing on screen looks like a hang."""
         subscription = self.bus.subscribe()
-        commands = []
+        stream = FakeStream(says=lambda command: f"ran {command[0]}")
+        build = self.build(FakeGit(["v0.2.0\n"] * 40), stream)
+        build.update()
+        finish(build)
 
-        def fake_stream(build, command, elapsed, timeout):
-            commands.append(command)
-            build._say("out", f"ran {command[0]}", 0)
-
-        with patch.object(SourceBuild, "_stream", fake_stream), \
-             patch.object(SourceBuild, "_git", side_effect=["v0.2.0\n"] * 40):
-            self.build.update()
-            finish(self.build)
-
-        self.assertEqual(self.build.status()["state"], "done")
+        self.assertEqual(build.status()["state"], "done")
+        commands = stream.commands
         self.assertEqual([item[0] for item in commands], ["git", "git", "cmake"])
         checkout = [item for item in commands if item[:2] == ["git", "checkout"]]
         self.assertTrue(checkout, "an update must move to a named tag")
+        self.assertIn("ran cmake", build.status()["log"])
         published = []
-        stream = subscription.events(timeout=0.01)
-        while (event := next(stream)) is not None:
+        events = subscription.events(timeout=0.01)
+        while (event := next(events)) is not None:
             # The stream also carries change notices, which have no text.
             if isinstance(event, LogEvent):
                 published.append(event.text)
@@ -157,36 +180,39 @@ class SourceBuildTests(unittest.TestCase):
 
     def test_it_rebuilds_without_reconfiguring(self):
         """The existing build directory holds this machine's compile flags."""
-        commands = []
-        with patch.object(SourceBuild, "_stream",
-                          lambda self, command, elapsed, timeout: commands.append(command)), \
-             patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
-            self.build.update()
-            finish(self.build)
-        cmake = [item for item in commands if item[0] == "cmake"][0]
+        stream = FakeStream()
+        build = self.build(FakeGit(["v0.1.0\n"] * 40), stream)
+        build.update()
+        finish(build)
+        cmake = [item for item in stream.commands if item[0] == "cmake"][0]
         self.assertEqual(cmake[:3], ["cmake", "--build", "build"])
         self.assertNotIn("-DGGML_CUDA=ON", cmake)
 
     def test_a_failure_is_recorded_with_its_message(self):
-        def explode(self, command, elapsed, timeout):
+        def explode(command):
             raise RuntimeError("cmake exited 2")
 
-        with patch.object(SourceBuild, "_stream", explode), \
-             patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
-            self.build.update()
-            finish(self.build)
-        status = self.build.status()
+        build = self.build(FakeGit(["v0.1.0\n"] * 40), FakeStream(explode))
+        build.update()
+        finish(build)
+        status = build.status()
         self.assertEqual(status["state"], "failed")
         self.assertIn("cmake exited 2", status["error"])
 
     def test_two_builds_cannot_run_at_once(self):
-        with patch.object(SourceBuild, "_stream",
-                          lambda *a, **k: __import__("time").sleep(0.3)), \
-             patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
-            self.build.update()
-            with self.assertRaises(ValueError):
-                self.build.update()
-            finish(self.build)
+        started, release = threading.Event(), threading.Event()
+
+        def hold(command):
+            started.set()
+            release.wait(5)
+
+        build = self.build(FakeGit(["v0.1.0\n"] * 40), FakeStream(hold))
+        build.update()
+        self.assertTrue(started.wait(5))
+        with self.assertRaises(ValueError):
+            build.update()
+        release.set()
+        finish(build)
 
 
 class BuildsTests(unittest.TestCase):
@@ -214,11 +240,15 @@ class VersionedBuildTests(unittest.TestCase):
         mark_version(self.legacy, Version("b10448", "oldcommit"))
         self.builds = self.root / "compiled"
         self.builds.mkdir()
-        self.build = SourceBuild(
-            "llamacpp", str(self.source), EventBus(), BuildOptions(
-                builds=str(self.builds), legacy_build=str(self.legacy),
-                cmake_args=["-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"]))
+        self.git = FakeGit(return_value="")
+        self.stream = FakeStream()
+        self.build = self.made(self.git, self.stream)
         self.build.point_at(self.legacy)
+
+    def made(self, git, stream):
+        return build_with(self.source, EventBus(), git, stream, BuildOptions(
+            builds=str(self.builds), legacy_build=str(self.legacy),
+            cmake_args=["-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"]))
 
     def _compiled(self, tag="v0.3.0", commit="newcommit"):
         path = self.builds / f"build-{tag}"
@@ -228,9 +258,10 @@ class VersionedBuildTests(unittest.TestCase):
         return path
 
     def test_the_active_binary_not_checkout_is_the_installed_version(self):
-        with patch.object(SourceBuild, "checkout_version",
-                          return_value=Version("v0.3.0", "newcommit")):
-            self.assertEqual(self.build.installed(), Version("b10448", "oldcommit"))
+        # The checkout says v0.3.0; the binary that runs is the legacy b10448.
+        build = self.made(FakeGit(["v0.3.0\n", "newcommit\n"] * 4), FakeStream())
+        self.assertEqual(build.checkout_version(), Version("v0.3.0", "newcommit"))
+        self.assertEqual(build.installed(), Version("b10448", "oldcommit"))
 
     def test_compiled_versions_are_listed_and_the_active_one_is_marked(self):
         newer = self._compiled()
@@ -240,11 +271,10 @@ class VersionedBuildTests(unittest.TestCase):
 
     def test_switching_is_instant_and_deletes_nothing(self):
         newer = self._compiled()
-        with patch.object(SourceBuild, "_git", return_value="") as git:
-            self.build.activate(newer.name)
+        self.build.activate(newer.name)
         self.assertEqual(self.build.active(), newer.resolve())
         self.assertTrue(self.legacy.exists())
-        self.assertIn("newcommit", git.call_args.args)
+        self.assertIn("newcommit", self.git.calls.call_args.args)
 
     def test_the_active_build_cannot_be_deleted(self):
         with self.assertRaises(ValueError):
@@ -257,22 +287,19 @@ class VersionedBuildTests(unittest.TestCase):
         self.assertFalse(newer.exists())
 
     def test_update_configures_and_builds_beside_the_active_one(self):
-        commands = []
-
-        def stream(owner, command, elapsed, timeout):
-            commands.append(command)
+        def make_folder(command):
             if command[:2] == ["cmake", "-S"]:
                 target = Path(command[command.index("-B") + 1])
                 (target / "bin").mkdir(parents=True)
                 (target / "bin" / "llama-server").write_text("binary")
 
-        with patch.object(SourceBuild, "_stream", stream), \
-             patch.object(SourceBuild, "_git",
-                          side_effect=["v0.3.0\n", "v0.3.0\n", "newcommit\n"]):
-            self.build.update()
-            finish(self.build)
+        stream = FakeStream(make_folder)
+        build = self.made(FakeGit(["v0.3.0\n", "v0.3.0\n", "newcommit\n"]), stream)
+        build.update()
+        finish(build)
+        commands = stream.commands
 
-        status = self.build.status()
+        status = build.status()
         self.assertEqual(status["state"], "done", status["error"])
         self.assertEqual(status["installed"], "v0.3.0")
         self.assertEqual({item["version"] for item in status["environments"]},
@@ -283,25 +310,20 @@ class VersionedBuildTests(unittest.TestCase):
         self.assertTrue(any(command[-1:] == ["--version"] for command in commands))
 
     def test_a_failed_new_build_leaves_the_active_one_and_no_partial_copy(self):
-        def stream(owner, command, elapsed, timeout):
+        def fail_compiling(command):
             if command[:3] == ["cmake", "--build", str(self.builds / "build-v0.3.0")]:
                 raise RuntimeError("compile failed")
             if command[:2] == ["cmake", "-S"]:
                 Path(command[command.index("-B") + 1]).mkdir(parents=True)
 
-        with patch.object(SourceBuild, "_stream", stream), \
-             patch.object(SourceBuild, "_git",
-                          side_effect=["v0.3.0\n", "v0.3.0\n", "newcommit\n", ""]):
-            self.build.update()
-            finish(self.build)
+        build = self.made(FakeGit(["v0.3.0\n", "v0.3.0\n", "newcommit\n", ""]),
+                          FakeStream(fail_compiling))
+        build.update()
+        finish(build)
 
-        self.assertEqual(self.build.status()["state"], "failed")
-        self.assertEqual(self.build.active(), self.legacy.resolve())
+        self.assertEqual(build.status()["state"], "failed")
+        self.assertEqual(build.active(), self.legacy.resolve())
         self.assertFalse((self.builds / "build-v0.3.0").exists())
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class RobustnessTests(unittest.TestCase):
@@ -320,8 +342,8 @@ class RobustnessTests(unittest.TestCase):
         self.assertTrue(status["exists"])
 
     def test_status_survives_a_repository_with_no_tags(self):
-        with patch.object(SourceBuild, "_git", side_effect=ValueError("no tags")):
-            self.assertEqual(self.build.installed().tag, "")
+        build = build_with(self.path, EventBus(), FakeGit(side_effect=ValueError("no tags")))
+        self.assertEqual(build.installed().tag, "")
 
 
 class UnknownVersionTests(unittest.TestCase):
@@ -338,9 +360,8 @@ class UnknownVersionTests(unittest.TestCase):
         # A shallow clone has no tags, so there is nothing to compare against
         # and nothing sensible to move from. Offering an update there would be
         # offering to replace an unknown with an unknown.
-        with patch.object(SourceBuild, "_git",
-                          side_effect=["", "v0.2.0\n", ValueError("no tags")]):
-            status = self.build.check()
+        git = FakeGit(["", "v0.2.0\n", ValueError("no tags")])
+        status = build_with(self.path, EventBus(), git).check()
         self.assertEqual(status["installed"], "")
         self.assertEqual(status["latest"], "v0.2.0")
         self.assertFalse(status["update_available"])
@@ -353,8 +374,8 @@ class UnknownVersionTests(unittest.TestCase):
         self.assertIn("No git checkout", build.status()["note"])
 
     def test_a_healthy_checkout_has_nothing_to_report(self):
-        with patch.object(SourceBuild, "_git", side_effect=["b10331\n", "abc\n"]):
-            self.assertEqual(self.build.status()["note"], "")
+        build = build_with(self.path, EventBus(), FakeGit(["b10331\n", "abc\n"]))
+        self.assertEqual(build.status()["note"], "")
 
 
 class WatchTests(unittest.TestCase):
@@ -405,3 +426,7 @@ class WatchTests(unittest.TestCase):
         builds = Builds({}, EventBus())
         builds.watch(interval_s=60)
         self.assertIsNone(builds.watcher.thread)
+
+
+if __name__ == "__main__":
+    unittest.main()

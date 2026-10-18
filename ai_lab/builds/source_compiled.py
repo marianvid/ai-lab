@@ -1,6 +1,10 @@
 """The compiled versions of one source checkout, and which of them runs.
 
-A base class of `SourceBuild` (a mixin). With a versioned build root, every
+`CompiledVersions` is held by `SourceBuild`, with the `GitCheckout` it moves
+when a version is activated. It keeps no state of its own beyond its two
+paths (everything else is on disk), so it needs no lock; `SourceBuild`, which
+owns the lock, never runs an activation and an update at once. With a
+versioned build root, every
 compiled version lives in its own `build-<tag>` folder beside the others and
 a `current` link names the one the engine runs; switching is moving the link,
 so going back to an older version is instant and deletes nothing.
@@ -11,10 +15,10 @@ from __future__ import annotations
 import contextlib
 import re
 import shutil
-from collections.abc import Callable
 from pathlib import Path
 
 from ..disk import tree_size
+from .source_checkout import GitCheckout
 from .source_versions import BuildEnvironment, Version, marked_version
 
 CURRENT = "current"
@@ -24,15 +28,13 @@ CHECKOUT_S = 120
 
 
 class CompiledVersions:
-    """Compiled builds under `build_root` (see `SourceBuild`, which owns the fields)."""
+    """Compiled builds under `build_root`, and the `current` link naming the one in use."""
 
-    build_root: Path | None
-    legacy_build: Path | None
-    # From `GitCheckout`, the other base class of `SourceBuild`.
-    _git: Callable[..., str]
-    checkout_version: Callable[[], Version]
-    status: Callable[..., dict]
-    _announce: Callable[[], None]
+    def __init__(self, build_root: Path | None, legacy_build: Path | None,
+                 checkout: GitCheckout) -> None:
+        self.build_root = build_root
+        self.legacy_build = legacy_build
+        self.checkout = checkout
 
     @property
     def link(self) -> Path | None:
@@ -65,7 +67,7 @@ class CompiledVersions:
             seen.add(resolved)
             version = marked_version(path)
             if not version.tag and path == self.legacy_build and active == resolved:
-                version = self.checkout_version()
+                version = self.checkout.checkout_version()
             environment = BuildEnvironment(path, version, active == resolved, movable)
             if with_sizes:
                 environment.size_bytes = tree_size(path)
@@ -94,7 +96,7 @@ class CompiledVersions:
         temporary.symlink_to(build, target_is_directory=True)
         temporary.replace(self.link)
 
-    def activate(self, name: str) -> dict:
+    def activate(self, name: str) -> None:
         """Run the compiled build called `name`, with the checkout moved to its source."""
         environment = self._one(name)
         reference = environment.version.commit or environment.version.tag
@@ -103,31 +105,27 @@ class CompiledVersions:
         # Keep the source and the selected binary describing the same version.
         # This is a quick checkout, not a rebuild, and makes the next update
         # comparison start from what actually runs.
-        previous = self.checkout_version()
-        self._git("checkout", "--force", reference, timeout=CHECKOUT_S)
+        previous = self.checkout.checkout_version()
+        self.checkout.run("checkout", "--force", reference, timeout=CHECKOUT_S)
         try:
             self.point_at(environment.path)
         except Exception:
-            self._back_to(previous)
+            self.back_to(previous)
             raise
-        self._announce()
-        return self.status()
 
-    def remove(self, name: str) -> dict:
+    def remove(self, name: str) -> None:
         """Delete a compiled build that is not the one in use."""
         environment = self._one(name)
         if environment.active:
             raise ValueError(f"{name} is the build in use. Activate another one first.")
         shutil.rmtree(environment.path)
-        self._announce()
-        return self.status()
 
-    def _back_to(self, previous: Version) -> None:
+    def back_to(self, previous: Version) -> None:
         """Check the source out at `previous` again, if it is known; best effort."""
         if previous.tag:
             with contextlib.suppress(ValueError):
-                self._git("checkout", "--force", previous.commit or previous.tag,
-                          timeout=CHECKOUT_S)
+                self.checkout.run("checkout", "--force", previous.commit or previous.tag,
+                                  timeout=CHECKOUT_S)
 
     def _one(self, name: str) -> BuildEnvironment:
         for environment in self.environments(with_sizes=False):
