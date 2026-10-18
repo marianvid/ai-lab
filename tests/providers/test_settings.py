@@ -3,6 +3,7 @@ from typing import Any
 
 from ai_lab.config.store import Config
 from ai_lab.config.validation import validate_configuration
+from ai_lab.wiring import CONFIG_SECTIONS
 from ai_lab.providers.settings import ProvidersConfig, VendorLimits
 
 VENDORS = {"anthropic": {"dialect": "claude", "binary": "/opt/cli/claude",
@@ -60,9 +61,10 @@ class ProvidersConfigTests(unittest.TestCase):
     def test_a_bad_section_stops_the_manager_at_start(self):
         config = Config(providers={"vendors": {"x": {"dialect": "y", "binary": "/b"}}})
         with self.assertRaisesRegex(ValueError, "providers.vendors.x.dialect"):
-            validate_configuration(config, set())
-        self.assertEqual(Config(providers={"vendors": VENDORS, "models": MODELS})
-                         .provider_policy.models["claude/sonnet"].vendor, "anthropic")
+            validate_configuration(config, set(), sections=CONFIG_SECTIONS)
+        section = Config(providers={"vendors": VENDORS, "models": MODELS}).providers
+        self.assertEqual(ProvidersConfig.from_mapping(section).models["claude/sonnet"].vendor,
+                         "anthropic")
 
 
 if __name__ == "__main__":

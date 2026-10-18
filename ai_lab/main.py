@@ -13,7 +13,7 @@ from .gateway.card_sharing import guard_loads
 from .cpu_models import CpuLane
 from .lanes import SideLanes
 from .providers import ProviderPool
-from .reservations import ReservationBook
+from .reservations import ReservationBook, ReservationPolicy
 from .wiring import build
 
 
@@ -43,7 +43,8 @@ def main() -> None:
 
     # Card reservations (ADR 0005): kept where the host keeps its state, so a
     # restart restores who held the card; the reaper frees a silent holder.
-    book = ReservationBook(config.reservation_policy, state_dir / "reservations.json")
+    book = ReservationBook(ReservationPolicy.from_mapping(config.reservations),
+                           state_dir / "reservations.json")
     book.start_reaper()
 
     _install_shutdown(operations, lanes)

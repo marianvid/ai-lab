@@ -54,7 +54,7 @@ class CpuModelsConfigTests(unittest.TestCase):
 
     def test_the_configuration_carries_the_section(self):
         config = Config(cpu_models={"binary": BINARY, "models": {"bge-m3": BGE}})
-        self.assertEqual(list(config.cpu_model_policy.models), ["bge-m3"])
+        self.assertEqual(list(CpuModelsConfig.from_mapping(config.cpu_models).models), ["bge-m3"])
 
 
 if __name__ == "__main__":

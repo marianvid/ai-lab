@@ -4,7 +4,9 @@ How it is built (Chain of Responsibility + Strategy):
 
 - `validate_configuration` runs a fixed chain of section checkers — storage
   roots, repositories, the manager port, each instance, the policies, the
-  image profiles. Each checker adds plain-language messages to one shared
+  image profiles. Sections another package owns (subscription providers,
+  processor models, card reservations) are handed in as `Section`s by the
+  composition root, so this package imports nothing above itself. Each checker adds plain-language messages to one shared
   `_Report`, so the person reading the error sees every problem at once.
 - How an engine's per-model options are judged is a table, `ENGINE_RULES`:
   one entry per engine, a short message and a tuple of small rules such as
@@ -18,7 +20,7 @@ that does not host the weights.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,6 +28,23 @@ from .store import Config
 from ..types import Task
 
 Rule = Callable[[dict], bool]
+
+
+@dataclass(frozen=True)
+class Section:
+    """A configuration section another package owns, checked by that package.
+
+    `parse` reads the plain mapping kept in `Config` under the section's name
+    and raises `ValueError` saying what is wrong. `ports`, when the section
+    claims ports, lists them from what `parse` returned as (who, port), so a
+    port already taken is reported with the section's own label.
+    """
+
+    parse: Callable[[dict], object]
+    ports: Callable[[object], Iterable[tuple[str, int]]] | None = None
+
+
+NO_SECTIONS: Mapping[str, Section] = {}
 
 MAX_PORT = 65535
 # Khala's largest length bucket.
@@ -160,6 +179,7 @@ class _Report:
     config: Config
     engine_ids: set[str]
     check_workflows: bool
+    sections: Mapping[str, Section] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     instance_ids: set[str] = field(default_factory=set)
     ports: set[int] = field(default_factory=set)
@@ -242,24 +262,30 @@ def _check_placement(report: _Report, item) -> None:
 
 
 def _check_policies(report: _Report) -> None:
-    for policy_name in ("gateway_policy", "media_policy", "provider_policy",
-                        "cpu_model_policy", "reservation_policy"):
+    for policy_name in ("gateway_policy", "media_policy"):
         try:
             getattr(report.config, policy_name)
         except ValueError as error:
             report.add(str(error))
+    for name, section in report.sections.items():
+        try:
+            section.parse(getattr(report.config, name))
+        except ValueError as error:
+            report.add(str(error))
 
 
-def _check_cpu_model_ports(report: _Report) -> None:
-    """An embeddings model's ports (processor, card) must not be the manager's or an instance's."""
-    try:
-        models = report.config.cpu_model_policy.models.values()
-    except ValueError:
-        return  # already reported by `_check_policies`
-    for model in models:
-        for port in model.ports:
+def _check_section_ports(report: _Report) -> None:
+    """The ports a section claims (an embeddings model's, say) must not be taken already."""
+    for name, section in report.sections.items():
+        if section.ports is None:
+            continue
+        try:
+            parsed = section.parse(getattr(report.config, name))
+        except ValueError:
+            continue  # already reported by `_check_policies`
+        for who, port in section.ports(parsed):
             if port in report.ports:
-                report.add(f"cpu model {model.name}: port {port} is already assigned")
+                report.add(f"{who}: port {port} is already assigned")
             report.ports.add(port)
 
 
@@ -302,14 +328,19 @@ def _check_profile_workflow(report: _Report, profile_id: str, workflow: str,
 
 
 CHAIN = (_check_roots, _check_repositories, _check_manager_port,
-         _check_instances, _check_policies, _check_cpu_model_ports,
+         _check_instances, _check_policies, _check_section_ports,
          _check_image_profiles)
 
 
-def validate_configuration(config: Config, engine_ids: set[str],
-                           *, check_workflows: bool = False) -> None:
-    """Reject broken references and conflicting ports with one useful report."""
-    report = _Report(config, engine_ids, check_workflows)
+def validate_configuration(config: Config, engine_ids: set[str], *,
+                           check_workflows: bool = False,
+                           sections: Mapping[str, Section] = NO_SECTIONS) -> None:
+    """Reject broken references and conflicting ports with one useful report.
+
+    `sections` are the parts of the configuration other packages own, by the
+    name `Config` keeps them under (see `wiring.CONFIG_SECTIONS`).
+    """
+    report = _Report(config, engine_ids, check_workflows, dict(sections))
     for checker in CHAIN:
         checker(report)
     if report.errors:

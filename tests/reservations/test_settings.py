@@ -11,7 +11,8 @@ class PolicyTests(unittest.TestCase):
         policy = ReservationPolicy.from_mapping(None)
         self.assertEqual((policy.heartbeat_timeout_s, policy.default_max_s, policy.ceiling_s,
                           policy.required), (180, 1800, 14400, False))
-        self.assertEqual(Config(reservations={"aging_s": 0}).reservation_policy.aging_s, 0)
+        section = Config(reservations={"aging_s": 0}).reservations
+        self.assertEqual(ReservationPolicy.from_mapping(section).aging_s, 0)
 
     def test_mistakes_are_refused(self):
         for raw, words in (("x", "must be an object"),

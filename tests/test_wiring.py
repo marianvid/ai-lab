@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from ai_lab.config.store import Config, Instance
-from ai_lab.wiring import engine_settings_of, gateway_limits
+from ai_lab.wiring import CONFIG_SECTIONS, engine_settings_of, gateway_limits
 
 
 class EngineSettingsTests(unittest.TestCase):
@@ -36,3 +36,18 @@ class GatewayLimitsTests(unittest.TestCase):
     def test_the_front_door_s_limits_come_from_the_configuration(self):
         limits = gateway_limits(Config(gateway={"first_byte_s": 60, "max_waiting": 12}))
         self.assertEqual((limits.first_byte_s, limits.max_waiting), (60, 12))
+
+
+class SectionsTests(unittest.TestCase):
+    def test_the_sections_other_packages_own_are_checked_by_their_parsers(self):
+        self.assertEqual(sorted(CONFIG_SECTIONS), ["cpu_models", "providers", "reservations"])
+        with self.assertRaisesRegex(ValueError, "Unknown"):
+            CONFIG_SECTIONS["reservations"].parse({"nope": 1})
+
+    def test_an_embeddings_model_claims_its_ports(self):
+        section = CONFIG_SECTIONS["cpu_models"]
+        parsed = section.parse({"binary": "/bin/llama-server", "models": {"bge-m3": {
+            "path": "/m/bge.gguf", "port": 8390, "card": {"port": 8391, "needs_mb": 1300}}}})
+        assert section.ports is not None
+        self.assertEqual(list(section.ports(parsed)),
+                         [("cpu model bge-m3", 8390), ("cpu model bge-m3", 8391)])

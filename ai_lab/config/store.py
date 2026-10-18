@@ -35,10 +35,7 @@ from threading import RLock
 
 from .migrations import SCHEMA_VERSION, migrate
 from .policy import GatewayPolicy, MediaPolicy
-from ..cpu_models.settings import CpuModelsConfig
 from ..network import ALL_INTERFACES
-from ..providers.settings import ProvidersConfig
-from ..reservations.settings import ReservationPolicy
 
 
 @dataclass(slots=True)
@@ -156,13 +153,15 @@ class Config:
     # a model between benchmark and core storage.
     model_notes: dict = field(default_factory=dict)
     # Subscription models served through their vendors' CLIs (Claude Code,
-    # Codex): vendors, limits and model names. See `providers/settings.py`.
+    # Codex): vendors, limits and model names. Read and checked by
+    # `providers/settings.py`; this package only keeps the mapping.
     providers: dict = field(default_factory=dict)
     # Models run on the processor, from RAM (embeddings): the llama.cpp server
-    # and each model's file, port and limits. See `cpu_models/settings.py`.
+    # and each model's file, port and limits. Read and checked by
+    # `cpu_models/settings.py`.
     cpu_models: dict = field(default_factory=dict)
     # Card reservations (ADR 0005): heartbeat, durations, aging, whether they
-    # are required. See `reservations/settings.py`.
+    # are required. Read and checked by `reservations/settings.py`.
     reservations: dict = field(default_factory=dict)
     # The one directory every model lives under. Each repository is a
     # folder in it, named after the format.
@@ -188,21 +187,6 @@ class Config:
     def media_policy(self) -> MediaPolicy:
         """The music and speech job settings, checked."""
         return MediaPolicy.from_mapping(self.media)
-
-    @property
-    def provider_policy(self) -> ProvidersConfig:
-        """The subscription providers, checked."""
-        return ProvidersConfig.from_mapping(self.providers)
-
-    @property
-    def cpu_model_policy(self) -> CpuModelsConfig:
-        """The processor models, checked."""
-        return CpuModelsConfig.from_mapping(self.cpu_models)
-
-    @property
-    def reservation_policy(self) -> ReservationPolicy:
-        """The card reservations' settings, checked."""
-        return ReservationPolicy.from_mapping(self.reservations)
 
     def repository(self, repository_id: str) -> Repository:
         """One repository by id; KeyError when there is none."""

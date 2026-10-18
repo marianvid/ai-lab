@@ -11,12 +11,14 @@ If logic starts appearing in this file, it belongs in `operations.py`.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from .builds.core import Builds
 from .catalog.capabilities import Known
 from .catalog.core import Catalog
 from .config.store import Config, ConfigStore
-from .config.validation import validate_configuration
+from .config.validation import Section, validate_configuration
+from .cpu_models.settings import CpuModelsConfig
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
@@ -30,9 +32,28 @@ from .runtime.lastloaded import LastLoaded
 from .media.jobs import MediaJobs
 from .operations import Operations
 from .operations_services import OperationsParts
+from .providers.settings import ProvidersConfig
+from .reservations.settings import ReservationPolicy
 from .runtime.core import Runtime
 from .settings import Settings
 from .storage import Storage
+
+
+
+def _cpu_model_ports(parsed: object) -> list[tuple[str, int]]:
+    """Every port an embeddings model claims (processor, card), labelled by the model."""
+    models = cast(CpuModelsConfig, parsed).models
+    return [(f"cpu model {model.name}", port)
+            for model in models.values() for port in model.ports]
+
+
+# The configuration sections other packages own, checked by their own parsers
+# when the configuration is validated (`config` imports none of them).
+CONFIG_SECTIONS: dict[str, Section] = {
+    "providers": Section(ProvidersConfig.from_mapping),
+    "cpu_models": Section(CpuModelsConfig.from_mapping, ports=_cpu_model_ports),
+    "reservations": Section(ReservationPolicy.from_mapping),
+}
 
 
 def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway]:
@@ -46,7 +67,8 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     config = store.load()
     engine_settings = engine_settings_of(config)
     engines = Registry(engine_settings)
-    validate_configuration(config, set(engines.known()), check_workflows=True)
+    validate_configuration(config, set(engines.known()), check_workflows=True,
+                           sections=CONFIG_SECTIONS)
     host = current_host(engine_settings)
     operations = _operations(store, bus, host, engines, engine_settings)
     model_gateway = Gateway(operations, gateway_limits(config))

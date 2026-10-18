@@ -7,6 +7,7 @@ from typing import Any
 from ai_lab.gateway.card_sharing import NoNeighbours, guard_loads
 from ai_lab.config.store import Config, Instance, ModelRoot
 from ai_lab.config.validation import validate_configuration
+from ai_lab.wiring import CONFIG_SECTIONS
 from ai_lab.gateway.resources import GatewayResources
 from ai_lab.main import _card_free_mb
 from ai_lab.types import AcceleratorSnapshot
@@ -98,7 +99,7 @@ class CardRoomTests(unittest.TestCase):
                             "path": "/m/bge.gguf", "port": 8390,
                             "card": {"port": 8391, "needs_mb": 1300}}}})
         with self.assertRaisesRegex(ValueError, "port 8391 is already assigned"):
-            validate_configuration(config, {"vllm"})
+            validate_configuration(config, {"vllm"}, sections=CONFIG_SECTIONS)
 
 
 if __name__ == "__main__":
