@@ -8,7 +8,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_lab.catalog import capabilities
 from ai_lab.catalog.capabilities import IMAGES, TOOLS, FILE_NAME, Known
 
 
@@ -121,15 +120,11 @@ class Remembering(unittest.TestCase):
         # opening anything. Counted rather than timed: the point is that the
         # file is not read, and a stopwatch would only say it was quick.
         reads = []
-        original = capabilities._read
+
         def counted(*_args):
             reads.append(1)
             return frozenset()
-        capabilities._read = counted
-        try:
-            answer = Known(self.state).of(str(self.weights), True, ["model.gguf"])
-        finally:
-            capabilities._read = original
+        answer = Known(self.state, read=counted).of(str(self.weights), True, ["model.gguf"])
         self.assertEqual(answer, frozenset({TOOLS}))
         self.assertEqual(reads, [], "read the file again despite having the answer")
 

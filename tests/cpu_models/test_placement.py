@@ -98,7 +98,6 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual((alone.reclaimable_mb(), alone.device()), (0.0, "cpu"))
 
     def test_making_way_waits_for_the_card_requests_then_leaves(self):
-        server = self.place.take()
         finished: list[bool] = []
 
         def finish_later(seconds):
@@ -106,7 +105,9 @@ class PlacementTests(unittest.TestCase):
             if not finished:
                 finished.append(True)
                 self.place.give_back(server)
-        self.place._sleep = finish_later
+        self.place = Placement(cast(Any, self.cpu), cast(Any, self.card), self.card_free,
+                               self.clock, finish_later)
+        server = self.place.take()
         self.place.make_way()
         self.assertEqual(finished, [True])
         self.assertFalse(self.card.running)

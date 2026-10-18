@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import struct
+from collections.abc import Callable
 from pathlib import Path
 
 IMAGES = "images"
@@ -56,6 +57,8 @@ _STRING, _ARRAY = 8, 9
 _CHAT_TEMPLATE_KEY = "tokenizer.chat_template"
 
 FILE_NAME = "model-capabilities.json"
+# Opens a model's files and says what it can do: (entrypoint, is_gguf, companions).
+Reader = Callable[[Path, bool, list[str]], frozenset[str]]
 
 
 class Known:
@@ -70,8 +73,10 @@ class Known:
     a page over it would cost more.
     """
 
-    def __init__(self, directory: Path | None = None) -> None:
+    def __init__(self, directory: Path | None = None, read: Reader | None = None) -> None:
+        """`read` opens a model's files and says what it can do (default: `_read`)."""
         self.path = Path(directory) / FILE_NAME if directory else None
+        self._read = read or _read
         self._known: dict[str, list[str]] = self._load()
 
     def of(self, entrypoint: str, is_gguf: bool,
@@ -93,7 +98,7 @@ class Known:
         if remembered is not None:
             return frozenset(remembered)
         try:
-            found = _read(path, is_gguf, companions)
+            found = self._read(path, is_gguf, companions)
         except Exception:
             found = frozenset()
         self._known[key] = sorted(found)

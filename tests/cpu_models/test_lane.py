@@ -55,8 +55,8 @@ class CpuLaneTests(unittest.TestCase):
         self.free = None
         self.lane = self.make(RAW)
 
-    def make(self, raw):
-        tools = LaneTools(poster=self.post, server_factory=cast(Any, FakeServer),
+    def make(self, raw, poster=None):
+        tools = LaneTools(poster=poster or self.post, server_factory=cast(Any, FakeServer),
                           card_free_mb=lambda: self.free, clock=lambda: 10.0)
         return CpuLane(CpuModelsConfig.from_mapping(raw), Path(tempfile.mkdtemp()), tools)
 
@@ -80,7 +80,7 @@ class CpuLaneTests(unittest.TestCase):
     def test_a_failure_is_counted_and_raised(self):
         def broken(_port, _payload):
             raise ValueError("input is too long")
-        self.lane._post = broken
+        self.lane = self.make(RAW, broken)
         with self.assertRaisesRegex(ValueError, "too long"):
             self.lane.embed(EMBEDDINGS_PATH, REQUEST)
         self.assertEqual(self.lane.stats()["bge-m3"]["failures"], 1)
@@ -94,7 +94,7 @@ class CpuLaneTests(unittest.TestCase):
             release.wait(2)
             inside[0] -= 1
             return {"data": []}
-        self.lane._post = slow
+        self.lane = self.make(RAW, slow)
         threads = [threading.Thread(target=self.lane.embed, args=(EMBEDDINGS_PATH, REQUEST))
                    for _ in range(5)]
         for thread in threads:

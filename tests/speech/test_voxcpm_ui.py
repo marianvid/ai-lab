@@ -26,8 +26,9 @@ class VoxCpmNativeUiTests(unittest.TestCase):
         module.VoxCPMDemo = Demo
         module.create_demo_interface = lambda demo: seen.setdefault("demo", demo) and interface
         module.I18N = object()
-        module._APP_THEME = object()
-        module._CUSTOM_CSS = ""
+        # The upstream module's own private names, which the launcher reads:
+        # part of the stand-in module, not the inside of an object under test.
+        vars(module).update({"_APP_THEME": object(), "_CUSTOM_CSS": ""})
         backend = types.SimpleNamespace(model=object())
 
         with patch.dict(sys.modules, {"ai_lab.vendor.voxcpm_upstream.app": module}):
