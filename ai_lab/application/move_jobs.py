@@ -4,8 +4,14 @@
 the host's state directory, rewritten atomically at every phase (`pending`,
 `copying`, `verifying`, `publishing`, then `completed`, `failed` or
 `cancelled`). Reading the file back is also how a cancellation asked for by
-another request reaches the move in progress. The files are the only state,
-each rewritten in one step, so the store needs no lock.
+another request reaches the move in progress.
+
+Two threads write the same record: the move's own thread, at every phase, and
+a request thread when the operator cancels. The store's lock guards every
+read-modify-write, so a `cancelling` written by one is never overwritten by
+the other's older copy: `phase` raises `MoveCancelledError` instead, and
+`finish` keeps the request on record. Each write goes to a temporary file of
+its own before being renamed over the record.
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -36,6 +43,8 @@ class MoveJobStore:
     def __init__(self, host: Host, on_change: Callable[[str], None]) -> None:
         self.host = host
         self._changed = on_change
+        # Guards every read-modify-write of a record (see the module's docstring).
+        self._lock = threading.RLock()
 
     def open(self, plan: MovePlan) -> dict:
         """Write the durable job record before any byte is copied."""
@@ -60,12 +69,20 @@ class MoveJobStore:
         return job
 
     def finish(self, job: dict, status: str, error: str = "") -> None:
-        """Record how the move ended, with the error when there is one."""
-        if error:
-            job["error"] = error
-        job["status"] = status
-        job["updated_at"] = time.time()
-        self.write(job)
+        """Record how the move ended, with the error when there is one.
+
+        A move that completed after a cancel was asked for (the cancel came
+        once it was publishing, past the last point where it can stop) says
+        so in its error, rather than silently dropping the request.
+        """
+        with self._lock:
+            if self._on_disk_status(job) == "cancelling" and status == "completed":
+                error = error or "Cancel asked too late: the model had already been published"
+            if error:
+                job["error"] = error
+            job["status"] = status
+            job["updated_at"] = time.time()
+            self.write(job)
 
     def _move_job_dir(self) -> Path:
         directory = self.host.state_dir() / "moves"
@@ -78,9 +95,11 @@ class MoveJobStore:
     def write(self, job: dict) -> None:
         """Save the job record in one step (written beside, then renamed over)."""
         path = self._job_path(job["id"])
-        temporary = path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(job, sort_keys=True))
-        temporary.replace(path)
+        # A temporary file of its own per write: two writers never share one.
+        temporary = path.with_name(f"{path.stem}.{uuid.uuid4().hex}.json.tmp")
+        with self._lock:
+            temporary.write_text(json.dumps(job, sort_keys=True))
+            temporary.replace(path)
         self._changed("models")
 
     def read(self, job_id: str) -> dict:
@@ -88,10 +107,20 @@ class MoveJobStore:
         return json.loads(self._job_path(job_id).read_text())
 
     def phase(self, job: dict, status: str) -> None:
-        """Record that the move entered `status`."""
-        job["status"] = status
-        job["updated_at"] = time.time()
-        self.write(job)
+        """Record that the move entered `status`; MoveCancelledError if a cancel was asked for."""
+        with self._lock:
+            if self._on_disk_status(job) == "cancelling":
+                raise MoveCancelledError()
+            job["status"] = status
+            job["updated_at"] = time.time()
+            self.write(job)
+
+    def _on_disk_status(self, job: dict) -> str:
+        """The record's status as saved now; "" when there is none yet."""
+        try:
+            return str(self.read(job["id"]).get("status", ""))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return ""
 
     def check_cancelled(self, job: dict) -> None:
         """Whether someone asked for this move to stop.
@@ -158,10 +187,11 @@ class MoveJobStore:
         disk, so the same job can be inspected or cleaned up rather than the
         work simply disappearing.
         """
-        job = self.read(job_id)
-        if job["status"] in ("completed", "failed", "cancelled"):
-            return job
-        job["status"] = "cancelling"
-        job["updated_at"] = time.time()
-        self.write(job)
+        with self._lock:
+            job = self.read(job_id)
+            if job["status"] in ("completed", "failed", "cancelled"):
+                return job
+            job["status"] = "cancelling"
+            job["updated_at"] = time.time()
+            self.write(job)
         return job
