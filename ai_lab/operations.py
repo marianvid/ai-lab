@@ -41,6 +41,8 @@ class Operations:
         self._storage = parts.storage
         self._instances = services.instance_service
         self._model_storage = services.model_storage
+        self._move_jobs = services.move_jobs
+        self._configuration = services.instance_configuration
         self._listing = services.listing
         self._downloads = services.model_downloads
         self._maintenance = services.engine_maintenance
@@ -120,19 +122,19 @@ class Operations:
 
     def suggest_port(self):
         """The first free port at or above 8080."""
-        return self._instances.configuration.suggest_port()
+        return self._configuration.suggest_port()
 
     def new_instance_form(self):
         """Everything the Add form needs, in one call."""
-        return self._instances.configuration.new_instance_form()
+        return self._configuration.new_instance_form()
 
     def create_instance(self, payload: dict):
         """Add an entry. The id is given rather than worked out."""
-        return self._instances.configuration.create_instance(payload)
+        return self._configuration.create_instance(payload)
 
     def update_instance(self, instance_id: str, changes: dict):
         """Change the settings of an instance. Does not restart it."""
-        return self._instances.configuration.update_instance(instance_id, changes)
+        return self._configuration.update_instance(instance_id, changes)
 
     def apply_and_reload(self, instance_id: str, changes: dict):
         """Save the settings and restart the model with them."""
@@ -140,7 +142,7 @@ class Operations:
 
     def delete_instance(self, instance_id: str):
         """Remove an entry that is not running."""
-        return self._instances.configuration.delete_instance(instance_id)
+        return self._configuration.delete_instance(instance_id)
 
     # -- this machine's settings -----------------------------------------------
 
@@ -250,15 +252,15 @@ class Operations:
 
     def move_jobs(self) -> list[dict]:
         """Every move job on record, most recently updated first."""
-        return self._model_storage.jobs.all()
+        return self._move_jobs.all()
 
     def recover_moves(self) -> list[dict]:
         """Sweep move jobs left mid-flight by a process that did not exit cleanly."""
-        return self._model_storage.jobs.recover()
+        return self._move_jobs.recover()
 
     def cancel_move(self, job_id: str) -> dict:
         """Ask an in-progress move to stop at the next file or phase boundary."""
-        return self._model_storage.jobs.cancel(job_id)
+        return self._move_jobs.cancel(job_id)
 
     # -- downloads -------------------------------------------------------------
 

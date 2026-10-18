@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from .application.downloads import ModelDownloadService
 from .application.engine_maintenance import EngineMaintenanceService, MaintenanceParts
+from .application.instance_config import InstanceConfiguration
 from .application.instances import InstanceParts, InstanceService
 from .application.model_listing import ModelListing
 from .application.model_storage import ModelStorageService, MoveJobsFactory, StorageParts
@@ -64,12 +65,19 @@ class OperationsParts:
 
 @dataclass(frozen=True)
 class OperationsServices:
-    """The services `Operations` delegates to, one per area of the application."""
+    """The services `Operations` delegates to, one per area of the application.
+
+    `instance_configuration` (editing the entries) and `move_jobs` (the record
+    of model moves) belong to the instance and storage services, and are
+    handed over on their own so `Operations` asks them directly.
+    """
 
     listing: ModelListing
     model_downloads: ModelDownloadService
     model_storage: ModelStorageService
+    move_jobs: MoveJobStore
     instance_service: InstanceService
+    instance_configuration: InstanceConfiguration
     engine_maintenance: EngineMaintenanceService
     settings_changes: SettingsChanges
 
@@ -106,5 +114,6 @@ def build_services(parts: OperationsParts) -> OperationsServices:
                          parts.builds, parts.installs), instances.instances)
     return OperationsServices(
         listing=listing, model_downloads=downloads, model_storage=storage,
-        instance_service=instances, engine_maintenance=maintenance,
+        move_jobs=storage.jobs, instance_service=instances,
+        instance_configuration=instances.configuration, engine_maintenance=maintenance,
         settings_changes=SettingsChanges(parts.store, parts.host, parts.settings, changed))

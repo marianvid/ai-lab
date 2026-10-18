@@ -31,7 +31,7 @@ class InstanceService:
         self.bus = parts.bus
         self.last_loaded = parts.last_loaded
         # Editing the entries: suggesting a port, the Add form, create,
-        # change, delete. Callers reach it as `instance_service.configuration`.
+        # change, delete. `build_services` hands it to `Operations` on its own.
         self.configuration = InstanceConfiguration(parts)
 
     def configured(self) -> list[dict]:
