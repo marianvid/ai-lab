@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from ai_lab.events import EventBus
-from ai_lab.gitapps import GitApplicationInstall
+from ai_lab.builds.gitapps import GitApplicationInstall
 
 
 class GitApplicationInstallTests(unittest.TestCase):

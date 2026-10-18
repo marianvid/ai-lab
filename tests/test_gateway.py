@@ -14,10 +14,10 @@ import unittest
 
 from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
                                  validate)
-from ai_lab.gateway import (CardBusyError, CouldNotLoadError, Gateway, GatewayLimits, NotConfiguredError,
+from ai_lab.gateway.core import (CardBusyError, CouldNotLoadError, Gateway, GatewayLimits, NotConfiguredError,
                             ShapeNotServedError)
-from ai_lab.scheduler import WillNotFitError
-from ai_lab.runtime import Operation
+from ai_lab.gateway.scheduler import WillNotFitError
+from ai_lab.runtime.core import Operation
 from ai_lab.types import AcceleratorSnapshot, Task
 
 
@@ -321,9 +321,9 @@ class DescribingTests(unittest.TestCase):
 
     def test_the_real_engines_say_what_they_withhold(self):
         from ai_lab.engines.base import withheld
-        from ai_lab.engines.llamacpp import LlamaCppEngine
-        from ai_lab.engines.mlxlm import MlxLmEngine
-        from ai_lab.engines.vllm import VllmEngine
+        from ai_lab.engines.text.llamacpp import LlamaCppEngine
+        from ai_lab.engines.text.mlxlm import MlxLmEngine
+        from ai_lab.engines.text.vllm import VllmEngine
         self.assertEqual(withheld(MlxLmEngine(binary="python"), {}), {"images"})
         self.assertEqual(withheld(VllmEngine(binary="vllm"),
                                   {"language_model_only": True}), {"images"})

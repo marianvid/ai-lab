@@ -2,7 +2,7 @@
 
 import unittest
 
-from ai_lab.config import Config
+from ai_lab.config.store import Config
 from ai_lab.cpu_models.settings import CpuModelsConfig
 
 BINARY = "/opt/ai/llama.cpp/build/bin/llama-server"

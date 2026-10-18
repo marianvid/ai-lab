@@ -1,0 +1,296 @@
+"""What models are on disk.
+
+Walks the configured repositories and groups loose files into complete models.
+This is where the shard rule lives: the knowledge that
+`model-00003-of-00005.safetensors` is one fifth of one thing, and that the
+tokenizer sitting next to it belongs with it.
+
+That rule used to live in the HTTP handler, which meant supporting a new
+format required editing the web server. Here it can be tested against a
+directory of empty files, with no HTTP and no real weights.
+
+A model missing one of its shards is reported as incomplete rather than
+hidden, so an interrupted download is visible instead of mysterious.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import NamedTuple
+
+from ..config.store import Repository
+from .naming import (base_name, is_companion, is_part, is_weight_for_format,
+                     missing_shards)
+from ..types import Format, ModelFile, ModelSet, Task
+
+
+
+class _Found(NamedTuple):
+    """The weights of one model found in a directory, and the name it goes by."""
+
+    directory: Path
+    base: str
+    shards: list[Path]
+
+
+def _inside_any(directory: Path, roots: list[Path]) -> bool:
+    """Whether the directory is one of these model roots or below one."""
+    return any(directory == root or directory.is_relative_to(root) for root in roots)
+
+class Catalog:
+    """Scans repositories and returns the models found in them.
+
+    `known` remembers what each model's files said it can do, so they are
+    opened once. Without one, nothing is worked out and every model reports no
+    capabilities — which is what a test that does not care about them wants.
+    """
+
+    def __init__(self, known=None) -> None:
+        self.known = known
+
+    def scan(self, repositories: list[Repository]) -> list[ModelSet]:
+        """Every model in these repositories, sorted by id; missing folders are skipped."""
+        models: list[ModelSet] = []
+        for repository in repositories:
+            root = Path(repository.path)
+            if not root.is_dir():
+                continue
+            models.extend(self._scan_repository(repository, root))
+        models.sort(key=lambda item: item.id)
+        return models
+
+    def find(self, repositories: list[Repository], model_id: str) -> ModelSet:
+        """The model with this id; KeyError when there is none."""
+        found = next((item for item in self.scan(repositories) if item.id == model_id), None)
+        if found is None:
+            raise KeyError(f"Unknown model: {model_id}")
+        return found
+
+    # -- internals ---------------------------------------------------------
+
+    def _scan_repository(self, repository: Repository, root: Path) -> list[ModelSet]:
+        """Turn the files in a repository into models.
+
+        Scanning directory by directory rather than file by file is what lets
+        companions be attached: a tokenizer belongs to the model it sits beside.
+
+        How a directory divides into models depends on the format, and the two
+        rules are opposites:
+
+        GGUF puts a whole model in one file, so one directory can hold several
+        unrelated ones. Weights are grouped by shard base name, and the name of
+        the model is the name of its file.
+
+        Safetensors spreads one model across a directory — weights, index,
+        tokenizer, config — so the directory *is* the model and its name is the
+        directory's. Applying the GGUF rule here splits a model into pieces:
+        `model_mtp.safetensors` beside `model.safetensors` is a
+        multi-token-prediction head, not a second model, and on its own it will
+        not load.
+        """
+        if repository.format == Format.PYANNOTE.value:
+            return self._scan_pyannote(repository, root)
+        declared, declared_roots = self._declared_models(repository, root)
+        models: list[ModelSet] = list(declared)
+        model_roots = list(declared_roots)
+        for directory in self._directories(root):
+            if _inside_any(directory, model_roots):
+                continue
+            weights, companions = self._classify(directory, repository.format)
+            if not weights:
+                continue
+            if self._directory_is_the_model(repository):
+                found = _Found(directory, self._directory_name(root, directory), weights)
+                models.append(self._build(repository, root, found, companions))
+                model_roots.append(directory)
+                continue
+            for base, shards in self._group(weights).items():
+                models.append(self._build(repository, root, _Found(directory, base, shards),
+                                          companions))
+        return models
+
+    @staticmethod
+    def _declared_models(repository: Repository, root: Path) -> tuple[list[ModelSet], list[Path]]:
+        """Read model trees whose pieces live in several nested folders.
+
+        Multi-folder ComfyUI stacks and a few application caches are one usable model
+        even though their transformer, text encoder and VAEs sit in different
+        subdirectories. A tiny manifest at the model root makes that boundary
+        explicit instead of exposing each component as a separate model.
+        """
+        manifests = [path for path in root.rglob(".ai-lab-model.json")
+                     if not any(part.startswith(".") and part != ".ai-lab-model.json"
+                                for part in path.relative_to(root).parts)]
+        models, roots = [], []
+        for manifest in sorted(manifests):
+            directory = manifest.parent
+            raw = json.loads(manifest.read_text())
+            name = str(raw.get("name") or directory.name)
+            entrypoint = directory / str(raw.get("entrypoint") or "")
+            files = Catalog._physical_files(directory)
+            relative = directory.relative_to(root)
+            parts = [repository.id, *relative.parts[:-1], name] if relative.parts \
+                else [repository.id, name]
+            models.append(ModelSet(
+                id="/".join(parts), name=name, format=Format(repository.format),
+                entrypoint=str(entrypoint), files=files,
+                task=Task(repository.task), complete=True,
+            ))
+            roots.append(directory)
+        return models, roots
+
+    @staticmethod
+    def _physical_files(directory: Path) -> tuple[ModelFile, ...]:
+        """Count cached weights once when snapshots symlink back to blobs.
+
+        Hugging Face application caches keep a content-addressed blob and a
+        friendly snapshot symlink to the same inode.  Both paths belong to the
+        declared model, but summing both reports twice the disk actually used.
+        """
+        files, seen = [], set()
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file():
+                continue
+            stat = path.stat()
+            physical = (stat.st_dev, stat.st_ino)
+            if physical in seen:
+                continue
+            seen.add(physical)
+            files.append(ModelFile(path=str(path), size_bytes=stat.st_size))
+        return tuple(files)
+
+    def _scan_pyannote(self, repository: Repository, root: Path) -> list[ModelSet]:
+        """A downloaded pyannote pipeline is one directory tree.
+
+        Its root config refers to segmentation and embedding assets in child
+        directories, so scanning those weight files separately would expose
+        unusable fragments instead of the pipeline.
+        """
+        directories = [root] if (root / "config.yaml").is_file() else [
+            path for path in sorted(root.iterdir())
+            if path.is_dir() and (path / "config.yaml").is_file()
+        ]
+        models = []
+        for directory in directories:
+            files = tuple(ModelFile(path=str(path), size_bytes=path.stat().st_size)
+                          for path in sorted(directory.rglob("*")) if path.is_file())
+            relative = directory.relative_to(root)
+            name = directory.name
+            parts = [repository.id, *relative.parts[:-1], name] if relative.parts \
+                else [repository.id, name]
+            models.append(ModelSet(id="/".join(parts), name=name,
+                                   format=Format.PYANNOTE,
+                                   entrypoint=str(directory), files=files,
+                                   task=Task(repository.task)))
+        return models
+
+    @staticmethod
+    def _directory_is_the_model(repository: Repository) -> bool:
+        """Whether one directory holds exactly one model.
+
+        True for every format the engine is handed a directory for — the same
+        distinction `_entrypoint` makes, kept in step with it.
+        """
+        return repository.format != Format.GGUF.value
+
+    @staticmethod
+    def _directory_name(root: Path, directory: Path) -> str:
+        """The model's name when the directory is the model.
+
+        Weight files in these formats are always called `model-00001-of-...`,
+        so naming from the file would call every model "model". The directory
+        carries the real name. A repository root holding loose weights has no
+        directory of its own to be named after, so it falls back to its own name.
+        """
+        return directory.name if directory != root else root.name
+
+    @staticmethod
+    def _directories(root: Path) -> list[Path]:
+        """Every folder in a repository, except the ones that are not models.
+
+        A folder whose name begins with a dot is working space — a model being
+        downloaded, or one being copied between tiers — and what is inside it
+        is by definition not finished. Looking in would show half a model as a
+        model, which is exactly what the working folder exists to prevent.
+        """
+        return [root, *(path for path in sorted(root.rglob("*"))
+                        if path.is_dir()
+                        and not any(part.startswith(".")
+                                    for part in path.relative_to(root).parts))]
+
+    @staticmethod
+    def _classify(directory: Path,
+                  repository_format: str) -> tuple[list[Path], list[Path]]:
+        weights, companions = [], []
+        for path in sorted(directory.iterdir()):
+            if not path.is_file():
+                continue
+            # A part is weights, but not a model: it goes with whatever else
+            # is in the directory rather than becoming an entry of its own.
+            # The order matters — a vision projector passes `is_weight`.
+            if (is_weight_for_format(path.name, repository_format)
+                    and not is_part(path.name)):
+                weights.append(path)
+            elif is_companion(path.name) or is_part(path.name):
+                companions.append(path)
+        return weights, companions
+
+    @staticmethod
+    def _group(weights: list[Path]) -> dict[str, list[Path]]:
+        """Group weight files by the model they belong to.
+
+        A directory can hold several unrelated GGUF files, so grouping is by
+        shard base name rather than by directory alone.
+        """
+        groups: dict[str, list[Path]] = {}
+        for path in weights:
+            groups.setdefault(base_name(path.name), []).append(path)
+        return groups
+
+    def _build(self, repository: Repository, root: Path, found: _Found,
+               companions: list[Path]) -> ModelSet:
+        directory, base, shards = found.directory, found.base, sorted(found.shards)
+        complete, missing = missing_shards([path.name for path in shards])
+        files = (self._physical_files(directory)
+                 if self._directory_is_the_model(repository)
+                 else tuple(ModelFile(path=str(path), size_bytes=path.stat().st_size)
+                            for path in (*shards, *companions)))
+        relative = directory.relative_to(root)
+        # When the directory is the model, `base` is already the directory's
+        # name, so listing the path as well would repeat it: nvfp4/gemma/gemma.
+        parts = ([repository.id, *relative.parts[:-1], base]
+                 if self._directory_is_the_model(repository) and relative.parts
+                 else [repository.id, *relative.parts, base])
+        entrypoint = str(self._entrypoint(repository, directory, shards))
+        return ModelSet(
+            id="/".join(parts),
+            name=base,
+            format=Format(repository.format),
+            entrypoint=entrypoint,
+            files=files,
+            task=Task(repository.task),
+            complete=complete,
+            missing=missing,
+            capabilities=self._can_do(repository, entrypoint, companions),
+        )
+
+    def _can_do(self, repository: Repository, entrypoint: str,
+                companions: list[Path]) -> frozenset[str]:
+        if self.known is None:
+            return frozenset()
+        return self.known.of(entrypoint,
+                             repository.format == Format.GGUF.value,
+                             [path.name for path in companions])
+
+    @staticmethod
+    def _entrypoint(repository: Repository, directory: Path, shards: list[Path]) -> Path:
+        """What gets handed to the engine.
+
+        llama.cpp is given the first shard and finds the rest itself. Engines
+        reading safetensors are given the directory, because they need the
+        index and the tokenizer alongside the weights.
+        """
+        if repository.format == Format.GGUF.value:
+            return shards[0]
+        return directory

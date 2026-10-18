@@ -12,7 +12,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from ..config_policy import MediaPolicy
+from ..config.policy import MediaPolicy
 from ..engines.base import MUSIC_PATHS, SPEECH_PATHS
 from ..network import LOOPBACK
 from ..types import ChangeEvent, Task

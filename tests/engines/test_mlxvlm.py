@@ -7,8 +7,8 @@ from unittest import mock
 
 from ai_lab.engines import base
 from ai_lab.engines.base import withheld
-from ai_lab.engines.mlxvlm import MlxVlmEngine
-from ai_lab.engines.text_launch import default_launcher
+from ai_lab.engines.text.mlxvlm import MlxVlmEngine
+from ai_lab.engines.text.text_launch import default_launcher
 from ai_lab.engines.registry import Registry
 from ai_lab.text import mlxvlm_server as launcher
 from ai_lab.types import Format, ModelFile, ModelSet, Task
@@ -98,13 +98,13 @@ class DescriptionTests(unittest.TestCase):
         self.assertEqual(self.engine.api_paths(), base.OPENAI_PATHS)
 
     def test_ready_only_once_a_model_is_named(self):
-        with mock.patch("ai_lab.engines.mlxvlm.http_json",
+        with mock.patch("ai_lab.engines.text.mlxvlm.http_json",
                         return_value={"status": "healthy", "loaded_model": None}):
             self.assertFalse(self.engine.ready(8150))
-        with mock.patch("ai_lab.engines.mlxvlm.http_json",
+        with mock.patch("ai_lab.engines.text.mlxvlm.http_json",
                         return_value={"status": "healthy", "loaded_model": "/m"}):
             self.assertTrue(self.engine.ready(8150))
-        with mock.patch("ai_lab.engines.mlxvlm.http_json", return_value={}):
+        with mock.patch("ai_lab.engines.text.mlxvlm.http_json", return_value={}):
             self.assertFalse(self.engine.ready(8150))
 
     def test_memory_and_concurrency(self):

@@ -6,13 +6,13 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..capabilities import IMAGES, TOOLS
+from ..catalog.capabilities import IMAGES, TOOLS
 from ..changes import Reader, counted
 from ..types import Interests
 
 if TYPE_CHECKING:
-    from ..builds import Builds
-    from ..installs import Installs
+    from ..builds.core import Builds
+    from ..builds.installs import Installs
 
 
 @dataclass(frozen=True)

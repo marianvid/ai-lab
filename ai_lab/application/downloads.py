@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ..config import ConfigStore
+from ..config.store import ConfigStore
 from ..downloads import DownloadManager, HuggingFaceClient
 from ..downloads import bundles
 from ..hosts.base import Host

@@ -31,12 +31,12 @@ from ...engines.base import (
     TRANSCRIPTION_PATHS,
     VAD_PATHS,
 )
-from ...gateway import Gateway
+from ...gateway.core import Gateway
 from ...lanes import SideLanes
 from ...network import LOOPBACK
-from ...gateway_state import Lease
+from ...gateway.state import Lease
 from ...reservations import CardReservedError, ReservationBook, ReservationConflictError
-from ...scheduler_parts import AdmissionWithdrawnError, StillWanted
+from ...gateway.scheduler_parts import AdmissionWithdrawnError, StillWanted
 from ...types import Task
 from ..multipart import MultipartBody
 from ..passthrough import Hooks, Waits, forward

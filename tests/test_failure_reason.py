@@ -14,7 +14,7 @@ three faults below was invisible against a tidier example.
 import unittest
 from pathlib import Path
 
-from ai_lab.runtime_diagnostics import RuntimeDiagnostics
+from ai_lab.runtime.diagnostics import RuntimeDiagnostics
 
 JOURNALS = Path(__file__).resolve().parent / "support" / "journals"
 

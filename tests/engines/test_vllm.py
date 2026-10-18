@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from ai_lab.engines.vllm import VllmEngine
+from ai_lab.engines.text.vllm import VllmEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

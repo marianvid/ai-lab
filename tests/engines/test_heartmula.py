@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.engines.heartmula import HeartMulaEngine
+from ai_lab.engines.music.heartmula import HeartMulaEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

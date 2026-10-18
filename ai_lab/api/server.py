@@ -21,7 +21,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
-from ..gateway import CardBusyError
+from ..gateway.core import CardBusyError
 from ..lanes import SideLanes
 from ..multipart import MultipartBody
 from ..operations import Operations

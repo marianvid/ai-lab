@@ -17,7 +17,7 @@ build-backend = "setuptools.build_meta"
 include = ["ai_lab*"]
 
 [tool.setuptools.package-data]
-ai_lab = ["public_services.json", "web/*", "web/css/*", "web/js/*", "web/js/views/*",
+ai_lab = ["builds/public_services.json", "web/*", "web/css/*", "web/js/*", "web/js/views/*",
           "comfyui_custom_nodes/ai_lab_preset/web/*",
           "comfyui_templates/*.json",
           "vendor/sglang_omni/playground/higgs/frontend/*",

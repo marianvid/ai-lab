@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.stableaudio3 import StableAudio3Engine
+from ai_lab.engines.music.stableaudio3 import StableAudio3Engine
 from ai_lab.types import Format, ModelSet, Task
 
 

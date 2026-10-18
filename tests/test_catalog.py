@@ -3,9 +3,9 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.catalog import Catalog
-from ai_lab.naming import split_shard
-from ai_lab.config import Repository
+from ai_lab.catalog.core import Catalog
+from ai_lab.catalog.naming import split_shard
+from ai_lab.config.store import Repository
 from ai_lab.types import Format, Task
 
 from tests.support import make_files, repository

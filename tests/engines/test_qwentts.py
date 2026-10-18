@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.engines.qwentts import QwenTtsEngine
+from ai_lab.engines.speech.qwentts import QwenTtsEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.runtime_diagnostics import RuntimeDiagnostics
+from ai_lab.runtime.diagnostics import RuntimeDiagnostics
 
 
 class Host:

@@ -5,13 +5,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-from ai_lab.catalog import Catalog
-from ai_lab.config import Repository
+from ai_lab.catalog.core import Catalog
+from ai_lab.config.store import Repository
 from ai_lab.engines import base
-from ai_lab.engines.mlxlm import MlxLmEngine
-from ai_lab.engines.text_launch import default_launcher
+from ai_lab.engines.text.mlxlm import MlxLmEngine
+from ai_lab.engines.text.text_launch import default_launcher
 from ai_lab.engines.registry import Registry
-from ai_lab.naming import is_weight_for_format
+from ai_lab.catalog.naming import is_weight_for_format
 from ai_lab.types import Capabilities, Format, ModelFile, ModelSet, Task
 
 PYTHON = "/runtime/mlxlm/current/bin/python"
@@ -111,7 +111,7 @@ class DescriptionTests(unittest.TestCase):
         self.assertEqual(self.engine.api_paths(Task.TRANSCRIPTION), ())
 
     def test_readiness_asks_the_health_page(self):
-        with mock.patch("ai_lab.engines.mlxlm.http_ok", return_value=True) as probe:
+        with mock.patch("ai_lab.engines.text.mlxlm.http_ok", return_value=True) as probe:
             self.assertTrue(self.engine.ready(8130))
         probe.assert_called_once_with(8130, "/health")
 

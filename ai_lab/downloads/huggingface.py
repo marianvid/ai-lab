@@ -17,9 +17,9 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
-from ..naming import (WEIGHT_SUFFIXES, base_name, is_companion, is_weight,
+from ..catalog.naming import (WEIGHT_SUFFIXES, base_name, is_companion, is_weight,
                       missing_shards)
-from ..public_services import address
+from ..builds.public_services import address
 from .bundles import Bundle
 
 USER_AGENT = "AI-Lab/0.2"

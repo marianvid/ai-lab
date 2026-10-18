@@ -7,19 +7,19 @@ from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.catalog import Catalog
-from ai_lab.config import ConfigStore
+from ai_lab.catalog.core import Catalog
+from ai_lab.config.store import ConfigStore
 from ai_lab.downloads import DownloadManager, HuggingFaceClient
 from ai_lab.events import EventBus
 from ai_lab.operations import Operations
 from ai_lab.operations_services import OperationsParts
-from ai_lab.runtime import Runtime
+from ai_lab.runtime.core import Runtime
 from ai_lab.engines.registry import Registry
 from ai_lab.settings import Settings
 
-from ai_lab.engines.llamacpp import LlamaCppEngine
+from ai_lab.engines.text.llamacpp import LlamaCppEngine
 
-from ai_lab.lastloaded import LastLoaded
+from ai_lab.runtime.lastloaded import LastLoaded
 from tests.support import FakeHost, make_files
 
 
@@ -1272,7 +1272,7 @@ class RepositoryEditingTests(unittest.TestCase):
         benchmark = self.root / "benchmark"
         benchmark.mkdir()
         with self.store.mutate() as config:
-            from ai_lab.config import ModelRoot
+            from ai_lab.config.store import ModelRoot
             config.model_roots.append(
                 ModelRoot(id="benchmark", name="Benchmark", path=str(benchmark)))
         with self.assertRaises(ValueError) as caught:
@@ -1286,7 +1286,7 @@ class RepositoryEditingTests(unittest.TestCase):
         benchmark = self.root / "benchmark"
         benchmark.mkdir()
         with self.store.mutate() as config:
-            from ai_lab.config import ModelRoot
+            from ai_lab.config.store import ModelRoot
             config.model_roots.append(
                 ModelRoot(id="benchmark", name="Benchmark", path=str(benchmark)))
         with self.assertRaises(ValueError) as caught:
@@ -1487,7 +1487,7 @@ class RestoringTests(unittest.TestCase):
 
 
 def _failed(instance_id):
-    from ai_lab.runtime import Operation
+    from ai_lab.runtime.core import Operation
     return Operation(instance_id=instance_id, kind="load", ok=False, error="no")
 
 

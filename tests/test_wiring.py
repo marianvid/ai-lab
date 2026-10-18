@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_lab.config import Config, Instance
+from ai_lab.config.store import Config, Instance
 from ai_lab.wiring import engine_settings_of, gateway_limits
 
 

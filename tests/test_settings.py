@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.config import ConfigStore
+from ai_lab.config.store import ConfigStore
 from ai_lab.engines.registry import Registry
 from ai_lab.settings import Settings
 

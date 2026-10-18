@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.mulacover import MulaCoverEngine
+from ai_lab.engines.music.mulacover import MulaCoverEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

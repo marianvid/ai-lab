@@ -28,7 +28,7 @@ The number is the engine's own, per entry: slots for llama.cpp, sequences for
 vLLM. Ask the engine, do not guess from a setting name.
 
 Requests wanting a different model wait, and the queueing rules are in
-`scheduler.py`. In one line: **the queue is served in order, and requests next
+`gateway/scheduler.py`. In one line: **the queue is served in order, and requests next
 to each other wanting the same model go in together.**
 
 Nothing younger is served first, ever — not even when it wants the model that

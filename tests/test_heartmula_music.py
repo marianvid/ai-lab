@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.music.heartmula_backend import HeartMulaBackend
+from ai_lab.music.backends.heartmula_backend import HeartMulaBackend
 
 
 class HeartMulaRequestTests(unittest.TestCase):

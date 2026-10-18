@@ -1,7 +1,7 @@
 import base64
 import unittest
 
-from ai_lab.music.mulacover_backend import MulaCoverBackend
+from ai_lab.music.backends.mulacover_backend import MulaCoverBackend
 
 
 class MulaCoverRequestTests(unittest.TestCase):

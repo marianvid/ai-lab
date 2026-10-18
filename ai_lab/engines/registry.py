@@ -32,18 +32,21 @@ _NOT_ENGINES = frozenset({"base", "isolated", "probe", "registry", "text_launch"
 def engine_classes() -> dict[str, type]:
     """Every engine this package defines, by id, found by looking.
 
-    An engine registers itself by being a module of this package with a class
-    that has an `id`, a `display_name` and a `plan` method — the shape of
-    `base.Engine`. Adding one touches only its own file; nothing here lists
-    them by name. Ordered by module name, so the list is the same each time.
+    An engine registers itself by being a module of this package, or of one of
+    its sub-packages (one per kind of model), with a class that has an `id`, a
+    `display_name` and a `plan` method — the shape of `base.Engine`. Adding
+    one touches only its own file; nothing here lists them by name. Ordered by
+    the module's own name, whatever sub-package it is in, so the list is the
+    same each time.
     """
     found: dict[str, type] = {}
     package = importlib.import_module(__package__ or "ai_lab.engines")
-    for module_info in sorted(pkgutil.iter_modules(package.__path__),
-                              key=lambda item: item.name):
-        if module_info.name in _NOT_ENGINES or module_info.name.startswith("_"):
+    for module_info in sorted(pkgutil.walk_packages(package.__path__, package.__name__ + "."),
+                              key=lambda item: item.name.rsplit(".", 1)[-1]):
+        leaf = module_info.name.rsplit(".", 1)[-1]
+        if module_info.ispkg or leaf in _NOT_ENGINES or leaf.startswith("_"):
             continue
-        module = importlib.import_module(f"{package.__name__}.{module_info.name}")
+        module = importlib.import_module(module_info.name)
         for _, cls in inspect.getmembers(module, inspect.isclass):
             if cls.__module__ == module.__name__ and _is_engine(cls):
                 found[getattr(cls, "id", "")] = cls

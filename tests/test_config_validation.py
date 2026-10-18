@@ -2,8 +2,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.config import Config, Instance, ModelRoot, Repository
-from ai_lab.config_validation import validate_configuration
+from ai_lab.config.store import Config, Instance, ModelRoot, Repository
+from ai_lab.config.validation import validate_configuration
 
 
 class ConfigurationValidationTests(unittest.TestCase):
@@ -55,7 +55,7 @@ class ConfigurationValidationTests(unittest.TestCase):
             validate_configuration(config, {'comfyui'})
 
     def test_unknown_gateway_fields_survive_a_config_save(self):
-        from ai_lab.config import ConfigStore
+        from ai_lab.config.store import ConfigStore
         import json
         with TemporaryDirectory() as root:
             path = Path(root) / "config.json"

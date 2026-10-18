@@ -18,7 +18,7 @@ import ai_lab.api.routes.gateway as gateway_routes
 from ai_lab.api.router import Router
 from ai_lab.api.server import Handler, build_router, status_for
 from ai_lab.events import EventBus
-from ai_lab.gateway import CardBusyError, NotConfiguredError
+from ai_lab.gateway.core import CardBusyError, NotConfiguredError
 from ai_lab.multipart import MultipartBody
 
 

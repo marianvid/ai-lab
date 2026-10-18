@@ -12,25 +12,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .builds import Builds
-from .capabilities import Known
-from .catalog import Catalog
-from .config import Config, ConfigStore
-from .config_validation import validate_configuration
+from .builds.core import Builds
+from .catalog.capabilities import Known
+from .catalog.core import Catalog
+from .config.store import Config, ConfigStore
+from .config.validation import validate_configuration
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
-from .gateway import Gateway
-from .gateway_limits import GatewayLimits
+from .gateway.core import Gateway
+from .gateway.limits import GatewayLimits
 from .hosts import current_host
 from .hosts.base import Host
 from .images.jobs import ImageJobs
-from .installs import Installs
-from .lastloaded import LastLoaded
+from .builds.installs import Installs
+from .runtime.lastloaded import LastLoaded
 from .media.jobs import MediaJobs
 from .operations import Operations
 from .operations_services import OperationsParts
-from .runtime import Runtime
+from .runtime.core import Runtime
 from .settings import Settings
 from .storage import Storage
 

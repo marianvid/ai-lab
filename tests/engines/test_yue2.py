@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.engines.yue2 import Yue2Engine
+from ai_lab.engines.music.yue2 import Yue2Engine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
@@ -51,7 +51,7 @@ class Yue2EngineTests(unittest.TestCase):
     def test_studio_uses_metal_fallback_only_on_mac(self):
         import os
         from unittest.mock import patch
-        from ai_lab.music.yue2_server import studio_env
+        from ai_lab.music.servers.yue2_server import studio_env
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(studio_env('mps'), {
                 'HF_HUB_OFFLINE': '1', 'PYTORCH_ENABLE_MPS_FALLBACK': '1'})

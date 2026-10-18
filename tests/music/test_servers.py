@@ -11,16 +11,14 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-from ai_lab.music import (
-    comfy_server,
-    heartmula_server,
-    hosting,
-    khala_server,
-    levo2_server,
-    mulacover_server,
-    stableaudio3_server,
-    yue2_server,
-)
+from ai_lab.music import hosting
+from ai_lab.music.servers import comfy_server
+from ai_lab.music.servers import heartmula_server
+from ai_lab.music.servers import khala_server
+from ai_lab.music.servers import levo2_server
+from ai_lab.music.servers import mulacover_server
+from ai_lab.music.servers import stableaudio3_server
+from ai_lab.music.servers import yue2_server
 
 
 class Built:

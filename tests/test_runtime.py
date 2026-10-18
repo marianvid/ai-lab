@@ -2,12 +2,12 @@ import time
 import unittest
 from typing import cast
 
-from ai_lab.config import Instance
+from ai_lab.config.store import Instance
 from ai_lab.events import EventBus
-from ai_lab.engines.llamacpp import LlamaCppEngine
-from ai_lab.engines.vllm import VllmEngine
+from ai_lab.engines.text.llamacpp import LlamaCppEngine
+from ai_lab.engines.text.vllm import VllmEngine
 from ai_lab.hosts.base import Host
-from ai_lab.runtime import Runtime
+from ai_lab.runtime.core import Runtime
 from ai_lab.types import (AcceleratorSnapshot, Format, ModelFile, ModelSet, Phase,
                           ProcessStatus, RuntimeEvent)
 

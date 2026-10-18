@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.pyannote import PyannoteEngine
+from ai_lab.engines.audio.pyannote import PyannoteEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

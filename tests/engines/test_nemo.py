@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.nemo import NemoEngine
+from ai_lab.engines.audio.nemo import NemoEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.comfy_music import ComfyMusicEngine
+from ai_lab.engines.music.comfy_music import ComfyMusicEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

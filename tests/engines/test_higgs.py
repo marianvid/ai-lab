@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 
-from ai_lab.engines.higgs import HiggsEngine
+from ai_lab.engines.speech.higgs import HiggsEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

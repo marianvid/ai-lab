@@ -24,7 +24,7 @@ Updating and switching are refused while any model is loaded: the engine is
 about to be launched from somewhere else.
 
 AI-Lab asks upstream for a newer tag by itself: first about 20 seconds after
-the manager starts, then once an hour (`builds.py`). A failed check, for
+the manager starts, then once an hour (`builds/core.py`). A failed check, for
 example while offline, is ignored.
 
 An installation without a configured build root keeps the original behaviour

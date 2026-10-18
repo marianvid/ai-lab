@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.comfyui import ComfyUiEngine
+from ai_lab.engines.images.comfyui import ComfyUiEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

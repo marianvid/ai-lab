@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.config import Config, ConfigStore, Instance, Repository
+from ai_lab.config.store import Config, ConfigStore, Instance, Repository
 
 
 class ConfigStoreTests(unittest.TestCase):

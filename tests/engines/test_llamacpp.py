@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.engines.llamacpp import LlamaCppEngine
+from ai_lab.engines.text.llamacpp import LlamaCppEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

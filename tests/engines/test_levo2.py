@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.levo2 import Levo2Engine
+from ai_lab.engines.music.levo2 import Levo2Engine
 from ai_lab.types import Format, ModelSet, Task
 
 

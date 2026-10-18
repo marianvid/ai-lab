@@ -217,7 +217,7 @@ is what tells the manager the load finished.
 ### Which engines have an update row
 
 An engine gets an update row only when its configuration has a `source`
-section (`builds.py`, `installs.py`):
+section (`builds/core.py`, `builds/installs.py`):
 
 - `source.path` — a git checkout compiled here, such as llama.cpp. See
   [Source build versions](source-builds.md).

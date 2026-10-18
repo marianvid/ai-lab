@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.engines.voxcpm import VoxCpmEngine
+from ai_lab.engines.speech.voxcpm import VoxCpmEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

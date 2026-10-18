@@ -4,18 +4,18 @@ import dataclasses
 import threading
 import unittest
 
-from ai_lab.gateway_catalogue import GatewayCatalogue
-from ai_lab.gateway_errors import CouldNotLoadError, NotConfiguredError
-from ai_lab.gateway_limits import FIRST_BYTE_S, MAX_WAITING, GatewayLimits
-from ai_lab.gateway_loading import CardLoading
-from ai_lab.gateway_state import Shape
-from ai_lab.scheduler_parts import (
+from ai_lab.gateway.catalogue import GatewayCatalogue
+from ai_lab.gateway.errors import CouldNotLoadError, NotConfiguredError
+from ai_lab.gateway.limits import FIRST_BYTE_S, MAX_WAITING, GatewayLimits
+from ai_lab.gateway.loading import CardLoading
+from ai_lab.gateway.state import Shape
+from ai_lab.gateway.scheduler_parts import (
     AbandonedError,
     AdmissionWithdrawnError,
     Waiting,
     release,
 )
-from ai_lab.scheduler_planning import QueuePlanning
+from ai_lab.gateway.scheduler_planning import QueuePlanning
 
 
 class Entries:

@@ -18,7 +18,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from . import dialects, prompt
+from . import dialects
+from . import prompt
 from .dialects import DIALECTS, Dialect, Outcome
 from .errors import (
     ErrorKind,

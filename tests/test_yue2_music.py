@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.music.yue2_web_backend import Yue2WebBackend
+from ai_lab.music.backends.yue2_web_backend import Yue2WebBackend
 
 
 class Yue2RequestTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class Yue2RequestTests(unittest.TestCase):
                                     'instrumental': True})
 
     def test_truncation_is_read_per_stage(self):
-        from ai_lab.music.yue2_web_backend import was_truncated
+        from ai_lab.music.backends.yue2_web_backend import was_truncated
         self.assertFalse(was_truncated({'abc': False, 'semantic': False}))
         self.assertTrue(was_truncated({'abc': False, 'semantic': True}))
         self.assertFalse(was_truncated(None))

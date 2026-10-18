@@ -3,9 +3,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from ai_lab.builds import Builds
-from ai_lab.source_build import BuildOptions, SourceBuild
-from ai_lab.source_versions import Version, mark_version
+from ai_lab.builds.core import Builds
+from ai_lab.builds.source_build import BuildOptions, SourceBuild
+from ai_lab.builds.source_versions import Version, mark_version
 from ai_lab.events import EventBus
 from ai_lab.types import LogEvent
 
@@ -370,7 +370,7 @@ class WatchTests(unittest.TestCase):
         return Builds({"llamacpp": {"source": {"path": str(self.path)}}}, EventBus())
 
     def test_it_checks_every_build_on_the_timer(self):
-        import ai_lab.builds as module
+        import ai_lab.builds.core as module
         builds = self.builds()
         self.addCleanup(builds.stop)
         checked = []
@@ -384,7 +384,7 @@ class WatchTests(unittest.TestCase):
 
     def test_a_failure_is_swallowed_rather_than_shouted_about(self):
         """Being offline is not worth a message on a page nobody is reading."""
-        import ai_lab.builds as module
+        import ai_lab.builds.core as module
         builds = self.builds()
         self.addCleanup(builds.stop)
         with patch.object(SourceBuild, "check", side_effect=ValueError("no network")), \

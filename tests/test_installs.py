@@ -18,8 +18,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from ai_lab.events import EventBus
-from ai_lab.installs import Installs
-from ai_lab.package_install import CURRENT, PackageInstall, PackageOptions
+from ai_lab.builds.installs import Installs
+from ai_lab.builds.package_install import CURRENT, PackageInstall, PackageOptions
 
 
 def finish(install):
@@ -186,7 +186,7 @@ class Installing(unittest.TestCase):
                              lambda self, *a, **k: stream(*a, **k)),
                 patch.object(PackageInstall, "_verify",
                              lambda self, *a, **k: verify(*a, **k)),
-                patch("ai_lab.package_install.version_in", lambda path, package: lands))
+                patch("ai_lab.builds.package_install.version_in", lambda path, package: lands))
 
     def _run(self, **how):
         one, two, three = self._pretend(**how)
@@ -244,7 +244,7 @@ class Installing(unittest.TestCase):
 
         with patch.object(PackageInstall, "_stream", slow), \
              patch.object(PackageInstall, "_verify", lambda *a, **k: None), \
-             patch("ai_lab.package_install.version_in", lambda path, package: "0.27.1"):
+             patch("ai_lab.builds.package_install.version_in", lambda path, package: "0.27.1"):
             self.install.install("0.27.1")
             self.assertTrue(started.wait(timeout=5), "the first never started")
             with self.assertRaises(ValueError):
@@ -264,7 +264,7 @@ class Installing(unittest.TestCase):
             return type("Result", (), {"returncode": 0, "stdout": "ok\n",
                                         "stderr": ""})()
 
-        with patch("ai_lab.package_install.subprocess.run", run):
+        with patch("ai_lab.builds.package_install.subprocess.run", run):
             install._verify(self.working, lambda: 0)
         program = commands[0][2]
         self.assertIn("paddlepaddle-gpu", program)
@@ -327,7 +327,7 @@ class TheOneThatWasAlreadyThere(unittest.TestCase):
         self.install = PackageInstall("vllm", str(self.root), "vllm", EventBus())
 
     def test_it_is_listed_and_can_be_used(self):
-        with patch("ai_lab.package_environments.version_in", lambda path, package: "0.26.1"):
+        with patch("ai_lab.builds.package_environments.version_in", lambda path, package: "0.26.1"):
             self.install.point_at(self.first)
             found = self.install.environments()
         self.assertEqual([item.name for item in found], [".venv"])
@@ -336,7 +336,7 @@ class TheOneThatWasAlreadyThere(unittest.TestCase):
         self.assertTrue(found[0].active)
 
     def test_it_is_marked_as_the_one_that_cannot_move(self):
-        with patch("ai_lab.package_environments.version_in", lambda path, package: "0.26.1"):
+        with patch("ai_lab.builds.package_environments.version_in", lambda path, package: "0.26.1"):
             found = self.install.environments()[0]
         self.assertFalse(found.movable)
 
@@ -346,7 +346,7 @@ class TheOneThatWasAlreadyThere(unittest.TestCase):
         (newer / "bin").mkdir(parents=True)
         (newer / "bin" / "python").write_text("#!/bin/sh\n")
         self.install.point_at(newer)
-        with patch("ai_lab.package_environments.version_in", lambda path, package: "0.26.1"):
+        with patch("ai_lab.builds.package_environments.version_in", lambda path, package: "0.26.1"):
             found = {item.name: item.active for item in self.install.environments()}
         self.assertEqual(found, {".venv": False, ".venv-0.27.1": True})
         self.assertTrue((self.first / "bin" / "vllm").exists())
@@ -386,7 +386,7 @@ class WhatIsWaiting(unittest.TestCase):
                 raise OSError("no network")
             return Answer()
 
-        return patch("ai_lab.package_install.urllib.request.urlopen", open_url)
+        return patch("ai_lab.builds.package_install.urllib.request.urlopen", open_url)
 
     def test_a_newer_version_upstream_is_an_update_waiting(self):
         with self._index_says("0.27.1"):

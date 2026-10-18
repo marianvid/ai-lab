@@ -7,8 +7,8 @@ nothing.
 
 from __future__ import annotations
 
-from ..catalog import Catalog
-from ..config import Config, ConfigStore
+from ..catalog.core import Catalog
+from ..config.store import Config, ConfigStore
 
 
 class ModelListing:

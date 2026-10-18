@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.eviction import EvictionPlanner
+from ai_lab.gateway.eviction import EvictionPlanner
 
 
 class EvictionPlannerTests(unittest.TestCase):

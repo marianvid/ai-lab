@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ai_lab.config import Repository
+from ai_lab.config.store import Repository
 
 
 def make_files(directory: Path, *names: str, size: int = 16) -> None:

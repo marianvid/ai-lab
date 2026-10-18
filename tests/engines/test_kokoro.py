@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.kokoro import KokoroEngine
+from ai_lab.engines.speech.kokoro import KokoroEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

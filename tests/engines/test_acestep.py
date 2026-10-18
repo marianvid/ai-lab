@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.acestep import AceStepEngine
+from ai_lab.engines.music.acestep import AceStepEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

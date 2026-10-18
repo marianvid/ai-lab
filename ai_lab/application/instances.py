@@ -5,11 +5,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ..catalog import Catalog
-from ..config import ConfigStore
+from ..catalog.core import Catalog
+from ..config.store import ConfigStore
 from ..engines.base import validate
 from ..hosts.base import Host
-from ..runtime import Operation, Runtime
+from ..runtime.core import Operation, Runtime
 from ..types import LogEvent, Task
 from .instance_config import InstanceConfiguration
 

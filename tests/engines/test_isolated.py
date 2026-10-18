@@ -15,7 +15,7 @@ from ai_lab.engines.isolated import (
     ui_port,
     with_headroom_mb,
 )
-from ai_lab.engines.text_launch import SAMPLING, sampling_argv
+from ai_lab.engines.text.text_launch import SAMPLING, sampling_argv
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 MIB = 1024 * 1024

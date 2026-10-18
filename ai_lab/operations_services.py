@@ -21,13 +21,13 @@ from .application.settings_changes import SettingsChanges
 from .types import ChangeEvent
 
 if TYPE_CHECKING:
-    from .builds import Builds
-    from .catalog import Catalog
-    from .config import ConfigStore
+    from .builds.core import Builds
+    from .catalog.core import Catalog
+    from .config.store import ConfigStore
     from .downloads import DownloadManager, HuggingFaceClient
     from .hosts.base import Host
-    from .installs import Installs
-    from .runtime import Runtime
+    from .builds.installs import Installs
+    from .runtime.core import Runtime
     from .settings import Settings
     from .storage import Storage
 

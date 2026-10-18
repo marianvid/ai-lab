@@ -9,8 +9,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ..catalog import Catalog
-from ..config import ConfigStore, ModelRoot, Repository
+from ..catalog.core import Catalog
+from ..config.store import ConfigStore, ModelRoot, Repository
 from ..disk import sha256_of
 from ..hosts.base import Host
 from .move_files import (

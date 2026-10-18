@@ -11,7 +11,7 @@ from typing import Any, cast
 from ai_lab.application import paths
 from ai_lab.application.model_listing import ModelListing, _note
 from ai_lab.application.settings_changes import SettingsChanges
-from ai_lab.config import ConfigStore
+from ai_lab.config.store import ConfigStore
 
 
 def store_at(directory: Path) -> ConfigStore:

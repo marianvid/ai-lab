@@ -21,7 +21,7 @@ is `benchmark-gguf` on benchmark. A tier that is switched off, or marked
 read-only, makes its copies unusable or read-only too. Two tiers may not be the
 same place on disk: the paths are compared after following links, and a
 configuration where they match is refused (`validate_distinct_roots` in
-`config.py`).
+`config/store.py`).
 
 Library can promote or demote a model. The move works like this
 (`application/model_storage.py`):
@@ -162,7 +162,7 @@ Two repositories may share one folder — the Hugging Face and NeMo
 transcription repositories both read `/models/audio/asr/`. Each one then counts only
 the weight files whose file type matches its own format, so a checkpoint
 appears once, under the right repository (`is_weight_for_format` in
-`naming.py`). The `fp8`, `nvfp4`, `awq`, `gptq` and `comfyui` formats all count
+`catalog/naming.py`). The `fp8`, `nvfp4`, `awq`, `gptq` and `comfyui` formats all count
 `.safetensors` files. A `comfyui` folder also counts `.gguf` files, because a
 ComfyUI model can mix a GGUF diffusion model with safetensors parts.
 
@@ -216,7 +216,7 @@ model; started on its own it serves nothing.
 It is the GGUF version of the `model_mtp.safetensors` problem above. For every
 other format the directory-is-the-model rule takes care of it. GGUF has no such
 rule — there one file genuinely is one model — so this one is named explicitly,
-in `naming.py`. A projector is attached to the model in its directory, the way a
+in `catalog/naming.py`. A projector is attached to the model in its directory, the way a
 tokenizer is, and never listed on its own.
 
 Left as a model it becomes a library entry that can never be started, and an

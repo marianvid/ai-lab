@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import ModelRoot, Repository
+from ..config.store import ModelRoot, Repository
 
 
 @dataclass(frozen=True)

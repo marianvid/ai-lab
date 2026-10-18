@@ -4,10 +4,10 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 
-from ai_lab.card_sharing import NoNeighbours, guard_loads
-from ai_lab.config import Config, Instance, ModelRoot
-from ai_lab.config_validation import validate_configuration
-from ai_lab.gateway_resources import GatewayResources
+from ai_lab.gateway.card_sharing import NoNeighbours, guard_loads
+from ai_lab.config.store import Config, Instance, ModelRoot
+from ai_lab.config.validation import validate_configuration
+from ai_lab.gateway.resources import GatewayResources
 from ai_lab.main import _card_free_mb
 from ai_lab.types import AcceleratorSnapshot
 from tests import test_operations as base

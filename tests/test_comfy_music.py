@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.music.comfy_backend import ComfyMusicBackend
+from ai_lab.music.backends.comfy_backend import ComfyMusicBackend
 
 
 class ComfyMusicRequestTests(unittest.TestCase):

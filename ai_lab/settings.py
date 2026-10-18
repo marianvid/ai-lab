@@ -19,7 +19,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import budget
-from .config import ConfigStore
+from .config.store import ConfigStore
 from .engines.registry import Registry
 from .hosts.base import Host
 

@@ -26,7 +26,7 @@ import re
 import urllib.error
 import urllib.request
 
-from ..public_services import address
+from ..builds.public_services import address
 
 TIMEOUT_S = 20
 

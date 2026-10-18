@@ -14,7 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .. import budget
-from ..config import ConfigStore, ModelRoot, validate_distinct_roots
+from ..config.store import ConfigStore, ModelRoot, validate_distinct_roots
 from ..hosts.base import Host
 from ..settings import Settings
 

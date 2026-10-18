@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.paddleocr import PaddleOcrEngine
+from ai_lab.engines.images.paddleocr import PaddleOcrEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

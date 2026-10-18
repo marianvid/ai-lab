@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.onnx import OnnxEngine
+from ai_lab.engines.audio.onnx import OnnxEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

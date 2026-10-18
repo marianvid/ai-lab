@@ -1,7 +1,8 @@
 import unittest
 from pathlib import Path
 
-from ai_lab.music import levo2_backend, stableaudio3_backend
+from ai_lab.music.backends import levo2_backend
+from ai_lab.music.backends import stableaudio3_backend
 
 
 class Levo2RequestTests(unittest.TestCase):

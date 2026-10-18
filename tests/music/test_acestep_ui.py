@@ -7,7 +7,7 @@ from typing import Any, cast
 from pathlib import Path
 from unittest.mock import patch
 
-from ai_lab.music.server import launch_native_ui
+from ai_lab.music.servers.acestep_server import launch_native_ui
 
 
 class AceStepNativeUiTests(unittest.TestCase):

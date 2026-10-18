@@ -1,8 +1,8 @@
 import unittest
 from typing import Any
 
-from ai_lab.config import Config
-from ai_lab.config_validation import validate_configuration
+from ai_lab.config.store import Config
+from ai_lab.config.validation import validate_configuration
 from ai_lab.providers.settings import ProvidersConfig, VendorLimits
 
 VENDORS = {"anthropic": {"dialect": "claude", "binary": "/opt/cli/claude",

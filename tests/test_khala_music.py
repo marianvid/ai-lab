@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.music.khala_backend import KhalaBackend
+from ai_lab.music.backends.khala_backend import KhalaBackend
 
 
 class KhalaRequestTests(unittest.TestCase):

@@ -24,7 +24,7 @@ its name, and those indexes are pruned. An update in place would have been
 irreversible.
 
 What "checked that it actually starts" means, step by step
-(`package_install.py`):
+(`builds/package_install.py`):
 
 1. `uv` (a fast Python package installer) creates the environment in a folder
    named after the version. It is created at its final path, because an
@@ -40,7 +40,7 @@ never written to. Installing, and switching versions, are refused while any
 model is loaded. Deleting a version is refused only for the one in use.
 
 AI-Lab asks the package index for the newest release by itself: first about 25
-seconds after the manager starts, then once an hour (`installs.py`).
+seconds after the manager starts, then once an hour (`builds/installs.py`).
 
 How the engine finds the right one: it is launched through a fixed path, a link
 called `current` that points at whichever folder is in use. Swapping versions

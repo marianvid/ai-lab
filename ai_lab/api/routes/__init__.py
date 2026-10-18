@@ -12,18 +12,16 @@ nothing is guarded because nothing is being served.
 """
 
 from ...lanes import SideLanes
-from . import (
-    catalog,
-    downloads,
-    gateway,
-    huggingface,
-    images,
-    media,
-    reservations,
-    runtime,
-    settings,
-    storage,
-)
+from . import catalog
+from . import downloads
+from . import gateway
+from . import huggingface
+from . import images
+from . import media
+from . import reservations
+from . import runtime
+from . import settings
+from . import storage
 
 MODULES = (settings, storage, catalog, downloads, huggingface, images, media)
 

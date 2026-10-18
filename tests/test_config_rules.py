@@ -1,8 +1,8 @@
 """The per-engine option rules behind `validate_configuration`."""
 import unittest
 
-from ai_lab.config import Config, Instance, ModelRoot, Repository
-from ai_lab.config_validation import (ENGINE_RULES, absolute_path, file_name, file_names,
+from ai_lab.config.store import Config, Instance, ModelRoot, Repository
+from ai_lab.config.validation import (ENGINE_RULES, absolute_path, file_name, file_names,
                                       number, one_of, options_pass, positive, text, whole,
                                       validate_configuration)
 

@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_lab import capabilities
-from ai_lab.capabilities import IMAGES, TOOLS, FILE_NAME, Known
+from ai_lab.catalog import capabilities
+from ai_lab.catalog.capabilities import IMAGES, TOOLS, FILE_NAME, Known
 
 
 def _gguf(path: Path, metadata: dict[str, str]) -> None:

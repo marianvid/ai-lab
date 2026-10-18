@@ -6,13 +6,13 @@ import unittest
 from ai_lab import uploads
 from ai_lab.api import uploads as api_uploads
 from ai_lab.api.sse import stream
-from ai_lab.config_migrations import SCHEMA_VERSION, migrate
-from ai_lab.config_policy import GatewayPolicy, MediaPolicy
+from ai_lab.config.migrations import SCHEMA_VERSION, migrate
+from ai_lab.config.policy import GatewayPolicy, MediaPolicy
 from ai_lab.events import EventBus
-from ai_lab.gateway_control import GatewayControl
-from ai_lab.gateway_errors import CardBusyError
-from ai_lab.gateway_state import Shape
-from ai_lab.gateway_stats import GatewayCounters, _runs, _waiting_summary
+from ai_lab.gateway.control import GatewayControl
+from ai_lab.gateway.errors import CardBusyError
+from ai_lab.gateway.state import Shape
+from ai_lab.gateway.stats import GatewayCounters, _runs, _waiting_summary
 from ai_lab.types import ChangeEvent
 
 

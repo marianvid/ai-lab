@@ -2,7 +2,7 @@
 
 import unittest
 
-from ai_lab.engines.mlxwhisper import MlxWhisperEngine
+from ai_lab.engines.audio.mlxwhisper import MlxWhisperEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 

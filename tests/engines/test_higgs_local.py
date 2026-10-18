@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.engines.higgs_local import HiggsLocalEngine
+from ai_lab.engines.speech.higgs_local import HiggsLocalEngine
 from ai_lab.speech.higgs_local_backend import frame_limit
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 

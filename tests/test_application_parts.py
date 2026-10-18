@@ -16,11 +16,11 @@ from ai_lab.application.move_jobs import MoveCancelledError, MoveJobRecords
 from ai_lab.changes.frompackages import Move, venv_of
 from ai_lab.changes.sifting import UNSORTED, area_of, sift
 from ai_lab.hosts import detect
-from ai_lab.runtime_checks import StartChecks
-from ai_lab.runtime_state import Operation, Step
-from ai_lab.source_checkout import GitCheckout
-from ai_lab.source_compiled import CompiledVersions
-from ai_lab.source_versions import Version, mark_version
+from ai_lab.runtime.checks import StartChecks
+from ai_lab.runtime.state import Operation, Step
+from ai_lab.builds.source_checkout import GitCheckout
+from ai_lab.builds.source_compiled import CompiledVersions
+from ai_lab.builds.source_versions import Version, mark_version
 from ai_lab.types import AcceleratorSnapshot, Change, Interests, Phase
 
 

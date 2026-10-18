@@ -2,7 +2,7 @@
 
 import unittest
 
-from ai_lab.config import Config
+from ai_lab.config.store import Config
 from ai_lab.reservations.settings import ReservationPolicy
 
 

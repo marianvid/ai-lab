@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.music.server import validate_payload
+from ai_lab.music.servers.acestep_server import validate_payload
 
 
 class MusicRequestTests(unittest.TestCase):

@@ -12,8 +12,8 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from ..catalog import Catalog
-from ..config import INSTANCE_ID, ConfigStore, Instance
+from ..catalog.core import Catalog
+from ..config.store import INSTANCE_ID, ConfigStore, Instance
 from ..engines.base import validate
 from ..hosts.base import Host
 

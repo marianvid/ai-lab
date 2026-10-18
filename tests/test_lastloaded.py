@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.lastloaded import LastLoaded
+from ai_lab.runtime.lastloaded import LastLoaded
 
 
 class RememberingTests(unittest.TestCase):

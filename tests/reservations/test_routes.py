@@ -11,7 +11,7 @@ from ai_lab.api.routes import reservations as reservation_routes
 from ai_lab.api.routes import runtime as runtime_routes
 from ai_lab.api.routes.gateway import RESERVATION_HEADER, _forwarder
 from ai_lab.api.server import status_for
-from ai_lab.config import ConfigStore
+from ai_lab.config.store import ConfigStore
 from ai_lab.lanes import SideLanes
 from ai_lab.reservations.book import ReservationBook
 from ai_lab.reservations.errors import CardReservedError, ReservationEndedError, ReservationRequiredError
