@@ -33,7 +33,7 @@ class BackgroundJob:
         """`name` names the thread; `what` names the task in refusals ("a build")."""
         self.name = name
         self.what = what
-        self.lines: deque[str] = deque(maxlen=LOG_LINES)
+        self._lines: deque[str] = deque(maxlen=LOG_LINES)
         self._lock = threading.RLock()
         self._state = IDLE
         self._error = ""
@@ -71,7 +71,7 @@ class BackgroundJob:
                 raise ValueError(f"A version is being switched or removed; start {self.what} after")
             if check is not None:
                 check()
-            self.lines.clear()
+            self._lines.clear()
             self._error = ""
             self._state = RUNNING
             self._thread = threading.Thread(target=task, args=args, daemon=True,
@@ -93,12 +93,12 @@ class BackgroundJob:
     def say(self, text: str) -> None:
         """Keep one line of output for the settings page."""
         with self._lock:
-            self.lines.append(text)
+            self._lines.append(text)
 
     def log(self) -> list[str]:
         """The last lines of output, oldest first."""
         with self._lock:
-            return list(self.lines)
+            return list(self._lines)
 
     @contextmanager
     def idle(self, change: str) -> Iterator[None]:

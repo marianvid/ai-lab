@@ -80,7 +80,7 @@ class GitApplicationInstall:
         self.verify_module = source.get("verify_module", "server")
         self.requires_cuda = bool(source.get("requires_cuda", False))
         self.job = BackgroundJob(f"install-{engine_id}", "an update")
-        self.log = InstallLog(engine_id, bus, self.job.lines)
+        self.log = InstallLog(engine_id, bus, self.job.say)
         self._latest = ""
         self._component_latest: dict[str, str] = {}
         self._commands = commands

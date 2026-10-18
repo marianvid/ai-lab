@@ -135,7 +135,7 @@ class PackageInstall:
         self.uv = options.uv
         self.python = options.python
         self.job = BackgroundJob(f"install-{engine_id}", "an install")
-        self.log = InstallLog(engine_id, bus, self.job.lines)
+        self.log = InstallLog(engine_id, bus, self.job.say)
         self.folders = EnvironmentFolders(self.root, package)
         self.commands: InstallCommands = options.tools.commands or self.log
         self.checker: EnvironmentCheck = options.tools.check or SubprocessCheck()

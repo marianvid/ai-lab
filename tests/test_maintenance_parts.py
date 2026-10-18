@@ -80,7 +80,7 @@ class InstallLogTests(unittest.TestCase):
                               {"PATH": "/bin:/usr/bin"}, 30)
             with self.assertRaisesRegex(ValueError, "sh -c echo one; echo two; exit 3 failed"):
                 self.log.run(command, since(time.monotonic()))
-        self.assertEqual(list(self.log.lines), ["one", "two"])
+        self.assertEqual(self.log.kept(), ["one", "two"])
 
     def test_a_line_is_published(self):
         seen: list[LogEvent] = []

@@ -38,15 +38,23 @@ class InstallLog:
     """One engine's install output: kept, and published as it arrives."""
 
     def __init__(self, engine_id: str, bus: EventBus | None,
-                 lines: deque[str] | None = None) -> None:
-        """`lines` is where the kept lines go (a `BackgroundJob`'s, when there is one)."""
+                 keep: Callable[[str], None] | None = None) -> None:
+        """`keep` stores each line (a `BackgroundJob`'s `say`, under the job's lock).
+
+        Without one the log keeps its own last lines, read with `kept`.
+        """
         self.engine_id = engine_id
         self.bus = bus
-        self.lines: deque[str] = lines if lines is not None else deque(maxlen=LOG_LINES)
+        self._own: deque[str] = deque(maxlen=LOG_LINES)
+        self._keep = keep or self._own.append
+
+    def kept(self) -> list[str]:
+        """The lines this log kept itself (empty when they go to a job)."""
+        return list(self._own)
 
     def say(self, stream: str, text: str, elapsed_ms: int) -> None:
         """Keep one line and publish it; `stream` is "status", "out" or "err"."""
-        self.lines.append(text)
+        self._keep(text)
         if self.bus:
             self.bus.publish(LogEvent(source=self.engine_id, stream=stream,
                                       text=text, elapsed_ms=elapsed_ms))
