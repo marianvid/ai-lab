@@ -53,8 +53,8 @@ def offline_huggingface():
     ])
 
 
-def operations_with_instances(count, last_loaded=None):
-    """An Operations with `count` configured entries, and the host behind it.
+def parts_with_instances(count, last_loaded=None):
+    """The parts of an Operations with `count` configured entries, and the host behind them.
 
     Built by hand rather than through the interface, because what is under test
     is how the list is drawn, not how entries are created.
@@ -86,15 +86,20 @@ def operations_with_instances(count, last_loaded=None):
     path.write_text(json.dumps(config))
     host = FakeHost()
     store = ConfigStore(path)
-    operations = Operations.assemble(OperationsParts(
+    return OperationsParts(
         store=store, catalog=Catalog(),
         runtime=Runtime(host, EventBus(), sample_interval_s=0),
         settings=Settings(store, host, Registry()),
         downloads=DownloadManager(), huggingface=offline_huggingface(),
         host=host, engines=FakeRegistry(host), bus=EventBus(),
         last_loaded=last_loaded,
-    ))
-    return operations, host
+    ), host
+
+
+def operations_with_instances(count, last_loaded=None):
+    """An Operations with `count` configured entries, and the host behind it."""
+    parts, host = parts_with_instances(count, last_loaded)
+    return Operations.assemble(parts), host
 
 
 class FakeRegistry:
@@ -113,6 +118,17 @@ class FakeRegistry:
                  "reason": "", "binary": engine.binary,
                  "formats": ["gguf"],
                  "params": [asdict(spec) for spec in engine.params()]}]
+
+
+def parts_on(store, host):
+    """The parts of an Operations over `store` and `host`, with no network and instant engines."""
+    return OperationsParts(
+        store=store, catalog=Catalog(),
+        runtime=Runtime(host, EventBus(), sample_interval_s=0),
+        settings=Settings(store, host, Registry()),
+        downloads=DownloadManager(), huggingface=offline_huggingface(),
+        host=host, engines=FakeRegistry(host),
+    )
 
 
 class OperationsTests(unittest.TestCase):
@@ -138,13 +154,7 @@ class OperationsTests(unittest.TestCase):
         }))
         self.store = ConfigStore(self.path)
         self.host = FakeHost()
-        self.operations = Operations.assemble(OperationsParts(
-            store=self.store, catalog=Catalog(),
-            runtime=Runtime(self.host, EventBus(), sample_interval_s=0),
-            settings=Settings(self.store, self.host, Registry()),
-            downloads=DownloadManager(), huggingface=offline_huggingface(),
-            host=self.host, engines=FakeRegistry(self.host),
-        ))
+        self.operations = Operations.assemble(parts_on(self.store, self.host))
 
     # -- reading -----------------------------------------------------------
 
@@ -744,7 +754,7 @@ class MoveModelTests(unittest.TestCase):
                "bytes": 100, "files": 1, "staging": str(staging),
                "status": "copying", "error": "", "started_at": 0.0,
                "updated_at": 0.0}
-        self.operations.model_storage.jobs.write(job)
+        MoveJobStore(self.host, lambda _topic: None).write(job)
 
         recovered = self.operations.recover_moves()
 
@@ -774,7 +784,7 @@ class MoveModelTests(unittest.TestCase):
                "bytes": 100, "files": 1, "staging": "",
                "status": "copying", "error": "", "started_at": 0.0,
                "updated_at": 0.0}
-        self.operations.model_storage.jobs.write(job)
+        MoveJobStore(self.host, lambda _topic: None).write(job)
         with self.assertRaises(ValueError) as caught:
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertIn("already being moved", str(caught.exception))
@@ -797,15 +807,15 @@ class SupportedFormatTests(unittest.TestCase):
         self.path.write_text(json.dumps({"repositories": [], "instances": []}))
         store = ConfigStore(self.path)
         host = FakeHost()
+        self.huggingface = HuggingFaceClient(opener=lambda url: [
+            {"type": "file", "path": "model-Q4_K_M.gguf", "size": 10},
+            {"type": "file", "path": "model.safetensors", "size": 20},
+        ])
         self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(store, host, Registry()),
-            downloads=DownloadManager(),
-            huggingface=HuggingFaceClient(opener=lambda url: [
-                {"type": "file", "path": "model-Q4_K_M.gguf", "size": 10},
-                {"type": "file", "path": "model.safetensors", "size": 20},
-            ]),
+            downloads=DownloadManager(), huggingface=self.huggingface,
             host=host, engines=Registry(),
         ))
 
@@ -828,7 +838,7 @@ class SupportedFormatTests(unittest.TestCase):
         self.assertEqual(self.operations.supported_formats(), ["gguf"])
 
     def test_search_hides_repositories_without_a_runnable_format(self):
-        cast(Any, self.operations.huggingface).search = lambda query: [
+        cast(Any, self.huggingface).search = lambda query: [
             {"repo": "org/source", "formats": ["safetensors"]},
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
         ]
@@ -840,7 +850,7 @@ class SupportedFormatTests(unittest.TestCase):
         # The one thing the switch was good for. "Nothing found" and "nothing
         # you can run" are different answers, and a list of length zero cannot
         # tell them apart.
-        cast(Any, self.operations.huggingface).search = lambda query: [
+        cast(Any, self.huggingface).search = lambda query: [
             {"repo": "org/source", "formats": ["safetensors"]},
             {"repo": "org/other", "formats": ["safetensors"]},
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
@@ -850,13 +860,13 @@ class SupportedFormatTests(unittest.TestCase):
         self.assertEqual(answer["hidden"], 2)
 
     def test_nothing_hidden_is_reported_as_nothing_hidden(self):
-        cast(Any, self.operations.huggingface).search = lambda query: [
+        cast(Any, self.huggingface).search = lambda query: [
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
         ]
         self.assertEqual(self.operations.search("weights")["hidden"], 0)
 
     def test_a_search_that_found_nothing_hid_nothing(self):
-        cast(Any, self.operations.huggingface).search = lambda query: []
+        cast(Any, self.huggingface).search = lambda query: []
         answer = self.operations.search("nothing at all")
         self.assertEqual(answer, {"results": [], "hidden": 0})
 
@@ -1406,8 +1416,8 @@ class RestoringTests(unittest.TestCase):
         self._temporary = TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.memory = LastLoaded(Path(self._temporary.name))
-        self.operations, self.host = operations_with_instances(
-            2, last_loaded=self.memory)
+        self.parts, self.host = parts_with_instances(2, last_loaded=self.memory)
+        self.operations = Operations.assemble(self.parts)
 
     def remembered(self) -> dict:
         memory = self.memory.read()
@@ -1435,12 +1445,8 @@ class RestoringTests(unittest.TestCase):
         self.assertEqual(self.remembered()["instance_id"], "model-0")
 
     def test_a_load_that_failed_is_not_remembered(self):
-        original = self.operations.runtime.load
-        self.operations.runtime.load = lambda *a, **k: _failed("model-0")
-        try:
-            self.operations.load("model-0")
-        finally:
-            self.operations.runtime.load = original
+        self.parts.runtime.load = lambda *a, **k: _failed("model-0")
+        self.operations.load("model-0")
         self.assertIsNone(self.memory.read())
 
     def test_it_comes_back_on_startup(self):

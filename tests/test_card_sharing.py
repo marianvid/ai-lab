@@ -11,6 +11,8 @@ from ai_lab.wiring import CONFIG_SECTIONS
 from ai_lab.gateway.resources import GatewayResources
 from ai_lab.wiring import card_free_mb as _card_free_mb
 from ai_lab.types import AcceleratorSnapshot
+from ai_lab.operations import Operations
+from ai_lab.operations_services import build_services
 from tests import test_operations as base
 
 
@@ -54,12 +56,16 @@ class ResourcesTests(unittest.TestCase):
 
 class LoadTests(unittest.TestCase):
     operations: Any
+    store: Any
+    host: Any
     setUp = base.OperationsTests.setUp
 
     def test_a_load_asks_the_neighbours_to_step_aside_and_tells_them_when_done(self):
         neighbours = Neighbours()
-        guard_loads(self.operations.instance_service, neighbours)
-        self.assertTrue(self.operations.load("qwen").ok)
+        parts = base.parts_on(self.store, self.host)
+        services = build_services(parts)
+        guard_loads(services.instance_service, neighbours)
+        self.assertTrue(Operations(parts, services).load("qwen").ok)
         self.assertEqual(neighbours.calls, ["make_way", "settled"])
 
     def test_a_load_that_fails_still_says_it_is_over(self):

@@ -37,7 +37,7 @@ def main() -> None:
     config = manager.store.load()
     host = arguments.host or config.host
     port = arguments.port or config.port
-    state_dir = operations.host.state_dir()
+    state_dir = manager.host.state_dir()
 
     # Card reservations (ADR 0005): kept where the host keeps its state, so a
     # restart restores who held the card; the reaper frees a silent holder.
@@ -45,7 +45,7 @@ def main() -> None:
                            state_dir / "reservations.json")
     book.start_reaper()
 
-    _install_shutdown(operations, lanes)
+    _install_shutdown(manager.host, lanes)
 
     operations.recover_moves()
     _restore_last_model(operations)
@@ -53,11 +53,12 @@ def main() -> None:
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
         parts = RouteParts(gateway=manager.gateway, lanes=lanes, book=book,
-                           image_jobs=manager.image_jobs, media_jobs=manager.media_jobs)
+                           store=manager.store, image_jobs=manager.image_jobs,
+                           media_jobs=manager.media_jobs)
         serve(build_router(operations, parts), manager.bus, (host, port))
     finally:
         lanes.stop_all()
-        operations.host.stop_all()
+        manager.host.stop_all()
 
 
 def _restore_last_model(operations) -> None:
@@ -75,7 +76,7 @@ def _restore_last_model(operations) -> None:
     thread.start()
 
 
-def _install_shutdown(operations, lanes: SideLanes) -> None:
+def _install_shutdown(host, lanes: SideLanes) -> None:
     """Stop the engines and the processor models when we are asked to quit.
 
     Python does not run its exit handlers on SIGTERM, so a plain `kill` would
@@ -86,7 +87,7 @@ def _install_shutdown(operations, lanes: SideLanes) -> None:
     """
     def shutdown(_signal, _frame):
         lanes.stop_all()
-        operations.host.stop_all()
+        host.stop_all()
         sys.exit(0)
 
     for received in (signal.SIGTERM, signal.SIGINT):

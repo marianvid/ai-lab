@@ -1,15 +1,17 @@
 """Card reservations (ADR 0005): a team asks for the card, keeps it alive, gives it back.
 
 Each handler is one call into `ReservationBook`. The settings are stored in the
-configuration's `reservations` section and used at once.
+configuration's `reservations` section, through the `ConfigStore` handed in,
+and used at once.
 """
 
 from __future__ import annotations
 
+from ...config.store import ConfigStore
 from ...reservations import ReservationBook, ReservationPolicy
 
 
-def register(router, operations, book: ReservationBook) -> None:
+def register(router, store: ConfigStore, book: ReservationBook) -> None:
     """The reservation routes and the page's settings."""
     router.add("POST", "/api/reservations",
                lambda body=None, **_: book.request(body or {}))
@@ -24,7 +26,7 @@ def register(router, operations, book: ReservationBook) -> None:
 
     def settings(body=None, **_):
         """Change the reservation settings, keep them, and use them at once."""
-        with operations.store.mutate() as config:
+        with store.mutate() as config:
             policy = ReservationPolicy.from_mapping({**config.reservations, **(body or {})})
             config.reservations = policy.json()
         book.apply_policy(policy)

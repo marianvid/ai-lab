@@ -29,28 +29,18 @@ class Operations:
     """What the routes can ask of this machine, each a sentence a person would say.
 
     A façade: every method hands the request to the service that owns it, or
-    joins two of them (`settings_view`). It holds the parts it was built from
-    so the routes and the gateway can reach the store, the host and the
-    engines through one object.
+    joins two of them (`settings_view`). What it was built from stays inside;
+    a caller that needs one of those parts is handed it by `wiring`.
     """
 
     def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
-        self.parts = parts
-        self.store = parts.store
-        self.catalog = parts.catalog
-        self.runtime = parts.runtime
-        self.settings = parts.settings
-        self.downloads = parts.downloads
-        self.huggingface = parts.huggingface
-        self.host = parts.host
-        self.engines = parts.engines
-        self.builds = parts.builds
-        self.installs = parts.installs
-        self.storage = parts.storage
-        self.bus = parts.bus
-        self.last_loaded = parts.last_loaded
-        self.instance_service = services.instance_service
-        self.model_storage = services.model_storage
+        self._store = parts.store
+        self._settings = parts.settings
+        self._host = parts.host
+        self._engines = parts.engines
+        self._storage = parts.storage
+        self._instances = services.instance_service
+        self._model_storage = services.model_storage
         self._listing = services.listing
         self._downloads = services.model_downloads
         self._maintenance = services.engine_maintenance
@@ -72,7 +62,7 @@ class Operations:
         the same thing — the same engine, under two spellings, with two paths
         and two badges.
         """
-        view = self.settings.view()
+        view = self._settings.view()
         sources = {item["engine"]: item for item in self.build_status(with_sizes=False)}
         for engine in view["engines"]:
             engine["source"] = sources.get(engine["id"])
@@ -82,75 +72,75 @@ class Operations:
 
     def configured(self):
         """Every entry, without asking what any of them is doing."""
-        return self.instance_service.configured()
+        return self._instances.configured()
 
     def instances(self):
         """Every configured model, with the settings that will actually apply."""
-        return self.instance_service.instances()
+        return self._instances.instances()
 
     def instance(self, instance_id: str):
         """One configured entry, without asking what it is doing."""
-        return self.instance_service.instance(instance_id)
+        return self._instances.instance(instance_id)
 
     def model_for(self, instance_id: str):
         """The model an entry points at, for asking how big it is."""
-        return self.instance_service.model_for(instance_id)
+        return self._instances.model_for(instance_id)
 
     def engine(self, engine_id: str):
         """The engine with this id; KeyError when there is none."""
-        return self.engines.get(engine_id)
+        return self._engines.get(engine_id)
 
     def accelerator(self):
         """One reading of this machine's card (or unified memory)."""
-        return self.host.accelerator()
+        return self._host.accelerator()
 
     def machine_budget(self, card=None) -> budget.Budget:
         """What this machine can offer models now, pool by pool (`card`: a reading already taken)."""
-        return budget.of(self.host, self.reserve_mb(), card=card)
+        return budget.of(self._host, self.reserve_mb(), card=card)
 
     def load(self, instance_id: str, settings: dict | None = None):
         """Start this model, replacing whatever this entry was running."""
-        return self.instance_service.load(instance_id, settings)
+        return self._instances.load(instance_id, settings)
 
     def effective_params(self, instance_id: str, settings: dict):
         """The entry's settings with these laid over them, checked."""
-        return self.instance_service.effective_params(instance_id, settings)
+        return self._instances.effective_params(instance_id, settings)
 
     def unload(self, instance_id: str):
         """Stop this entry."""
-        return self.instance_service.unload(instance_id)
+        return self._instances.unload(instance_id)
 
     def restore_last(self):
         """Put back whatever was on the card before the manager stopped."""
-        return self.instance_service.restore_last()
+        return self._instances.restore_last()
 
     def logs(self, instance_id: str, lines: int = 200):
         """What the engine has printed about itself."""
-        return self.instance_service.logs(instance_id, lines)
+        return self._instances.logs(instance_id, lines)
 
     def suggest_port(self):
         """The first free port at or above 8080."""
-        return self.instance_service.configuration.suggest_port()
+        return self._instances.configuration.suggest_port()
 
     def new_instance_form(self):
         """Everything the Add form needs, in one call."""
-        return self.instance_service.configuration.new_instance_form()
+        return self._instances.configuration.new_instance_form()
 
     def create_instance(self, payload: dict):
         """Add an entry. The id is given rather than worked out."""
-        return self.instance_service.configuration.create_instance(payload)
+        return self._instances.configuration.create_instance(payload)
 
     def update_instance(self, instance_id: str, changes: dict):
         """Change the settings of an instance. Does not restart it."""
-        return self.instance_service.configuration.update_instance(instance_id, changes)
+        return self._instances.configuration.update_instance(instance_id, changes)
 
     def apply_and_reload(self, instance_id: str, changes: dict):
         """Save the settings and restart the model with them."""
-        return self.instance_service.apply_and_reload(instance_id, changes)
+        return self._instances.apply_and_reload(instance_id, changes)
 
     def delete_instance(self, instance_id: str):
         """Remove an entry that is not running."""
-        return self.instance_service.configuration.delete_instance(instance_id)
+        return self._instances.configuration.delete_instance(instance_id)
 
     # -- this machine's settings -----------------------------------------------
 
@@ -252,23 +242,23 @@ class Operations:
 
     def delete_model(self, model_id: str) -> dict:
         """Remove a model's files from disk."""
-        return self.model_storage.delete_model(model_id)
+        return self._model_storage.delete_model(model_id)
 
     def move_model(self, model_id: str, target_root_id: str) -> dict:
         """Copy, verify and only then remove a model from its current tier."""
-        return self.model_storage.move_model(model_id, target_root_id)
+        return self._model_storage.move_model(model_id, target_root_id)
 
     def move_jobs(self) -> list[dict]:
         """Every move job on record, most recently updated first."""
-        return self.model_storage.jobs.all()
+        return self._model_storage.jobs.all()
 
     def recover_moves(self) -> list[dict]:
         """Sweep move jobs left mid-flight by a process that did not exit cleanly."""
-        return self.model_storage.jobs.recover()
+        return self._model_storage.jobs.recover()
 
     def cancel_move(self, job_id: str) -> dict:
         """Ask an in-progress move to stop at the next file or phase boundary."""
-        return self.model_storage.jobs.cancel(job_id)
+        return self._model_storage.jobs.cancel(job_id)
 
     # -- downloads -------------------------------------------------------------
 
@@ -292,7 +282,7 @@ class Operations:
     def browse(self, path: str | None = None, programs: bool = False) -> dict:
         """List what is inside one directory, for picking a path (see `application.paths`)."""
         start = (Path(path) if path else
-                 paths.browse_root([item.path for item in self.store.load().repositories]))
+                 paths.browse_root([item.path for item in self._store.load().repositories]))
         return paths.browse(start, programs)
 
     def create_directory(self, path: str) -> dict:
@@ -303,14 +293,14 @@ class Operations:
 
     def storage_view(self) -> dict:
         """What can be reclaimed outside model storage, item by item."""
-        return self.storage.view() if self.storage else {
+        return self._storage.view() if self._storage else {
             "items": [], "recoverable_bytes": 0}
 
     def clear_storage(self, item_id: str) -> dict:
         """Reclaim one item; KeyError when nothing reclaimable is configured."""
-        if self.storage is None:
+        if self._storage is None:
             raise KeyError("No reclaimable storage is configured")
-        return self.storage.clear(item_id)
+        return self._storage.clear(item_id)
 
     # -- downloads, continued ------------------------------------------------
 

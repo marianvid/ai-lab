@@ -20,9 +20,6 @@ from ai_lab.reservations.settings import ReservationPolicy
 
 class Operations:
     def __init__(self):
-        path = Path(tempfile.mkdtemp()) / "config.json"
-        path.write_text('{"models_root": "/tmp"}')
-        self.store = ConfigStore(path)
         self.loaded = []
 
     def load(self, instance_id):
@@ -57,8 +54,11 @@ class RouteTests(unittest.TestCase):
     def setUp(self):
         self.book = ReservationBook(ReservationPolicy(unreserved_wait_s=0))
         self.operations = Operations()
+        path = Path(tempfile.mkdtemp()) / "config.json"
+        path.write_text('{"models_root": "/tmp"}')
+        self.store = ConfigStore(path)
         self.router = Router()
-        reservation_routes.register(self.router, self.operations, self.book)
+        reservation_routes.register(self.router, self.store, self.book)
         runtime_routes.register(self.router, self.operations, None, self.book)
 
     def test_ask_beat_extend_release(self):
@@ -84,7 +84,7 @@ class RouteTests(unittest.TestCase):
         answer = call(self.router, "PATCH", "/api/reservations/settings",
                       body={"ceiling_s": 7200, "required": True})
         self.assertEqual(answer["settings"]["ceiling_s"], 7200)
-        self.assertEqual(self.operations.store.load().reservations["ceiling_s"], 7200)
+        self.assertEqual(self.store.load().reservations["ceiling_s"], 7200)
         self.assertTrue(self.book.policy.required)
         with self.assertRaises(ValueError):
             call(self.router, "PATCH", "/api/reservations/settings", body={"aging_s": -1})

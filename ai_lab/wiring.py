@@ -35,7 +35,8 @@ from .builds.installs import Installs
 from .runtime.lastloaded import LastLoaded
 from .media.jobs import MediaJobs
 from .operations import Operations
-from .operations_services import OperationsParts
+from .application.instances import InstanceService
+from .operations_services import OperationsParts, build_services
 from .providers import ProviderPool
 from .providers.settings import ProvidersConfig
 from .reservations.settings import ReservationPolicy
@@ -65,6 +66,7 @@ class Manager(NamedTuple):
     """The built manager: what `main` starts and the routes are bound to."""
 
     operations: Operations
+    host: Host
     bus: EventBus
     store: ConfigStore
     gateway: Gateway
@@ -91,18 +93,18 @@ def build(config_path: Path) -> Manager:
     validate_configuration(config, set(engines.known()), check_workflows=True,
                            sections=CONFIG_SECTIONS)
     host = current_host(engine_settings)
-    operations = _operations(store, bus, host, engines, engine_settings)
-    lanes = side_lanes(config, operations)
+    operations, instances = _operations(store, bus, host, engines, engine_settings)
+    lanes = side_lanes(config, host, instances)
     limits = gateway_limits(config)
     memory = GatewayResources(operations, limits.quiet_mb, limits.quiet_timeout_s,
                               limits.poll_s, neighbours=lanes.cpu)
     model_gateway = Gateway(operations, limits, memory=memory)
     image_jobs = ImageJobs(model_gateway, store.load().images, host.state_dir(), bus)
     media_jobs = MediaJobs(model_gateway, host.state_dir(), bus, settings=config.media_policy)
-    return Manager(operations, bus, store, model_gateway, lanes, image_jobs, media_jobs)
+    return Manager(operations, host, bus, store, model_gateway, lanes, image_jobs, media_jobs)
 
 
-def side_lanes(config: Config, operations: Operations) -> SideLanes:
+def side_lanes(config: Config, host: Host, instances: InstanceService) -> SideLanes:
     """Two lanes of their own beside the card.
 
     Subscription models (Claude Code, Codex, opencode) count their usage where
@@ -111,13 +113,13 @@ def side_lanes(config: Config, operations: Operations) -> SideLanes:
     gateway (its memory has them as the card's neighbour) and the Load button
     alike (`guard_loads`).
     """
-    state_dir = operations.host.state_dir()
+    state_dir = host.state_dir()
     cpu = CpuLane.from_config(config.cpu_models, state_dir,
-                              card_free_mb=lambda: card_free_mb(operations.host))
+                              card_free_mb=lambda: card_free_mb(host))
     lanes = SideLanes(providers=ProviderPool.from_config(config.providers, state_dir), cpu=cpu)
     if cpu.placements:
         cpu.start_reaper()
-        guard_loads(operations.instance_service, cpu)
+        guard_loads(instances, cpu)
     return lanes
 
 
@@ -176,15 +178,14 @@ def gateway_limits(config: Config) -> GatewayLimits:
 
 
 def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry,
-                engine_settings: dict) -> Operations:
-    """The operations the routes call, with every service they delegate to."""
+                engine_settings: dict) -> tuple[Operations, InstanceService]:
+    """The operations the routes call, and the instance service the side lanes guard."""
     builds = Builds(engine_settings, bus)
     # Engines that arrive as packages rather than as source. A new
     # version is installed beside the one that works, never over it.
     installs = Installs(engine_settings, bus)
-    # The page should already know what is waiting when it is opened, so there
-    # is no button that only asks; and the version figures stay current
-    # without anyone pressing anything.
+    # The page knows what is waiting as soon as it opens (no button that only
+    # asks), and the version figures stay current without anyone pressing.
     installs.watch()
     builds.watch()
     built: list[Operations] = []
@@ -198,7 +199,7 @@ def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry
         """
         built[0].models()
 
-    operations = Operations.assemble(OperationsParts(
+    parts = OperationsParts(
         store=store,
         # What each model's files say it can do, read once and kept beside the
         # rest of the state: a quarter of a second per GGUF model otherwise, on
@@ -210,8 +211,9 @@ def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry
         huggingface=HuggingFaceClient(),
         host=host, engines=engines, builds=builds, installs=installs,
         storage=Storage(store.load().storage, bus), bus=bus,
-        # What was on the card when the manager last stopped. The host says
-        # where a machine keeps such things.
-        last_loaded=LastLoaded(host.state_dir())))
+        # What was on the card when the manager last stopped, where the host keeps state.
+        last_loaded=LastLoaded(host.state_dir()))
+    services = build_services(parts)
+    operations = Operations(parts, services)
     built.append(operations)
-    return operations
+    return operations, services.instance_service

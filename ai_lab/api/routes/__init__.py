@@ -38,7 +38,8 @@ class RouteParts:
     `gateway` decides which entry serves a model name; `lanes` are the lanes
     beside the card; `book` is the card's reservations (ADR 0005): the front
     door asks it before any model call, the Load buttons refuse while the card
-    is reserved, and its own routes manage it; `image_jobs` and `media_jobs`
+    is reserved, and its own routes manage it, saving their settings in
+    `store` (the configuration store); `image_jobs` and `media_jobs`
     are the two job queues. A router built for a test leaves out what it does
     not need, and those routes are simply not there.
     """
@@ -46,6 +47,7 @@ class RouteParts:
     gateway: Any = None
     lanes: SideLanes = NO_LANES
     book: Any = None
+    store: Any = None
     image_jobs: Any = None
     media_jobs: Any = None
 
@@ -59,7 +61,7 @@ def register_all(router, operations, parts: RouteParts | None = None) -> None:
     if parts.gateway is not None:
         gateway.register(router, operations, parts.gateway, parts.lanes, parts.book)
     if parts.book is not None:
-        reservations.register(router, operations, parts.book)
+        reservations.register(router, parts.store, parts.book)
     if parts.image_jobs is not None:
         images.register(router, parts.image_jobs)
     if parts.media_jobs is not None:
