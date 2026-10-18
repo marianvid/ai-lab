@@ -7,6 +7,7 @@ from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ai_lab.application.model_storage import MoveMechanics
 from ai_lab.application.move_jobs import MoveJobStore
 from ai_lab.catalog.core import Catalog
 from ai_lab.config.store import ConfigStore
@@ -100,6 +101,10 @@ def operations_with_instances(count, last_loaded=None):
     """An Operations with `count` configured entries, and the host behind it."""
     parts, host = parts_with_instances(count, last_loaded)
     return Operations.assemble(parts), host
+
+
+# How a move copies, checks and publishes, unless a test says otherwise.
+STANDARD_MECHANICS = MoveMechanics()
 
 
 class FakeRegistry:
@@ -454,14 +459,15 @@ class MoveModelTests(unittest.TestCase):
         self.host = FakeHost()
         self.operations = self.assembled()
 
-    def assembled(self, move_jobs=MoveJobStore):
-        """Operations on this test's machine, with the move-job store `move_jobs` makes."""
+    def assembled(self, move_jobs=MoveJobStore, mechanics=STANDARD_MECHANICS):
+        """Operations on this test's machine, with `move_jobs`'s job store and these `mechanics`."""
         return Operations.assemble(OperationsParts(
             store=self.store, catalog=Catalog(),
             runtime=Runtime(self.host, EventBus(), sample_interval_s=0),
             settings=Settings(self.store, self.host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=self.host, engines=FakeRegistry(self.host), move_jobs=move_jobs,
+            move_mechanics=mechanics,
         ))
 
     def test_a_model_is_copied_verified_and_removed_from_the_source(self):
@@ -548,41 +554,19 @@ class MoveModelTests(unittest.TestCase):
 
     def test_a_checksum_failure_during_copy_leaves_the_source_intact(self):
         self.operations.delete_instance("qwen")
-        import ai_lab.application.model_storage as operations_module
-        # Read the descriptor straight out of the class `__dict__`, not
-        # through the class itself: `ModelStorageService._sha256` unwraps the
-        # `staticmethod` and hands back a plain function. Restoring *that*
-        # later would leave `_sha256` bound to `self` on every instance call
-        # after this test — exactly the bug that broke every other move test
-        # once this one ran first.
         calls = {"n": 0}
 
         def flaky_sha256(path):
             calls["n"] += 1
             return f"bad-{calls['n']}"
 
-        with (mock.patch.object(operations_module.ModelStorageService, "_sha256",
-                                staticmethod(flaky_sha256)),
-              self.assertRaises(ValueError) as caught):
+        self.operations = self.assembled(mechanics=MoveMechanics(checksum=flaky_sha256))
+        with self.assertRaises(ValueError) as caught:
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertIn("Checksum", str(caught.exception))
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
                         "source must survive a failed copy")
         self.assertFalse((self.benchmark / "gguf" / "qwen" / "qwen.gguf").exists())
-
-    def test_sha256_survives_the_checksum_failure_tests_patch_and_restore(self):
-        """A move right after the checksum-failure test must still work.
-
-        That test above swaps `ModelStorageService._sha256` for a fake and puts the
-        real one back afterwards. If the restore ever again hands back a bare
-        function instead of a `staticmethod`, every instance would call
-        `_sha256(self, path)` from here on — one argument too many — and this
-        move would fail with a `TypeError` instead of succeeding.
-        """
-        self.operations.delete_instance("qwen")
-        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        self.assertTrue(result["moved"])
-        self.assertTrue((self.benchmark / "gguf" / "qwen" / "qwen.gguf").exists())
 
     def test_same_tier_move_is_a_no_op(self):
         self.operations.delete_instance("qwen")
@@ -626,19 +610,12 @@ class MoveModelTests(unittest.TestCase):
         or the staging area — it must leave something a retry can find.
         """
         self.operations.delete_instance("qwen")
-        import ai_lab.application.model_storage as operations_module
-        # Read the descriptor straight out of the class `__dict__`, not
-        # through the class itself: see the identical note on the
-        # `_sha256` patch above — the same unwrap-and-rebind trap applies
-        # to `_publish`, and it is what broke every move test that ran
-        # after this one.
 
         def failing_publish(*args, **kwargs):
             raise OSError("disk pulled mid-rename")
 
-        with (mock.patch.object(operations_module.ModelStorageService, "_publish",
-                                staticmethod(failing_publish)),
-              self.assertRaises(OSError)):
+        self.operations = self.assembled(mechanics=MoveMechanics(publish=failing_publish))
+        with self.assertRaises(OSError):
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
         # The source must not have been touched: publishing never finished.
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
@@ -697,11 +674,8 @@ class MoveModelTests(unittest.TestCase):
         self.operations.delete_instance("qwen")
         make_files(self.core / "gguf" / "qwen", "qwen.gguf", size=8 * 1024 * 1024)
 
-        import ai_lab.application.model_storage as operations_module
-        self.operations = self.assembled(CancelsAtSecondCheck)
-        service = operations_module.ModelStorageService
-        with mock.patch.object(service, "_COPY_CHUNK", 1024):
-            result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.operations = self.assembled(CancelsAtSecondCheck, MoveMechanics(copy_chunk=1024))
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertTrue(result["cancelled"])
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
         self.assertFalse((self.benchmark / "gguf" / "qwen").exists(),

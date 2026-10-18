@@ -17,6 +17,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -57,10 +58,29 @@ class ComfyLaunch:
     ui_workflow: Path | None = None
 
 
-class Backend:
-    """A private ComfyUI process, started and stopped by this bridge, and its API."""
+def wait_until_ready(backend: Backend) -> None:
+    """Return once the backend's ComfyUI answers; raise if it exits or never does."""
+    deadline = time.monotonic() + START_LIMIT_S
+    while time.monotonic() < deadline:
+        if backend.process.poll() is not None:
+            raise RuntimeError("ComfyUI exited during startup")
+        try:
+            backend.request("GET", "/system_stats")
+            return
+        except Exception:
+            time.sleep(.5)
+    raise TimeoutError("ComfyUI did not become ready")
 
-    def __init__(self, launch: ComfyLaunch) -> None:
+
+class Backend:
+    """A private ComfyUI process, started and stopped by this bridge, and its API.
+
+    `wait_ready` is asked once the process is started (`wait_until_ready` by
+    default); a test hands in one that does not wait.
+    """
+
+    def __init__(self, launch: ComfyLaunch,
+                 wait_ready: Callable[[Backend], None] = wait_until_ready) -> None:
         self.base = f"http://{LOOPBACK}:{launch.port}"
         self.timeout = launch.timeout
         self.lock = Lock()
@@ -73,7 +93,7 @@ class Backend:
                    "--temp-directory", str(launch.state / "temp"),
                    *VRAM_FLAGS.get(launch.vram_mode, ())]
         self.process = subprocess.Popen(command, env=_environment(launch))
-        self._wait_ready()
+        wait_ready(self)
 
     def close(self) -> None:
         """Stop the private ComfyUI process owned by this bridge."""
@@ -85,18 +105,6 @@ class Backend:
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait(timeout=5)
-
-    def _wait_ready(self) -> None:
-        deadline = time.monotonic() + START_LIMIT_S
-        while time.monotonic() < deadline:
-            if self.process.poll() is not None:
-                raise RuntimeError("ComfyUI exited during startup")
-            try:
-                self.request("GET", "/system_stats")
-                return
-            except Exception:
-                time.sleep(.5)
-        raise TimeoutError("ComfyUI did not become ready")
 
     def request(self, method: str, path: str, payload=None) -> dict | bytes:
         """One call to ComfyUI's API: JSON back as a dict, anything else as bytes."""

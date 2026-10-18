@@ -17,7 +17,12 @@ from .application.engine_maintenance import EngineMaintenanceService, Maintenanc
 from .application.instance_config import InstanceConfiguration
 from .application.instances import InstanceParts, InstanceService
 from .application.model_listing import ModelListing
-from .application.model_storage import ModelStorageService, MoveJobsFactory, StorageParts
+from .application.model_storage import (
+    ModelStorageService,
+    MoveJobsFactory,
+    MoveMechanics,
+    StorageParts,
+)
 from .application.move_jobs import MoveJobStore
 from .application.settings_changes import SettingsChanges
 from .types import ChangeEvent
@@ -61,6 +66,8 @@ class OperationsParts:
     last_loaded: Any = None
     # Makes the store of model-move jobs; a test hands a fake of it.
     move_jobs: MoveJobsFactory = MoveJobStore
+    # How a move copies, checks and publishes; a test hands in a failing one.
+    move_mechanics: MoveMechanics = MoveMechanics()
 
 
 @dataclass(frozen=True)
@@ -105,7 +112,8 @@ def build_services(parts: OperationsParts) -> OperationsServices:
     downloads = ModelDownloadService(parts.store, parts.downloads, parts.huggingface,
                                      parts.host, parts.engines)
     storage = ModelStorageService(StorageParts(parts.store, parts.catalog, parts.host, changed,
-                                               downloads.writable_in_root, parts.move_jobs))
+                                               downloads.writable_in_root, parts.move_jobs,
+                                               parts.move_mechanics))
     instances = InstanceService(InstanceParts(
         parts.store, parts.catalog, parts.runtime, parts.host, parts.engines, changed,
         listing.models, bus=parts.bus, last_loaded=parts.last_loaded))

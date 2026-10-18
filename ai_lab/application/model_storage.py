@@ -28,6 +28,49 @@ from .move_jobs import UNFINISHED_MOVE_STATUSES, MoveCancelledError, MoveJobStor
 MoveJobsFactory = Callable[[Host, Callable[[str], None]], MoveJobStore]
 
 
+def publish_staged(staging: Path, target_path: Path,
+                   relatives: list[Path], destinations: list[Path]) -> None:
+    """Make the staged copy visible, as close to one atomic act as the
+    filesystem allows.
+
+    When every file sits under one shared top-level folder — the
+    ordinary case, a model in its own directory — the whole folder is
+    renamed into place in a single `os.replace`, so a crash mid-publish
+    either has not happened yet or has already finished; there is no
+    state where the destination holds half a model under its real name.
+
+    When files sit loose (no shared folder — the GGUF-in-the-repository-
+    root case), there is no single directory to rename, so each file is
+    renamed on its own. An interruption there can leave a partial set,
+    which is exactly why the move's job record exists: to say so rather
+    than pretend it did not happen.
+    """
+    tops = {relative.parts[0] if len(relative.parts) > 1 else None
+            for relative in relatives}
+    top = next(iter(tops)) if len(tops) == 1 else None
+    if top is not None and not (target_path / top).exists():
+        os.replace(staging / top, target_path / top)
+        return
+    for relative, destination in zip(relatives, destinations, strict=True):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        (staging / relative).replace(destination)
+
+
+# Checked between chunks during the copy itself, not only once per file — a
+# single-file GGUF, the common case, could otherwise not be stopped once
+# copying began.
+COPY_CHUNK = 64 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class MoveMechanics:
+    """How a move copies, checks and publishes files; a test hands in a failing one."""
+
+    checksum: Callable[[Path], str] = sha256_of
+    publish: Callable[[Path, Path, list[Path], list[Path]], None] = publish_staged
+    copy_chunk: int = COPY_CHUNK
+
+
 @dataclass(frozen=True)
 class StorageParts:
     """What `ModelStorageService` works with (`move_jobs` makes its job store)."""
@@ -38,6 +81,7 @@ class StorageParts:
     on_change: Callable[[str], None]
     writable_in_root: Callable[[Repository, ModelRoot], Repository]
     move_jobs: MoveJobsFactory = MoveJobStore
+    mechanics: MoveMechanics = MoveMechanics()
 
 
 class ModelStorageService:
@@ -56,6 +100,7 @@ class ModelStorageService:
         self._changed = parts.on_change
         self._writable_in_root = parts.writable_in_root
         self.jobs = parts.move_jobs(parts.host, parts.on_change)
+        self._mechanics = parts.mechanics
 
     def delete_model(self, model_id: str) -> dict:
         """Remove a model's files from disk.
@@ -206,7 +251,7 @@ class ModelStorageService:
             staged = staging / relative
             staged.parent.mkdir(parents=True, exist_ok=True)
             self._copy_checking_cancellation(source, staged, job)
-            if self._sha256(source) != self._sha256(staged):
+            if self._mechanics.checksum(source) != self._mechanics.checksum(staged):
                 raise ValueError(
                     f"Checksum mismatch while copying {source.name}")
         self.jobs.phase(job, "verifying")
@@ -217,7 +262,7 @@ class ModelStorageService:
         # the copy is in flight.
         self._reject_if_busy(self.store.load(), plan.model_id)
         self.jobs.phase(job, "publishing")
-        self._publish(staging, plan.target_path, plan.relatives, plan.destinations)
+        self._mechanics.publish(staging, plan.target_path, plan.relatives, plan.destinations)
         # A stopped model entry can follow the weights safely. Keeping the
         # assignment is the point of moving storage; forcing somebody to
         # delete and recreate it turns a physical move into configuration
@@ -267,34 +312,6 @@ class ModelStorageService:
                 "This model is currently loaded by " + ", ".join(loaded)
                 + ". Unload that entry in Models, then try the move again.")
 
-    @staticmethod
-    def _publish(staging: Path, target_path: Path,
-                relatives: list[Path], destinations: list[Path]) -> None:
-        """Make the staged copy visible, as close to one atomic act as the
-        filesystem allows.
-
-        When every file sits under one shared top-level folder — the
-        ordinary case, a model in its own directory — the whole folder is
-        renamed into place in a single `os.replace`, so a crash mid-publish
-        either has not happened yet or has already finished; there is no
-        state where the destination holds half a model under its real name.
-
-        When files sit loose (no shared folder — the GGUF-in-the-repository-
-        root case), there is no single directory to rename, so each file is
-        renamed on its own. An interruption there can leave a partial set,
-        which is exactly why the job record above exists: to say so rather
-        than pretend it did not happen.
-        """
-        tops = {relative.parts[0] if len(relative.parts) > 1 else None
-                for relative in relatives}
-        top = next(iter(tops)) if len(tops) == 1 else None
-        if top is not None and not (target_path / top).exists():
-            os.replace(staging / top, target_path / top)
-            return
-        for relative, destination in zip(relatives, destinations, strict=True):
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            (staging / relative).replace(destination)
-
     def _companions_still_needed(self, config, model, sources: list[Path]) -> set[Path]:
         """Companion files this move must not remove from the source.
 
@@ -313,26 +330,16 @@ class ModelStorageService:
             needed |= sibling_paths & source_set
         return needed
 
-    # Checked between chunks during the copy itself, not only once per file —
-    # a single-file GGUF, the common case, previously had exactly one
-    # cancellation check (before any bytes moved) and could not be stopped
-    # once copying began.
-    _COPY_CHUNK = 64 * 1024 * 1024
-
     def _copy_checking_cancellation(self, source: Path, destination: Path,
                                     job: dict) -> None:
         with source.open("rb") as read_from, destination.open("wb") as write_to:
             while True:
                 self.jobs.check_cancelled(job)
-                chunk = read_from.read(self._COPY_CHUNK)
+                chunk = read_from.read(self._mechanics.copy_chunk)
                 if not chunk:
                     break
                 write_to.write(chunk)
         shutil.copystat(source, destination)
-
-    @staticmethod
-    def _sha256(path: Path) -> str:
-        return sha256_of(path)
 
 
 

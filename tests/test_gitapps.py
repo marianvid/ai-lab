@@ -2,10 +2,8 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
-
 from ai_lab.events import EventBus
-from ai_lab.builds.gitapps import GitApplicationInstall
+from ai_lab.builds.gitapps import GitApplicationInstall, GitCommands
 
 
 class GitApplicationInstallTests(unittest.TestCase):
@@ -13,10 +11,14 @@ class GitApplicationInstallTests(unittest.TestCase):
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.install = GitApplicationInstall("comfyui", {
+        self.install = self.installer(GitCommands())
+
+    def installer(self, commands):
+        """The install under test, running `commands` instead of git and the build."""
+        return GitApplicationInstall("comfyui", {
             "source": {"root": str(self.root), "kind": "git-app",
                        "repository": "https://example.invalid/ComfyUI.git",
-                       "application": "ComfyUI"}}, EventBus())
+                       "application": "ComfyUI"}}, EventBus(), commands)
 
     def release(self, name, commit):
         release = self.root / name
@@ -44,11 +46,14 @@ class GitApplicationInstallTests(unittest.TestCase):
     def test_failed_candidate_is_removed_without_moving_current(self):
         active = self.release(".release-first", "a" * 40)
         self.install.point_at(active)
-        with patch.object(self.install, "_remote_commit", return_value="b" * 40), \
-             patch.object(self.install, "_stream", side_effect=ValueError("install failed")):
-            self.install.install("HEAD")
-            assert self.install.job.thread is not None
-            self.install.job.thread.join(timeout=2)
+
+        def failing(*_args):
+            raise ValueError("install failed")
+        self.install = self.installer(GitCommands(remote_commit=lambda *_: "b" * 40,
+                                                  run=failing))
+        self.install.install("HEAD")
+        assert self.install.job.thread is not None
+        self.install.job.thread.join(timeout=2)
         self.assertEqual(self.install.active(), active.resolve())
         self.assertEqual(self.install.status()["state"], "failed")
         self.assertFalse((self.root / (".release-" + "b" * 12)).exists())
@@ -62,27 +67,26 @@ class GitApplicationInstallTests(unittest.TestCase):
         def hold(*_args, **_kwargs):
             started.set()
             release.wait(5)
-        with patch.object(self.install, "_remote_commit", return_value="b" * 40), \
-             patch.object(self.install, "_stream", side_effect=hold):
-            self.install.install("HEAD")
-            self.assertTrue(started.wait(5))
-            try:
-                with self.assertRaisesRegex(ValueError, "while .* running"):
-                    self.install.activate(active.name)
-                with self.assertRaisesRegex(ValueError, "while .* running"):
-                    self.install.remove(active.name)
-            finally:
-                release.set()
-                assert self.install.job.thread is not None
-                self.install.job.thread.join(timeout=5)
+        self.install = self.installer(GitCommands(remote_commit=lambda *_: "b" * 40, run=hold))
+        self.install.install("HEAD")
+        self.assertTrue(started.wait(5))
+        try:
+            with self.assertRaisesRegex(ValueError, "while .* running"):
+                self.install.activate(active.name)
+            with self.assertRaisesRegex(ValueError, "while .* running"):
+                self.install.remove(active.name)
+        finally:
+            release.set()
+            assert self.install.job.thread is not None
+            self.install.job.thread.join(timeout=5)
 
     def test_dirty_custom_node_is_never_updated(self):
         active = self.release(".release-first", "a" * 40)
         node = active / "ComfyUI" / "custom_nodes" / "example"
         (node / ".git").mkdir(parents=True)
+        self.install = self.installer(GitCommands(git=lambda *_: " M changed.py\n"))
         self.install.point_at(active)
-        with patch.object(self.install, "_git", return_value=" M changed.py\n"), \
-                self.assertRaises(ValueError):
+        with self.assertRaises(ValueError):
             self.install.update_component("example")
 
 

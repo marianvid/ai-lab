@@ -25,6 +25,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 
 from ..builds.public_services import address
 
@@ -41,16 +42,39 @@ HOW_MANY = 30
 NUMBERS = re.compile(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?")
 
 
-def between(repo: str, installed: str, latest: str) -> tuple[str, str]:
+def github_releases(repo: str) -> list[dict]:
+    """The repository's latest releases, newest first, as GitHub lists them."""
+    request = urllib.request.Request(
+        address("github_releases").format(repo=repo, count=HOW_MANY),
+        headers={"Accept": "application/vnd.github+json",
+                 # Asked for by name so that a refusal names this application
+                 # rather than looking like an anonymous script.
+                 "User-Agent": "ai-lab"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as answer:
+            found = json.loads(answer.read())
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 429):
+            raise ValueError("too many requests to GitHub for now — "
+                             "it allows sixty an hour") from None
+        raise ValueError(f"GitHub answered {error.code}") from None
+    except urllib.error.URLError as error:
+        raise ValueError(f"could not reach GitHub ({error.reason})") from None
+    return found if isinstance(found, list) else []
+
+
+def between(repo: str, installed: str, latest: str,
+            releases_of: Callable[[str], list[dict]] = github_releases) -> tuple[str, str]:
     """The notes for every release after `installed`, up to and including `latest`.
 
     Returns the notes and a warning, either of which may be empty. A warning is
     not an error: notes that could not be fetched leave the rest of the screen
     — what packages change, what goes backwards — perfectly usable, and refusing
     to show any of it because a web service was unreachable would be worse.
+    `releases_of` reads a repository's releases (`github_releases` by default).
     """
     try:
-        releases = _releases(repo)
+        releases = releases_of(repo)
     except Exception as error:
         return "", f"Could not read the release notes: {error}"
 
@@ -95,26 +119,6 @@ def _render(releases: list[dict]) -> str:
         parts.append(f"# {title}\n\n{body}" if body
                      else f"# {title}\n\n_No notes were written for this release._")
     return "\n\n---\n\n".join(parts)
-
-
-def _releases(repo: str) -> list[dict]:
-    request = urllib.request.Request(
-        address("github_releases").format(repo=repo, count=HOW_MANY),
-        headers={"Accept": "application/vnd.github+json",
-                 # Asked for by name so that a refusal names this application
-                 # rather than looking like an anonymous script.
-                 "User-Agent": "ai-lab"})
-    try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as answer:
-            found = json.loads(answer.read())
-    except urllib.error.HTTPError as error:
-        if error.code in (403, 429):
-            raise ValueError("too many requests to GitHub for now — "
-                             "it allows sixty an hour") from None
-        raise ValueError(f"GitHub answered {error.code}") from None
-    except urllib.error.URLError as error:
-        raise ValueError(f"could not reach GitHub ({error.reason})") from None
-    return found if isinstance(found, list) else []
 
 
 def _shape(text: str) -> str:

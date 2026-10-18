@@ -9,10 +9,10 @@ from ai_lab.images.comfyui_server import Backend, ComfyLaunch, replace_marker
 class ComfyUiServerTests(unittest.TestCase):
     def command(self, mode, workflow=None, ui_workflow=None):
         with tempfile.TemporaryDirectory() as directory, \
-            patch.object(Backend, "_wait_ready"), \
              patch("ai_lab.images.comfyui_server.subprocess.Popen") as popen:
             Backend(ComfyLaunch("python", "main.py", ["/models"], Path(directory), 18114,
-                                vram_mode=mode, workflow=workflow, ui_workflow=ui_workflow))
+                                vram_mode=mode, workflow=workflow, ui_workflow=ui_workflow),
+                    wait_ready=lambda backend: None)
             return popen.call_args.args[0], popen.call_args.kwargs, Path(directory, "extra_model_paths.yaml").read_text()
 
     def test_low_vram_reaches_comfyui(self):

@@ -7,6 +7,8 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..disk import free_bytes, tree_size
@@ -27,10 +29,47 @@ SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 RELEASE_PREFIX = ".release-"
 
 
+def remote_commit(repository: str, ref: str) -> str:
+    """The commit `ref` names in `repository`, asked of the remote."""
+    answer = subprocess.run(["git", "ls-remote", repository, ref], capture_output=True,
+                            text=True, timeout=GIT_QUESTION_S, env=_environment())
+    if answer.returncode or not answer.stdout.strip():
+        raise ValueError(answer.stderr.strip() or f"Could not resolve {ref}")
+    return answer.stdout.split()[0]
+
+
+def git_output(checkout: Path, *args: str) -> str:
+    """What one git question about `checkout` prints."""
+    answer = subprocess.run(["git", "-C", str(checkout), *args], capture_output=True,
+                            text=True, timeout=GIT_QUESTION_S, env=_environment())
+    if answer.returncode:
+        raise ValueError(answer.stderr.strip() or "git failed")
+    return answer.stdout
+
+
+def run_logged(log: InstallLog, command: Command, elapsed: Elapsed) -> None:
+    """Run one build step, its output going to the install's log."""
+    log.run(command, elapsed)
+
+
+@dataclass(frozen=True)
+class GitCommands:
+    """The commands an install runs; a test hands in its own."""
+
+    remote_commit: Callable[[str, str], str] = remote_commit
+    git: Callable[..., str] = git_output
+    run: Callable[[InstallLog, Command, Elapsed], None] = run_logged
+
+
+# What an install runs unless it is handed something else.
+REAL_COMMANDS = GitCommands()
+
+
 class GitApplicationInstall:
     """Build a full checkout and venv beside the active release, then switch."""
 
-    def __init__(self, engine_id: str, settings: dict, bus: EventBus) -> None:
+    def __init__(self, engine_id: str, settings: dict, bus: EventBus,
+                 commands: GitCommands = REAL_COMMANDS) -> None:
         source = settings.get("source") or {}
         self.engine_id, self.bus = engine_id, bus
         self.root = Path(source["root"])
@@ -44,6 +83,7 @@ class GitApplicationInstall:
         self.log = InstallLog(engine_id, bus, self.job.lines)
         self._latest = ""
         self._component_latest: dict[str, str] = {}
+        self._commands = commands
 
     @property
     def link(self) -> Path:
@@ -250,25 +290,16 @@ class GitApplicationInstall:
     def _remote(self, checkout: Path) -> str:
         return self._git(checkout, "remote", "get-url", "origin").strip()
 
-    @staticmethod
-    def _remote_commit(repository: str, ref: str) -> str:
-        answer = subprocess.run(["git", "ls-remote", repository, ref], capture_output=True,
-                                text=True, timeout=GIT_QUESTION_S, env=_environment())
-        if answer.returncode or not answer.stdout.strip():
-            raise ValueError(answer.stderr.strip() or f"Could not resolve {ref}")
-        return answer.stdout.split()[0]
+    def _remote_commit(self, repository: str, ref: str) -> str:
+        return self._commands.remote_commit(repository, ref)
 
-    @staticmethod
-    def _git(checkout: Path, *args: str) -> str:
-        answer = subprocess.run(["git", "-C", str(checkout), *args], capture_output=True,
-                                text=True, timeout=GIT_QUESTION_S, env=_environment())
-        if answer.returncode:
-            raise ValueError(answer.stderr.strip() or "git failed")
-        return answer.stdout
+    def _git(self, checkout: Path, *args: str) -> str:
+        return self._commands.git(checkout, *args)
 
     def _stream(self, command: list[str], elapsed: Elapsed, timeout: int = INSTALL_TIMEOUT_S,
                 cwd: Path | None = None) -> None:
-        self.log.run(Command(command, cwd or self.root, _environment(), timeout), elapsed)
+        self._commands.run(self.log, Command(command, cwd or self.root, _environment(), timeout),
+                           elapsed)
 
     def _announce(self) -> None:
         self.log.announce()

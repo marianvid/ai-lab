@@ -1,5 +1,4 @@
 import unittest
-from unittest import mock
 
 from ai_lab.changes import fromgithub
 
@@ -13,8 +12,7 @@ RELEASES = [  # newest first, as GitHub returns them
 
 
 def between(installed, latest, releases=RELEASES):
-    with mock.patch.object(fromgithub, "_releases", return_value=releases):
-        return fromgithub.between("owner/repo", installed, latest)
+    return fromgithub.between("owner/repo", installed, latest, lambda repo: releases)
 
 
 class BetweenTests(unittest.TestCase):
@@ -39,9 +37,10 @@ class BetweenTests(unittest.TestCase):
         self.assertIn("No release notes", warning)
 
     def test_an_unreachable_service_is_a_warning(self):
-        with mock.patch.object(fromgithub, "_releases", side_effect=ValueError("down")):
-            self.assertEqual(fromgithub.between("o/r", "v1", "v2"),
-                             ("", "Could not read the release notes: down"))
+        def down(repo):
+            raise ValueError("down")
+        self.assertEqual(fromgithub.between("o/r", "v1", "v2", down),
+                         ("", "Could not read the release notes: down"))
 
 
 if __name__ == "__main__":
