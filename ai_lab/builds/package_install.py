@@ -2,9 +2,10 @@
 
 `PackageInstall` builds a new version in its own folder beside the one that
 works, checks that it starts, and only then points the engine at it — so what
-is working is never written to, and going back is always possible. Which
-folders exist and which one runs is `package_environments.EnvironmentFolders`,
-a base class of it.
+is working is never written to, and going back is always possible. It holds
+which folders exist and which one runs (`package_environments.EnvironmentFolders`),
+and runs its commands and its start check through `InstallTools` — real by
+default, fakes in a test. It alone owns its lock.
 """
 
 from __future__ import annotations
@@ -15,13 +16,15 @@ import subprocess
 import threading
 import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from ..disk import free_bytes
 from ..events import EventBus
 from .install_log import Command, Elapsed, InstallLog, since
-from .package_environments import CURRENT, PREFIX, EnvironmentFolders, version_in
+from .package_environments import CURRENT, PREFIX, Environment, EnvironmentFolders, version_in
 from .public_services import address
 
 __all__ = ["CURRENT", "PackageInstall", "PackageOptions"]
@@ -32,6 +35,46 @@ UV_TIMEOUT_S = 60
 INDEX_TIMEOUT_S = 20
 # The programs a new environment is built with are found on this search path.
 SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
+
+
+class InstallCommands(Protocol):
+    """Running one install command (`uv venv`, `uv pip install`), its output kept."""
+
+    def run(self, command: Command, elapsed: Elapsed) -> None:
+        """Run to the end; ValueError if it fails or runs too long."""
+        ...
+
+
+class CheckResult(Protocol):
+    """What running the start check said."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class EnvironmentCheck(Protocol):
+    """Running a Python program with a new environment's own Python."""
+
+    def check(self, environment: Path, program: str) -> CheckResult:
+        """Run `program` there and say what happened."""
+        ...
+
+
+class SubprocessCheck:
+    """The start check run as a process."""
+
+    def check(self, environment: Path, program: str) -> CheckResult:
+        """Run `program` with the environment's own Python."""
+        return _run_check(environment, program)
+
+
+@dataclass(frozen=True)
+class InstallTools:
+    """What an install runs: its commands and its start check. None means the real ones."""
+
+    commands: InstallCommands | None = None
+    check: EnvironmentCheck | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +96,8 @@ class PackageOptions:
     requires_cuda: bool = False
     pip_args: list[str] = field(default_factory=list)
     minimum_versions: dict[str, str] = field(default_factory=dict)
+    # Not configuration: the collaborators that run the commands and the check.
+    tools: InstallTools = field(default_factory=InstallTools)
 
     @classmethod
     def from_source(cls, source: dict) -> PackageOptions:
@@ -66,11 +111,11 @@ class PackageOptions:
                    minimum_versions=dict(source.get("minimum_versions") or {}))
 
 
-class PackageInstall(EnvironmentFolders):
+class PackageInstall:
     """The installed versions of one engine, and the ability to add or drop one.
 
     `root` is the directory holding them. `package` is what to install — for
-    vLLM, "vllm".
+    vLLM, "vllm". It alone owns its lock, which guards the install's state.
     """
 
     def __init__(self, engine_id: str, root: str, package: str, bus: EventBus,
@@ -89,11 +134,51 @@ class PackageInstall(EnvironmentFolders):
         self.uv = options.uv
         self.python = options.python
         self.log = InstallLog(engine_id, bus)
+        self.folders = EnvironmentFolders(self.root, package)
+        self.commands: InstallCommands = options.tools.commands or self.log
+        self.checker: EnvironmentCheck = options.tools.check or SubprocessCheck()
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._state = "idle"          # idle, running, done, failed
         self._error = ""
         self._latest = ""             # what the index last said
+
+    # -- the environment folders, as before -----------------------------
+
+    @property
+    def link(self) -> Path:
+        """The `current` link naming the environment in use."""
+        return self.folders.link
+
+    def active(self) -> Path | None:
+        """The folder the engine is currently launched from."""
+        return self.folders.active()
+
+    def installed_now(self) -> str:
+        """The version the engine is launched from, or "" if none is."""
+        return self.folders.installed_now()
+
+    def environments(self, with_sizes: bool = True) -> list[Environment]:
+        """Every installed version, the active one marked."""
+        return self.folders.environments(with_sizes)
+
+    def point_at(self, environment: Path) -> None:
+        """Make this the one the engine is launched from."""
+        self.folders.point_at(environment)
+
+    def activate(self, name: str) -> dict:
+        """Go back — or forward — to an installed version, by folder name."""
+        return self._after(self.folders.activate, name)
+
+    def remove(self, name: str) -> dict:
+        """Delete an installed version that is not the one in use."""
+        return self._after(self.folders.remove, name)
+
+    def _after(self, change: Callable[[str], None], name: str) -> dict:
+        """Make one change to the folders, tell the page, and say how things stand."""
+        change(name)
+        self._announce()
+        return self.status()
 
     def check(self) -> dict:
         """Ask the index what the newest release is.
@@ -226,7 +311,7 @@ class PackageInstall(EnvironmentFolders):
 
     def _verify(self, environment: Path, elapsed: Elapsed) -> None:
         """Refuse to hand the engine something that will not start."""
-        result = _run_check(environment, self._check_program())
+        result = self.checker.check(environment, self._check_program())
         for line in (result.stdout + result.stderr).splitlines():
             if line.strip():
                 self._say("out", line.rstrip(), elapsed())
@@ -257,7 +342,7 @@ class PackageInstall(EnvironmentFolders):
         environment = {"PATH": SYSTEM_PATH, "HOME": str(Path.home())}
         if venv is not None:
             environment["VIRTUAL_ENV"] = str(venv)
-        self.log.run(Command(command, self.root, environment, timeout), elapsed)
+        self.commands.run(Command(command, self.root, environment, timeout), elapsed)
 
     def _announce(self) -> None:
         self.log.announce()

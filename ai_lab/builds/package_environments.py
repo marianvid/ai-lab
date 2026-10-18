@@ -1,6 +1,9 @@
 """The installed versions of one package engine, as folders beside each other.
 
-A base class of `PackageInstall` (a mixin). Every version lives in its own
+`EnvironmentFolders` is held by `PackageInstall`. It keeps no state of its own
+beyond the folder and the package name (everything else is on disk), so it
+needs no lock; `PackageInstall` owns the lock and never installs and switches
+at once. Every version lives in its own
 `.venv-<version>` folder under `root`; the original install, from before this
 scheme, is `.venv`. A `current` link names the one the engine is launched
 from, so switching is moving the link: going back is one press and deletes
@@ -12,7 +15,6 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
 
 from ..disk import tree_size
@@ -76,13 +78,11 @@ def replace_link(link: Path, target: Path) -> None:
 
 
 class EnvironmentFolders:
-    """Environments under `root` (see `PackageInstall`, which owns the fields)."""
+    """The environments under `root`, and the `current` link naming the one in use."""
 
-    root: Path
-    package: str
-    # From `PackageInstall`.
-    status: Callable[[], dict]
-    _announce: Callable[[], None]
+    def __init__(self, root: Path, package: str) -> None:
+        self.root = root
+        self.package = package
 
     @property
     def link(self) -> Path:
@@ -134,14 +134,11 @@ class EnvironmentFolders:
             raise ValueError(f"{environment.name} has no bin/ — it is not usable")
         replace_link(self.link, environment)
 
-    def activate(self, name: str) -> dict:
+    def activate(self, name: str) -> None:
         """Go back — or forward — to an installed version, by folder name."""
-        environment = self._one(name)
-        self.point_at(environment.path)
-        self._announce()
-        return self.status()
+        self.point_at(self._one(name).path)
 
-    def remove(self, name: str) -> dict:
+    def remove(self, name: str) -> None:
         """Delete an installed version.
 
         Refused for the one in use, which would leave the engine with nothing
@@ -154,8 +151,6 @@ class EnvironmentFolders:
             raise ValueError(
                 f"{name} is the one in use. Activate another one first.")
         shutil.rmtree(environment.path)
-        self._announce()
-        return self.status()
 
     def _one(self, name: str) -> Environment:
         for environment in self.environments(with_sizes=False):

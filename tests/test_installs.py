@@ -19,13 +19,48 @@ from unittest.mock import patch
 
 from ai_lab.events import EventBus
 from ai_lab.builds.installs import Installs
-from ai_lab.builds.package_install import CURRENT, PackageInstall, PackageOptions
+from ai_lab.builds.package_install import CURRENT, InstallTools, PackageInstall, PackageOptions
 
 
 def finish(install):
     """Wait for the install started in the background."""
     assert install._thread is not None
     install._thread.join(timeout=10)
+
+
+class FakeUv:
+    """uv as these tests see it: `behaviour(argv)` runs for each command, all recorded."""
+
+    def __init__(self, behaviour):
+        self.behaviour = behaviour
+        self.commands = []
+
+    def run(self, command, elapsed):
+        self.commands.append(command)
+        self.behaviour(command.argv)
+
+
+class FakeCheck:
+    """The start check: passes or fails as told, and keeps the program it was given."""
+
+    def __init__(self, starts=True):
+        self.starts = starts
+        self.programs = []
+
+    def check(self, environment, program):
+        self.programs.append(program)
+        if self.starts:
+            return type("Result", (), {"returncode": 0, "stdout": "ok\n", "stderr": ""})()
+        return type("Result", (), {"returncode": 1, "stdout": "",
+                                    "stderr": "no CUDA"})()
+
+
+def makes_the_folder(argv):
+    """What `uv venv` leaves behind: a folder with a python in it."""
+    if argv[1] == "venv":
+        built = Path(argv[2])
+        (built / "bin").mkdir(parents=True, exist_ok=True)
+        (built / "bin" / "python").write_text("#!/bin/sh\n")
 
 
 def _environment(root: Path, version: str) -> Path:
@@ -168,30 +203,23 @@ class Installing(unittest.TestCase):
         self.install = PackageInstall("vllm", str(self.root), "vllm", EventBus())
         self.install.point_at(self.working)
 
-    def _pretend(self, lands="0.27.1", starts=True, fails_at=None):
-        """Stand in for uv and for the check that the result starts."""
-        def stream(command, elapsed, timeout, venv=None):
-            if fails_at and fails_at in command[1]:
+    def _installer(self, uv, check, **options):
+        install = PackageInstall("vllm", str(self.root), "vllm", EventBus(),
+                                 PackageOptions(tools=InstallTools(commands=uv, check=check),
+                                                **options))
+        install.point_at(self.working)
+        return install
+
+    def _run(self, lands="0.27.1", starts=True, fails_at=None):
+        """An install with uv and the start check stood in for."""
+        def uv(argv):
+            if fails_at and fails_at in argv[1]:
                 raise ValueError(f"{fails_at} failed")
-            if command[1] == "venv":
-                built = Path(command[2])
-                (built / "bin").mkdir(parents=True, exist_ok=True)
-                (built / "bin" / "python").write_text("#!/bin/sh\n")
+            makes_the_folder(argv)
 
-        def verify(environment, elapsed):
-            if not starts:
-                raise ValueError("The new environment does not start: no CUDA")
-
-        return (patch.object(PackageInstall, "_stream",
-                             lambda self, *a, **k: stream(*a, **k)),
-                patch.object(PackageInstall, "_verify",
-                             lambda self, *a, **k: verify(*a, **k)),
-                patch("ai_lab.builds.package_install.version_in", lambda path, package: lands))
-
-    def _run(self, **how):
-        one, two, three = self._pretend(**how)
-        with one, two, three:
-            self.install.install(how.get("lands", "0.27.1"))
+        self.install = self._installer(FakeUv(uv), FakeCheck(starts))
+        with patch("ai_lab.builds.package_install.version_in", lambda path, package: lands):
+            self.install.install(lands)
             finish(self.install)
         return self.install.status()
 
@@ -234,17 +262,13 @@ class Installing(unittest.TestCase):
         import threading
         holding, started = threading.Event(), threading.Event()
 
-        def slow(self_install, command, elapsed, timeout, venv=None):
-            if command[1] == "venv":
-                built = Path(command[2])
-                (built / "bin").mkdir(parents=True, exist_ok=True)
-                (built / "bin" / "python").write_text("#!/bin/sh\n")
+        def slow(argv):
+            makes_the_folder(argv)
             started.set()
             holding.wait(timeout=10)
 
-        with patch.object(PackageInstall, "_stream", slow), \
-             patch.object(PackageInstall, "_verify", lambda *a, **k: None), \
-             patch("ai_lab.builds.package_install.version_in", lambda path, package: "0.27.1"):
+        self.install = self._installer(FakeUv(slow), FakeCheck())
+        with patch("ai_lab.builds.package_install.version_in", lambda path, package: "0.27.1"):
             self.install.install("0.27.1")
             self.assertTrue(started.wait(timeout=5), "the first never started")
             with self.assertRaises(ValueError):
@@ -254,19 +278,13 @@ class Installing(unittest.TestCase):
         self.assertEqual(self.install.status()["state"], "done")
 
     def test_configured_minimum_versions_are_checked_before_activation(self):
-        install = PackageInstall(
-            "paddleocr", str(self.root), "paddleocr", EventBus(),
-            PackageOptions(minimum_versions={"paddlepaddle-gpu": "3.3.0"}))
-        commands = []
-
-        def run(command, **kwargs):
-            commands.append(command)
-            return type("Result", (), {"returncode": 0, "stdout": "ok\n",
-                                        "stderr": ""})()
-
-        with patch("ai_lab.builds.package_install.subprocess.run", run):
-            install._verify(self.working, lambda: 0)
-        program = commands[0][2]
+        check = FakeCheck()
+        install = self._installer(FakeUv(makes_the_folder), check,
+                                  minimum_versions={"paddlepaddle-gpu": "3.3.0"})
+        with patch("ai_lab.builds.package_install.version_in", lambda path, package: "0.27.1"):
+            install.install("0.27.1")
+            finish(install)
+        program = check.programs[0]
         self.assertIn("paddlepaddle-gpu", program)
         self.assertIn("3.3.0", program)
 
