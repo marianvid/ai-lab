@@ -13,14 +13,13 @@ class GatewayResources:
     """What the card holds and what a model needs, read for the scheduler."""
 
     def __init__(self, operations, quiet_mb: float, quiet_timeout_s: float,
-                 poll_s: float) -> None:
+                 poll_s: float, neighbours: CardNeighbours | None = None) -> None:
+        """`neighbours` borrow the card beside its models (the embeddings lane), built first."""
         self.operations = operations
         self.quiet_mb = quiet_mb
         self.quiet_timeout_s = quiet_timeout_s
         self.poll_s = poll_s
-        # Whoever borrows the card beside its models (the embeddings lane);
-        # set once at start-up, in `main`.
-        self.neighbours: CardNeighbours = NoNeighbours()
+        self._neighbours: CardNeighbours = neighbours or NoNeighbours()
 
     def needs_mb(self, shape, card_total_mb: float) -> float:
         """Ask the selected engine how much this request shape needs."""
@@ -52,7 +51,7 @@ class GatewayResources:
     def free_mb(self, pools: dict) -> float:
         """What a card model may take: what is free, plus what a neighbour gives back."""
         available = float(self.pool(pools).get("available_mb", 0.0))
-        return available + self.neighbours.reclaimable_mb()
+        return available + self._neighbours.reclaimable_mb()
 
     def read_pools(self) -> dict:
         """Read outside the scheduler lock; a failed probe keeps old readings."""
@@ -74,7 +73,7 @@ class GatewayResources:
         Neighbours borrowing the card leave it first, whatever was stopped: the
         card is read right after this, and must be read without them.
         """
-        self.neighbours.make_way()
+        self._neighbours.make_way()
         if not stopped:
             return
         snapshot = self.operations.host.accelerator()

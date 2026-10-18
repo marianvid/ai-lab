@@ -18,20 +18,25 @@ from .catalog.capabilities import Known
 from .catalog.core import Catalog
 from .config.store import Config, ConfigStore
 from .config.validation import Section, validate_configuration
+from .cpu_models import CpuLane
 from .cpu_models.settings import CpuModelsConfig
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
+from .gateway.card_sharing import guard_loads
 from .gateway.core import Gateway
 from .gateway.limits import GatewayLimits
+from .gateway.resources import GatewayResources
 from .hosts import current_host
 from .hosts.base import Host
+from .lanes import SideLanes
 from .media.image_jobs import ImageJobs
 from .builds.installs import Installs
 from .runtime.lastloaded import LastLoaded
 from .media.jobs import MediaJobs
 from .operations import Operations
 from .operations_services import OperationsParts
+from .providers import ProviderPool
 from .providers.settings import ProvidersConfig
 from .reservations.settings import ReservationPolicy
 from .runtime.core import Runtime
@@ -56,11 +61,13 @@ CONFIG_SECTIONS: dict[str, Section] = {
 }
 
 
-def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway]:
+def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway, SideLanes]:
     """The whole manager, from the configuration at `config_path`.
 
     Returns the operations the routes call, the event bus the page listens
-    on, the configuration store and the model gateway.
+    on, the configuration store, the model gateway and the lanes beside the
+    card. The embeddings lane is built before the gateway: it borrows the
+    card, so the gateway's memory is built with it as the card's neighbour.
     """
     store = ConfigStore(config_path)
     bus = EventBus()
@@ -71,12 +78,46 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
                            sections=CONFIG_SECTIONS)
     host = current_host(engine_settings)
     operations = _operations(store, bus, host, engines, engine_settings)
-    model_gateway = Gateway(operations, gateway_limits(config))
+    lanes = side_lanes(config, operations)
+    limits = gateway_limits(config)
+    memory = GatewayResources(operations, limits.quiet_mb, limits.quiet_timeout_s,
+                              limits.poll_s, neighbours=lanes.cpu)
+    model_gateway = Gateway(operations, limits, memory=memory)
     operations.image_jobs = ImageJobs(
         model_gateway, store.load().images, host.state_dir(), bus)
     operations.media_jobs = MediaJobs(
         model_gateway, host.state_dir(), bus, settings=config.media_policy)
-    return operations, bus, store, model_gateway
+    return operations, bus, store, model_gateway, lanes
+
+
+def side_lanes(config: Config, operations: Operations) -> SideLanes:
+    """Two lanes of their own beside the card.
+
+    Subscription models (Claude Code, Codex, opencode) count their usage where
+    the host keeps its state; processor models (embeddings) log there too.
+    Embeddings may borrow the card; its own models come first, through the
+    gateway (its memory has them as the card's neighbour) and the Load button
+    alike (`guard_loads`).
+    """
+    state_dir = operations.host.state_dir()
+    cpu = CpuLane.from_config(config.cpu_models, state_dir,
+                              card_free_mb=lambda: card_free_mb(operations.host))
+    lanes = SideLanes(providers=ProviderPool.from_config(config.providers, state_dir), cpu=cpu)
+    if cpu.placements:
+        cpu.start_reaper()
+        guard_loads(operations.instance_service, cpu)
+    return lanes
+
+
+def card_free_mb(host: Host) -> float | None:
+    """Free memory on a card of its own, or None (no card, or unified memory)."""
+    try:
+        snapshot = host.accelerator()
+    except Exception:
+        return None
+    if snapshot.memory_kind != "dedicated" or not snapshot.memory_total_mb:
+        return None
+    return float(snapshot.memory_total_mb - snapshot.memory_used_mb)
 
 
 def engine_settings_of(config: Config) -> dict:

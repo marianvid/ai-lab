@@ -9,7 +9,7 @@ from ai_lab.config.store import Config, Instance, ModelRoot
 from ai_lab.config.validation import validate_configuration
 from ai_lab.wiring import CONFIG_SECTIONS
 from ai_lab.gateway.resources import GatewayResources
-from ai_lab.main import _card_free_mb
+from ai_lab.wiring import card_free_mb as _card_free_mb
 from ai_lab.types import AcceleratorSnapshot
 from tests import test_operations as base
 
@@ -38,9 +38,9 @@ def snapshot(kind="dedicated", used=28000.0, total=32000.0):
 class ResourcesTests(unittest.TestCase):
     def setUp(self):
         host = SimpleNamespace(accelerator=lambda: snapshot(kind="unified"))
-        self.resources = GatewayResources(SimpleNamespace(host=host), 500, 1, 0.01)
         self.neighbours = Neighbours(held_mb=1300.0)
-        self.resources.neighbours = self.neighbours
+        self.resources = GatewayResources(SimpleNamespace(host=host), 500, 1, 0.01,
+                                          neighbours=self.neighbours)
 
     def test_what_a_neighbour_holds_counts_as_free_for_a_card_model(self):
         pools = {"card": {"available_mb": 4000}}

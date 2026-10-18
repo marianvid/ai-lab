@@ -3,7 +3,6 @@
 import dataclasses
 import unittest
 
-from ai_lab.gateway.card_sharing import NoNeighbours
 from ai_lab.gateway.catalogue import Catalogue
 from ai_lab.gateway.errors import CouldNotLoadError, NotConfiguredError
 from ai_lab.gateway.limits import FIRST_BYTE_S, MAX_WAITING, GatewayLimits
@@ -65,7 +64,6 @@ class Memory:
 
     def __init__(self, needs_mb, free_mb):
         self.needs, self.free = needs_mb, free_mb
-        self.neighbours = NoNeighbours()
 
     def needs_mb(self, _shape, _card_total_mb):
         return self.needs

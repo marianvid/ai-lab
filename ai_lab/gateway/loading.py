@@ -21,7 +21,6 @@ from collections.abc import Callable
 from typing import Protocol
 
 from .. import budget
-from .card_sharing import CardNeighbours
 from .errors import CouldNotLoadError
 from .eviction import EvictionPlanner
 from .state import Shape
@@ -31,8 +30,6 @@ from ..operations import Operations
 
 class CardMemory(Protocol):
     """What the loader asks of the machine's memory (see `resources.GatewayResources`)."""
-
-    neighbours: CardNeighbours
 
     def needs_mb(self, shape, card_total_mb: float) -> float:
         """What this request shape needs, by its engine's estimate."""
