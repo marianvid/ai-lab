@@ -403,6 +403,20 @@ class DeleteModelTests(unittest.TestCase):
         self.assertTrue((self.root / "gguf").is_dir())
 
 
+class CancelsAtSecondCheck(MoveJobStore):
+    """A move-job store whose operator cancels the move at its second check."""
+
+    def __init__(self, host, on_change):
+        super().__init__(host, on_change)
+        self.checks = 0
+
+    def check_cancelled(self, job):
+        self.checks += 1
+        if self.checks == 2:
+            self.cancel(job["id"])
+        super().check_cancelled(job)
+
+
 class MoveModelTests(unittest.TestCase):
     """Moving a model between storage tiers must never lose the source."""
 
@@ -428,12 +442,16 @@ class MoveModelTests(unittest.TestCase):
         }))
         self.store = ConfigStore(self.path)
         self.host = FakeHost()
-        self.operations = Operations.assemble(OperationsParts(
+        self.operations = self.assembled()
+
+    def assembled(self, move_jobs=MoveJobStore):
+        """Operations on this test's machine, with the move-job store `move_jobs` makes."""
+        return Operations.assemble(OperationsParts(
             store=self.store, catalog=Catalog(),
             runtime=Runtime(self.host, EventBus(), sample_interval_s=0),
             settings=Settings(self.store, self.host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
-            host=self.host, engines=FakeRegistry(self.host),
+            host=self.host, engines=FakeRegistry(self.host), move_jobs=move_jobs,
         ))
 
     def test_a_model_is_copied_verified_and_removed_from_the_source(self):
@@ -652,17 +670,8 @@ class MoveModelTests(unittest.TestCase):
         # otherwise there is no "between files" to check cancellation at.
         (directory / "config.json").write_text("{}")
 
-        original = MoveJobStore.check_cancelled
-        state = {"n": 0}
-
-        def cancel_after_first(jobs, job):
-            state["n"] += 1
-            if state["n"] == 2:
-                jobs.cancel(job["id"])
-            original(jobs, job)
-
-        with mock.patch.object(MoveJobStore, "check_cancelled", cancel_after_first):
-            result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.operations = self.assembled(CancelsAtSecondCheck)
+        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertFalse(result["moved"])
         self.assertTrue(result["cancelled"])
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
@@ -679,18 +688,9 @@ class MoveModelTests(unittest.TestCase):
         make_files(self.core / "gguf" / "qwen", "qwen.gguf", size=8 * 1024 * 1024)
 
         import ai_lab.application.model_storage as operations_module
-        original = MoveJobStore.check_cancelled
-        state = {"n": 0}
-
-        def cancel_after_first(jobs, job):
-            state["n"] += 1
-            if state["n"] == 2:
-                jobs.cancel(job["id"])
-            original(jobs, job)
-
+        self.operations = self.assembled(CancelsAtSecondCheck)
         service = operations_module.ModelStorageService
-        with (mock.patch.object(MoveJobStore, "check_cancelled", cancel_after_first),
-              mock.patch.object(service, "_COPY_CHUNK", 1024)):
+        with mock.patch.object(service, "_COPY_CHUNK", 1024):
             result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertTrue(result["cancelled"])
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
@@ -700,24 +700,23 @@ class MoveModelTests(unittest.TestCase):
     def test_staged_files_do_not_appear_as_a_model_while_moving(self):
         """The catalog must never see the in-flight staging directory.
 
-        Checked by inspecting the catalog mid-copy via a `check_cancelled`
-        patch on the move-job store: at that point the staging directory holds a real (partial)
+        Checked by inspecting the catalog mid-copy from a move-job store that
+        looks when the move checks for a cancel: at that point the staging directory holds a real (partial)
         file, which is exactly the state that used to show up as a broken
         model called `.ai-lab-move-<job-id>`.
         """
         self.operations.delete_instance("qwen")
-        seen = {}
+        seen: dict[str, list[str]] = {}
+        store, catalog = self.store, Catalog()
 
-        original = MoveJobStore.check_cancelled
-        storage = self.operations.model_storage
+        class Inspecting(MoveJobStore):
+            def check_cancelled(self, job):
+                config = store.load()
+                seen["ids"] = [item.id for item in catalog.scan(config.repositories)]
+                super().check_cancelled(job)
 
-        def inspect(jobs, job):
-            config = storage.store.load()
-            seen["ids"] = [item.id for item in storage.catalog.scan(config.repositories)]
-            original(jobs, job)
-
-        with mock.patch.object(MoveJobStore, "check_cancelled", inspect):
-            self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.operations = self.assembled(Inspecting)
+        self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertNotIn("benchmark-gguf/.ai-lab-staging", "".join(seen.get("ids", [])))
         for model_id in seen.get("ids", []):
             self.assertNotIn(".ai-lab-staging", model_id)

@@ -16,7 +16,8 @@ from .application.downloads import ModelDownloadService
 from .application.engine_maintenance import EngineMaintenanceService, MaintenanceParts
 from .application.instances import InstanceParts, InstanceService
 from .application.model_listing import ModelListing
-from .application.model_storage import ModelStorageService
+from .application.model_storage import ModelStorageService, MoveJobsFactory, StorageParts
+from .application.move_jobs import MoveJobStore
 from .application.settings_changes import SettingsChanges
 from .types import ChangeEvent
 
@@ -57,6 +58,8 @@ class OperationsParts:
     bus: Any = None
     # What was on the card when the manager last stopped, so it can be put back.
     last_loaded: Any = None
+    # Makes the store of model-move jobs; a test hands a fake of it.
+    move_jobs: MoveJobsFactory = MoveJobStore
 
 
 @dataclass(frozen=True)
@@ -93,8 +96,8 @@ def build_services(parts: OperationsParts) -> OperationsServices:
     listing = ModelListing(parts.store, parts.catalog, parts.engines)
     downloads = ModelDownloadService(parts.store, parts.downloads, parts.huggingface,
                                      parts.host, parts.engines)
-    storage = ModelStorageService(parts.store, parts.catalog, parts.host, changed,
-                                  downloads.writable_in_root)
+    storage = ModelStorageService(StorageParts(parts.store, parts.catalog, parts.host, changed,
+                                               downloads.writable_in_root, parts.move_jobs))
     instances = InstanceService(InstanceParts(
         parts.store, parts.catalog, parts.runtime, parts.host, parts.engines, changed,
         listing.models, bus=parts.bus, last_loaded=parts.last_loaded))

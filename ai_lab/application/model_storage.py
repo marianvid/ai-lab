@@ -7,6 +7,7 @@ import os
 import shutil
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..catalog.core import Catalog
@@ -22,6 +23,23 @@ from .move_files import (
 from .move_jobs import UNFINISHED_MOVE_STATUSES, MoveCancelledError, MoveJobStore
 
 
+# Makes the move-job store from the host and the change callback; the store
+# class itself by default, a fake of it in a test.
+MoveJobsFactory = Callable[[Host, Callable[[str], None]], MoveJobStore]
+
+
+@dataclass(frozen=True)
+class StorageParts:
+    """What `ModelStorageService` works with (`move_jobs` makes its job store)."""
+
+    store: ConfigStore
+    catalog: Catalog
+    host: Host
+    on_change: Callable[[str], None]
+    writable_in_root: Callable[[Repository, ModelRoot], Repository]
+    move_jobs: MoveJobsFactory = MoveJobStore
+
+
 class ModelStorageService:
     """Deleting a model's files, and moving them between storage tiers safely.
 
@@ -31,15 +49,13 @@ class ModelStorageService:
     so a crash, a failure or a cancellation is reported rather than lost.
     """
 
-    def __init__(self, store: ConfigStore, catalog: Catalog, host: Host,
-                 on_change: Callable[[str], None],
-                 writable_in_root: Callable[[Repository, ModelRoot], Repository]) -> None:
-        self.store = store
-        self.catalog = catalog
-        self.host = host
-        self._changed = on_change
-        self._writable_in_root = writable_in_root
-        self.jobs = MoveJobStore(host, on_change)
+    def __init__(self, parts: StorageParts) -> None:
+        self.store = parts.store
+        self.catalog = parts.catalog
+        self.host = parts.host
+        self._changed = parts.on_change
+        self._writable_in_root = parts.writable_in_root
+        self.jobs = parts.move_jobs(parts.host, parts.on_change)
 
     def delete_model(self, model_id: str) -> dict:
         """Remove a model's files from disk.
