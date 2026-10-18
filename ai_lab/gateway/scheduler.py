@@ -92,14 +92,14 @@ from .scheduler_parts import (
     WillNotFitError,
     release,
 )
-from .scheduler_planning import QueuePlanning
+from .scheduler_planning import Planner, QueueState
 
 # Re-exported: callers import the scheduler's errors from here.
 __all__ = ["AbandonedError", "AdmissionWithdrawnError", "QueueFullError", "Scheduler",
            "WillNotFitError"]
 
 
-class Scheduler(QueuePlanning):
+class Scheduler:
     """The queue, the places, and the decision to swap.
 
     Every public method may be called from any thread: one per request, which
@@ -109,8 +109,13 @@ class Scheduler(QueuePlanning):
     seconds and a minute, and everything here would stop for it — including the
     page asking what is going on, which is exactly when somebody wants to know.
     So the decision is taken under the lock, the lock is dropped, the load
-    happens, and the lock is taken again to publish the result. `_switching`
-    marks the gap so a second thread does not start a second load into it.
+    happens, and the lock is taken again to publish the result.
+    `QueueState.switching` marks the gap so a second thread does not start a
+    second load into it.
+
+    **One owner for the lock.** This class owns the lock and the `QueueState`
+    it guards; the `Planner` takes its decisions on that state and is only
+    ever called with the lock held here. Nothing else locks or touches it.
     """
 
     def __init__(self, switch, places, make_room=None,
@@ -135,24 +140,13 @@ class Scheduler(QueuePlanning):
         """
         self._switch = switch
         self._places = places
-        self._make_room = make_room or (lambda shape, loaded:
-                                        [item["shape"] for item in loaded])
+        self._planner = Planner(places, make_room or (
+            lambda shape, loaded: [item["shape"] for item in loaded]))
         self.max_waiting = max_waiting
 
         self._lock = threading.Lock()
         self._numbers = itertools.count(1)
-        # Shape -> how many requests it is answering. Being in here is what
-        # "loaded" means; there is no second flag to disagree with it.
-        self._loaded: dict = {}
-        # Shape -> when it last had a request admitted, so the choice of what
-        # to unload can prefer whatever nobody has wanted for longest.
-        self._last_used: dict = {}
-        self._queue: list[Waiting] = []
-        self._switching = False
-        # Bumped by `reset`. A load already under way finishes after it — the
-        # engine is starting and cannot be called back — and its result must
-        # not be published into a world that has been thrown away since.
-        self._epoch = 0
+        self._state = QueueState()
 
     # -- what a request does ------------------------------------------------
 
@@ -164,17 +158,17 @@ class Scheduler(QueuePlanning):
         whatever the load raised.
         """
         with self._lock:
-            if self._admits_now(shape):
-                self._take_place(shape)
+            if self._planner.admits_now(self._state, shape):
+                self._planner.take_place(self._state, shape)
                 return
-            if len(self._queue) >= self.max_waiting:
+            if len(self._state.queue) >= self.max_waiting:
                 raise QueueFullError(
-                    f"{len(self._queue)} requests are already waiting for the "
+                    f"{len(self._state.queue)} requests are already waiting for the "
                     f"card, which is as many as this manager will hold. Try "
                     f"again shortly.")
             entry = Waiting(number=next(self._numbers), shape=shape,
                             arrived=time.time(), still_wanted=still_wanted)
-            self._queue.append(entry)
+            self._state.queue.append(entry)
         # An idle card with the wrong model on it has nobody to start things
         # off but the request that just arrived.
         self._pump()
@@ -190,12 +184,12 @@ class Scheduler(QueuePlanning):
         loaded and is why every caller predating the budget still works.
         """
         with self._lock:
-            if shape is not None and self._loaded.get(shape, 0) > 0:
-                self._loaded[shape] -= 1
+            if shape is not None and self._state.loaded.get(shape, 0) > 0:
+                self._state.loaded[shape] -= 1
             else:
-                for held in self._loaded:
-                    if self._loaded[held] > 0:
-                        self._loaded[held] -= 1
+                for held in self._state.loaded:
+                    if self._state.loaded[held] > 0:
+                        self._state.loaded[held] -= 1
                         break
         self._pump()
 
@@ -206,7 +200,7 @@ class Scheduler(QueuePlanning):
         with self._lock:
             waiting = [{"shape": entry.shape,
                         "waiting_s": round(time.time() - entry.arrived, 1)}
-                       for entry in self._queue]
+                       for entry in self._state.queue]
             return {
                 # One entry per loaded shape, with what it is answering and
                 # how many it could. A list because what is on the machine is
@@ -214,11 +208,11 @@ class Scheduler(QueuePlanning):
                 "loaded": [{"shape": shape,
                             "in_flight": count,
                             "places": self._places(shape),
-                            "waiting": sum(1 for entry in self._queue
+                            "waiting": sum(1 for entry in self._state.queue
                                            if entry.shape == shape)}
-                           for shape, count in self._loaded.items()],
-                "in_flight": sum(self._loaded.values()),
-                "switching": self._switching,
+                           for shape, count in self._state.loaded.items()],
+                "in_flight": sum(self._state.loaded.values()),
+                "switching": self._state.switching,
                 "waiting": waiting,
             }
 
@@ -231,11 +225,11 @@ class Scheduler(QueuePlanning):
         anything. Returns how many were turned away.
         """
         with self._lock:
-            self._epoch += 1
-            turned_away = self._queue
-            self._queue = []
-            self._loaded = {}
-            self._last_used = {}
+            self._state.epoch += 1
+            turned_away = self._state.queue
+            self._state.queue = []
+            self._state.loaded = {}
+            self._state.last_used = {}
         for entry in turned_away:
             entry.fail(AbandonedError(reason))
         return len(turned_away)
@@ -254,11 +248,11 @@ class Scheduler(QueuePlanning):
         must not overwrite it.
         """
         with self._lock:
-            if any(self._loaded.values()) or self._queue or self._switching:
+            if any(self._state.loaded.values()) or self._state.queue or self._state.switching:
                 return
             now = time.time()
-            self._loaded = dict.fromkeys(shapes, 0)
-            self._last_used = dict.fromkeys(shapes, now)
+            self._state.loaded = dict.fromkeys(shapes, 0)
+            self._state.last_used = dict.fromkeys(shapes, now)
 
     def forget_current(self) -> None:
         """Note that the machine no longer holds what it did.
@@ -267,17 +261,10 @@ class Scheduler(QueuePlanning):
         again rather than walking onto an empty card.
         """
         with self._lock:
-            self._loaded = {}
-            self._last_used = {}
+            self._state.loaded = {}
+            self._state.last_used = {}
 
     # -- the decision -------------------------------------------------------
-
-    def _admits_now(self, shape) -> bool:
-        """Straight through, or into the queue. Called holding the lock."""
-        return (not self._queue
-                and not self._switching
-                and shape in self._loaded
-                and self._loaded[shape] < self._places(shape))
 
     def _pump(self) -> None:
         """Move things along until nothing more can happen without waiting.
@@ -288,7 +275,7 @@ class Scheduler(QueuePlanning):
         """
         while True:
             with self._lock:
-                ready, job = self._plan()
+                ready, job = self._planner.plan(self._state)
             release(ready)
             if job is None:
                 return
@@ -298,4 +285,6 @@ class Scheduler(QueuePlanning):
                 self._switch(shape, victims)
             except BaseException as error:      # reported to everyone waiting
                 failure = error
-            release(self._settle(job, failure))
+            with self._lock:
+                ready = self._planner.settle(self._state, job, failure)
+            release(ready)

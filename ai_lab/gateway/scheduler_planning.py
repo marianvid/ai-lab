@@ -1,17 +1,18 @@
-"""How the scheduler chooses the next run and publishes what a load did.
+"""How the scheduler decides: the state it keeps and the decisions taken on it.
 
-The rules themselves are written down in `scheduler.py`. This is the part of
-the `Scheduler` that applies them under its lock: who goes in now, which run of
-requests a switch is for, and who is let in once the model is up. It is a base
-class of `Scheduler` (a mixin) rather than a separate object because every step
-reads and changes the same few fields, all guarded by the scheduler's one lock.
+The rules themselves are written down in `scheduler.py`. `QueueState` is what
+the scheduler knows (the queue, what is loaded, whether a load runs);
+`Planner` applies the rules to it — who goes in now, which run of requests a
+switch is for, who is let in once the model is up. `Scheduler` owns both and
+the one lock that guards the state; the planner is only ever called with that
+lock held and takes none itself.
 """
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from .scheduler_parts import AbandonedError, AdmissionWithdrawnError, Waiting, WillNotFitError
 
@@ -23,24 +24,61 @@ Switch = tuple[object, tuple, list[Waiting], int]
 _WAIT = "wait"
 
 
-class QueuePlanning:
-    """The decisions, made holding the lock (see `Scheduler`, which owns the fields)."""
+@dataclass
+class QueueState:
+    """Everything the scheduler knows about the card and its queue.
 
-    _lock: threading.Lock
-    _queue: list[Waiting]
-    _loaded: dict
-    _last_used: dict
-    _switching: bool
-    _epoch: int
-    _places: Callable[[object], int]
-    _make_room: Callable[[object, list[dict]], list | None]
+    Owned by `Scheduler` and guarded by its one lock: every read and every
+    change of these fields happens with that lock held. Nothing else locks it.
+    """
 
-    def _take_place(self, shape) -> None:
-        """One more request on this shape. Called holding the lock."""
-        self._loaded[shape] = self._loaded.get(shape, 0) + 1
-        self._last_used[shape] = time.time()
+    # Who waits, oldest first.
+    queue: list[Waiting] = field(default_factory=list)
+    # Shape -> how many requests it is answering. Being in here is what
+    # "loaded" means; there is no second flag to disagree with it.
+    loaded: dict = field(default_factory=dict)
+    # Shape -> when it last had a request admitted, so the choice of what to
+    # unload can prefer whatever nobody has wanted for longest.
+    last_used: dict = field(default_factory=dict)
+    # True while a load runs with the lock dropped, so a second thread does not
+    # start a second load into it.
+    switching: bool = False
+    # Bumped by `reset`. A load already under way finishes after it, and its
+    # result must not be published into a world thrown away since.
+    epoch: int = 0
 
-    def _loaded_now(self) -> list[dict]:
+
+class Planner:
+    """The scheduler's decisions: who goes in now, which run a switch is for, who after a load.
+
+    Called only under the scheduler's lock. It holds no lock and no state of
+    its own: every method is handed the `QueueState` to read and change, so
+    the one owner of that state, and of the lock that guards it, stays
+    `Scheduler`.
+
+    `places(shape)` says how many requests a shape serves at once;
+    `make_room(shape, loaded)` which loaded shapes must go for it to fit
+    (empty: it fits beside them; None: it never will).
+    """
+
+    def __init__(self, places: Callable[[object], int],
+                 make_room: Callable[[object, list[dict]], list | None]) -> None:
+        self._places = places
+        self._make_room = make_room
+
+    def admits_now(self, state: QueueState, shape) -> bool:
+        """Straight through, or into the queue: nobody waits, no load runs, a place is free."""
+        return (not state.queue
+                and not state.switching
+                and shape in state.loaded
+                and state.loaded[shape] < self._places(shape))
+
+    def take_place(self, state: QueueState, shape) -> None:
+        """One more request on this shape."""
+        state.loaded[shape] = state.loaded.get(shape, 0) + 1
+        state.last_used[shape] = time.time()
+
+    def _loaded_now(self, state: QueueState) -> list[dict]:
         """What is on the machine, for whoever decides what has to go.
 
         Called holding the lock, and handed out as plain dictionaries so the
@@ -48,10 +86,10 @@ class QueuePlanning:
         memory and should not learn.
         """
         return [{"shape": shape, "in_flight": count,
-                 "last_used": self._last_used.get(shape, 0.0)}
-                for shape, count in self._loaded.items()]
+                 "last_used": state.last_used.get(shape, 0.0)}
+                for shape, count in state.loaded.items()]
 
-    def _plan(self) -> tuple[list[Waiting], Switch | None]:
+    def plan(self, state: QueueState) -> tuple[list[Waiting], Switch | None]:
         """Decide what can happen now. Called holding the lock.
 
         Returns the entries to wake and, at most, one switch for the caller to
@@ -60,31 +98,32 @@ class QueuePlanning:
         is how a deadlock gets written.
         """
         ready: list[Waiting] = []
-        while self._queue and not self._switching:
-            head = self._queue[0]
-            if head.shape in self._loaded:
-                if not self._admit_head(head, ready):
+        while state.queue and not state.switching:
+            head = state.queue[0]
+            if head.shape in state.loaded:
+                if not self._admit_head(state, head, ready):
                     break                       # full: wait for a place
                 continue
-            switch = self._plan_switch(head)
+            switch = self._plan_switch(state, head)
             if switch == _WAIT:
                 break
             if isinstance(switch, tuple):
-                self._switching = True
+                state.switching = True
                 return ready, switch
         return ready, None
 
-    def _admit_head(self, head: Waiting, ready: list[Waiting]) -> bool:
+    def _admit_head(self, state: QueueState, head: Waiting,
+                    ready: list[Waiting]) -> bool:
         """The head's model is loaded: let it in if a place is free. False when full."""
-        if self._loaded[head.shape] >= self._places(head.shape):
+        if state.loaded[head.shape] >= self._places(head.shape):
             return False
-        self._queue.pop(0)
-        if not self._gone(head):
-            self._take_place(head.shape)
+        state.queue.pop(0)
+        if not self.gone(head):
+            self.take_place(state, head.shape)
             ready.append(head)
         return True
 
-    def _plan_switch(self, head: Waiting) -> Switch | str | None:
+    def _plan_switch(self, state: QueueState, head: Waiting) -> Switch | str | None:
         """The head wants something not on the machine: the switch for it.
 
         `_WAIT` while something that has to go is still answering; None when
@@ -93,17 +132,17 @@ class QueuePlanning:
         """
         # Who has to go for it to fit? Empty means it fits beside what is
         # there and nothing is taken off.
-        victims = self._make_room(head.shape, self._loaded_now())
+        victims = self._make_room(head.shape, self._loaded_now(state))
         if victims is None:
             # It will not fit however much is unloaded. Say so to the whole
             # run rather than emptying the machine to discover it.
-            self._queue.pop(0)
-            if not self._gone(head):
+            state.queue.pop(0)
+            if not self.gone(head):
                 head.fail(WillNotFitError(
                     "there is not enough memory for this model on this "
                     "machine, whatever else is unloaded"))
             return None
-        if any(self._loaded.get(shape, 0) for shape in victims):
+        if any(state.loaded.get(shape, 0) for shape in victims):
             # One of them is still answering. Everything waits until it
             # finishes — including requests behind this one for models that
             # are loaded and idle. That is the ordering rule doing its job:
@@ -112,12 +151,12 @@ class QueuePlanning:
             # models either, so the wait is bounded by what is already in
             # flight.
             return _WAIT
-        photograph = self._take_run(head.shape)
+        photograph = self._take_run(state, head.shape)
         if not photograph:
             return None                         # all gone: try the next shape
-        return head.shape, tuple(victims), photograph, self._epoch
+        return head.shape, tuple(victims), photograph, state.epoch
 
-    def _take_run(self, shape) -> list[Waiting]:
+    def _take_run(self, state: QueueState, shape) -> list[Waiting]:
         """The run at the front of the queue wanting `shape`, and only that.
 
         Everything from the first request wanting something else stays where
@@ -132,15 +171,16 @@ class QueuePlanning:
         """
         photograph = []
         taken = 0
-        while taken < len(self._queue) and self._queue[taken].shape == shape:
-            entry = self._queue[taken]
+        while taken < len(state.queue) and state.queue[taken].shape == shape:
+            entry = state.queue[taken]
             taken += 1
-            if not self._gone(entry):
+            if not self.gone(entry):
                 photograph.append(entry)
-        self._queue = self._queue[taken:]
+        state.queue = state.queue[taken:]
         return photograph
 
-    def _settle(self, switch: Switch, failure: BaseException | None) -> list[Waiting]:
+    def settle(self, state: QueueState, switch: Switch,
+               failure: BaseException | None) -> list[Waiting]:
         """Publish what the load did, and admit who fits.
 
         Unless everything was thrown away while it ran. A forced stop empties
@@ -150,28 +190,28 @@ class QueuePlanning:
         request unloads before it loads.
         """
         shape, victims, photograph, epoch = switch
-        with self._lock:
-            self._switching = False
-            if epoch != self._epoch:
-                for entry in photograph:
-                    entry.fail(failure or AbandonedError(
-                        "everything was stopped while this model was loading"))
-                return []
-            # Whatever was taken off is off, whether the load that followed
-            # worked or not. Claiming otherwise would send the next request to
-            # a port with nothing behind it.
-            for gone in victims:
-                self._loaded.pop(gone, None)
-                self._last_used.pop(gone, None)
-            if failure is not None:
-                for entry in photograph:
-                    entry.fail(failure)
-                return []
-            self._loaded[shape] = 0
-            self._last_used[shape] = time.time()
-            return self._admit_run(shape, photograph)
+        state.switching = False
+        if epoch != state.epoch:
+            for entry in photograph:
+                entry.fail(failure or AbandonedError(
+                    "everything was stopped while this model was loading"))
+            return []
+        # Whatever was taken off is off, whether the load that followed
+        # worked or not. Claiming otherwise would send the next request to
+        # a port with nothing behind it.
+        for gone in victims:
+            state.loaded.pop(gone, None)
+            state.last_used.pop(gone, None)
+        if failure is not None:
+            for entry in photograph:
+                entry.fail(failure)
+            return []
+        state.loaded[shape] = 0
+        state.last_used[shape] = time.time()
+        return self._admit_run(state, shape, photograph)
 
-    def _admit_run(self, shape, photograph: list[Waiting]) -> list[Waiting]:
+    def _admit_run(self, state: QueueState, shape,
+                   photograph: list[Waiting]) -> list[Waiting]:
         """Let in as many of the run as the new model has places for.
 
         More were in the run than fit? They go back at the front, in order,
@@ -183,18 +223,18 @@ class QueuePlanning:
         overflow = []
         room = self._places(shape)
         for entry in photograph:
-            if self._gone(entry):
+            if self.gone(entry):
                 continue
-            if self._loaded[shape] >= room:
+            if state.loaded[shape] >= room:
                 overflow.append(entry)
                 continue
-            self._take_place(shape)
+            self.take_place(state, shape)
             ready.append(entry)
-        self._queue[:0] = overflow
+        state.queue[:0] = overflow
         return ready
 
     @staticmethod
-    def _gone(entry: Waiting) -> bool:
+    def gone(entry: Waiting) -> bool:
         """Whether the request is no longer to be served. Dropped, and woken.
 
         Asked at the last possible moment, because the expensive part is what
