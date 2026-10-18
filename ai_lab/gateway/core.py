@@ -18,7 +18,7 @@ from .limits import GatewayLimits
 from .loading import CardLoader, CardMemory
 from .resources import GatewayResources
 from .state import Lease, Shape
-from .stats import GatewayCounters, GatewayStats
+from .stats import GatewayCounters, GatewayStats, StatsSources
 from ..operations import Operations
 from .scheduler import AbandonedError, Scheduler, StillWanted, WillNotFitError
 from ..types import Task
@@ -46,7 +46,7 @@ class Gateway:
     def __init__(self, operations: Operations, limits: GatewayLimits | None = None,
                  memory: CardMemory | None = None) -> None:
         limits = limits or GatewayLimits()
-        self.operations = operations
+        self._operations = operations
         self.quiet_mb = limits.quiet_mb
         self.quiet_timeout_s = limits.quiet_timeout_s
         self.poll_s = limits.poll_s
@@ -58,15 +58,15 @@ class Gateway:
         self.max_upload_bytes = limits.max_upload_bytes
         self.max_upload_pixels = limits.max_upload_pixels
         self.max_upload_dimension = limits.max_upload_dimension
-        self.resources: CardMemory = memory or GatewayResources(
+        self._memory: CardMemory = memory or GatewayResources(
             operations, limits.quiet_mb, limits.quiet_timeout_s, limits.poll_s)
-        self.counters = GatewayCounters()
+        self._counters = GatewayCounters()
         self._catalogue = Catalogue(operations)
-        self.scheduler = Scheduler(self._switch, self._places, self._make_room,
+        self._scheduler = Scheduler(self._switch, self._places, self._make_room,
                                    max_waiting=limits.max_waiting)
-        self._loader = CardLoader(operations, self.resources, self.counters,
-                                  self.scheduler.state, self._catalogue.engine_name_of)
-        self.control = GatewayControl(self.scheduler)
+        self._loader = CardLoader(operations, self._memory, self._counters,
+                                  self._scheduler.state, self._catalogue.engine_name_of)
+        self._control = GatewayControl(self._scheduler)
 
     # -- what a client can ask for -----------------------------------------
 
@@ -117,16 +117,16 @@ class Gateway:
         instance, asked_for = self._what_is_asked(wanted, shape, settings)
         self._enter(Shape.of(instance["id"], asked_for), asked_for, still_wanted)
         try:
-            self.counters.requests += 1
-            self.counters.waited_s += time.perf_counter() - started
-            self.counters.arrivals.append((time.time(), instance["id"]))
+            self._counters.requests += 1
+            self._counters.waited_s += time.perf_counter() - started
+            self._counters.arrivals.append((time.time(), instance["id"]))
             return Lease(self, instance["id"], instance["port"], Catalogue.engine_name(instance),
                          started=time.perf_counter())
         except BaseException:
             # The place has been taken. Anything that goes wrong between there
             # and handing it to the caller has to give it back, or the card
             # loses a place with nobody using it.
-            self.scheduler.leave()
+            self._scheduler.leave()
             raise
 
     def _what_is_asked(self, wanted: str, shape: str | None,
@@ -144,11 +144,11 @@ class Gateway:
         asking for the same thing, and comparing partial dictionaries would
         make them different — a reload for nothing, on every other request.
         """
-        entries = self.operations.configured()
+        entries = self._operations.configured()
         instance = self.resolve(wanted, entries)
         if shape is not None:
             self._catalogue.refuse_wrong_shape(instance, shape, entries)
-        return instance, self.operations.effective_params(instance["id"], settings or {})
+        return instance, self._operations.effective_params(instance["id"], settings or {})
 
     def _enter(self, requested: Shape, asked_for: dict,
                still_wanted: StillWanted | None) -> None:
@@ -158,10 +158,10 @@ class Gateway:
         # reading taken when the server started is then too optimistic for the
         # next model. Refresh only for a switch; warm requests stay cheap.
         if not any(item["shape"] == requested
-                   for item in self.scheduler.state()["loaded"]):
+                   for item in self._scheduler.state()["loaded"]):
             self._loader.read_the_card()
         try:
-            self.scheduler.enter(requested, still_wanted=still_wanted)
+            self._scheduler.enter(requested, still_wanted=still_wanted)
         except WillNotFitError as error:
             # The scheduler knows the ordering and nothing about memory, so the
             # numbers are attached here. A client that can read them can correct
@@ -169,20 +169,20 @@ class Gateway:
             # anybody parsing an English sentence.
             error.detail = {"ai_lab": self._loader.why_it_does_not_fit(
                 requested.instance_id, asked_for)}
-            self.counters.last_error = str(error)
+            self._counters.last_error = str(error)
             raise
         except Exception as error:
             # A client that gave up, or a request withdrawn by its reservation,
             # is not a fault of this machine, so it does not become the error
             # the page shows.
             if not isinstance(error, AbandonedError):
-                self.counters.last_error = str(error)
+                self._counters.last_error = str(error)
             raise
 
     def finished(self, held_s: float = 0.0) -> None:
         """Give a place back, and let in whoever can go next."""
-        self.counters.served_s += held_s
-        self.scheduler.leave()
+        self._counters.served_s += held_s
+        self._scheduler.leave()
 
     def first_token(self, seconds: float, instance_id: str = "") -> None:
         """How long that request waited for its first token.
@@ -191,7 +191,7 @@ class Gateway:
         Kept against the model that answered, because that is the only level at
         which the figure means anything.
         """
-        counters = self.counters
+        counters = self._counters
         counters.first_token_s[instance_id] = (
             counters.first_token_s.get(instance_id, 0.0) + seconds)
         counters.first_tokens[instance_id] = (
@@ -199,7 +199,7 @@ class Gateway:
 
     def adopt_what_is_there(self) -> None:
         """Tell the scheduler what is already on the card, once after an outside change."""
-        self._loader.adopt_what_is_there(self.scheduler.adopt)
+        self._loader.adopt_what_is_there(self._scheduler.adopt)
 
     # -- what the scheduler asks of us --------------------------------------
 
@@ -221,8 +221,8 @@ class Gateway:
         if shape is None:
             return 1
         try:
-            instance = self.operations.instance(shape.instance_id)
-            engine = self.operations.engines.get(instance["engine"])
+            instance = self._operations.instance(shape.instance_id)
+            engine = self._operations.engines.get(instance["engine"])
             return max(1, engine.concurrency({**instance["params"],
                                               **shape.as_dict()}))
         except Exception:
@@ -256,7 +256,7 @@ class Gateway:
         if "between_bytes_s" in settings:
             self.between_bytes_s = float(settings["between_bytes_s"])
         if "max_waiting" in settings:
-            self.scheduler.max_waiting = int(settings["max_waiting"])
+            self._scheduler.max_waiting = int(settings["max_waiting"])
         if "task_timeouts" in settings:
             self.task_timeouts = dict(settings["task_timeouts"])
 
@@ -267,7 +267,7 @@ class Gateway:
         something else, and the next request would then be admitted onto a card
         that no longer holds what it thinks.
         """
-        self.scheduler.forget_current()
+        self._scheduler.forget_current()
         self._loader.card_changed()
 
     def reset(self, reason: str) -> int:
@@ -278,20 +278,23 @@ class Gateway:
         state that no longer exists. Returns how many were turned away.
         """
         self._loader.card_changed()
-        return self.scheduler.reset(reason)
+        return self._scheduler.reset(reason)
 
     # -- what the buttons on the page have to respect -----------------------
 
     def busy(self) -> dict | None:
         """Who holds the card now, for the Load and Unload buttons; None when idle."""
-        return self.control.busy()
+        return self._control.busy()
 
     def guard(self, action: str, instance_id: str) -> None:
         """Refuse a button that would interrupt an answer in progress."""
-        self.control.guard(action, instance_id)
+        self._control.guard(action, instance_id)
 
     # -- what the interface shows ------------------------------------------
 
     def stats(self) -> dict:
         """Everything the Gateway page shows, read now."""
-        return GatewayStats(self).snapshot()
+        return GatewayStats(StatsSources(
+            operations=self._operations, scheduler=self._scheduler, counters=self._counters,
+            waits=(self.first_byte_s, self.between_bytes_s), adopt=self.adopt_what_is_there,
+            holder=self.busy, engine_name_of=self.engine_name_of)).snapshot()

@@ -18,7 +18,7 @@ from ai_lab.gateway.core import (CardBusyError, CouldNotLoadError, Gateway, Gate
                             ShapeNotServedError)
 from ai_lab.gateway.resources import GatewayResources
 from ai_lab.gateway.scheduler import WillNotFitError
-from ai_lab.gateway.stats import GatewayStats
+from ai_lab.gateway.stats import shapes_offered
 from ai_lab.runtime.core import Operation
 from ai_lab.types import AcceleratorSnapshot, Task
 
@@ -1323,7 +1323,6 @@ class LiveSettingsTests(unittest.TestCase):
     def test_the_queue_length_reaches_the_scheduler(self):
         gateway = quick(two_models())
         gateway.apply_settings({"max_waiting": 7})
-        self.assertEqual(gateway.scheduler.max_waiting, 7)
         self.assertEqual(gateway.stats()["max_waiting"], 7)
 
     def test_settings_left_out_are_left_alone(self):
@@ -1358,7 +1357,7 @@ class ShapesOfferedTests(unittest.TestCase):
             reads["n"] += 1
             return original()
         operations.instances = counted
-        GatewayStats(quick(operations)).shapes_offered()
+        shapes_offered(operations)
         self.assertEqual(reads["n"], 0)
 
 

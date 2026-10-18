@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .. import budget
 from ..types import Task
@@ -58,16 +60,35 @@ class GatewayCounters:
     history: list[dict] = field(default_factory=list)
 
 
-class GatewayStats:
-    """What the Gateway page shows, read from the gateway, its scheduler and its counters."""
+@dataclass(frozen=True)
+class StatsSources:
+    """Exactly what the Gateway page reads, handed over by the gateway for one report.
 
-    def __init__(self, gateway):
-        self.gateway = gateway
-        self.operations = gateway.operations
-        self.scheduler = gateway.scheduler
-        self.counters = gateway.counters
-        self.first_byte_s = gateway.first_byte_s
-        self.between_bytes_s = gateway.between_bytes_s
+    `operations` answers the configuration and the machine (`configured`,
+    `engines`, `host`, `reserve_mb`); `scheduler` the queue (`state`,
+    `max_waiting`); `waits` the two current timeouts (first byte, between
+    bytes); `adopt` tells the scheduler what is already on the card; `holder`
+    says who holds it; `engine_name_of` names a loaded shape's engine.
+    """
+
+    operations: Any
+    scheduler: Any
+    counters: GatewayCounters
+    waits: tuple[float, float]
+    adopt: Callable[[], None]
+    holder: Callable[[], dict | None]
+    engine_name_of: Callable[[Any], str]
+
+
+class GatewayStats:
+    """What the Gateway page shows, read from what the gateway hands it (`StatsSources`)."""
+
+    def __init__(self, sources: StatsSources) -> None:
+        self.sources = sources
+        self.operations = sources.operations
+        self.scheduler = sources.scheduler
+        self.counters = sources.counters
+        self.first_byte_s, self.between_bytes_s = sources.waits
 
     # -- what the interface shows ------------------------------------------
 
@@ -89,13 +110,13 @@ class GatewayStats:
         # sends something — which is exactly when a person is watching it.
         # `adopt_what_is_there` clears the flag, so this costs the expensive
         # read once after a restart rather than on every refresh.
-        self.gateway.adopt_what_is_there()
+        self.sources.adopt()
         state = self.scheduler.state()
         return {**self._card_part(state), **self._queue_part(state["waiting"]),
                 # Which shapes of request each model answers. Configuration only
                 # — an entry's engine and what that engine serves — so the page
                 # can say it without the expensive question.
-                "shapes": self.shapes_offered(),
+                "shapes": shapes_offered(self.operations),
                 # What the machine has room for, pool by pool. The same answer
                 # an admission decision would use, so the page cannot disagree
                 # with the thing that says no. One accelerator reading gives
@@ -116,7 +137,7 @@ class GatewayStats:
         return {
             "loaded": [self._loaded_row(item) for item in state["loaded"]],
             "busy": bool(state["in_flight"] or state["waiting"] or state["switching"]),
-            "holder": self.gateway.busy(),
+            "holder": self.sources.holder(),
             "in_flight": state["in_flight"],
             "switching": state["switching"],
         }
@@ -134,7 +155,7 @@ class GatewayStats:
         """
         instance_id = item["shape"].instance_id
         return {"instance_id": instance_id,
-                "engine": self.gateway.engine_name_of(item["shape"]),
+                "engine": self.sources.engine_name_of(item["shape"]),
                 "settings": item["shape"].as_dict(),
                 "in_flight": item["in_flight"],
                 "places": item["places"],
@@ -240,35 +261,36 @@ class GatewayStats:
         working = counters.switch_s + counters.served_s
         return round(100.0 * counters.switch_s / working, 1) if working else 0.0
 
-    def shapes_offered(self) -> list[dict]:
-        """The kinds of request that can be sent here, and to which models.
 
-        Two are in circulation. Nearly every client speaks the OpenAI one and
-        every engine answers it. A client written against Anthropic's own
-        library speaks the other, and only some engines do — so listing the
-        base address alone would be half the answer, and the wrong half for
-        anybody whose tool speaks the second.
-        """
-        answers: dict[str, list[str]] = {}
-        engines_for: dict[str, set] = {}
-        for entry in self.operations.configured():
-            try:
-                engine = self.operations.engines.get(entry["engine"])
-                task = Task(entry.get("task", Task.TEXT_GENERATION.value))
-                paths = engine.api_paths(task)
-            except Exception:
-                continue
-            for path in paths:
-                answers.setdefault(path, []).append(entry["id"])
-                # The engines, as well as the models. A shape only some answer
-                # is answered by an engine, not by a list of names that grows
-                # every time an entry is added — "vLLM models" says it once and
-                # stays true.
-                engines_for.setdefault(path, set()).add(
-                    getattr(engine, "display_name", entry["engine"]))
-        return [{"path": path, "models": sorted(models),
-                  "engines": sorted(engines_for[path])}
-                for path, models in sorted(answers.items())]
+def shapes_offered(operations) -> list[dict]:
+    """The kinds of request that can be sent here, and to which models.
+
+    Two are in circulation. Nearly every client speaks the OpenAI one and
+    every engine answers it. A client written against Anthropic's own
+    library speaks the other, and only some engines do — so listing the
+    base address alone would be half the answer, and the wrong half for
+    anybody whose tool speaks the second.
+    """
+    answers: dict[str, list[str]] = {}
+    engines_for: dict[str, set] = {}
+    for entry in operations.configured():
+        try:
+            engine = operations.engines.get(entry["engine"])
+            task = Task(entry.get("task", Task.TEXT_GENERATION.value))
+            paths = engine.api_paths(task)
+        except Exception:
+            continue
+        for path in paths:
+            answers.setdefault(path, []).append(entry["id"])
+            # The engines, as well as the models. A shape only some answer
+            # is answered by an engine, not by a list of names that grows
+            # every time an entry is added — "vLLM models" says it once and
+            # stays true.
+            engines_for.setdefault(path, set()).add(
+                getattr(engine, "display_name", entry["engine"]))
+    return [{"path": path, "models": sorted(models),
+             "engines": sorted(engines_for[path])}
+            for path, models in sorted(answers.items())]
 
 
 def _runs(waiting: list[dict]) -> list[dict]:
