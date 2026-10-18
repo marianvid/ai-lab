@@ -19,15 +19,15 @@ from .move_files import (
     reject_unfit_destination,
     reject_unremovable_sources,
 )
-from .move_jobs import MoveCancelledError, MoveJobRecords
+from .move_jobs import UNFINISHED_MOVE_STATUSES, MoveCancelledError, MoveJobStore
 
 
-class ModelStorageService(MoveJobRecords):
+class ModelStorageService:
     """Deleting a model's files, and moving them between storage tiers safely.
 
     A move copies into a staging area, verifies every file by checksum,
     publishes the copy under its real name, repoints stopped entries, and only
-    then removes the source. Every step is recorded (`move_jobs.MoveJobRecords`)
+    then removes the source. Every step is recorded in a `move_jobs.MoveJobStore` it holds
     so a crash, a failure or a cancellation is reported rather than lost.
     """
 
@@ -39,6 +39,7 @@ class ModelStorageService(MoveJobRecords):
         self.host = host
         self._changed = on_change
         self._writable_in_root = writable_in_root
+        self.jobs = MoveJobStore(host, on_change)
 
     def delete_model(self, model_id: str) -> dict:
         """Remove a model's files from disk.
@@ -76,10 +77,10 @@ class ModelStorageService(MoveJobRecords):
         A durable job record is written before anything is touched, and
         updated at every phase (`copying`, `verifying`, `publishing`,
         `completed`/`failed`/`cancelled`). If the process dies partway, that
-        record is still on disk — `recover_moves()` sweeps it at the next
+        record is still on disk — `MoveJobStore.recover()` sweeps it at the next
         startup and marks it failed, rather than leaving a job that claims to
         still be running with no thread behind it. A move can also be
-        stopped in flight with `cancel_move(job_id)`, which is checked
+        stopped in flight with `MoveJobStore.cancel(job_id)`, which is checked
         between chunks while a file copies and at each phase boundary.
         """
         config = self.store.load()
@@ -90,7 +91,7 @@ class ModelStorageService(MoveJobRecords):
                     "moved": False}
         plan = self._plan_move(config, model, model_id, source_repository,
                                target_root_id)
-        job = self._open_move_job(plan)
+        job = self.jobs.open(plan)
         if self._copy_and_publish(plan, job):
             return {"model_id": model_id, "job_id": job["id"],
                     "moved": False, "cancelled": True}
@@ -99,9 +100,9 @@ class ModelStorageService(MoveJobRecords):
         except Exception as error:
             # Publishing has succeeded: both complete copies stay, but the
             # durable record must not claim a worker is still active.
-            self._finish_job(job, "failed", str(error))
+            self.jobs.finish(job, "failed", str(error))
             raise
-        self._finish_job(job, "completed")
+        self.jobs.finish(job, "completed")
         self._changed("models")
         return {**record, "moved": True, "job_id": job["id"]}
 
@@ -114,17 +115,17 @@ class ModelStorageService(MoveJobRecords):
         `staging`, published or not: a half-finished move is a resumable
         failure, not garbage, and deleting it once turned an interruption into
         data that existed nowhere. Staging lives outside the scanned tree (see
-        `_open_move_job`), so it never shows in the Library as a broken model.
+        `MoveJobStore.open`), so it never shows in the Library as a broken model.
         """
         staging = Path(job["staging"])
         try:
             self._stage_and_publish(plan, job, staging)
         except MoveCancelledError:
             shutil.rmtree(staging, ignore_errors=True)
-            self._finish_job(job, "cancelled", "Cancelled")
+            self.jobs.finish(job, "cancelled", "Cancelled")
             return True
         except Exception as error:
-            self._finish_job(job, "failed", str(error))
+            self.jobs.finish(job, "failed", str(error))
             raise
         # Everything is published under its real name; staging is empty.
         shutil.rmtree(staging, ignore_errors=True)
@@ -158,9 +159,9 @@ class ModelStorageService(MoveJobRecords):
         return plan
 
     def _reject_if_moving(self, model_id: str) -> None:
-        active = [job for job in self.move_jobs()
+        active = [job for job in self.jobs.all()
                   if job.get("model_id") == model_id
-                  and job.get("status") in self.UNFINISHED_MOVE_STATUSES]
+                  and job.get("status") in UNFINISHED_MOVE_STATUSES]
         if active:
             raise ValueError(
                 f"{model_id} is already being moved (job {active[0]['id']})")
@@ -181,25 +182,25 @@ class ModelStorageService(MoveJobRecords):
 
     def _stage_and_publish(self, plan: MovePlan, job: dict, staging: Path) -> None:
         """Copy and verify into staging, publish, then repoint stopped entries."""
-        self._move_phase(job, "copying")
+        self.jobs.phase(job, "copying")
         staging.mkdir(parents=True, exist_ok=True)
         os.chmod(staging, 0o700)
         for source, relative in zip(plan.sources, plan.relatives, strict=True):
-            self._check_cancelled(job)
+            self.jobs.check_cancelled(job)
             staged = staging / relative
             staged.parent.mkdir(parents=True, exist_ok=True)
             self._copy_checking_cancellation(source, staged, job)
             if self._sha256(source) != self._sha256(staged):
                 raise ValueError(
                     f"Checksum mismatch while copying {source.name}")
-        self._move_phase(job, "verifying")
-        self._check_cancelled(job)
+        self.jobs.phase(job, "verifying")
+        self.jobs.check_cancelled(job)
         # Re-checked here, not only at entry: the copy above can run for
         # a long time, and nothing before this point stops a new
         # instance being pointed at the model, or it being loaded, while
         # the copy is in flight.
         self._reject_if_busy(self.store.load(), plan.model_id)
-        self._move_phase(job, "publishing")
+        self.jobs.phase(job, "publishing")
         self._publish(staging, plan.target_path, plan.relatives, plan.destinations)
         # A stopped model entry can follow the weights safely. Keeping the
         # assignment is the point of moving storage; forcing somebody to
@@ -306,7 +307,7 @@ class ModelStorageService(MoveJobRecords):
                                     job: dict) -> None:
         with source.open("rb") as read_from, destination.open("wb") as write_to:
             while True:
-                self._check_cancelled(job)
+                self.jobs.check_cancelled(job)
                 chunk = read_from.read(self._COPY_CHUNK)
                 if not chunk:
                     break

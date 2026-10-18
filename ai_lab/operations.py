@@ -252,15 +252,15 @@ class Operations:
 
     def move_jobs(self) -> list[dict]:
         """Every move job on record, most recently updated first."""
-        return self.model_storage.move_jobs()
+        return self.model_storage.jobs.all()
 
     def recover_moves(self) -> list[dict]:
         """Sweep move jobs left mid-flight by a process that did not exit cleanly."""
-        return self.model_storage.recover_moves()
+        return self.model_storage.jobs.recover()
 
     def cancel_move(self, job_id: str) -> dict:
         """Ask an in-progress move to stop at the next file or phase boundary."""
-        return self.model_storage.cancel_move(job_id)
+        return self.model_storage.jobs.cancel(job_id)
 
     # -- downloads -------------------------------------------------------------
 

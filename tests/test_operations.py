@@ -7,6 +7,7 @@ from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ai_lab.application.move_jobs import MoveJobStore
 from ai_lab.catalog.core import Catalog
 from ai_lab.config.store import ConfigStore
 from ai_lab.downloads import DownloadManager, HuggingFaceClient
@@ -651,18 +652,16 @@ class MoveModelTests(unittest.TestCase):
         # otherwise there is no "between files" to check cancellation at.
         (directory / "config.json").write_text("{}")
 
-        import ai_lab.application.model_storage as operations_module
-        original = operations_module.ModelStorageService._check_cancelled
+        original = MoveJobStore.check_cancelled
         state = {"n": 0}
 
-        def cancel_after_first(self, job):
+        def cancel_after_first(jobs, job):
             state["n"] += 1
             if state["n"] == 2:
-                self.cancel_move(job["id"])
-            original(self, job)
+                jobs.cancel(job["id"])
+            original(jobs, job)
 
-        with mock.patch.object(operations_module.ModelStorageService, "_check_cancelled",
-                               cancel_after_first):
+        with mock.patch.object(MoveJobStore, "check_cancelled", cancel_after_first):
             result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertFalse(result["moved"])
         self.assertTrue(result["cancelled"])
@@ -680,17 +679,17 @@ class MoveModelTests(unittest.TestCase):
         make_files(self.core / "gguf" / "qwen", "qwen.gguf", size=8 * 1024 * 1024)
 
         import ai_lab.application.model_storage as operations_module
-        original = operations_module.ModelStorageService._check_cancelled
+        original = MoveJobStore.check_cancelled
         state = {"n": 0}
 
-        def cancel_after_first(self, job):
+        def cancel_after_first(jobs, job):
             state["n"] += 1
             if state["n"] == 2:
-                self.cancel_move(job["id"])
-            original(self, job)
+                jobs.cancel(job["id"])
+            original(jobs, job)
 
         service = operations_module.ModelStorageService
-        with (mock.patch.object(service, "_check_cancelled", cancel_after_first),
+        with (mock.patch.object(MoveJobStore, "check_cancelled", cancel_after_first),
               mock.patch.object(service, "_COPY_CHUNK", 1024)):
             result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertTrue(result["cancelled"])
@@ -701,24 +700,23 @@ class MoveModelTests(unittest.TestCase):
     def test_staged_files_do_not_appear_as_a_model_while_moving(self):
         """The catalog must never see the in-flight staging directory.
 
-        Checked by inspecting the catalog mid-copy via a `_check_cancelled`
-        patch: at that point the staging directory holds a real (partial)
+        Checked by inspecting the catalog mid-copy via a `check_cancelled`
+        patch on the move-job store: at that point the staging directory holds a real (partial)
         file, which is exactly the state that used to show up as a broken
         model called `.ai-lab-move-<job-id>`.
         """
         self.operations.delete_instance("qwen")
         seen = {}
 
-        import ai_lab.application.model_storage as operations_module
-        original = operations_module.ModelStorageService._check_cancelled
+        original = MoveJobStore.check_cancelled
+        storage = self.operations.model_storage
 
-        def inspect(self, job):
-            config = self.store.load()
-            seen["ids"] = [item.id for item in self.catalog.scan(config.repositories)]
-            original(self, job)
+        def inspect(jobs, job):
+            config = storage.store.load()
+            seen["ids"] = [item.id for item in storage.catalog.scan(config.repositories)]
+            original(jobs, job)
 
-        with mock.patch.object(operations_module.ModelStorageService, "_check_cancelled",
-                               inspect):
+        with mock.patch.object(MoveJobStore, "check_cancelled", inspect):
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertNotIn("benchmark-gguf/.ai-lab-staging", "".join(seen.get("ids", [])))
         for model_id in seen.get("ids", []):
@@ -747,7 +745,7 @@ class MoveModelTests(unittest.TestCase):
                "bytes": 100, "files": 1, "staging": str(staging),
                "status": "copying", "error": "", "started_at": 0.0,
                "updated_at": 0.0}
-        self.operations.model_storage._write_job(job)
+        self.operations.model_storage.jobs.write(job)
 
         recovered = self.operations.recover_moves()
 
@@ -777,7 +775,7 @@ class MoveModelTests(unittest.TestCase):
                "bytes": 100, "files": 1, "staging": "",
                "status": "copying", "error": "", "started_at": 0.0,
                "updated_at": 0.0}
-        self.operations.model_storage._write_job(job)
+        self.operations.model_storage.jobs.write(job)
         with self.assertRaises(ValueError) as caught:
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertIn("already being moved", str(caught.exception))

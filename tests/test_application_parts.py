@@ -12,7 +12,7 @@ from ai_lab.application.downloads import _candidates
 from ai_lab.application.engine_maintenance import EngineMaintenanceService, MaintenanceParts
 from ai_lab.application.instance_config import _free_port, _supported_model_ids
 from ai_lab.application.instances import InstanceParts, InstanceService
-from ai_lab.application.move_jobs import MoveCancelledError, MoveJobRecords
+from ai_lab.application.move_jobs import MoveCancelledError, MoveJobStore
 from ai_lab.changes.frompackages import Move, venv_of
 from ai_lab.changes.sifting import UNSORTED, area_of, sift
 from ai_lab.hosts import detect
@@ -119,31 +119,30 @@ class Host:
         return self.snapshot
 
 
-class Records(MoveJobRecords):
-    def __init__(self, directory):
-        self.host = cast(Any, Host(directory))
-        self.changes: list[str] = []
-        self._changed = self.changes.append
+def records_in(directory, changes):
+    """A move job store under `directory`, noting each change in `changes`."""
+    return MoveJobStore(cast(Any, Host(directory)), changes.append)
 
 
 class MoveJobTests(unittest.TestCase):
     def setUp(self):
         self._temporary = TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
-        self.records = Records(Path(self._temporary.name))
+        self.changes: list[str] = []
+        self.records = records_in(Path(self._temporary.name), self.changes)
         self.job = {"id": "j1", "status": "copying", "updated_at": 1.0,
                     "staging": str(Path(self._temporary.name) / "staging")}
-        self.records._write_job(self.job)
+        self.records.write(self.job)
 
     def test_a_cancellation_reaches_the_move_through_the_file(self):
-        self.records.cancel_move("j1")
+        self.records.cancel("j1")
         with self.assertRaises(MoveCancelledError):
-            self.records._check_cancelled(self.job)
+            self.records.check_cancelled(self.job)
 
     def test_a_move_left_running_by_a_restart_is_marked_failed(self):
-        recovered = self.records.recover_moves()
+        recovered = self.records.recover()
         self.assertEqual([job["status"] for job in recovered], ["failed"])
-        self.assertIn("restart", self.records.move_jobs()[0]["error"])
+        self.assertIn("restart", self.records.all()[0]["error"])
 
 
 class ChangesTests(unittest.TestCase):
