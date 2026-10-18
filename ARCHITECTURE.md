@@ -123,7 +123,7 @@ there is exactly one place to look.
 | `builds/gitapps.py` | The same for a Python application installed from git, such as ComfyUI: a full checkout and environment beside the working one, then a switch | — |
 | `application/instances.py` | Configured entries: create, change, delete, load, unload, restore after a restart | HTTP |
 | `application/model_storage.py`, `application/move_jobs.py` | Deletion, verified moves and durable move jobs (`ModelStorageService` holds a `MoveJobStore`, the one place the job files are written) | HTTP and engine startup |
-| `application/instance_config.py`, `application/model_listing.py`, `application/paths.py`, `application/settings_changes.py` | An entry's settings; the model listing; browsing and creating folders; changing the machine-wide settings | HTTP |
+| `application/instance_config.py`, `application/model_listing.py`, `application/paths.py`, `application/settings_changes.py` | An entry's settings (`InstanceConfiguration`, held by `InstanceService` as its `configuration`); the model listing; browsing and creating folders; changing the machine-wide settings | HTTP |
 | `application/downloads.py` | Finding download candidates and safe destinations | Model scheduling and HTTP |
 | `application/engine_maintenance.py` | Engine updates, version switches and package installs, refused while a model is running | HTTP |
 | `operations.py`, `operations_services.py` | The single object the routes and the gateway talk to: a façade handing each action to an `application/` service. The services are built in `wiring.py` and handed to it (`OperationsParts`, `OperationsServices`) | Building its own services; anything a single service could do alone |

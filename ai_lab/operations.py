@@ -122,19 +122,19 @@ class Operations:
 
     def suggest_port(self):
         """The first free port at or above 8080."""
-        return self.instance_service.suggest_port()
+        return self.instance_service.configuration.suggest_port()
 
     def new_instance_form(self):
         """Everything the Add form needs, in one call."""
-        return self.instance_service.new_instance_form()
+        return self.instance_service.configuration.new_instance_form()
 
     def create_instance(self, payload: dict):
         """Add an entry. The id is given rather than worked out."""
-        return self.instance_service.create_instance(payload)
+        return self.instance_service.configuration.create_instance(payload)
 
     def update_instance(self, instance_id: str, changes: dict):
         """Change the settings of an instance. Does not restart it."""
-        return self.instance_service.update_instance(instance_id, changes)
+        return self.instance_service.configuration.update_instance(instance_id, changes)
 
     def apply_and_reload(self, instance_id: str, changes: dict):
         """Save the settings and restart the model with them."""
@@ -142,7 +142,7 @@ class Operations:
 
     def delete_instance(self, instance_id: str):
         """Remove an entry that is not running."""
-        return self.instance_service.delete_instance(instance_id)
+        return self.instance_service.configuration.delete_instance(instance_id)
 
     # -- this machine's settings -----------------------------------------------
 

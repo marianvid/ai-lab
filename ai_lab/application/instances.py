@@ -1,40 +1,24 @@
 """Configured instance lifecycle and runtime transitions."""
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, replace
-from typing import Any
+from dataclasses import replace
 
-from ..catalog.core import Catalog
-from ..config.store import ConfigStore
 from ..engines.base import validate
-from ..hosts.base import Host
-from ..runtime.core import Operation, Runtime
+from ..runtime.core import Operation
 from ..types import LogEvent, Task
-from .instance_config import InstanceConfiguration
+from .instance_config import InstanceConfiguration, InstanceParts
+
+# `InstanceParts` is part of this service's interface: callers import it from here.
+__all__ = ["InstanceParts", "InstanceService"]
 
 
-@dataclass(frozen=True)
-class InstanceParts:
-    """What the entries' service works with; `bus` and `last_loaded` may be absent.
+class InstanceService:
+    """The configured model entries: listing them, loading and unloading, editing.
 
-    `changed(topic)` tells the page something changed; `models()` lists the
-    models on disk; `last_loaded` remembers what was on the card for a restart.
+    Editing is its `InstanceConfiguration`; this class lists, loads, unloads
+    and restores. It keeps no state that needs a lock: the configuration file
+    is guarded by `ConfigStore`, the processes by the host.
     """
-
-    store: ConfigStore
-    catalog: Catalog
-    runtime: Runtime
-    host: Host
-    engines: Any
-    changed: Callable[[str], None]
-    models: Callable[[], list[dict]]
-    bus: Any = None
-    last_loaded: Any = None
-
-
-class InstanceService(InstanceConfiguration):
-    """The configured model entries: listing them, loading and unloading, editing."""
 
     def __init__(self, parts: InstanceParts) -> None:
         self.store = parts.store
@@ -46,6 +30,9 @@ class InstanceService(InstanceConfiguration):
         self.models = parts.models
         self.bus = parts.bus
         self.last_loaded = parts.last_loaded
+        # Editing the entries: suggesting a port, the Add form, create,
+        # change, delete. Callers reach it as `instance_service.configuration`.
+        self.configuration = InstanceConfiguration(parts)
 
     def configured(self) -> list[dict]:
         """Every entry, without asking what any of them is doing.
@@ -251,7 +238,7 @@ class InstanceService(InstanceConfiguration):
         means: the settings decide how much is reserved on the accelerator, so
         they only take effect when the model starts again.
         """
-        self.update_instance(instance_id, changes)
+        self.configuration.update_instance(instance_id, changes)
         operation = self.load(instance_id)
         return {"id": instance_id, "applied": operation.ok,
                 "operation": operation.json()}

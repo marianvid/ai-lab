@@ -1,7 +1,9 @@
 """Adding, changing and deleting configured model entries.
 
-A base class of `InstanceService` (a mixin): everything that edits the
-`instances` section of the configuration. Saving never restarts a model —
+`InstanceConfiguration` is held by `InstanceService`: everything that edits
+the `instances` section of the configuration. It keeps no state of its own
+(the configuration file is the state, and `ConfigStore` guards it), so it
+needs no lock. Saving never restarts a model —
 applying means restarting, and restarting unloads a model somebody may be
 using, so that is a separate act (`InstanceService.apply_and_reload`).
 """
@@ -9,13 +11,14 @@ using, so that is a separate act (`InstanceService.apply_and_reload`).
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from ..catalog.core import Catalog
 from ..config.store import INSTANCE_ID, ConfigStore, Instance
 from ..engines.base import validate
 from ..hosts.base import Host
+from ..runtime.core import Runtime
 
 FIRST_PORT = 8080
 CHANGEABLE = frozenset({"params", "model_id", "port"})
@@ -23,15 +26,35 @@ CHANGEABLE = frozenset({"params", "model_id", "port"})
 CONFIGURED_NAMES = ("model_configs", "model_modes", "model_options")
 
 
-class InstanceConfiguration:
-    """The entries' configuration (see `InstanceService`, which owns the fields)."""
+@dataclass(frozen=True)
+class InstanceParts:
+    """What the entries' service works with; `bus` and `last_loaded` may be absent.
+
+    `changed(topic)` tells the page something changed; `models()` lists the
+    models on disk; `last_loaded` remembers what was on the card for a restart.
+    """
 
     store: ConfigStore
     catalog: Catalog
+    runtime: Runtime
     host: Host
     engines: Any
+    changed: Callable[[str], None]
     models: Callable[[], list[dict]]
-    _changed: Callable[[str], None]
+    bus: Any = None
+    last_loaded: Any = None
+
+
+class InstanceConfiguration:
+    """The entries' configuration: suggesting a port, the Add form, create, change, delete."""
+
+    def __init__(self, parts: InstanceParts) -> None:
+        self.store = parts.store
+        self.catalog = parts.catalog
+        self.host = parts.host
+        self.engines = parts.engines
+        self.models = parts.models
+        self._changed = parts.changed
 
     def suggest_port(self) -> int:
         """The first free port at or above 8080.

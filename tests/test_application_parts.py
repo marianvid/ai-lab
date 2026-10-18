@@ -10,7 +10,11 @@ from unittest import mock
 
 from ai_lab.application.downloads import _candidates
 from ai_lab.application.engine_maintenance import EngineMaintenanceService, MaintenanceParts
-from ai_lab.application.instance_config import _free_port, _supported_model_ids
+from ai_lab.application.instance_config import (
+    InstanceConfiguration,
+    _free_port,
+    _supported_model_ids,
+)
 from ai_lab.application.instances import InstanceParts, InstanceService
 from ai_lab.application.move_jobs import MoveCancelledError, MoveJobStore
 from ai_lab.changes.frompackages import Move, venv_of
@@ -104,7 +108,8 @@ class InstancesTests(unittest.TestCase):
         config = SimpleNamespace(port=8081, instances=[SimpleNamespace(port=8080)])
         parts = InstanceParts(cast(Any, Store(config)), cast(Any, None), cast(Any, None),
                               cast(Any, None), None, print, list)
-        self.assertEqual(InstanceService(parts).suggest_port(), 8082)
+        self.assertEqual(InstanceService(parts).configuration.suggest_port(), 8082)
+        self.assertEqual(InstanceConfiguration(parts).suggest_port(), 8082)
 
 
 class Host:
