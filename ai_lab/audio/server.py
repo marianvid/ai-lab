@@ -3,7 +3,7 @@
 
 This file is deliberately executable by a runtime-specific Python environment.
 NeMo and ONNX stay isolated from the manager and from vLLM; only this small
-HTTP contract is shared between them. The HTTP side is `media.http_host`'s
+HTTP contract is shared between them. The HTTP side is `engine_host.http_host`'s
 `UploadHost`; this file says how each kind of backend answers an upload.
 """
 
@@ -20,7 +20,7 @@ from threading import Lock
 # Give those environments access to the small adapter beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ai_lab.audio.aligner import QwenAlignBackend
-from ai_lab.media.http_host import Form, UploadHost, form_text, serve_uploads, uploaded_file
+from ai_lab.engine_host.http_host import Form, UploadHost, form_text, serve_uploads, uploaded_file
 from ai_lab.network import LOOPBACK
 
 # What every backend here is fed: mono audio at 16 kHz.

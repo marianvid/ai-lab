@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ai_lab.media.http_host import serve
+from ai_lab.engine_host.http_host import serve
 from ai_lab.music.backends.comfy_backend import ComfyMusicBackend, ComfyRuntime
 from ai_lab.music.hosting import PORT, parse, stop_on_exit
 

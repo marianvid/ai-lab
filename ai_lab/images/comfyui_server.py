@@ -24,7 +24,7 @@ from threading import Lock
 from typing import Any
 
 from ai_lab.comfyui_templates import for_model
-from ai_lab.media.http_host import JsonReplies
+from ai_lab.engine_host.http_host import JsonReplies
 from ai_lab.network import ALL_INTERFACES, LOOPBACK
 
 # How long one job may run, how long ComfyUI may take to start, how often

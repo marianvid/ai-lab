@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ai_lab.media.http_host import serve
+from ai_lab.engine_host.http_host import serve
 from ai_lab.music.bundles import Checkpoint, Sampling
 from ai_lab.music.backends.heartmula_backend import HeartMulaBackend
 from ai_lab.music.hosting import CHECKPOINT_OPTIONS, PORT, SAMPLING_OPTIONS, UI_PORT, parse

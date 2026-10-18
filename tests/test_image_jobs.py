@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from ai_lab.images.jobs import ImageJobs
+from ai_lab.media.image_jobs import ImageJobs
 from ai_lab.types import Task
 
 

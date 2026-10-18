@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-from ai_lab.media.http_host import serve
+from ai_lab.engine_host.http_host import serve
 from ai_lab.music.hosting import (
     PORT,
     UI_PORT,

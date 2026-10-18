@@ -26,7 +26,7 @@ from .gateway.core import Gateway
 from .gateway.limits import GatewayLimits
 from .hosts import current_host
 from .hosts.base import Host
-from .images.jobs import ImageJobs
+from .media.image_jobs import ImageJobs
 from .builds.installs import Installs
 from .runtime.lastloaded import LastLoaded
 from .media.jobs import MediaJobs

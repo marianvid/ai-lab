@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_lab.images.workflows import INPUT_MARKER, read_request, render
+from ai_lab.media.image_workflows import INPUT_MARKER, read_request, render
 from ai_lab.multipart import MultipartBody
 
 GRAPH = {"1": {"class_type": "Prompt", "inputs": {"text": "", "seed": 0}},

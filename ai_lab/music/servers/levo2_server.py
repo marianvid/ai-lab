@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ai_lab.media.http_host import serve
+from ai_lab.engine_host.http_host import serve
 from ai_lab.music.hosting import PORT, parse
 from ai_lab.music.backends.levo2_backend import Levo2Backend, Levo2Files
 

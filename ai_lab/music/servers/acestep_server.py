@@ -18,7 +18,7 @@ from threading import Lock
 # This file is launched directly by the runtime's own Python environment.
 # Give it access to the small shared modules beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from ai_lab.media.http_host import MUSIC_PATH, serve
+from ai_lab.engine_host.http_host import MUSIC_PATH, serve
 from ai_lab.music.hosting import PORT, UI_PORT, parse
 from ai_lab.music.request_fields import MAX_LYRICS_CHARS, MAX_PROMPT_CHARS, MAX_SEED
 from ai_lab.network import ALL_INTERFACES

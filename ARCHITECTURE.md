@@ -34,15 +34,44 @@ Three kinds of file sit outside the line:
   files, `catalog/naming.py`, `events.py`, `budget.py`, `gateway/eviction.py`, `multipart.py`
   and `uploads.py`. They hold
   data shapes, rules or arithmetic, and decide nothing about what to do.
-- **The job queues** `images/jobs.py` and `media/jobs.py`. They are handed the
+- **The job queues** `media/image_jobs.py` and `media/jobs.py`. They are handed the
   gateway when the application is built, so they sit beside `api/`, above the
   gateway, and send their work through it like any other client.
-- **The isolated runtime adapters** — `audio/`, `speech/`, `music/`,
-  and the servers in `images/`. The manager never imports them. An engine
-  starts one as a separate program, with the engine's own Python, so its
-  heavy libraries never load into the manager.
+- **The isolated runtime adapters** — `audio/`, `speech/`, `music/`, `text/`,
+  `images/` and the host they share, `engine_host/`. The manager never imports
+  them. An engine starts one as a separate program, with the engine's own
+  Python (3.10 or newer), so its heavy libraries never load into the manager.
+  They may import only each other's process-side modules listed below and the
+  shared `network`, `multipart` and `comfyui_templates` — never a manager
+  layer.
 
-No import breaks the rule today. The last one did: `images/jobs.py` borrowed
+### The process side, module by module
+
+What an engine's command line starts (the scripts) and everything they import,
+with what each may import from AI-Lab. Nothing else in AI-Lab is loaded in an
+engine's process.
+
+| Module | May import from AI-Lab |
+|---|---|
+| `engine_host.http_host` | `network` |
+| `audio.server` (script) | `audio.aligner`, `engine_host.http_host`, `network` |
+| `audio.aligner` | — |
+| `images.server` (script) | `engine_host.http_host`, `network` |
+| `images.comfyui_server` (script) | `comfyui_templates`, `engine_host.http_host`, `network` |
+| `speech.server` (script) | `engine_host.http_host`, `network`, `speech.contract`, `speech.higgs_local_backend`, `speech.higgs_playground`, `speech.kokoro_backend`, `speech.qwen`, `speech.voxcpm_backend`, `vendor.kokoro_upstream`, `vendor.voxcpm_upstream` |
+| `speech.higgs_server` (script) | `engine_host.http_host`, `network`, `speech.contract`, `speech.higgs_backend` |
+| `speech.higgs_playground` | `multipart`, `network`, `speech.higgs_local_backend` |
+| `speech.higgs_backend` | `network`, `speech.contract` |
+| `speech.higgs_local_backend` | `speech.batching`, `speech.contract` |
+| `speech.kokoro_backend`, `speech.qwen`, `speech.voxcpm_backend` | `speech.contract` |
+| `speech.contract`, `speech.batching` | — |
+| `music.servers.<engine>_server` (scripts: acestep, comfy, heartmula, khala, levo2, mulacover, stableaudio3, yue2) | `engine_host.http_host`, `music.backends.<engine>_backend`, `music.bundles`, `music.hosting`, `music.request_fields`, `network` |
+| `music.backends.<engine>_backend` | `music.bundles`, `music.request_fields`; `comfy_backend` also `comfyui_templates`, `images.comfyui_server` |
+| `music.bundles`, `music.hosting`, `music.request_fields` | — |
+| `text.mlxlm_server`, `text.mlxvlm_server` (scripts) | — |
+| `network`, `multipart`, `comfyui_templates` (shared with the manager) | — |
+
+No import breaks the rule today. The last one did: `media/image_jobs.py` borrowed
 the multipart reader and the uploaded-image check from `api/`. Both moved to
 the shared level (`multipart.py`, `uploads.py`), so the job queue and the web
 layer now import them from below. `api/multipart.py` and `api/uploads.py`
@@ -73,8 +102,9 @@ there is exactly one place to look.
 | `audio/` | Isolated adapters: an OpenAI-shaped HTTP server for audio runtimes that ship none (`server.py`), and transcript alignment (`aligner.py`) | Scheduling, configuration, model discovery |
 | `speech/` | Isolated adapters for speech synthesis: one HTTP host (`server.py`, and `higgs_server.py` for the Higgs worker), one backend file per engine (`kokoro_backend.py`, `voxcpm_backend.py`, `qwen.py`, `higgs_backend.py`, `higgs_local_backend.py`), the shared request check and WAV answer (`contract.py`), grouping requests that arrive together into one model pass (`batching.py`), and `higgs_playground.py`, which serves the upstream Higgs playground page from the in-process `higgs_local` model | Anything the manager imports |
 | `music/` | Isolated adapters for music: for each engine a host in `music/servers/` (`acestep_server.py` for ACE-Step, `<engine>_server.py` for the others) and, except ACE-Step, a `music/backends/<engine>_backend.py` that does the work (Khala, HeartMuLa, YuE2, MuLaCover, LeVo 2, Stable Audio 3, ComfyUI). `yue2_web_backend.py` drives YuE2 through its own resident web worker. Shared by them: `request_fields.py` (the request checks and the WAV answer), `bundles.py` (checkpoint and sampling settings), `hosting.py` (command line, stopping, readiness) | Anything the manager imports |
-| `images/` | `server.py`: isolated PaddleOCR adapter. `comfyui_server.py`: isolated bridge to a private ComfyUI. `jobs.py`: named image workflows run as jobs that survive a restart; `workflows.py`: filling a workflow and reading a job request | Arbitrary workflow graphs from clients |
-| `media/` | `jobs.py` and `job_store.py`: music and speech jobs that can be cancelled and survive a restart. `http_host.py`: the small HTTP hosts every isolated adapter is built on — JSON in and out (`GenerationHost`), or an upload in and JSON out (`UploadHost`), the handler bound to its backend when the server starts | Choosing a model — the gateway does that |
+| `images/` | Isolated adapters only: `server.py` for PaddleOCR, `comfyui_server.py`, the bridge to a private ComfyUI | Arbitrary workflow graphs from clients; anything the manager imports |
+| `media/` | The manager's media job queues: `jobs.py` (music and speech) and `image_jobs.py` (named image workflows), their store `job_store.py`, and `image_workflows.py` (filling a workflow and reading a job request). Jobs can be cancelled and survive a restart | Choosing a model — the gateway does that |
+| `engine_host/` | `http_host.py`: the small HTTP hosts every isolated adapter is built on — JSON in and out (`GenerationHost`), or an upload in and JSON out (`UploadHost`), the handler bound to its backend when the server starts. Process side only | Anything of the manager's |
 | `comfyui_templates/`, `comfyui_custom_nodes/` | Workflow files for ComfyUI's own editor, one per model, and the ComfyUI extension that loads the entry's workflow into it | Python logic beyond finding the right file |
 | `vendor/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000. The Higgs page is used by both Higgs engines | AI-Lab rules — it is vendored code |
 | `catalog/core.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |

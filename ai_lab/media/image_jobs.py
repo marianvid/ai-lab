@@ -19,9 +19,9 @@ from pathlib import Path
 from ..multipart import MultipartBody
 from ..network import LOOPBACK
 from ..types import ChangeEvent, Task
-from ..media.job_store import record_failure
+from .job_store import record_failure
 from ..uploads import validate_image
-from .workflows import ALLOWED, read_request, render
+from .image_workflows import ALLOWED, read_request, render
 
 FINAL = frozenset({"succeeded", "failed", "cancelled"})
 # How long a waiting client is kept, how often it looks, how long a result lives.

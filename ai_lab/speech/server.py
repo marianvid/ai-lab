@@ -3,7 +3,7 @@
 
 One backend per process (Qwen TTS, Kokoro, VoxCPM or Higgs on a Mac), with
 the backend's own editor on `--ui-port` and AI-Lab's speech JSON contract
-(`speech.contract`) on `--port`, answered by `media.http_host`.
+(`speech.contract`) on `--port`, answered by `engine_host.http_host`.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
-from ai_lab.media.http_host import Generator, serve
+from ai_lab.engine_host.http_host import Generator, serve
 from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH
 from ai_lab.speech.higgs_local_backend import HiggsLocalBackend
 from ai_lab.speech.kokoro_backend import KokoroBackend

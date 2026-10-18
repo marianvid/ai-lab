@@ -3,7 +3,7 @@
 
 Executable by a runtime-specific Python environment, the same way
 `ai_lab/audio/server.py` is: PaddleOCR stays isolated from the manager, and
-only this small HTTP contract is shared with it (`media.http_host`'s
+only this small HTTP contract is shared with it (`engine_host.http_host`'s
 `UploadHost`).
 
 The response is AI-Lab's own stable OCR schema, not PaddleOCR's native
@@ -23,7 +23,7 @@ from threading import Lock
 # This file is launched directly by the runtime's own Python environment.
 # Give it access to the small shared modules beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from ai_lab.media.http_host import Form, UploadHost, form_text, serve_uploads, uploaded_file
+from ai_lab.engine_host.http_host import Form, UploadHost, form_text, serve_uploads, uploaded_file
 from ai_lab.network import LOOPBACK
 
 

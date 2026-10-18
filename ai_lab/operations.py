@@ -21,7 +21,7 @@ from .application import paths
 from .operations_services import OperationsParts, OperationsServices, build_services
 
 if TYPE_CHECKING:
-    from .images.jobs import ImageJobs
+    from .media.image_jobs import ImageJobs
     from .media.jobs import MediaJobs
     from .types import Interests
 

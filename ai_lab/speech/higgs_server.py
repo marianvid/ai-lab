@@ -4,7 +4,7 @@
 On Linux, Higgs runs inside an SGLang-Omni worker process (`HiggsBackend`
 starts and stops it). Beside it this starts the playground page that ships
 with SGLang-Omni, waits until the page answers, then answers AI-Lab's speech
-contract on `--port` (`media.http_host`). Stopping the host stops both.
+contract on `--port` (`engine_host.http_host`). Stopping the host stops both.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
-from ai_lab.media.http_host import GenerationHost
+from ai_lab.engine_host.http_host import GenerationHost
 from ai_lab.network import ALL_INTERFACES, LOOPBACK
 from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH
 from ai_lab.speech.higgs_backend import HiggsBackend

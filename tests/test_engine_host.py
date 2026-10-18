@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from ai_lab.media.http_host import (
+from ai_lab.engine_host.http_host import (
     Form,
     GenerationHost,
     UploadHost,

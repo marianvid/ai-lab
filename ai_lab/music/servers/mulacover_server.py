@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ai_lab.media.http_host import serve
+from ai_lab.engine_host.http_host import serve
 from ai_lab.music.bundles import Checkpoint, Sampling
 from ai_lab.music.hosting import CHECKPOINT_OPTIONS, PORT, SAMPLING_OPTIONS, parse
 from ai_lab.music.backends.mulacover_backend import MulaCoverBackend

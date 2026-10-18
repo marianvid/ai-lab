@@ -3,7 +3,7 @@
 import unittest
 from unittest import mock
 
-from ai_lab.media.http_host import GenerationHost
+from ai_lab.engine_host.http_host import GenerationHost
 from ai_lab.speech import higgs_server
 from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH
 
