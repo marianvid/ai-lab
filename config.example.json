@@ -357,6 +357,7 @@
   "benchmark": {
     "_comment": "Read by the benchmark harness (benchmark/harness/shared/lab.py), never by the manager. manager_url is optional: without it the harness uses the loopback address and `port` above.",
     "fish_tts_url": "http://127.0.0.1:8188/v1/tts",
-    "scratch_dir": "/tmp/ai-lab-benchmark"
+    "scratch_dir": "/tmp/ai-lab-benchmark",
+    "oversize_port": 8099
   }
 }

@@ -98,5 +98,20 @@ class ConfiguredBinaryTests(unittest.TestCase):
         self.assertEqual(plan.argv[0], "/custom/llama-server")
 
 
+class EngineSettingsTests(unittest.TestCase):
+    def test_a_mistyped_setting_stops_the_start_naming_it(self):
+        with self.assertRaisesRegex(ValueError, r"engines\.llamacpp: unknown setting\(s\) binray"):
+            Registry({"llamacpp": {"binray": "/opt/ai/llama.cpp/build/bin/llama-server"}})
+
+    def test_the_maintenance_keys_are_allowed(self):
+        engine = Registry({"llamacpp": {"binary": "/custom/llama-server",
+                                        "source": {"path": "/src"}, "update": {}}}).get("llamacpp")
+        self.assertEqual(cast(Any, engine).binary, "/custom/llama-server")
+
+    def test_grouped_settings_are_checked_too(self):
+        with self.assertRaisesRegex(ValueError, "engines.heartmula: unknown setting"):
+            Registry({"heartmula": {"bundel_root": "/x"}})
+
+
 if __name__ == "__main__":
     unittest.main()

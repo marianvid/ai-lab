@@ -21,6 +21,10 @@ from dataclasses import asdict
 from ..types import Capabilities
 from .base import Engine
 
+# Keys an engine's section holds for the builds and installs that maintain
+# the engine, not for the engine itself.
+MAINTENANCE_KEYS = frozenset({"source", "update"})
+
 # Modules of this package that hold no engine.
 _NOT_ENGINES = frozenset({"base", "isolated", "probe", "registry", "text_launch"})
 
@@ -53,22 +57,34 @@ def _is_engine(cls: type) -> bool:
             and callable(getattr(cls, "plan", None)))
 
 
-def _construct(cls: type, settings: dict) -> Engine:
+def _construct(engine_id: str, cls: type, settings: dict) -> Engine:
     """One engine, given the settings its constructor takes.
 
-    An engine's section of the configuration can hold more than the engine
-    reads — `source` and `update`, for example, belong to the builds and
-    installs that maintain it — so only the names its constructor declares
-    are passed. An engine with nothing configured falls back to its defaults
-    (usually: look on PATH). An engine whose settings are grouped (more than
-    a constructor should take one by one) reads its section itself, with a
+    An engine's section of the configuration holds the constructor's settings
+    plus `MAINTENANCE_KEYS`, which belong to the builds and installs that
+    maintain it. Any other key is refused, naming it: a mistyped `binray`
+    would otherwise be dropped and the engine started from whatever is on
+    PATH — the silent pick this module exists to prevent. An engine with
+    nothing configured falls back to its defaults (usually: look on PATH). An
+    engine whose settings are grouped reads its section itself, with a
     `from_settings` class method.
     """
+    unknown = sorted(set(settings) - accepted_settings(cls))
+    if unknown:
+        raise ValueError(f"engines.{engine_id}: unknown setting(s) {', '.join(unknown)}; "
+                         f"it takes {', '.join(sorted(accepted_settings(cls) - MAINTENANCE_KEYS))}")
     make = getattr(cls, "from_settings", None)
     if make is not None:
         return make(settings)
     accepted = inspect.signature(cls).parameters
     return cls(**{key: value for key, value in settings.items() if key in accepted})
+
+
+def accepted_settings(cls: type) -> set[str]:
+    """The keys an engine's configuration section may hold."""
+    names = set(inspect.signature(cls).parameters) - {"locations"}
+    names |= set(getattr(cls, "location_settings", ()))
+    return names | MAINTENANCE_KEYS
 
 
 def build(settings: dict | None = None) -> dict[str, Engine]:
@@ -78,7 +94,7 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
     `{"llamacpp": {"binary": "/opt/ai/llama.cpp/build/bin/llama-server"}}`.
     """
     settings = settings or {}
-    return {engine_id: _construct(cls, settings.get(engine_id) or {})
+    return {engine_id: _construct(engine_id, cls, settings.get(engine_id) or {})
             for engine_id, cls in engine_classes().items()}
 
 
