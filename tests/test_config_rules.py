@@ -83,8 +83,8 @@ class HiggsWorkerPortTests(unittest.TestCase):
         for taken in (8090, 8100):
             with self.subTest(port=taken), \
                     self.assertRaisesRegex(ValueError, "Higgs worker settings are invalid"):
-                validate_configuration(self.config(taken), {"higgs"})
-        validate_configuration(self.config(9000), {"higgs"})
+                validate_configuration(self.config(taken), {"higgs"}, sections={})
+        validate_configuration(self.config(9000), {"higgs"}, sections={})
 
 
 if __name__ == "__main__":

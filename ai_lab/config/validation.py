@@ -44,8 +44,6 @@ class Section:
     ports: Callable[[object], Iterable[tuple[str, int]]] | None = None
 
 
-NO_SECTIONS: Mapping[str, Section] = {}
-
 MAX_PORT = 65535
 # Khala's largest length bucket.
 KHALA_MAX_BUCKET = 20
@@ -333,12 +331,14 @@ CHAIN = (_check_roots, _check_repositories, _check_manager_port,
 
 
 def validate_configuration(config: Config, engine_ids: set[str], *,
-                           check_workflows: bool = False,
-                           sections: Mapping[str, Section] = NO_SECTIONS) -> None:
+                           sections: Mapping[str, Section],
+                           check_workflows: bool = False) -> None:
     """Reject broken references and conflicting ports with one useful report.
 
     `sections` are the parts of the configuration other packages own, by the
-    name `Config` keeps them under (see `wiring.CONFIG_SECTIONS`).
+    name `Config` keeps them under (see `wiring.CONFIG_SECTIONS`). Required:
+    a caller that leaves them out must say so with an empty mapping, so half
+    the file is never validated by accident.
     """
     report = _Report(config, engine_ids, check_workflows, dict(sections))
     for checker in CHAIN:

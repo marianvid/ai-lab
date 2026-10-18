@@ -25,19 +25,19 @@ class ConfigurationValidationTests(unittest.TestCase):
         config = self.base()
         config.media = {"result_ttl_s": -1}
         with self.assertRaisesRegex(ValueError, "Media result_ttl_s"):
-            validate_configuration(config, {'comfyui'})
+            validate_configuration(config, {'comfyui'}, sections={})
 
     def test_unknown_media_setting_is_refused(self):
         config = self.base()
         config.media = {"retention_days": 1}
         with self.assertRaisesRegex(ValueError, "Unknown media settings"):
-            validate_configuration(config, {'comfyui'})
+            validate_configuration(config, {'comfyui'}, sections={})
 
     def test_gateway_policy_has_typed_task_waits(self):
         config = self.base()
         config.gateway = {"task_timeouts": {
             "music-generation": {"first_byte_s": 1800, "between_bytes_s": 60}}}
-        validate_configuration(config, {'comfyui'})
+        validate_configuration(config, {'comfyui'}, sections={})
         policy = config.gateway_policy
         self.assertEqual(policy.task_timeouts["music-generation"].first_byte_s, 1800)
         self.assertEqual(policy.max_waiting, 150)
@@ -46,18 +46,18 @@ class ConfigurationValidationTests(unittest.TestCase):
         config = self.base()
         config.gateway = []
         with self.assertRaisesRegex(ValueError, "Gateway settings must be an object"):
-            validate_configuration(config, {'comfyui'})
+            validate_configuration(config, {'comfyui'}, sections={})
         config.gateway = {}
         config.media = []
         with self.assertRaisesRegex(ValueError, "Media settings must be an object"):
-            validate_configuration(config, {'comfyui'})
+            validate_configuration(config, {'comfyui'}, sections={})
 
     def test_invalid_gateway_task_wait_fails_at_startup(self):
         config = self.base()
         config.gateway = {"task_timeouts": {
             "music-generation": {"first_byte_s": -1}}}
         with self.assertRaisesRegex(ValueError, "Gateway first_byte_s"):
-            validate_configuration(config, {'comfyui'})
+            validate_configuration(config, {'comfyui'}, sections={})
 
     def test_unknown_gateway_fields_survive_a_config_save(self):
         from ai_lab.config.store import ConfigStore
@@ -80,7 +80,7 @@ class ConfigurationValidationTests(unittest.TestCase):
             config.images = {'workflow_root': root, 'profiles': {
                 'picture': {'model': 'picture', 'task': 'generation',
                             'workflow': 'generate.json'}}}
-            validate_configuration(config, {'comfyui'}, check_workflows=True)
+            validate_configuration(config, {'comfyui'}, check_workflows=True, sections={})
 
     def test_reports_bad_references_before_work_starts(self):
         config = self.base()
@@ -88,7 +88,7 @@ class ConfigurationValidationTests(unittest.TestCase):
         config.images = {'profiles': {'broken': {
             'model': 'absent', 'workflow': '../outside.json'}}}
         with self.assertRaisesRegex(ValueError, 'unknown engine') as error:
-            validate_configuration(config, {'comfyui'})
+            validate_configuration(config, {'comfyui'}, sections={})
         self.assertIn('port 8100 is already assigned', str(error.exception))
         self.assertIn('unknown instance absent', str(error.exception))
 
@@ -98,7 +98,7 @@ class ConfigurationValidationTests(unittest.TestCase):
             'wrong': {'model': 'picture', 'task': 'edit',
                       'workflow': 'missing.json'}}}
         with self.assertRaisesRegex(ValueError, 'expected image-edit') as error:
-            validate_configuration(config, {'comfyui'}, check_workflows=True)
+            validate_configuration(config, {'comfyui'}, check_workflows=True, sections={})
         self.assertIn('workflow file is absent', str(error.exception))
 
 
@@ -133,10 +133,14 @@ class SectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "owned thing: port 8100 is already assigned"):
             validate_configuration(config, {'comfyui'}, sections=OWNED)
 
-    def test_without_sections_only_the_configuration_s_own_parts_are_checked(self):
+    def test_an_empty_section_map_checks_only_the_configuration_s_own_parts(self):
         config = self.base()
         config.reservations = {}
-        validate_configuration(config, {'comfyui'})
+        validate_configuration(config, {'comfyui'}, sections={})
+
+    def test_the_sections_must_be_named(self):
+        with self.assertRaises(TypeError):
+            validate_configuration(self.base(), {'comfyui'})  # type: ignore[call-arg]
 
 
 if __name__ == '__main__':
