@@ -37,7 +37,8 @@ def engine_classes() -> dict[str, type]:
     `display_name` and a `plan` method — the shape of `base.Engine`. Adding
     one touches only its own file; nothing here lists them by name. Ordered by
     the module's own name, whatever sub-package it is in, so the list is the
-    same each time.
+    same each time. Two classes with the same `id` are refused, naming both:
+    one would otherwise silently replace the other.
     """
     found: dict[str, type] = {}
     package = importlib.import_module(__package__ or "ai_lab.engines")
@@ -49,8 +50,18 @@ def engine_classes() -> dict[str, type]:
         module = importlib.import_module(module_info.name)
         for _, cls in inspect.getmembers(module, inspect.isclass):
             if cls.__module__ == module.__name__ and _is_engine(cls):
-                found[getattr(cls, "id", "")] = cls
+                _add(found, cls)
     return found
+
+
+def _add(found: dict[str, type], cls: type) -> None:
+    """Register one engine class under its id; a second class with that id is an error."""
+    engine_id = getattr(cls, "id", "")
+    other = found.get(engine_id)
+    if other is not None and other is not cls:
+        raise ValueError(f"two engines share the id {engine_id!r}: "
+                         f"{other.__module__}.{other.__name__} and {cls.__module__}.{cls.__name__}")
+    found[engine_id] = cls
 
 
 def _is_engine(cls: type) -> bool:

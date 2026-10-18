@@ -1,7 +1,7 @@
 import unittest
 from typing import Any, cast
 
-from ai_lab.engines.registry import Registry
+from ai_lab.engines.registry import Registry, _add, engine_classes
 from ai_lab.types import Capabilities
 
 
@@ -111,6 +111,20 @@ class EngineSettingsTests(unittest.TestCase):
     def test_grouped_settings_are_checked_too(self):
         with self.assertRaisesRegex(ValueError, "engines.heartmula: unknown setting"):
             Registry({"heartmula": {"bundel_root": "/x"}})
+
+
+class DuplicateIdTests(unittest.TestCase):
+    def test_every_engine_has_its_own_id(self):
+        classes = engine_classes()
+        self.assertEqual(len(classes), len(set(classes.values())))
+
+    def test_a_second_engine_with_the_same_id_is_refused_naming_both(self):
+        first = type("First", (), {"id": "same", "__module__": "pkg.first"})
+        second = type("Second", (), {"id": "same", "__module__": "pkg.second"})
+        found: dict[str, type] = {}
+        _add(found, first)
+        with self.assertRaisesRegex(ValueError, "pkg.first.First and pkg.second.Second"):
+            _add(found, second)
 
 
 if __name__ == "__main__":
