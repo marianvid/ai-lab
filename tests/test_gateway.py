@@ -12,6 +12,7 @@ import threading
 import time
 import unittest
 
+from ai_lab import budget
 from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
                                  validate)
 from ai_lab.gateway.core import (CardBusyError, CouldNotLoadError, Gateway, GatewayLimits, NotConfiguredError,
@@ -134,6 +135,15 @@ class FakeOperations:
 
     def reserve_mb(self) -> float:
         return self.reserve
+
+    def engine(self, engine_id):
+        return self.engines.get(engine_id)
+
+    def accelerator(self):
+        return self.host.accelerator()
+
+    def machine_budget(self, card=None):
+        return budget.of(self.host, self.reserve, card=card)
 
     def instances(self):
         return [dict(entry) for entry in self._entries.values()]

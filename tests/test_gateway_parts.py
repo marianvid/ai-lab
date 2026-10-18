@@ -195,3 +195,13 @@ class PlanningTests(unittest.TestCase):
         self.assertFalse(self.planner.admits_now(self.state, "b"))
         self.state.queue = [waiting("a")]
         self.assertFalse(self.planner.admits_now(self.state, "a"))
+
+
+class CardOperationsTests(unittest.TestCase):
+    def test_operations_offers_everything_the_gateway_asks_of_it(self):
+        from ai_lab.gateway.card_operations import CardOperations
+        from ai_lab.operations import Operations
+        asked = [name for name, value in vars(CardOperations).items()
+                 if callable(value) and not name.startswith("_")]
+        self.assertGreater(len(asked), 5)
+        self.assertEqual([name for name in asked if not callable(getattr(Operations, name, None))], [])

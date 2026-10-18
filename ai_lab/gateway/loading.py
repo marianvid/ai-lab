@@ -25,7 +25,7 @@ from .errors import CouldNotLoadError
 from .eviction import EvictionPlanner
 from .state import Shape
 from .stats import GatewayCounters
-from ..operations import Operations
+from .card_operations import CardOperations
 
 
 class CardMemory(Protocol):
@@ -65,7 +65,7 @@ class CardLoader:
 
     HISTORY = 50
 
-    def __init__(self, operations: Operations, memory: CardMemory,
+    def __init__(self, operations: CardOperations, memory: CardMemory,
                  counters: GatewayCounters, scheduled: Callable[[], dict],
                  engine_name_of: Callable[[Shape | None], str]) -> None:
         self.operations = operations

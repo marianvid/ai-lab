@@ -37,9 +37,9 @@ def snapshot(kind="dedicated", used=28000.0, total=32000.0):
 
 class ResourcesTests(unittest.TestCase):
     def setUp(self):
-        host = SimpleNamespace(accelerator=lambda: snapshot(kind="unified"))
         self.neighbours = Neighbours(held_mb=1300.0)
-        self.resources = GatewayResources(SimpleNamespace(host=host), 500, 1, 0.01,
+        self.resources = GatewayResources(SimpleNamespace(accelerator=lambda: snapshot(kind="unified")),
+                                          500, 1, 0.01,
                                           neighbours=self.neighbours)
 
     def test_what_a_neighbour_holds_counts_as_free_for_a_card_model(self):

@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import budget
 from .application import paths
 from .operations_services import OperationsParts, OperationsServices, build_services
 
@@ -99,6 +100,18 @@ class Operations:
     def model_for(self, instance_id: str):
         """The model an entry points at, for asking how big it is."""
         return self.instance_service.model_for(instance_id)
+
+    def engine(self, engine_id: str):
+        """The engine with this id; KeyError when there is none."""
+        return self.engines.get(engine_id)
+
+    def accelerator(self):
+        """One reading of this machine's card (or unified memory)."""
+        return self.host.accelerator()
+
+    def machine_budget(self, card=None) -> budget.Budget:
+        """What this machine can offer models now, pool by pool (`card`: a reading already taken)."""
+        return budget.of(self.host, self.reserve_mb(), card=card)
 
     def load(self, instance_id: str, settings: dict | None = None):
         """Start this model, replacing whatever this entry was running."""

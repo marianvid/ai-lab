@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from ..engines.base import withheld
 from .errors import NotConfiguredError, ShapeNotServedError
-from ..operations import Operations
+from .card_operations import CardOperations
 from ..types import Task
 
 
 class Catalogue:
     """Names, listings and shapes, read from the configuration and the engines."""
 
-    def __init__(self, operations: Operations) -> None:
+    def __init__(self, operations: CardOperations) -> None:
         self.operations = operations
 
     def catalogue(self) -> list[dict]:
@@ -80,7 +80,7 @@ class Catalogue:
         except Exception:
             return []
         try:
-            engine = self.operations.engines.get(instance["engine"])
+            engine = self.operations.engine(instance["engine"])
         except KeyError:
             return sorted(able)
         return sorted(able - withheld(engine, instance.get("params")))
@@ -88,7 +88,7 @@ class Catalogue:
     def _shapes(self, instance: dict) -> list[str]:
         try:
             task = Task(instance.get("task", Task.TEXT_GENERATION.value))
-            return list(self.operations.engines.get(instance["engine"]).api_paths(task))
+            return list(self.operations.engine(instance["engine"]).api_paths(task))
         except KeyError:
             return []
 
@@ -132,7 +132,7 @@ class Catalogue:
     def _answers(self, instance: dict, shape: str) -> bool:
         """Whether this entry's engine answers this kind of request."""
         try:
-            engine = self.operations.engines.get(instance["engine"])
+            engine = self.operations.engine(instance["engine"])
         except KeyError:
             return False
         task = Task(instance.get("task", Task.TEXT_GENERATION.value))
@@ -162,6 +162,6 @@ class Catalogue:
             return ""
         try:
             entry = self.operations.instance(shape.instance_id)
-            return self.operations.engines.get(entry["engine"]).display_name
+            return self.operations.engine(entry["engine"]).display_name
         except Exception:
             return ""

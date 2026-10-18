@@ -26,7 +26,7 @@ def ask_engine(operations, shape, question: Callable[[Any, dict], Answer],
     """
     try:
         instance = operations.instance(shape.instance_id)
-        engine = operations.engines.get(instance["engine"])
+        engine = operations.engine(instance["engine"])
         return question(engine, {**instance["params"], **shape.as_dict()})
     except Exception:
         return default
@@ -54,7 +54,7 @@ class GatewayResources:
     def card_total_mb(self) -> float:
         """The card's whole memory, or 0 when it cannot be read."""
         try:
-            return float(self.operations.host.accelerator().memory_total_mb)
+            return float(self.operations.accelerator().memory_total_mb)
         except Exception:
             return 0.0
 
@@ -74,7 +74,7 @@ class GatewayResources:
 
     def read_pools(self) -> dict:
         """Read outside the scheduler lock; a failed probe keeps old readings."""
-        found = budget.of(self.operations.host, self.operations.reserve_mb())
+        found = self.operations.machine_budget()
         return {pool.name: pool.json() for pool in found.pools}
 
     def wait_until_quiet(self, stopped: list) -> None:
@@ -95,7 +95,7 @@ class GatewayResources:
         self._neighbours.make_way()
         if not stopped:
             return
-        snapshot = self.operations.host.accelerator()
+        snapshot = self.operations.accelerator()
         if snapshot.memory_kind != "dedicated":
             return                      # unified memory: nothing to wait for
         deadline = time.perf_counter() + self.quiet_timeout_s
@@ -131,7 +131,7 @@ class GatewayResources:
         if keeping:
             return
         while True:
-            used = self.operations.host.accelerator().memory_used_mb
+            used = self.operations.accelerator().memory_used_mb
             if used <= self.quiet_mb:
                 return
             if time.perf_counter() > deadline:

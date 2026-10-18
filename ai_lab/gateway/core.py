@@ -19,7 +19,7 @@ from .loading import CardLoader, CardMemory
 from .resources import GatewayResources, ask_engine
 from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats, StatsSources
-from ..operations import Operations
+from .card_operations import CardOperations
 from .scheduler import AbandonedError, Scheduler, StillWanted, WillNotFitError
 from ..types import Task
 
@@ -43,7 +43,7 @@ class Gateway:
     gateway builds a `GatewayResources` from the operations and the limits.
     """
 
-    def __init__(self, operations: Operations, limits: GatewayLimits | None = None,
+    def __init__(self, operations: CardOperations, limits: GatewayLimits | None = None,
                  memory: CardMemory | None = None) -> None:
         limits = limits or GatewayLimits()
         self._operations = operations

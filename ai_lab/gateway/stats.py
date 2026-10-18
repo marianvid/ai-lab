@@ -12,7 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .. import budget
 from ..types import Task
 
 
@@ -65,7 +64,8 @@ class StatsSources:
     """Exactly what the Gateway page reads, handed over by the gateway for one report.
 
     `operations` answers the configuration and the machine (`configured`,
-    `engines`, `host`, `reserve_mb`); `scheduler` the queue (`state`,
+    `engine`, `accelerator`, `machine_budget`: a `CardOperations`);
+    `scheduler` the queue (`state`,
     `max_waiting`); `waits` the two current timeouts (first byte, between
     bytes); `adopt` tells the scheduler what is already on the card; `holder`
     says who holds it; `engine_name_of` names a loaded shape's engine.
@@ -214,13 +214,11 @@ class GatewayStats:
         A figure that is usually wrong is worse than none.
         """
         try:
-            card = self.operations.host.accelerator()
+            card = self.operations.accelerator()
         except Exception:
             return {"memory": {}, "card": {}}
         try:
-            found = budget.of(self.operations.host, self.operations.reserve_mb(),
-                              card=card)
-            memory = found.json()
+            memory = self.operations.machine_budget(card=card).json()
         except Exception:
             memory = {}
         # Unified memory has no temperature to read, and that comes back empty
@@ -275,7 +273,7 @@ def shapes_offered(operations) -> list[dict]:
     engines_for: dict[str, set] = {}
     for entry in operations.configured():
         try:
-            engine = operations.engines.get(entry["engine"])
+            engine = operations.engine(entry["engine"])
             task = Task(entry.get("task", Task.TEXT_GENERATION.value))
             paths = engine.api_paths(task)
         except Exception:
