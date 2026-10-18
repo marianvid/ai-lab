@@ -47,6 +47,7 @@ class GitApplicationInstallTests(unittest.TestCase):
         with patch.object(self.install, "_remote_commit", return_value="b" * 40), \
              patch.object(self.install, "_stream", side_effect=ValueError("install failed")):
             self.install.install("HEAD")
+            assert self.install._thread is not None
             self.install._thread.join(timeout=2)
         self.assertEqual(self.install.active(), active.resolve())
         self.assertEqual(self.install.status()["state"], "failed")
@@ -57,9 +58,9 @@ class GitApplicationInstallTests(unittest.TestCase):
         node = active / "ComfyUI" / "custom_nodes" / "example"
         (node / ".git").mkdir(parents=True)
         self.install.point_at(active)
-        with patch.object(self.install, "_git", return_value=" M changed.py\n"):
-            with self.assertRaises(ValueError):
-                self.install.update_component("example")
+        with patch.object(self.install, "_git", return_value=" M changed.py\n"), \
+                self.assertRaises(ValueError):
+            self.install.update_component("example")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 import sys
 import types
 import unittest
+from typing import Any, cast
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,17 +12,17 @@ from ai_lab.speech.server import launch_native_voxcpm_ui
 
 class VoxCpmNativeUiTests(unittest.TestCase):
     def test_editor_reuses_model_and_binds_companion_port(self):
-        seen = {}
+        seen: dict[str, Any] = {}
 
         class Demo:
             def __init__(self, model_id):
                 seen["model_id"] = model_id
                 self.voxcpm_model = None
 
-        interface = types.SimpleNamespace(
+        interface: Any = types.SimpleNamespace(
             queue=lambda **kwargs: seen.setdefault("queue", kwargs) and interface,
             launch=lambda **kwargs: seen.setdefault("launch", kwargs))
-        module = types.ModuleType("ai_lab.vendor.voxcpm_upstream.app")
+        module: Any = types.ModuleType("ai_lab.vendor.voxcpm_upstream.app")
         module.VoxCPMDemo = Demo
         module.create_demo_interface = lambda demo: seen.setdefault("demo", demo) and interface
         module.I18N = object()
@@ -30,7 +31,7 @@ class VoxCpmNativeUiTests(unittest.TestCase):
         backend = types.SimpleNamespace(model=object())
 
         with patch.dict(sys.modules, {"ai_lab.vendor.voxcpm_upstream.app": module}):
-            launch_native_voxcpm_ui(backend, Path("/models/voxcpm"), 18113)
+            launch_native_voxcpm_ui(cast(Any, backend), Path("/models/voxcpm"), 18113)
 
         self.assertEqual(seen["model_id"], "/models/voxcpm")
         self.assertIs(seen["demo"].voxcpm_model, backend.model)

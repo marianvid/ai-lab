@@ -17,12 +17,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import NamedTuple
 
 from .config import Repository
 from .naming import (base_name, is_companion, is_part, is_weight_for_format,
                      missing_shards)
 from .types import Format, ModelFile, ModelSet, Task
 
+
+
+class _Found(NamedTuple):
+    """The weights of one model found in a directory, and the name it goes by."""
+
+    directory: Path
+    base: str
+    shards: list[Path]
+
+
+def _inside_any(directory: Path, roots: list[Path]) -> bool:
+    """Whether the directory is one of these model roots or below one."""
+    return any(directory == root or directory.is_relative_to(root) for root in roots)
 
 class Catalog:
     """Scans repositories and returns the models found in them.
@@ -36,6 +50,7 @@ class Catalog:
         self.known = known
 
     def scan(self, repositories: list[Repository]) -> list[ModelSet]:
+        """Every model in these repositories, sorted by id; missing folders are skipped."""
         models: list[ModelSet] = []
         for repository in repositories:
             root = Path(repository.path)
@@ -46,6 +61,7 @@ class Catalog:
         return models
 
     def find(self, repositories: list[Repository], model_id: str) -> ModelSet:
+        """The model with this id; KeyError when there is none."""
         found = next((item for item in self.scan(repositories) if item.id == model_id), None)
         if found is None:
             raise KeyError(f"Unknown model: {model_id}")
@@ -79,21 +95,19 @@ class Catalog:
         models: list[ModelSet] = list(declared)
         model_roots = list(declared_roots)
         for directory in self._directories(root):
-            if any(directory == model_root
-                   or directory.is_relative_to(model_root)
-                   for model_root in model_roots):
+            if _inside_any(directory, model_roots):
                 continue
             weights, companions = self._classify(directory, repository.format)
             if not weights:
                 continue
             if self._directory_is_the_model(repository):
-                models.append(self._build(repository, root, directory,
-                                          self._directory_name(root, directory),
-                                          weights, companions))
+                found = _Found(directory, self._directory_name(root, directory), weights)
+                models.append(self._build(repository, root, found, companions))
                 model_roots.append(directory)
                 continue
             for base, shards in self._group(weights).items():
-                models.append(self._build(repository, root, directory, base, shards, companions))
+                models.append(self._build(repository, root, _Found(directory, base, shards),
+                                          companions))
         return models
 
     @staticmethod
@@ -234,9 +248,9 @@ class Catalog:
             groups.setdefault(base_name(path.name), []).append(path)
         return groups
 
-    def _build(self, repository: Repository, root: Path, directory: Path,
-               base: str, shards: list[Path], companions: list[Path]) -> ModelSet:
-        shards = sorted(shards)
+    def _build(self, repository: Repository, root: Path, found: _Found,
+               companions: list[Path]) -> ModelSet:
+        directory, base, shards = found.directory, found.base, sorted(found.shards)
         complete, missing = missing_shards([path.name for path in shards])
         files = (self._physical_files(directory)
                  if self._directory_is_the_model(repository)

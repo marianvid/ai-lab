@@ -15,8 +15,8 @@ import json
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Iterator
 
 # Headers worth copying from the engine's answer. Content-Length is deliberately
 # not among them: the body is re-sent as it arrives, so the original length is
@@ -42,111 +42,144 @@ BETWEEN_BYTES_S = 30.0
 
 @dataclass(slots=True)
 class Passthrough:
+    """An engine's answer on its way to the client: status, headers and the body as it arrives."""
+
     status: int
     content_type: str
     chunks: Iterator[bytes]
     headers: dict[str, str]
 
 
-def forward(url: str, payload: dict | bytes, on_close=None,
-            first_byte_s: float = FIRST_BYTE_S,
-            between_bytes_s: float = BETWEEN_BYTES_S,
-            on_first_chunk=None,
-            content_type: str = "application/json") -> Passthrough:
-    """POST a JSON body to an engine and hand back its answer as it arrives.
+@dataclass(frozen=True, slots=True)
+class Waits:
+    """How long to wait for the first byte of the answer, and then between bytes.
+
+    The two limits are separate because they catch different faults. Nothing
+    at all means the engine never started answering; a gap in the middle
+    means it started and stopped. At the slowest generation measured on either
+    machine, 17 tokens a second, the gap between them is 59 milliseconds — so
+    seconds of silence mid-answer is a fault, while a minute before the first
+    byte can be an ordinary large prompt on a slow machine.
+    """
+
+    first_byte_s: float = FIRST_BYTE_S
+    between_bytes_s: float = BETWEEN_BYTES_S
+
+
+@dataclass(frozen=True, slots=True)
+class Hooks:
+    """What the caller wants told: the body is done, and how long the first byte took.
 
     `on_close` runs when the body has been fully read or the connection has
     broken. That is where the caller releases its lease — it must happen after
-    the last byte, not when this function returns, because the answer is still
-    being read then.
-
-    The two limits are separate because they catch different faults. Nothing at
-    all means the engine never started answering; a gap in the middle means it
-    started and stopped. At the slowest generation measured on either machine,
-    17 tokens a second, the gap between them is 59 milliseconds — so seconds of
-    silence mid-answer is a fault, while a minute before the first byte can be
-    an ordinary large prompt on a slow machine.
+    the last byte, not when `forward` returns, because the answer is still
+    being read then. `on_first_chunk` gets the seconds from sending to the
+    first byte of real answer.
     """
+
+    on_close: Callable[[], None] | None = None
+    on_first_chunk: Callable[[float], None] | None = None
+
+    def closed(self) -> None:
+        """Tell the caller the answer is over, if it asked."""
+        if self.on_close:
+            self.on_close()
+
+
+# The defaults: the module's waits, and nobody to tell.
+DEFAULT_WAITS = Waits()
+NO_HOOKS = Hooks()
+
+
+def forward(url: str, payload: dict | bytes, waits: Waits = DEFAULT_WAITS,
+            hooks: Hooks = NO_HOOKS, content_type: str = "application/json") -> Passthrough:
+    """POST a body to an engine and hand back its answer as it arrives."""
     data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
     request = urllib.request.Request(
         url, data=data, headers={"Content-Type": content_type}, method="POST")
     sent_at = time.perf_counter()
     try:
-        response = urllib.request.urlopen(request, timeout=first_byte_s)
+        response = urllib.request.urlopen(request, timeout=waits.first_byte_s)
     except urllib.error.HTTPError as error:
         # The engine refused it. Pass its own words through rather than
         # inventing a message: the client asked the engine a question and
         # deserves the engine's answer.
         body = error.read()
-        if on_close:
-            on_close()
+        hooks.closed()
         return Passthrough(
             status=error.code,
             content_type=error.headers.get("Content-Type", "application/json"),
             chunks=iter([body]),
             headers={})
     except Exception:
-        if on_close:
-            on_close()
+        hooks.closed()
         raise
-
-    # Headers are not the first byte, and neither is a keep-alive. A streaming
-    # engine sends its headers at once and then reads the prompt, which on a
-    # Mac takes a minute for a long one. During that time llama.cpp sends
-    # only an empty "still here" line (`:` on its own, an SSE comment) every
-    # 30 s. Starting the idle limit at the headers cut those answers off at
-    # 30 s, just before the first keep-alive, and the client got an empty
-    # stream. So the first-byte limit runs from when the request was sent
-    # until the first byte of real answer arrives; only then does the tighter
-    # idle limit take over. Keep-alives are still passed on to the client.
-    def remaining() -> float:
-        return max(0.1, first_byte_s - (time.perf_counter() - sent_at))
-
-    _limit(response, remaining())
-
-    # `read1` hands over whatever has arrived. Plain `read(CHUNK)` waits until
-    # it has CHUNK bytes or the answer ends, so a stream reached the client in
-    # 8 KB bursts — dozens of words late, which showed up as a slower first
-    # word through the gateway than straight from the engine.
-    take = getattr(response, "read1", None) or response.read
-
-    def read() -> Iterator[bytes]:
-        first = True
-        try:
-            while True:
-                chunk = take(CHUNK)
-                if not chunk:
-                    return
-                if first and _keep_alive_only(chunk):
-                    # Not an answer yet: the first-byte limit keeps running,
-                    # counted from when the request was sent.
-                    _limit(response, remaining())
-                    yield chunk
-                    continue
-                if first:
-                    first = False
-                    # The answer has begun, so the tighter limit applies from
-                    # here.
-                    _limit(response, between_bytes_s)
-                    if on_first_chunk:
-                        # How long the engine took to start answering. Timed
-                        # here because this is the only place that sees the
-                        # moment it arrives. It looks at a piece only to tell
-                        # a keep-alive from an answer, never further.
-                        on_first_chunk(time.perf_counter() - sent_at)
-                yield chunk
-        finally:
-            response.close()
-            if on_close:
-                on_close()
-
+    reader = _Reader(response, waits, hooks, sent_at)
     headers = {name: value for name, value in response.headers.items()
                if name.lower() in KEEP}
     return Passthrough(
         status=response.status,
         content_type=response.headers.get("Content-Type", "application/json"),
-        chunks=read(),
+        chunks=reader.chunks(),
         headers=headers)
+
+
+class _Reader:
+    """Reads one answer piece by piece, with the right limit at each moment.
+
+    Headers are not the first byte, and neither is a keep-alive. A streaming
+    engine sends its headers at once and then reads the prompt, which on a
+    Mac takes a minute for a long one. During that time llama.cpp sends only
+    an empty "still here" line (`:` on its own, an SSE comment) every 30 s.
+    Starting the idle limit at the headers cut those answers off at 30 s, just
+    before the first keep-alive, and the client got an empty stream. So the
+    first-byte limit runs from when the request was sent until the first byte
+    of real answer arrives; only then does the tighter idle limit take over.
+    Keep-alives are still passed on to the client.
+    """
+
+    def __init__(self, response, waits: Waits, hooks: Hooks, sent_at: float) -> None:
+        self.response = response
+        self.waits = waits
+        self.hooks = hooks
+        self.sent_at = sent_at
+        # `read1` hands over whatever has arrived. Plain `read(CHUNK)` waits
+        # until it has CHUNK bytes or the answer ends, so a stream reached the
+        # client in 8 KB bursts — dozens of words late.
+        self.take = getattr(response, "read1", None) or response.read
+        _limit(response, self._remaining())
+
+    def _remaining(self) -> float:
+        return max(0.1, self.waits.first_byte_s - (time.perf_counter() - self.sent_at))
+
+    def chunks(self) -> Iterator[bytes]:
+        """The answer's pieces as they arrive; closes the answer when done or broken."""
+        first = True
+        try:
+            while True:
+                chunk = self.take(CHUNK)
+                if not chunk:
+                    return
+                if first and _keep_alive_only(chunk):
+                    # Not an answer yet: the first-byte limit keeps running,
+                    # counted from when the request was sent.
+                    _limit(self.response, self._remaining())
+                elif first:
+                    first = False
+                    self._answer_began()
+                yield chunk
+        finally:
+            self.response.close()
+            self.hooks.closed()
+
+    def _answer_began(self) -> None:
+        """The tighter limit from here; and tell the caller how long the engine took."""
+        _limit(self.response, self.waits.between_bytes_s)
+        if self.hooks.on_first_chunk:
+            # Timed here because this is the only place that sees the moment
+            # it arrives. It looks at a piece only to tell a keep-alive from
+            # an answer, never further.
+            self.hooks.on_first_chunk(time.perf_counter() - self.sent_at)
 
 
 def _keep_alive_only(chunk: bytes) -> bool:

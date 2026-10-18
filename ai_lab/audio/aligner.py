@@ -9,7 +9,13 @@ SUPPORTED_LANGUAGES = frozenset({
     "Japanese", "Korean", "Portuguese", "Russian", "Spanish"})
 
 
+# The longest transcript one request may align.
+MAX_TRANSCRIPT_CHARS = 10000
+
+
 class QwenAlignBackend:
+    """Word timings for a recording and its transcript, with Qwen3's forced aligner."""
+
     owner = "qwen-align"
     path = "/v1/audio/alignments"
 
@@ -28,9 +34,10 @@ class QwenAlignBackend:
         self.lock = Lock()
 
     def align(self, audio_path: str, text: str, language: str) -> list[dict]:
+        """Each word of `text` with its start and end in the recording, in seconds."""
         text = text.strip()
-        if not 1 <= len(text) <= 10000:
-            raise ValueError("transcript must contain 1–10000 characters")
+        if not 1 <= len(text) <= MAX_TRANSCRIPT_CHARS:
+            raise ValueError(f"transcript must contain 1–{MAX_TRANSCRIPT_CHARS} characters")
         if language not in SUPPORTED_LANGUAGES:
             raise ValueError("unsupported alignment language: " + language)
         with self.lock, self.torch.inference_mode():

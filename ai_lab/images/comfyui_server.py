@@ -6,63 +6,73 @@ from __future__ import annotations
 import argparse
 import atexit
 import base64
+import contextlib
 import copy
 import json
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from dataclasses import dataclass
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+from typing import Any
 
 from ai_lab.comfyui_templates import for_model
+from ai_lab.media.http_host import JsonReplies
 from ai_lab.network import ALL_INTERFACES, LOOPBACK
+
+# How long one job may run, how long ComfyUI may take to start, how often
+# the job's history is asked for.
+DEFAULT_TIMEOUT_S = 1800.0
+START_LIMIT_S = 180.0
+HISTORY_POLL_S = 0.25
+# The private ComfyUI listens this far above the bridge's own port.
+PRIVATE_PORT_OFFSET = 10_000
+VRAM_FLAGS = {"low": ("--lowvram",), "cpu": ("--cpu",)}
+
+
+@dataclass(frozen=True)
+class ComfyLaunch:
+    """How to start one private ComfyUI: its program, models, state folder and port.
+
+    `vram_mode` is "normal", "low" (`--lowvram`) or "cpu". `workflow` is the
+    API workflow preset the bridge fills in; `ui_workflow` the one ComfyUI's
+    own page opens with.
+    """
+
+    python: str
+    comfyui: str
+    model_roots: list[str]
+    state: Path
+    port: int
+    timeout: float = DEFAULT_TIMEOUT_S
+    vram_mode: str = "normal"
+    workflow: Path | None = None
+    ui_workflow: Path | None = None
 
 
 class Backend:
-    def __init__(self, python: str, comfyui: str, model_roots: list[str],
-                 state: Path, port: int, timeout: float = 1800,
-                 vram_mode: str = "normal", workflow: Path | None = None,
-                 ui_workflow: Path | None = None) -> None:
-        self.base = f"http://{LOOPBACK}:{port}"
-        self.timeout = timeout
+    """A private ComfyUI process, started and stopped by this bridge, and its API."""
+
+    def __init__(self, launch: ComfyLaunch) -> None:
+        self.base = f"http://{LOOPBACK}:{launch.port}"
+        self.timeout = launch.timeout
         self.lock = Lock()
-        state.mkdir(parents=True, exist_ok=True)
-        extra = state / "extra_model_paths.yaml"
-        sections = []
-        for index, model_root in enumerate(dict.fromkeys(model_roots)):
-            root = str(Path(model_root).resolve())
-            sections.append(
-                f"ai_lab_{index}:\n  base_path: {json.dumps(root)}\n"
-                "  checkpoints: .\n  diffusion_models: .\n"
-                "  text_encoders: .\n  vae: .\n  loras: .\n"
-                "  controlnet: .\n  clip_vision: .\n"
-                "  latent_upscale_models: .\n")
-        extra.write_text("".join(sections))
-        preset_nodes = Path(__file__).resolve().parents[1] / "comfyui_custom_nodes"
-        with extra.open("a") as output:
-            output.write(f"ai_lab_preset:\n  base_path: {json.dumps(str(preset_nodes))}\n"
-                         "  custom_nodes: .\n")
-        command = [python, comfyui, "--listen", ALL_INTERFACES, "--port", str(port),
-                   "--extra-model-paths-config", str(extra),
-                   "--output-directory", str(state / "output"),
-                   "--temp-directory", str(state / "temp")]
-        if vram_mode == "low":
-            command.append("--lowvram")
-        elif vram_mode == "cpu":
-            command.append("--cpu")
-        environment = os.environ.copy()
-        environment.pop("AI_LAB_COMFYUI_PRESET", None)
-        environment.pop("AI_LAB_COMFYUI_UI_PRESET", None)
-        if workflow is not None:
-            environment["AI_LAB_COMFYUI_PRESET"] = str(workflow.resolve())
-        if ui_workflow is not None:
-            environment["AI_LAB_COMFYUI_UI_PRESET"] = str(ui_workflow.resolve())
-        self.process = subprocess.Popen(command, env=environment)
+        launch.state.mkdir(parents=True, exist_ok=True)
+        extra = launch.state / "extra_model_paths.yaml"
+        extra.write_text(_model_paths(launch.model_roots))
+        command = [launch.python, launch.comfyui, "--listen", ALL_INTERFACES,
+                   "--port", str(launch.port), "--extra-model-paths-config", str(extra),
+                   "--output-directory", str(launch.state / "output"),
+                   "--temp-directory", str(launch.state / "temp"),
+                   *VRAM_FLAGS.get(launch.vram_mode, ())]
+        self.process = subprocess.Popen(command, env=_environment(launch))
         self._wait_ready()
 
     def close(self) -> None:
@@ -77,7 +87,7 @@ class Backend:
             self.process.wait(timeout=5)
 
     def _wait_ready(self) -> None:
-        deadline = time.monotonic() + 180
+        deadline = time.monotonic() + START_LIMIT_S
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 raise RuntimeError("ComfyUI exited during startup")
@@ -89,6 +99,7 @@ class Backend:
         raise TimeoutError("ComfyUI did not become ready")
 
     def request(self, method: str, path: str, payload=None) -> dict | bytes:
+        """One call to ComfyUI's API: JSON back as a dict, anything else as bytes."""
         data = None if payload is None else json.dumps(payload).encode()
         request = urllib.request.Request(self.base + path, data=data, method=method,
                                          headers={"Content-Type": "application/json"})
@@ -96,29 +107,35 @@ class Backend:
             body = response.read()
             return json.loads(body) if "json" in response.headers.get("Content-Type", "") else body
 
+    def json(self, method: str, path: str, payload=None) -> dict:
+        """One call to ComfyUI's API that must answer JSON."""
+        answer = self.request(method, path, payload)
+        if not isinstance(answer, dict):
+            raise RuntimeError(f"ComfyUI answered {path} with something other than JSON")
+        return answer
+
     def generate(self, payload: dict) -> dict:
+        """Run the request's workflow (with its input image, if any) and return the images."""
         with self.lock:
             workflow = copy.deepcopy(payload["workflow"])
             image = payload.get("image_base64")
             if image:
                 name = self._upload(base64.b64decode(image))
-                self._replace(workflow, "__AI_LAB_INPUT__", name)
-            accepted = self.request("POST", "/prompt", {"prompt": workflow})
-            prompt_id = accepted["prompt_id"]
+                replace_marker(workflow, "__AI_LAB_INPUT__", name)
+            prompt_id = self.json("POST", "/prompt", {"prompt": workflow})["prompt_id"]
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
-                history = self.request("GET", f"/history/{prompt_id}")
+                history = self.json("GET", f"/history/{prompt_id}")
                 if prompt_id in history:
                     return self._outputs(history[prompt_id])
-                time.sleep(.25)
+                time.sleep(HISTORY_POLL_S)
             self.interrupt()
             raise TimeoutError("ComfyUI job timed out")
 
     def interrupt(self) -> None:
-        try:
+        """Stop the job ComfyUI is running; nothing if it cannot be reached."""
+        with contextlib.suppress(Exception):
             self.request("POST", "/interrupt", {})
-        except Exception:
-            pass
 
     def _upload(self, image: bytes) -> str:
         boundary = "ai-lab-comfyui"
@@ -131,80 +148,99 @@ class Backend:
         with urllib.request.urlopen(request, timeout=30) as response:
             return json.loads(response.read())["name"]
 
-    @staticmethod
-    def _replace(value, wanted, replacement) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if item == wanted:
-                    value[key] = replacement
-                else:
-                    Backend._replace(item, wanted, replacement)
-        elif isinstance(value, list):
-            for index, item in enumerate(value):
-                if item == wanted:
-                    value[index] = replacement
-                else:
-                    Backend._replace(item, wanted, replacement)
-
     def _outputs(self, history: dict) -> dict:
-        images = []
-        for output in history.get("outputs", {}).values():
-            for item in output.get("images", []):
-                query = urllib.parse.urlencode({key: item[key] for key in
-                                                ("filename", "subfolder", "type")
-                                                if key in item})
-                request = urllib.request.Request(self.base + "/view?" + query)
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    images.append({"b64_json": base64.b64encode(response.read()).decode(),
-                                   "mime_type": response.headers.get_content_type()})
+        """Every image the finished job saved, read back from ComfyUI."""
+        images = [self._image(item) for output in history.get("outputs", {}).values()
+                  for item in output.get("images", [])]
         if not images:
             raise RuntimeError("ComfyUI completed without an image output")
         return {"data": images}
 
+    def _image(self, item: dict) -> dict:
+        """One saved image, base64-encoded, with its type."""
+        wanted = {key: item[key] for key in ("filename", "subfolder", "type") if key in item}
+        request = urllib.request.Request(f"{self.base}/view?{urllib.parse.urlencode(wanted)}")
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return {"b64_json": base64.b64encode(response.read()).decode(),
+                    "mime_type": response.headers.get_content_type()}
 
-class Handler(BaseHTTPRequestHandler):
+
+def replace_marker(value, wanted, replacement) -> None:
+    """Replace every `wanted` value inside a workflow (nested dicts and lists), in place."""
+    items = (value.items() if isinstance(value, dict)
+             else enumerate(value) if isinstance(value, list) else ())
+    for key, item in list(items):
+        if item == wanted:
+            value[key] = replacement
+        else:
+            replace_marker(item, wanted, replacement)
+
+
+def _model_paths(model_roots: list[str]) -> str:
+    """ComfyUI's extra model paths: every model root, then AI-Lab's preset node."""
+    sections = []
+    for index, model_root in enumerate(dict.fromkeys(model_roots)):
+        root = str(Path(model_root).resolve())
+        sections.append(
+            f"ai_lab_{index}:\n  base_path: {json.dumps(root)}\n"
+            "  checkpoints: .\n  diffusion_models: .\n"
+            "  text_encoders: .\n  vae: .\n  loras: .\n"
+            "  controlnet: .\n  clip_vision: .\n"
+            "  latent_upscale_models: .\n")
+    preset_nodes = Path(__file__).resolve().parents[1] / "comfyui_custom_nodes"
+    sections.append(f"ai_lab_preset:\n  base_path: {json.dumps(str(preset_nodes))}\n"
+                    "  custom_nodes: .\n")
+    return "".join(sections)
+
+
+def _environment(launch: ComfyLaunch) -> dict[str, str]:
+    """This process's environment, with only this launch's presets named."""
+    environment = os.environ.copy()
+    environment.pop("AI_LAB_COMFYUI_PRESET", None)
+    environment.pop("AI_LAB_COMFYUI_UI_PRESET", None)
+    if launch.workflow is not None:
+        environment["AI_LAB_COMFYUI_PRESET"] = str(launch.workflow.resolve())
+    if launch.ui_workflow is not None:
+        environment["AI_LAB_COMFYUI_UI_PRESET"] = str(launch.ui_workflow.resolve())
+    return environment
+
+
+class Handler(JsonReplies):
+    """AI-Lab's image requests and the cancel button, answered through ComfyUI."""
+
     backend: Backend
     model_name = ""
 
-    def do_GET(self):
-        if self.path == "/health":
-            self._json(200, {"status": "ok"})
-        elif self.path == "/v1/models":
-            self._json(200, {"object": "list", "data": [{"id": self.model_name,
-                                                            "object": "model",
-                                                            "owned_by": "comfyui"}]})
-        else:
-            self._json(404, {"error": {"message": "not found"}})
+    def _listing(self) -> dict | None:
+        if self.path != "/v1/models":
+            return None
+        return {"object": "list", "data": [{"id": self.model_name, "object": "model",
+                                            "owned_by": "comfyui"}]}
 
-    def do_POST(self):
+    def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
+        """Generate or edit an image, or cancel the job running now."""
         try:
             if self.path == "/api/jobs/current/cancel":
                 self.backend.interrupt()
                 self._json(200, {"ok": True})
                 return
             if self.path not in ("/v1/images/generations", "/v1/images/edits"):
-                self._json(404, {"error": {"message": "not found"}})
+                self._not_found()
                 return
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
             self._json(200, self.backend.generate(payload))
         except Exception as error:
             self._json(400, {"error": {"message": str(error),
-                                        "type": error.__class__.__name__}})
+                                       "type": error.__class__.__name__}})
 
-    def _json(self, status, payload):
-        body = json.dumps(payload).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - the base class's name
+        """One line per request on standard output, where the manager reads the log."""
         print(format % args, flush=True)
 
 
 def main() -> None:
+    """Start the private ComfyUI for the model named on the command line, and answer."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--comfyui", required=True)
     parser.add_argument("--model-root", required=True)
@@ -217,26 +253,24 @@ def main() -> None:
     memory.add_argument("--lowvram", action="store_true")
     memory.add_argument("--cpu", action="store_true")
     args = parser.parse_args()
-    state = Path(tempfile.gettempdir()) / f"ai-lab-comfyui-{args.port}"
-    vram_mode = "low" if args.lowvram else "cpu" if args.cpu else "normal"
     # Each bridge gets its own private ComfyUI port.  A fixed port left a
     # previous model's child process answering the next model after a switch.
-    backend_port = args.port + 10_000
-    Handler.backend = Backend(__import__("sys").executable, args.comfyui,
-                              [args.model_root, *args.extra_model_root], state,
-                              backend_port,
-                              vram_mode=vram_mode, workflow=args.workflow,
-                              ui_workflow=for_model(args.name))
-    atexit.register(Handler.backend.close)
+    backend = Backend(ComfyLaunch(
+        sys.executable, args.comfyui, [args.model_root, *args.extra_model_root],
+        Path(tempfile.gettempdir()) / f"ai-lab-comfyui-{args.port}",
+        args.port + PRIVATE_PORT_OFFSET,
+        vram_mode="low" if args.lowvram else "cpu" if args.cpu else "normal",
+        workflow=args.workflow, ui_workflow=for_model(args.name)))
+    atexit.register(backend.close)
 
     def stop(_signum, _frame):
-        Handler.backend.close()
+        backend.close()
         raise SystemExit(0)
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    Handler.model_name = args.name
-    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    handler = type("BoundHandler", (Handler,), {"backend": backend, "model_name": args.name})
+    ThreadingHTTPServer((args.host, args.port), handler).serve_forever()
 
 
 if __name__ == "__main__":

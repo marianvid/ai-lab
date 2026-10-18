@@ -81,30 +81,19 @@ class AdjustRequests:
         self.defaults = defaults
 
     async def __call__(self, scope, receive, send):
+        """Pass the request on, its JSON body rewritten by `adjust` when it has one."""
         if scope.get("type") != "http" or scope.get("method") != "POST":
             return await self.app(scope, receive, send)
         headers = dict(scope.get("headers") or [])
         if b"json" not in headers.get(b"content-type", b""):
             return await self.app(scope, receive, send)
-        chunks = []
-        while True:
-            message = await receive()
-            if message["type"] != "http.request":
-                return await self.app(scope, receive, send)
-            chunks.append(message.get("body", b""))
-            if not message.get("more_body"):
-                break
-        raw = b"".join(chunks)
-        try:
-            parsed = json.loads(raw)
-        except ValueError:
-            parsed = None
-        if isinstance(parsed, dict):
-            raw = json.dumps(adjust(parsed, self.model, self.defaults)).encode()
+        raw = await _whole_body(receive)
+        if raw is None:
+            return await self.app(scope, receive, send)
+        raw = self._rewritten(raw)
         replaced = [(name, value) for name, value in scope.get("headers") or []
                     if name.lower() != b"content-length"]
         replaced.append((b"content-length", str(len(raw)).encode()))
-        scope = dict(scope, headers=replaced)
         sent = False
 
         async def replay():
@@ -114,10 +103,33 @@ class AdjustRequests:
                 return {"type": "http.request", "body": raw, "more_body": False}
             return await receive()
 
-        return await self.app(scope, replay, send)
+        return await self.app(dict(scope, headers=replaced), replay, send)
+
+    def _rewritten(self, raw: bytes) -> bytes:
+        """The body with the model and defaults applied; unchanged if it is not an object."""
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return raw
+        if not isinstance(parsed, dict):
+            return raw
+        return json.dumps(adjust(parsed, self.model, self.defaults)).encode()
+
+
+async def _whole_body(receive) -> bytes | None:
+    """Every chunk of the request body; None if the client went away first."""
+    chunks = []
+    while True:
+        message = await receive()
+        if message["type"] != "http.request":
+            return None
+        chunks.append(message.get("body", b""))
+        if not message.get("more_body"):
+            return b"".join(chunks)
 
 
 def main() -> None:
+    """Add the request rewriting to mlx-vlm's server, then run it with this command line."""
     defaults, rest = split_arguments(sys.argv[1:])
     model = model_of(rest)
     import mlx_vlm.server as server

@@ -7,26 +7,25 @@ opening the page costs no second copy of the model on the card.
 """
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 from ai_lab.media.http_host import serve
+from ai_lab.music.hosting import PORT, UI_PORT, parse
 from ai_lab.music.stableaudio3_backend import StableAudio3Backend
 from ai_lab.network import ALL_INTERFACES
 
 
+# Room for the base64 source recordings (two WAVs of up to 25 MiB).
+MAX_BODY_BYTES = 72 * 1024 * 1024
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--steps", type=int, required=True)
-    parser.add_argument("--cfg-scale", type=float, required=True)
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--ui-port", type=int, required=True)
-    args = parser.parse_args()
+    """Load Stable Audio 3 and its own page, then answer music requests."""
+    args = parse(("--model-path", Path), ("--steps", int), ("--cfg-scale", float),
+                 PORT, UI_PORT)
     backend = StableAudio3Backend(args.model_path, args.steps, args.cfg_scale)
     launch_native_ui(backend, args.ui_port)
-    # Room for the base64 source recordings (two WAVs of up to 25 MiB).
-    serve(backend, args.port, max_body_bytes=72 * 1024 * 1024)
+    serve(backend, args.port, max_body_bytes=MAX_BODY_BYTES)
 
 
 def launch_native_ui(backend: StableAudio3Backend, port: int) -> None:

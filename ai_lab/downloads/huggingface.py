@@ -19,10 +19,9 @@ from dataclasses import dataclass, field
 
 from ..naming import (WEIGHT_SUFFIXES, base_name, is_companion, is_weight,
                       missing_shards)
+from ..public_services import address
 from .bundles import Bundle
 
-API = "https://huggingface.co/api"
-FILES = "https://huggingface.co/{repo}/resolve/main/{path}"
 USER_AGENT = "AI-Lab/0.2"
 TIMEOUT = 20.0
 
@@ -49,7 +48,8 @@ class RemoteFile:
     sha256: str = ""
 
     def url(self, repo: str) -> str:
-        return FILES.format(repo=self.repo or repo,
+        """Where to download this file from; `repo` is the set's repository."""
+        return address("huggingface_file").format(repo=self.repo or repo,
                             path=urllib.parse.quote(self.path))
 
 
@@ -70,9 +70,11 @@ class RemoteSet:
 
     @property
     def size_bytes(self) -> int:
+        """All the set's files together."""
         return sum(item.size_bytes for item in self.files)
 
     def json(self) -> dict:
+        """The set as the download page shows it."""
         payload = {"repo": self.repo, "name": self.name, "format": self.format,
                    "size_bytes": self.size_bytes, "complete": self.complete,
                    "missing": list(self.missing),
@@ -88,15 +90,18 @@ class RemoteSet:
 
 
 class HuggingFaceClient:
+    """Searching Hugging Face and listing a repository's files, as JSON over HTTPS."""
+
     def __init__(self, opener=None) -> None:
         self._open = opener or self._fetch
 
     def search(self, query: str, limit: int = 20) -> list[dict]:
+        """The most downloaded repositories matching `query`, with their formats."""
         if not query.strip():
             return []
         params = urllib.parse.urlencode(
             {"search": query, "limit": limit, "sort": "downloads", "direction": -1})
-        payload = self._open(f"{API}/models?{params}")
+        payload = self._open(f"{address('huggingface_api')}/models?{params}")
         return [{"repo": item.get("modelId") or item.get("id", ""),
                  "downloads": item.get("downloads", 0),
                  "likes": item.get("likes", 0),
@@ -105,8 +110,10 @@ class HuggingFaceClient:
                 for item in payload]
 
     def files(self, repo: str) -> list[RemoteFile]:
+        """Every file in a repository, with its size and, for large ones, its SHA-256."""
         quoted = urllib.parse.quote(repo)
-        payload = self._open(f"{API}/models/{quoted}/tree/main?recursive=true")
+        payload = self._open(
+            f"{address('huggingface_api')}/models/{quoted}/tree/main?recursive=true")
         files = []
         for item in payload:
             if item.get("type") != "file":
@@ -173,33 +180,41 @@ def group(repo: str, files: list[RemoteFile]) -> list[RemoteSet]:
     for item in files:
         directory = item.path.rsplit("/", 1)[0] if "/" in item.path else ""
         by_directory.setdefault(directory, []).append(item)
-
     sets: list[RemoteSet] = []
     for directory, entries in sorted(by_directory.items()):
-        weights = [item for item in entries if is_weight(item.path.rsplit("/", 1)[-1])]
-        companions = [item for item in entries
-                      if is_companion(item.path.rsplit("/", 1)[-1])]
-        groups: dict[str, list[RemoteFile]] = {}
-        for item in weights:
-            groups.setdefault(base_name(item.path.rsplit("/", 1)[-1]), []).append(item)
-        for base, shards in sorted(groups.items()):
-            names = [item.path.rsplit("/", 1)[-1] for item in shards]
-            complete, missing = missing_shards(names)
-            lower = names[0].lower()
-            model_format = next(
-                value for suffix, value in WEIGHT_SUFFIXES.items()
-                if lower.endswith(suffix))
-            name = f"{directory}/{base}" if directory else base
-            if model_format == "paddleocr" and base == "inference":
-                name = repo.rsplit("/", 1)[-1]
-            sets.append(RemoteSet(
-                repo=repo,
-                name=name,
-                format=model_format,
-                files=tuple(sorted(shards + companions, key=lambda item: item.path)),
-                complete=complete, missing=missing,
-            ))
+        sets += _directory_sets(repo, directory, entries)
     return sets
+
+
+def _file_name(item: RemoteFile) -> str:
+    return item.path.rsplit("/", 1)[-1]
+
+
+def _directory_sets(repo: str, directory: str, entries: list[RemoteFile]) -> list[RemoteSet]:
+    """The models in one directory: weights grouped by base name, with the companions."""
+    companions = [item for item in entries if is_companion(_file_name(item))]
+    groups: dict[str, list[RemoteFile]] = {}
+    for item in entries:
+        if is_weight(_file_name(item)):
+            groups.setdefault(base_name(_file_name(item)), []).append(item)
+    return [_one_set(repo, directory, base, shards, companions)
+            for base, shards in sorted(groups.items())]
+
+
+def _one_set(repo: str, directory: str, base: str, shards: list[RemoteFile],
+             companions: list[RemoteFile]) -> RemoteSet:
+    """One model: its weight shards (named after `base`) and the companions beside them."""
+    names = [_file_name(item) for item in shards]
+    complete, missing = missing_shards(names)
+    lower = names[0].lower()
+    model_format = next(value for suffix, value in WEIGHT_SUFFIXES.items()
+                        if lower.endswith(suffix))
+    name = f"{directory}/{base}" if directory else base
+    if model_format == "paddleocr" and base == "inference":
+        name = repo.rsplit("/", 1)[-1]
+    return RemoteSet(repo=repo, name=name, format=model_format,
+                     files=tuple(sorted(shards + companions, key=lambda item: item.path)),
+                     complete=complete, missing=missing)
 
 
 def bundle_sets(bundles: list[Bundle],

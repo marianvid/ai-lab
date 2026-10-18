@@ -59,6 +59,8 @@ class GatewayCounters:
 
 
 class GatewayStats:
+    """What the Gateway page shows, read from the gateway, its scheduler and its counters."""
+
     def __init__(self, gateway):
         self.gateway = gateway
         self.operations = gateway.operations
@@ -88,73 +90,89 @@ class GatewayStats:
         # `_adopt_what_is_there` clears the flag, so this costs the expensive
         # read once after a restart rather than on every refresh.
         self.gateway._adopt_what_is_there()
-        counters = self.counters
         state = self.scheduler.state()
-        waiting = state["waiting"]
+        return {**self._card_part(state), **self._queue_part(state["waiting"]),
+                # Which shapes of request each model answers. Configuration only
+                # — an entry's engine and what that engine serves — so the page
+                # can say it without the expensive question.
+                "shapes": self._shapes_offered(),
+                # What the machine has room for, pool by pool. The same answer
+                # an admission decision would use, so the page cannot disagree
+                # with the thing that says no. One accelerator reading gives
+                # this and the temperature both.
+                **self._memory_and_heat(),
+                **self._counters_part()}
+
+    def _card_part(self, state: dict) -> dict:
+        """What is loaded and what it is doing.
+
+        `loaded` is a list, always, even while the scheduler holds exactly one.
+        What is on the machine is a set — one model today, more when the budget
+        allows it — and a report shaped as a single name would have to change
+        shape later, taking every reader with it. The engine is beside each
+        name because one tells you what to send and the other tells you what
+        will answer, and the second decides which request shapes work.
+        """
         return {
-            # A list, always, even while the scheduler still holds exactly one.
-            # What is on the machine is a set — one model today, more when the
-            # budget allows it — and a report shaped as a single name would
-            # have to change shape later, taking every reader with it. The
-            # engine is beside each name because one tells you what to send and
-            # the other tells you what will answer, and the second decides
-            # which request shapes work.
-            "loaded": [{
-                "instance_id": item["shape"].instance_id,
+            "loaded": [self._loaded_row(item) for item in state["loaded"]],
+            "busy": bool(state["in_flight"] or state["waiting"] or state["switching"]),
+            "holder": self.gateway.busy(),
+            "in_flight": state["in_flight"],
+            "switching": state["switching"],
+        }
+
+    def _loaded_row(self, item: dict) -> dict:
+        """One loaded model: its settings, how busy it is, and its own rates.
+
+        Rates are per model, because neither figure means anything averaged
+        across two: a 3B and a 35B differ by an order of magnitude on the
+        first token, and requests per minute answers "which of these is
+        carrying the traffic", which is what decides what is worth keeping.
+        `waiting` counts the requests queued for this one specifically: with
+        several loaded, a request can wait because its own model is full
+        rather than because a swap is coming.
+        """
+        instance_id = item["shape"].instance_id
+        return {"instance_id": instance_id,
                 "engine": self.gateway._engine_name_of(item["shape"]),
                 "settings": item["shape"].as_dict(),
                 "in_flight": item["in_flight"],
                 "places": item["places"],
-                # How many are queued for this one specifically. With several
-                # loaded, a request can be waiting because its own model is
-                # full rather than because a swap is coming.
                 "waiting": item["waiting"],
-                # Per model, because neither figure means anything averaged
-                # across two: a 3B and a 35B differ by an order of magnitude on
-                # the first, and the second answers "which of these is carrying
-                # the traffic", which is what decides what is worth keeping.
-                "requests_per_minute": self._rate_of(item["shape"].instance_id),
-                "first_token_s": self._first_token_of(item["shape"].instance_id),
-            } for item in state["loaded"]],
-            "busy": bool(state["in_flight"] or waiting or state["switching"]),
-            "holder": self.gateway.busy(),
-            "in_flight": state["in_flight"],
-            "switching": state["switching"],
-            # What is waiting, and for how long. A request that has been in the
-            # queue for a minute is a fact worth seeing before it becomes a
-            # complaint.
-            "waiting": len(waiting),
-            "waiting_for": _waiting_summary(waiting),
-            "queue_runs": _runs(waiting),
-            "longest_wait_s": max((item["waiting_s"] for item in waiting),
-                                  default=0.0),
-            "max_waiting": self.scheduler.max_waiting,
-            "first_byte_s": self.first_byte_s,
-            "between_bytes_s": self.between_bytes_s,
-            # Which shapes of request each model answers. Configuration only
-            # — an entry's engine and what that engine serves — so the page can
-            # say it without the expensive question.
-            "shapes": self._shapes_offered(),
-            # What the machine has room for, pool by pool. The same answer an
-            # admission decision would use, so the page cannot disagree with
-            # the thing that says no. One accelerator reading gives this and
-            # the temperature both — 35 ms on the container, against a page
-            # that is otherwise 9.
-            **self._memory_and_heat(),
-            "requests_per_minute": self._rate(),
-            "switches": counters.switches,
-            "evictions": counters.evictions,
-            # Of the time this was working — answering or loading — how much
-            # went on loading. Against the wall clock instead, a machine that
-            # sits idle overnight reports a flattering number for a workflow
-            # that spends its life swapping.
-            "switching_share": self._switching_share(),
-            "average_wait_s": round(counters.waited_s / counters.requests, 2)
-                              if counters.requests else 0.0,
-            "last_error": counters.last_error,
-            "recent": list(reversed(counters.history[-10:])),
-        }
+                "requests_per_minute": self._rate_of(instance_id),
+                "first_token_s": self._first_token_of(instance_id)}
 
+    def _queue_part(self, waiting: list[dict]) -> dict:
+        """What is waiting, and for how long, and the gateway's limits.
+
+        A request that has been in the queue for a minute is a fact worth
+        seeing before it becomes a complaint.
+        """
+        return {"waiting": len(waiting),
+                "waiting_for": _waiting_summary(waiting),
+                "queue_runs": _runs(waiting),
+                "longest_wait_s": max((item["waiting_s"] for item in waiting), default=0.0),
+                "max_waiting": self.scheduler.max_waiting,
+                "first_byte_s": self.first_byte_s,
+                "between_bytes_s": self.between_bytes_s}
+
+    def _counters_part(self) -> dict:
+        """Requests, switches and waits since the manager started.
+
+        `switching_share` is of the time this was working — answering or
+        loading — how much went on loading. Against the wall clock instead, a
+        machine that sits idle overnight reports a flattering number for a
+        workflow that spends its life swapping.
+        """
+        counters = self.counters
+        return {"requests_per_minute": self._rate(),
+                "switches": counters.switches,
+                "evictions": counters.evictions,
+                "switching_share": self._switching_share(),
+                "average_wait_s": (round(counters.waited_s / counters.requests, 2)
+                                   if counters.requests else 0.0),
+                "last_error": counters.last_error,
+                "recent": list(reversed(counters.history[-10:]))}
 
     def _memory_and_heat(self) -> dict:
         """What the machine has room for, and how warm the card is.

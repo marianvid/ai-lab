@@ -13,6 +13,13 @@ from ai_lab import budget
 from ai_lab.types import AcceleratorSnapshot
 
 
+def pool_of(found: budget.Budget, name: str) -> budget.Pool:
+    """The named pool, which the test expects to be there."""
+    pool = found.pool(name)
+    assert pool is not None, name
+    return pool
+
+
 class FakeHost:
     def __init__(self, card=None, machine=(0.0, 0.0)):
         self._card = card
@@ -48,12 +55,12 @@ class ADedicatedCard(unittest.TestCase):
 
     def test_the_whole_card_is_for_models(self):
         # Nothing else on the machine wants it, so no reserve is taken.
-        card_pool = self.budget.pool(budget.CARD)
+        card_pool = pool_of(self.budget, budget.CARD)
         self.assertEqual(card_pool.reserve_mb, 0.0)
         self.assertEqual(card_pool.available_mb, 32623 - 29138)
 
     def test_the_machine_keeps_its_reserve(self):
-        machine = self.budget.pool(budget.MACHINE)
+        machine = pool_of(self.budget, budget.MACHINE)
         self.assertEqual(machine.free_mb, 49152 - 12000)
         self.assertEqual(machine.available_mb, 49152 - 12000 - 8192)
 
@@ -62,13 +69,13 @@ class ADedicatedCard(unittest.TestCase):
         # elsewhere and read as though there were room.
         tight = budget.of(FakeHost(card=card(), machine=(46000.0, 49152.0)),
                           reserve_mb=8192)
-        self.assertEqual(tight.pool(budget.MACHINE).available_mb, 0.0)
+        self.assertEqual(pool_of(tight, budget.MACHINE).available_mb, 0.0)
 
     def test_what_our_own_models_hold_is_separate_from_what_is_used(self):
         # On a card they are the same thing; on the machine they are not,
         # because the rest of the machine is using it too.
-        self.assertEqual(self.budget.pool(budget.CARD).used_by_models_mb, 29138)
-        self.assertEqual(self.budget.pool(budget.MACHINE).used_by_models_mb, 0.0)
+        self.assertEqual(pool_of(self.budget, budget.CARD).used_by_models_mb, 29138)
+        self.assertEqual(pool_of(self.budget, budget.MACHINE).used_by_models_mb, 0.0)
 
 
 class UnifiedMemory(unittest.TestCase):
@@ -147,9 +154,9 @@ class TwoDifferentQuestions(unittest.TestCase):
     def test_what_models_are_allowed_moves_only_with_the_setting(self):
         # The settings screen shows this against the total, so the reader is
         # not left doing a subtraction. It must not move when a model loads.
-        machine = self.budget.pool(budget.MACHINE)
+        machine = pool_of(self.budget, budget.MACHINE)
         self.assertEqual(machine.for_models_mb, 49152 - 8192)
-        card = self.budget.pool(budget.CARD)
+        card = pool_of(self.budget, budget.CARD)
         self.assertEqual(card.for_models_mb, 32623,
                          "a pool with no reserve offers all of itself")
 
@@ -157,17 +164,17 @@ class TwoDifferentQuestions(unittest.TestCase):
         # Not a negative amount, which would print as "-4000 / 8000 MB".
         tiny = budget.of(FakeHost(card=card(), machine=(1000.0, 8000.0)),
                          reserve_mb=12000)
-        self.assertEqual(tiny.pool(budget.MACHINE).for_models_mb, 0.0)
+        self.assertEqual(pool_of(tiny, budget.MACHINE).for_models_mb, 0.0)
 
     def test_how_big_a_pool_is_does_not_move_when_a_model_loads(self):
         # The settings screen shows this and it stays put; what a model could
         # take is the other figure and it does not.
-        pool = self.budget.pool(budget.CARD)
+        pool = pool_of(self.budget, budget.CARD)
         self.assertEqual(pool.total_mb, 32623, "the whole card, whatever holds it")
         self.assertEqual(pool.available_mb, 32623 - 28946)
 
     def test_the_reserve_comes_off_what_is_free(self):
-        machine = self.budget.pool(budget.MACHINE)
+        machine = pool_of(self.budget, budget.MACHINE)
         self.assertEqual(machine.total_mb, 49152)
         self.assertEqual(machine.available_mb, 49152 - 5157 - 8192)
 

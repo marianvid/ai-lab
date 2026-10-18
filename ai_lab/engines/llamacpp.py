@@ -12,11 +12,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..types import Format, ModelSet, Task
 from ..hosts.command import which
-from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
-from .probe import http_ok
 from ..network import ALL_INTERFACES
+from ..types import Format, ModelSet, Task
+from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
+from .isolated import MIB
+from .probe import http_ok
+from .text_launch import MIN_P, TEMPERATURE, TOP_K, TOP_P, sampling_argv
 
 # Two kinds of setting, and mixing them would mislead. The "memory" group
 # decides how much is reserved on the accelerator when the model starts, so
@@ -64,13 +66,8 @@ PARAMS = (
                    "suffers far less."),
 
     # -- generation: defaults a client can override ------------------------
-    ParamSpec("temperature", "Temperature", "float", 0.8, minimum=0.0, maximum=2.0,
-              group="generation",
-              help="Higher is more varied, lower is more predictable."),
-    ParamSpec("top_p", "Top-p", "float", 0.95, minimum=0.0, maximum=1.0,
-              group="generation",
-              help="Consider only the most likely tokens adding up to this "
-                   "probability. 1.0 disables it."),
+    TEMPERATURE,
+    TOP_P,
     # Three separate controls, and the difference matters. `--reasoning off`
     # is the switch. A budget of 0 does something else entirely: it closes the
     # thinking block straight away, and the model carries on writing the same
@@ -89,12 +86,8 @@ PARAMS = (
               help="A ceiling on thinking tokens. -1 is no limit. Note that 0 "
                    "does not turn thinking off — it cuts the thinking short "
                    "and the rest arrives as the answer. Use Thinking for that."),
-    ParamSpec("top_k", "Top-k", "int", 40, minimum=0, maximum=1000,
-              group="generation",
-              help="Consider only this many candidates. 0 disables it."),
-    ParamSpec("min_p", "Min-p", "float", 0.05, minimum=0.0, maximum=1.0,
-              group="generation",
-              help="Drop candidates below this share of the best one."),
+    TOP_K,
+    MIN_P,
     ParamSpec("repeat_penalty", "Repeat penalty", "float", 1.0,
               minimum=0.0, maximum=2.0, group="generation",
               help="Discourage repeating the same tokens. 1.0 disables it."),
@@ -147,7 +140,29 @@ def _layers(setting: int) -> str | None:
     return ALL_LAYERS if setting < 0 else str(setting)
 
 
+# Optional flags: the setting, the value that means "leave the flag off", the flag.
+_OPTIONAL_FLAGS = (("reasoning", "auto", "--reasoning"),
+                   ("reasoning_effort", "default", "--reasoning-effort"),
+                   ("reasoning_format", "auto", "--reasoning-format"))
+
+
+def _optional_argv(settings: dict) -> list[str]:
+    """The flags given only when a setting is not left at its default."""
+    argv = []
+    layers = _layers(settings["gpu_layers"])
+    if layers is not None:
+        argv += ["--n-gpu-layers", layers]
+    for key, unset, flag in _OPTIONAL_FLAGS:
+        if settings[key] != unset:
+            argv += [flag, settings[key]]
+    if settings["threads"] > 0:
+        argv += ["--threads", str(settings["threads"])]
+    return argv
+
+
 class LlamaCppEngine:
+    """llama-server, for GGUF models, with its own chat page when the build has one."""
+
     id = "llamacpp"
     display_name = "llama.cpp"
 
@@ -172,15 +187,19 @@ class LlamaCppEngine:
         return None
 
     def formats(self) -> frozenset[Format]:
+        """GGUF files; a sharded model by its first shard."""
         return frozenset({Format.GGUF})
 
     def tasks(self) -> frozenset[Task]:
+        """Text generation."""
         return frozenset({Task.TEXT_GENERATION})
 
     def params(self, task: Task = Task.TEXT_GENERATION) -> tuple[ParamSpec, ...]:
+        """llama.cpp's settings, for text generation."""
         return PARAMS if task is Task.TEXT_GENERATION else ()
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
+        """llama-server for this model, with its settings and its chat page if built."""
         if model.format is not Format.GGUF:
             raise ValueError(f"llama.cpp cannot load {model.format.value} models")
         if not model.complete:
@@ -201,24 +220,11 @@ class LlamaCppEngine:
             "--flash-attn", "on" if settings["flash_attention"] else "off",
             "--batch-size", str(settings["batch_size"]),
             "--ubatch-size", str(settings["ubatch_size"]),
-            "--temp", str(settings["temperature"]),
-            "--top-p", str(settings["top_p"]),
-            "--top-k", str(settings["top_k"]),
-            "--min-p", str(settings["min_p"]),
+            *sampling_argv(settings),
             "--repeat-penalty", str(settings["repeat_penalty"]),
             "--reasoning-budget", str(settings["reasoning_budget"]),
+            *_optional_argv(settings),
         ]
-        layers = _layers(settings["gpu_layers"])
-        if layers is not None:
-            argv += ["--n-gpu-layers", layers]
-        if settings["reasoning"] != "auto":
-            argv += ["--reasoning", settings["reasoning"]]
-        if settings["reasoning_effort"] != "default":
-            argv += ["--reasoning-effort", settings["reasoning_effort"]]
-        if settings["threads"] > 0:
-            argv += ["--threads", str(settings["threads"])]
-        if settings["reasoning_format"] != "auto":
-            argv += ["--reasoning-format", settings["reasoning_format"]]
         ui = self.web_ui()
         if ui:
             argv += ["--path", ui]
@@ -227,6 +233,7 @@ class LlamaCppEngine:
                           splits_across_cpu=_splits(settings["gpu_layers"]))
 
     def ready(self, port: int) -> bool:
+        """True once llama-server's health page says the model is loaded."""
         return http_ok(port, "/health")
 
     # What to change when the weights will not fit, and what it has to say
@@ -257,7 +264,7 @@ class LlamaCppEngine:
         """
         if _splits(int(params.get("gpu_layers", ALL_ON_CARD))):
             return 0.0
-        return max(0.0, getattr(model, "size_bytes", 0) / (1024 * 1024))
+        return max(0.0, getattr(model, "size_bytes", 0) / MIB)
 
     def concurrency(self, params: dict) -> int:
         """Slots. One by default, and one is a real answer here.

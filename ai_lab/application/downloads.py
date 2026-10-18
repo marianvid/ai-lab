@@ -13,6 +13,8 @@ from ..engines.registry import Registry
 
 
 class ModelDownloadService:
+    """Finding models to download, and where on this machine each would go."""
+
     def __init__(self, store: ConfigStore, downloads: DownloadManager,
                  huggingface: HuggingFaceClient, host: Host,
                  engines: Registry) -> None:
@@ -119,12 +121,7 @@ class ModelDownloadService:
         same kind of file and are kept apart. A set that says which job it is
         for picks the matching one instead of whichever comes first.
         """
-        candidates = [item for item in config.repositories
-                      if item.format == format_name
-                      and item.root_id == root_id]
-        if task:
-            preferred = [item for item in candidates if item.task == task]
-            candidates = preferred or candidates
+        candidates = _candidates(config, format_name, root_id, task)
         if not candidates:
             raise ValueError(
                 f"No repository is configured for {format_name} models. "
@@ -132,7 +129,7 @@ class ModelDownloadService:
         errors = []
         for item in candidates:
             try:
-                return self._writable_in_root(item, config.model_root(root_id))
+                return self.writable_in_root(item, config.model_root(root_id))
             except ValueError as error:
                 errors.append(str(error))
         raise ValueError(errors[0])
@@ -156,7 +153,7 @@ class ModelDownloadService:
                 f"Give it ownership of {path}.")
         return repository
 
-    def _writable_in_root(self, repository, model_root):
+    def writable_in_root(self, repository, model_root):
         """Create a derived repository directory inside a valid model root.
 
         Format/task directories are consequences of the configured root, not
@@ -195,7 +192,19 @@ class ModelDownloadService:
         return self._writable(repository)
 
     def transfers(self) -> list[dict]:
+        """Every download, running or recent."""
         return self.downloads.list()
 
     def cancel_download(self, transfer_id: str) -> None:
+        """Stop one download; what it fetched so far is discarded."""
         self.downloads.cancel(transfer_id)
+
+
+def _candidates(config, format_name: str, root_id: str, task: str) -> list:
+    """The repositories of this format in this storage tier, those for `task` first."""
+    candidates = [item for item in config.repositories
+                  if item.format == format_name and item.root_id == root_id]
+    if task:
+        preferred = [item for item in candidates if item.task == task]
+        candidates = preferred or candidates
+    return candidates

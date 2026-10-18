@@ -3,7 +3,8 @@
 
 Executable by a runtime-specific Python environment, the same way
 `ai_lab/audio/server.py` is: PaddleOCR stays isolated from the manager, and
-only this small HTTP contract is shared with it.
+only this small HTTP contract is shared with it (`media.http_host`'s
+`UploadHost`).
 
 The response is AI-Lab's own stable OCR schema, not PaddleOCR's native
 output shape — every client depends on this shape, not on
@@ -12,23 +13,23 @@ whatever PaddleOCR happens to return this version.
 
 from __future__ import annotations
 
-import sys
-
 import argparse
 import json
+import sys
 import tempfile
-from email import policy
-from email.parser import BytesParser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+
 # This file is launched directly by the runtime's own Python environment.
 # Give it access to the small shared modules beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from ai_lab.media.http_host import Form, UploadHost, form_text, serve_uploads, uploaded_file
 from ai_lab.network import LOOPBACK
 
 
 class PaddleOcrBackend:
+    """Text in an image, with PaddleOCR's detection and recognition models."""
+
     owner = "paddleocr"
     path = "/v1/images/ocr"
 
@@ -71,31 +72,19 @@ class PaddleOcrBackend:
             "packages whose names end in _det and _rec")
 
     def recognize(self, image_path: str, language: str | None = None) -> dict:
+        """The image's text, line by line with confidence and outline, in AI-Lab's schema."""
         with self.lock:
             result = list(self.pipeline.predict(image_path))
-        lines = []
+        lines: list[dict] = []
         orientation = 0
         for page in result:
-            payload = getattr(page, "json", page)
-            if callable(payload):
-                payload = payload()
-            if isinstance(payload, str):
-                payload = json.loads(payload)
-            if isinstance(payload, dict) and isinstance(payload.get("res"), dict):
-                payload = payload["res"]
-            if not isinstance(payload, dict):
+            payload = _page_payload(page)
+            if payload is None:
                 continue
-            texts = payload.get("rec_texts", [])
-            scores = payload.get("rec_scores", [])
-            polygons = payload.get("rec_polys") or payload.get("dt_polys") or []
-            for index, text in enumerate(texts):
-                polygon = polygons[index] if index < len(polygons) else []
-                score = scores[index] if index < len(scores) else 0.0
-                lines.append({"text": str(text), "confidence": float(score),
-                              "polygon": [[float(x), float(y)] for x, y in polygon]})
+            lines += _page_lines(payload)
             orientation = int(payload.get("doc_preprocessor_res", {}).get(
                 "angle", orientation) or orientation)
-        text = "\n".join(line["text"] for line in lines)
+        text = "\n".join(str(line["text"]) for line in lines)
         return {
             "text": text,
             "lines": lines,
@@ -104,72 +93,50 @@ class PaddleOcrBackend:
             "warnings": [] if lines else ["no text recognized"],
         }
 
-class Handler(BaseHTTPRequestHandler):
-    backend = None
-    model_name = ""
 
-    def do_GET(self):
-        if self.path == "/health":
-            self._json(200, {"status": "ok"})
-        elif self.path == "/v1/models":
-            self._json(200, {"object": "list", "data": [{
-                "id": self.model_name, "object": "model",
-                "owned_by": self.backend.owner
-            }]})
-        else:
-            self._json(404, {"error": {"message": "not found"}})
+def _page_payload(page) -> dict | None:
+    """One page of PaddleOCR's output as a dictionary, whichever form it came in."""
+    payload = getattr(page, "json", page)
+    if callable(payload):
+        payload = payload()
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    if isinstance(payload, dict) and isinstance(payload.get("res"), dict):
+        payload = payload["res"]
+    return payload if isinstance(payload, dict) else None
 
-    def do_POST(self):
-        if self.path != self.backend.path:
-            self._json(404, {"error": {"message": "not found"}})
-            return
-        try:
-            fields = self._multipart()
-            uploaded = fields.get("file")
-            if uploaded is None:
-                raise ValueError("the request must contain an image file")
-            filename, image = uploaded
-            suffix = Path(filename or "image.png").suffix or ".png"
-            language_part = fields.get("language")
-            language = (language_part[1].decode("utf-8")
-                        if language_part is not None else None)
-            with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
-                temporary.write(image)
-                temporary.flush()
-                result = self.backend.recognize(temporary.name, language)
-            self._json(200, result)
-        except Exception as error:
-            self._json(400, {"error": {"message": str(error),
-                                       "type": error.__class__.__name__}})
 
-    def log_message(self, format, *args):
-        print(f"{self.address_string()} {format % args}", flush=True)
+def _page_lines(payload: dict) -> list[dict]:
+    """The recognised lines of one page: text, confidence and polygon."""
+    texts = payload.get("rec_texts", [])
+    scores = payload.get("rec_scores", [])
+    polygons = payload.get("rec_polys") or payload.get("dt_polys") or []
+    lines = []
+    for index, text in enumerate(texts):
+        polygon = polygons[index] if index < len(polygons) else []
+        score = scores[index] if index < len(scores) else 0.0
+        lines.append({"text": str(text), "confidence": float(score),
+                      "polygon": [[float(x), float(y)] for x, y in polygon]})
+    return lines
 
-    def _multipart(self) -> dict[str, tuple[str | None, bytes]]:
-        length = int(self.headers.get("Content-Length", "0"))
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.lower().startswith("multipart/form-data"):
-            raise ValueError("expected a multipart/form-data request")
-        envelope = (f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()
-                    + self.rfile.read(length))
-        message = BytesParser(policy=policy.default).parsebytes(envelope)
-        fields = {}
-        for part in message.iter_parts():
-            name = part.get_param("name", header="content-disposition")
-            if name:
-                fields[name] = (part.get_filename(), part.get_payload(decode=True) or b"")
-        return fields
 
-    def _json(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+class OcrHost(UploadHost):
+    """Answers an uploaded image with the text PaddleOCR reads in it."""
+
+    backend: PaddleOcrBackend
+
+    def answer(self, fields: Form) -> dict:
+        """The image, saved to a temporary file and read."""
+        filename, image = uploaded_file(fields, "image")
+        suffix = Path(filename or "image.png").suffix or ".png"
+        with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
+            temporary.write(image)
+            temporary.flush()
+            return self.backend.recognize(temporary.name, form_text(fields, "language", None))
 
 
 def main() -> None:
+    """Load the OCR models named on the command line and answer on their port."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=("paddleocr",), required=True)
     parser.add_argument("--model", required=True)
@@ -179,10 +146,8 @@ def main() -> None:
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"),
                         default="fp32")
     args = parser.parse_args()
-    Handler.backend = PaddleOcrBackend(args.model, args.precision)
-    Handler.model_name = args.name
-    print(f"{args.backend} ready with {args.name} on {args.host}:{args.port}", flush=True)
-    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    serve_uploads(OcrHost, PaddleOcrBackend(args.model, args.precision), args.name,
+                  (args.host, args.port))
 
 
 if __name__ == "__main__":

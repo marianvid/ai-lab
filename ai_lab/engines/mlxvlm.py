@@ -22,13 +22,10 @@ batching"), up to the number set here.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from ..hosts.command import which
-from ..types import Format, ModelSet, Task
-from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
+from .base import ParamSpec
 from .probe import http_json
-from ..network import ALL_INTERFACES
+from .text_launch import SAMPLING, MlxTextEngine, flag_argv
 
 PARAMS = (
     # -- memory: decided when the model starts ------------------------------
@@ -56,19 +53,7 @@ PARAMS = (
     ParamSpec("max_tokens", "Longest answer", "int", 8192,
               minimum=1, maximum=1048576, group="generation",
               help="Tokens to produce when a request does not say."),
-    ParamSpec("temperature", "Temperature", "float", 0.8, minimum=0.0,
-              maximum=2.0, group="generation",
-              help="Higher is more varied, lower is more predictable."),
-    ParamSpec("top_p", "Top-p", "float", 0.95, minimum=0.0, maximum=1.0,
-              group="generation",
-              help="Consider only the most likely tokens adding up to this "
-                   "probability. 1.0 disables it."),
-    ParamSpec("top_k", "Top-k", "int", 40, minimum=0, maximum=1000,
-              group="generation",
-              help="Consider only this many candidates. 0 disables it."),
-    ParamSpec("min_p", "Min-p", "float", 0.05, minimum=0.0, maximum=1.0,
-              group="generation",
-              help="Drop candidates below this share of the best one."),
+    *SAMPLING,
     ParamSpec("reasoning", "Thinking", "choice", "auto",
               choices=("auto", "on", "off"), group="generation",
               help="Whether the model thinks before answering. mlx-vlm cannot "
@@ -82,63 +67,30 @@ PARAMS = (
 
 # The sampling settings the launcher fills into a request that leaves them out.
 REQUEST_DEFAULTS = ("temperature", "top_p", "top_k", "min_p")
-
-# Room on top of the weights, as for MLX LM: a floor, not a prediction.
-MARGIN_FRACTION = 0.10
-MARGIN_MIN_MB = 2048.0
-
-
-def default_launcher() -> str:
-    """Where AI-Lab's launcher for mlx-vlm sits in this checkout."""
-    return str(Path(__file__).resolve().parents[1] / "text" / "mlxvlm_server.py")
+# The settings mlx-vlm's server takes as they are, and its name for each.
+FLAGS = (("max_num_seqs", "--max-num-seqs"), ("prefill_step_size", "--prefill-step-size"),
+         ("vision_cache_size", "--vision-cache-size"), ("max_tokens", "--max-tokens"))
 
 
-class MlxVlmEngine:
+class MlxVlmEngine(MlxTextEngine):
+    """mlx-vlm's own server, behind AI-Lab's launcher (`text/mlxvlm_server.py`)."""
+
     id = "mlxvlm"
     display_name = "MLX VLM"
+    settings = PARAMS
+    launcher = "mlxvlm_server.py"
+    concurrency_setting = "max_num_seqs"
 
-    def __init__(self, binary: str | None = None,
-                 server: str | None = None) -> None:
-        self.binary = binary or which("python") or "python"
-        self.server = server or default_launcher()
-
-    def formats(self) -> frozenset[Format]:
-        return frozenset({Format.MLX})
-
-    def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.TEXT_GENERATION})
-
-    def params(self, task: Task = Task.TEXT_GENERATION) -> tuple[ParamSpec, ...]:
-        return PARAMS if task is Task.TEXT_GENERATION else ()
-
-    def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
-        if model.format is not Format.MLX:
-            raise ValueError(f"MLX VLM cannot load {model.format.value} models")
-        if model.task is not Task.TEXT_GENERATION:
-            raise ValueError(f"MLX VLM cannot perform {model.task.value}")
-        if not model.complete:
-            raise ValueError(f"{model.name} is missing {len(model.missing)} shard(s)")
-        settings = validate(PARAMS, params)
-        argv = [
-            self.binary, self.server,
-            "--model", model.entrypoint,
-            "--host", ALL_INTERFACES,
-            "--port", str(port),
-            "--max-num-seqs", str(settings["max_num_seqs"]),
-            "--prefill-step-size", str(settings["prefill_step_size"]),
-            "--vision-cache-size", str(settings["vision_cache_size"]),
-            "--max-tokens", str(settings["max_tokens"]),
-        ]
+    def _settings_argv(self, settings: dict) -> list[str]:
+        """These settings as the launcher's command-line options."""
+        argv = flag_argv(settings, FLAGS)
         if settings["max_kv_size"] > 0:
             argv += ["--max-kv-size", str(settings["max_kv_size"])]
         if settings["reasoning"] != "off":
             argv.append("--enable-thinking")
         for key in REQUEST_DEFAULTS:
             argv += ["--request-default", f"{key}={json.dumps(settings[key])}"]
-        # No chat page is offered: mlx-vlm serves an API.
-        return LaunchPlan(argv=argv, env={"PYTHONUNBUFFERED": "1",
-                                          "HF_HUB_OFFLINE": "1"},
-                          health_path="/health", web_ui=False)
+        return argv
 
     def ready(self, port: int) -> bool:
         """The health page names a loaded model.
@@ -148,17 +100,3 @@ class MlxVlmEngine:
         the name, not the answer, is what says the load finished.
         """
         return bool(http_json(port, "/health").get("loaded_model"))
-
-    def needs_mb(self, model: ModelSet, params: dict,
-                 card_total_mb: float) -> float:
-        """The weights on disk, plus a margin for the cache and the pictures."""
-        weights = max(0.0, model.size_bytes / (1024 * 1024))
-        return weights + max(MARGIN_MIN_MB, weights * MARGIN_FRACTION)
-
-    def concurrency(self, params: dict) -> int:
-        """Answers produced together — the number the manager lets in at once."""
-        return max(1, int(validate(PARAMS, params)["max_num_seqs"]))
-
-    def api_paths(self, task: Task = Task.TEXT_GENERATION) -> tuple[str, ...]:
-        """The OpenAI shape. Pictures travel inside it, as `image_url` parts."""
-        return OPENAI_PATHS if task is Task.TEXT_GENERATION else ()

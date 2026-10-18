@@ -66,6 +66,7 @@ def is_part(name: str) -> bool:
 
 
 def is_weight(name: str) -> bool:
+    """Whether a file name is model weights, by its suffix."""
     return any(name.lower().endswith(suffix) for suffix in WEIGHT_SUFFIXES)
 
 
@@ -91,10 +92,12 @@ def is_weight_for_format(name: str, repository_format: str) -> bool:
 
 
 def is_companion(name: str) -> bool:
+    """Whether a file travels with the weights (configuration, tokenizer and the like)."""
     return name in COMPANION_NAMES or name.startswith(COMPANION_PREFIXES)
 
 
 def stem(name: str) -> str:
+    """The file name without its weight suffix."""
     for suffix in WEIGHT_SUFFIXES:
         if name.lower().endswith(suffix):
             return name[: -len(suffix)]
@@ -122,16 +125,15 @@ def missing_shards(names: list[str]) -> tuple[bool, tuple[str, ...]]:
     without any manifest: five files that all say "of 00005" are complete,
     four are not.
     """
-    parsed = [split_shard(stem(name)) for name in names]
-    if not any(parsed):
+    shards = [shard for shard in (split_shard(stem(name)) for name in names) if shard]
+    if not shards:
         return True, ()
-    totals = {item[2] for item in parsed if item}
+    totals = {total for _, _, total in shards}
     if len(totals) != 1:
         return False, ("inconsistent shard numbering",)
     total = totals.pop()
-    present = {item[1] for item in parsed if item}
-    gaps = sorted(set(range(1, total + 1)) - present)
+    gaps = sorted(set(range(1, total + 1)) - {index for _, index, _ in shards})
     if not gaps:
         return True, ()
-    base = next(item[0] for item in parsed if item)
+    base = shards[0][0]
     return False, tuple(f"{base}-{index:05d}-of-{total:05d}" for index in gaps)

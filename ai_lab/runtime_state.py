@@ -9,6 +9,8 @@ from .types import Phase
 
 @dataclass(frozen=True, slots=True)
 class Step:
+    """One step of an operation: the phase reached, and when."""
+
     phase: Phase
     elapsed_ms: int
 
@@ -25,6 +27,7 @@ class Operation:
     error: str = ""
 
     def json(self) -> dict:
+        """The record as the page shows it."""
         return {
             "instance_id": self.instance_id,
             "kind": self.kind,

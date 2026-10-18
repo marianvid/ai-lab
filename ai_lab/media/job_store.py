@@ -10,7 +10,15 @@ from pathlib import Path
 FINAL = frozenset({"succeeded", "failed", "cancelled"})
 
 
+def record_failure(job: dict, cancelled: bool, error: BaseException) -> None:
+    """A job that did not succeed: cancelled by request, or failed with its error."""
+    job["status"] = "cancelled" if cancelled else "failed"
+    job["error"] = "cancelled" if cancelled else str(error)
+
+
 class JobStore:
+    """Jobs and their results as private files, each written in one atomic step."""
+
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.jobs_dir = self.root / "jobs"
@@ -28,17 +36,21 @@ class JobStore:
         os.replace(temporary, path)
 
     def save(self, job: dict) -> None:
+        """Write the job's record."""
         self._atomic(self.jobs_dir / f"{job['id']}.json",
                      json.dumps(job, separators=(",", ":")).encode())
 
     def result(self, job_id: str) -> dict:
+        """The finished job's result."""
         return json.loads((self.results_dir / f"{job_id}.json").read_text())
 
     def save_result(self, job_id: str, result: dict) -> None:
+        """Write the job's result."""
         self._atomic(self.results_dir / f"{job_id}.json",
                      json.dumps(result, separators=(",", ":")).encode())
 
     def recover(self) -> dict[str, dict]:
+        """Every saved job; unfinished ones marked failed, unreadable ones dropped."""
         jobs = {}
         for path in self.jobs_dir.glob("*.json"):
             try:
@@ -57,6 +69,7 @@ class JobStore:
         return jobs
 
     def expire(self, jobs: dict[str, dict], cutoff: float) -> None:
+        """Forget finished jobs last changed before `cutoff`, and their files."""
         for job_id, job in list(jobs.items()):
             if job["status"] in FINAL and job["updated_at"] < cutoff:
                 jobs.pop(job_id)

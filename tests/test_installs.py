@@ -12,14 +12,20 @@ index it came from was recorded nowhere.
 from __future__ import annotations
 
 import json
-import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from ai_lab.events import EventBus
-from ai_lab.installs import CURRENT, Installs, PackageInstall
+from ai_lab.installs import Installs
+from ai_lab.package_install import CURRENT, PackageInstall, PackageOptions
+
+
+def finish(install):
+    """Wait for the install started in the background."""
+    assert install._thread is not None
+    install._thread.join(timeout=10)
 
 
 def _environment(root: Path, version: str) -> Path:
@@ -145,9 +151,8 @@ class Removing(unittest.TestCase):
     def test_nothing_is_ever_removed_on_its_own(self):
         # The previous version is the way back. There is no rule anywhere that
         # decides it has stopped being needed.
-        self.install.install = lambda *a, **k: None      # not what is being tested
-        for item in (self.install.environments(), self.install.status()):
-            pass
+        self.install.environments()
+        self.install.status()
         self.assertTrue(self.old.exists(), "something tidied it away")
 
 
@@ -181,13 +186,13 @@ class Installing(unittest.TestCase):
                              lambda self, *a, **k: stream(*a, **k)),
                 patch.object(PackageInstall, "_verify",
                              lambda self, *a, **k: verify(*a, **k)),
-                patch("ai_lab.package_install._version_in", lambda path, package: lands))
+                patch("ai_lab.package_install.version_in", lambda path, package: lands))
 
     def _run(self, **how):
         one, two, three = self._pretend(**how)
         with one, two, three:
             self.install.install(how.get("lands", "0.27.1"))
-            self.install._thread.join(timeout=10)
+            finish(self.install)
         return self.install.status()
 
     def test_a_good_install_lands_beside_the_old_one_and_takes_over(self):
@@ -239,19 +244,19 @@ class Installing(unittest.TestCase):
 
         with patch.object(PackageInstall, "_stream", slow), \
              patch.object(PackageInstall, "_verify", lambda *a, **k: None), \
-             patch("ai_lab.package_install._version_in", lambda path, package: "0.27.1"):
+             patch("ai_lab.package_install.version_in", lambda path, package: "0.27.1"):
             self.install.install("0.27.1")
             self.assertTrue(started.wait(timeout=5), "the first never started")
             with self.assertRaises(ValueError):
                 self.install.install("0.27.1")
             holding.set()
-            self.install._thread.join(timeout=10)
+            finish(self.install)
         self.assertEqual(self.install.status()["state"], "done")
 
     def test_configured_minimum_versions_are_checked_before_activation(self):
         install = PackageInstall(
             "paddleocr", str(self.root), "paddleocr", EventBus(),
-            minimum_versions={"paddlepaddle-gpu": "3.3.0"})
+            PackageOptions(minimum_versions={"paddlepaddle-gpu": "3.3.0"}))
         commands = []
 
         def run(command, **kwargs):
@@ -286,7 +291,9 @@ class WhichEnginesHaveOne(unittest.TestCase):
                 "source": {"package": "paddleocr",
                            "minimum_versions": {"paddlepaddle-gpu": "3.3.0"}},
             }}, EventBus())
-        self.assertEqual(installs.get("paddleocr").minimum_versions,
+        install = installs.get("paddleocr")
+        assert isinstance(install, PackageInstall)
+        self.assertEqual(install.minimum_versions,
                          {"paddlepaddle-gpu": "3.3.0"})
 
     def test_the_folder_is_worked_out_from_the_launch_path(self):
@@ -320,7 +327,7 @@ class TheOneThatWasAlreadyThere(unittest.TestCase):
         self.install = PackageInstall("vllm", str(self.root), "vllm", EventBus())
 
     def test_it_is_listed_and_can_be_used(self):
-        with patch("ai_lab.package_install._version_in", lambda path, package: "0.26.1"):
+        with patch("ai_lab.package_environments.version_in", lambda path, package: "0.26.1"):
             self.install.point_at(self.first)
             found = self.install.environments()
         self.assertEqual([item.name for item in found], [".venv"])
@@ -329,7 +336,7 @@ class TheOneThatWasAlreadyThere(unittest.TestCase):
         self.assertTrue(found[0].active)
 
     def test_it_is_marked_as_the_one_that_cannot_move(self):
-        with patch("ai_lab.package_install._version_in", lambda path, package: "0.26.1"):
+        with patch("ai_lab.package_environments.version_in", lambda path, package: "0.26.1"):
             found = self.install.environments()[0]
         self.assertFalse(found.movable)
 
@@ -339,7 +346,7 @@ class TheOneThatWasAlreadyThere(unittest.TestCase):
         (newer / "bin").mkdir(parents=True)
         (newer / "bin" / "python").write_text("#!/bin/sh\n")
         self.install.point_at(newer)
-        with patch("ai_lab.package_install._version_in", lambda path, package: "0.26.1"):
+        with patch("ai_lab.package_environments.version_in", lambda path, package: "0.26.1"):
             found = {item.name: item.active for item in self.install.environments()}
         self.assertEqual(found, {".venv": False, ".venv-0.27.1": True})
         self.assertTrue((self.first / "bin" / "vllm").exists())
@@ -365,13 +372,13 @@ class WhatIsWaiting(unittest.TestCase):
 
     def _index_says(self, version, fails=False):
         class Answer:
-            def __enter__(inner):
-                return inner
+            def __enter__(self):
+                return self
 
-            def __exit__(inner, *args):
+            def __exit__(self, *args):
                 return False
 
-            def read(inner):
+            def read(self):
                 return json.dumps({"info": {"version": version}}).encode()
 
         def open_url(url, timeout=None):

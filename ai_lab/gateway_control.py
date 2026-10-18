@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from .gateway_errors import CardBusy
+from .gateway_errors import CardBusyError
 
 
 class GatewayControl:
+    """What the Load and Unload buttons must respect: work in progress on the card."""
+
     def __init__(self, scheduler) -> None:
         self.scheduler = scheduler
 
@@ -60,6 +62,6 @@ class GatewayControl:
         if holder["waiting"]:
             waiting = holder["waiting"]
             parts.append(f"{waiting} more {'is' if waiting == 1 else 'are'} waiting")
-        raise CardBusy(
+        raise CardBusyError(
             f"{' and '.join(parts) or 'The card is in use'}. Going ahead with "
             f"'{action}' on {instance_id} cuts all of that off.", holder)

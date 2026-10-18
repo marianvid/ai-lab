@@ -4,16 +4,20 @@ from __future__ import annotations
 
 
 def register(router, operations) -> None:
+    """The settings screen's routes: paths, memory, engine installs and builds, folders."""
     router.add("GET", "/api/settings", lambda **_: operations.settings_view())
-    router.add("GET", "/api/builds", lambda **_: operations.build_status())
-    # What an update would bring, read before anything is pressed. A GET
-    # because it changes nothing: it reads a checkout, asks upstream what it
-    # wrote, and asks the package manager what it would do.
-    # Engines that arrive as packages. A new version is installed beside the
-    # one in use, so these read and choose between folders rather than
-    # replacing anything.
-    # How much of this machine's memory is held back for the machine, and what
-    # that leaves for models. A GET that reads the machine, not the file.
+    _register_paths(router, operations)
+    _register_installs(router, operations)
+    _register_builds(router, operations)
+    _register_folders(router, operations)
+
+
+def _register_paths(router, operations) -> None:
+    """Where engines and models live, and how much memory is held back for the machine.
+
+    The memory GET reads the machine, not the file: what is held back, and what
+    that leaves for models.
+    """
     router.add("PATCH", "/api/engines/{engine}/binary",
                lambda engine, body=None, **_: operations.update_engine_binary(
                    engine, (body or {}).get("path", "")))
@@ -26,6 +30,14 @@ def register(router, operations) -> None:
     router.add("GET", "/api/memory", lambda **_: operations.memory_budget())
     router.add("PATCH", "/api/memory",
                lambda body=None, **_: operations.update_memory(body or {}))
+
+
+def _register_installs(router, operations) -> None:
+    """Engines that arrive as packages.
+
+    A new version is installed beside the one in use, so these read and choose
+    between folders rather than replacing anything.
+    """
     router.add("GET", "/api/installs", lambda **_: operations.installs_available())
     router.add("GET", "/api/installs/{engine}",
                lambda engine, **_: operations.install_status(engine))
@@ -38,6 +50,16 @@ def register(router, operations) -> None:
                lambda engine, name, **_: operations.remove_install(engine, name))
     router.add("POST", "/api/installs/{engine}/components/{name}/update",
                lambda engine, name, **_: operations.update_install_component(engine, name))
+
+
+def _register_builds(router, operations) -> None:
+    """Engines built from source: what an update would bring, updating, choosing a build.
+
+    What an update would bring is a GET because it changes nothing: it reads a
+    checkout, asks upstream what it wrote, and asks the package manager what
+    it would do.
+    """
+    router.add("GET", "/api/builds", lambda **_: operations.build_status())
     router.add("GET", "/api/builds/{engine}/changes",
                lambda engine, **_: operations.what_would_change(engine))
     router.add("POST", "/api/builds/{engine}/check",
@@ -49,8 +71,13 @@ def register(router, operations) -> None:
     router.add("DELETE", "/api/builds/{engine}/{name}",
                lambda engine, name, **_: operations.remove_build(engine, name))
 
-    # Picking a folder: a web page cannot open a dialog on the server's
-    # machine, so the server lists directories itself.
+
+def _register_folders(router, operations) -> None:
+    """Picking and creating folders, and editing a model repository.
+
+    A web page cannot open a dialog on the server's machine, so the server
+    lists directories itself.
+    """
     router.add("GET", "/api/browse",
                lambda query=None, **_: operations.browse(
                    (query or {}).get("path"),

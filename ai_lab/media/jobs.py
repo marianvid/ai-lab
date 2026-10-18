@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import queue
 import threading
@@ -13,9 +14,9 @@ from pathlib import Path
 
 from ..config_policy import MediaPolicy
 from ..engines.base import MUSIC_PATHS, SPEECH_PATHS
-from ..types import ChangeEvent, Task
-from .job_store import FINAL, JobStore
 from ..network import LOOPBACK
+from ..types import ChangeEvent, Task
+from .job_store import FINAL, JobStore, record_failure
 
 PATHS = {
     Task.MUSIC_GENERATION.value: MUSIC_PATHS[0],
@@ -40,6 +41,8 @@ def engine_refusal(error: urllib.error.HTTPError) -> str:
 
 
 class MediaJobs:
+    """Music and speech jobs: queued, run one at a time, kept on disk, cancellable."""
+
     def __init__(self, gateway, state_root: Path, bus=None,
                  *, settings: MediaPolicy | dict | None = None) -> None:
         self.gateway = gateway
@@ -62,6 +65,7 @@ class MediaJobs:
         threading.Thread(target=self._work, name="media-jobs", daemon=True).start()
 
     def submit(self, body: dict) -> dict:
+        """Queue one job for `model`; its result is fetched later by id."""
         if not isinstance(body, dict) or set(body) != {"model", "task", "input"}:
             raise ValueError("Media job needs model, task and input")
         task, model, payload = body["task"], body["model"], body["input"]
@@ -93,11 +97,13 @@ class MediaJobs:
         return dict(job)
 
     def list(self) -> list[dict]:
+        """Every job, newest first."""
         with self.lock:
             return [dict(item) for item in sorted(self.jobs.values(),
                     key=lambda job: job["created_at"], reverse=True)]
 
     def get(self, job_id: str) -> dict:
+        """One job, with its result once it succeeded."""
         with self.lock:
             job = self.jobs.get(job_id)
             if job is None:
@@ -108,6 +114,7 @@ class MediaJobs:
             return answer
 
     def cancel(self, job_id: str) -> dict:
+        """Cancel a job: at once while it waits, through the engine while it runs."""
         with self.lock:
             job = self.jobs.get(job_id)
             if job is None:
@@ -129,44 +136,21 @@ class MediaJobs:
         return self.get(job_id)
 
     def cleanup(self) -> None:
+        """Forget finished jobs older than the result lifetime."""
         with self.lock:
             self.store.expire(self.jobs, time.time() - self.ttl_s)
 
     def _work(self) -> None:
+        """The worker thread: one job at a time, in the order they were queued."""
         while True:
             job_id = self.pending.get()
-            with self.lock:
-                job = self.jobs.get(job_id)
-                if job is None or job_id in self.cancelled:
-                    continue
-                self.running = job_id
-                job["status"] = "running"
-                job["started_at"] = job["updated_at"] = time.time()
-                self.store.save(job)
-                payload = self.payloads[job_id]
+            started = self._start(job_id)
+            if started is None:
+                continue
+            job, payload = started
             self._changed()
             try:
-                path = PATHS[job["task"]]
-                with self.gateway.acquire(job["model"], shape=path) as lease:
-                    with self.lock:
-                        self.running_port = lease.port
-                    with self.lock:
-                        if job_id in self.cancelled:
-                            raise RuntimeError("cancelled")
-                    outgoing = {**payload, "model": lease.model_name or job["model"]}
-                    request = urllib.request.Request(
-                        f"http://{LOOPBACK}:{lease.port}{path}",
-                        data=json.dumps(outgoing).encode(), method="POST",
-                        headers={"Content-Type": "application/json"})
-                    first, _ = self.gateway.timeouts_for(Task(job["task"]))
-                    try:
-                        with urllib.request.urlopen(request, timeout=first) as response:
-                            raw = response.read(self.max_result_bytes + 1)
-                    except urllib.error.HTTPError as error:
-                        raise RuntimeError(engine_refusal(error)) from error
-                    if len(raw) > self.max_result_bytes:
-                        raise ValueError("Media result exceeds the configured limit")
-                    result = json.loads(raw)
+                result = self._call(job, payload)
                 with self.lock:
                     if job_id not in self.cancelled:
                         self.store.save_result(job_id, result)
@@ -174,34 +158,72 @@ class MediaJobs:
                         job["has_result"] = True
             except Exception as error:
                 with self.lock:
-                    job["status"] = "cancelled" if job_id in self.cancelled else "failed"
-                    job["error"] = "cancelled" if job_id in self.cancelled else str(error)
+                    record_failure(job, job_id in self.cancelled, error)
             finally:
-                with self.lock:
-                    if job_id in self.cancelled:
-                        job["status"] = "cancelled"
-                        job["error"] = "cancelled"
-                    job["updated_at"] = job["completed_at"] = time.time()
-                    job["duration_ms"] = int(
-                        (job["completed_at"] - job["started_at"]) * 1000)
-                    self.store.save(job)
-                    self.payloads.pop(job_id, None)
-                    self.running = self.running_port = None
-                self.cleanup()
-                self._changed()
+                self._finish(job)
+
+    def _start(self, job_id: str) -> tuple[dict, dict] | None:
+        """Mark the job running; None when it is gone or was cancelled while queued."""
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job is None or job_id in self.cancelled:
+                return None
+            self.running = job_id
+            job["status"] = "running"
+            job["started_at"] = job["updated_at"] = time.time()
+            self.store.save(job)
+            return job, self.payloads[job_id]
+
+    def _call(self, job: dict, payload: dict) -> dict:
+        """The engine's answer to the job, holding the card for the whole of it."""
+        path = PATHS[job["task"]]
+        with self.gateway.acquire(job["model"], shape=path) as lease:
+            with self.lock:
+                self.running_port = lease.port
+                if job["id"] in self.cancelled:
+                    raise RuntimeError("cancelled")
+            outgoing = {**payload, "model": lease.model_name or job["model"]}
+            request = urllib.request.Request(
+                f"http://{LOOPBACK}:{lease.port}{path}",
+                data=json.dumps(outgoing).encode(), method="POST",
+                headers={"Content-Type": "application/json"})
+            first, _ = self.gateway.timeouts_for(Task(job["task"]))
+            try:
+                with urllib.request.urlopen(request, timeout=first) as response:
+                    raw = response.read(self.max_result_bytes + 1)
+            except urllib.error.HTTPError as error:
+                raise RuntimeError(engine_refusal(error)) from error
+        if len(raw) > self.max_result_bytes:
+            raise ValueError("Media result exceeds the configured limit")
+        return json.loads(raw)
+
+    def _finish(self, job: dict) -> None:
+        """Record when and how long, forget the job's input, tidy up."""
+        with self.lock:
+            if job["id"] in self.cancelled:
+                job["status"] = "cancelled"
+                job["error"] = "cancelled"
+            job["updated_at"] = job["completed_at"] = time.time()
+            job["duration_ms"] = int((job["completed_at"] - job["started_at"]) * 1000)
+            self.store.save(job)
+            self.payloads.pop(job["id"], None)
+            self.running = self.running_port = None
+        self.cleanup()
+        self._changed()
 
     @staticmethod
     def _interrupt(port: int) -> None:
-        # ComfyUI understands this route. Other engines may finish naturally;
-        # their lease stays held until they do, even after a cancellation.
-        try:
-            request = urllib.request.Request(
-                f"http://{LOOPBACK}:{port}/api/jobs/current/cancel",
-                data=b"{}", method="POST",
-                headers={"Content-Type": "application/json"})
+        """Ask the engine to stop the job it runs; nothing if it cannot be reached.
+
+        ComfyUI understands this route. Other engines may finish naturally;
+        their lease stays held until they do, even after a cancellation.
+        """
+        request = urllib.request.Request(
+            f"http://{LOOPBACK}:{port}/api/jobs/current/cancel",
+            data=b"{}", method="POST",
+            headers={"Content-Type": "application/json"})
+        with contextlib.suppress(Exception):
             urllib.request.urlopen(request, timeout=5).close()
-        except Exception:
-            pass
 
     def _changed(self) -> None:
         if self.bus is not None:

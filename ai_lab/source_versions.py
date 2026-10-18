@@ -1,22 +1,33 @@
-"""Version labels, environment records and disk helpers for source builds."""
+"""Version labels, release lines and build records for source builds."""
 
 from __future__ import annotations
 
 import json
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+
+@dataclass(frozen=True, slots=True)
+class Line:
+    """One release line upstream publishes: the tags' glob for git, and their exact shape."""
+
+    glob: str
+    pattern: re.Pattern[str]
+
+
 LINES = {
-    "stable": {"glob": "v*", "pattern": re.compile(r"^v\d+\.\d+\.\d+$")},
-    "nightly": {"glob": "b*", "pattern": re.compile(r"^b\d+$")},
+    "stable": Line("v*", re.compile(r"^v\d+\.\d+\.\d+$")),
+    "nightly": Line("b*", re.compile(r"^b\d+$")),
 }
 DEFAULT_LINE = "stable"
 META = ".ai-lab-build.json"
 
+
 @dataclass(frozen=True, slots=True)
 class Version:
+    """A source version: its tag on one of the lines, and the commit it names."""
+
     tag: str                      # "b10331" or "v0.2.0", or "" when unknown
     commit: str = ""
 
@@ -24,7 +35,7 @@ class Version:
     def line(self) -> str:
         """Which of the two lines this tag belongs to, or "" for neither."""
         for name, shape in LINES.items():
-            if shape["pattern"].match(self.tag or ""):
+            if shape.pattern.match(self.tag or ""):
                 return name
         return ""
 
@@ -50,13 +61,15 @@ class BuildEnvironment:
         self.size_bytes = 0
 
     def json(self) -> dict:
+        """The row the settings page shows for this build."""
         return {"name": self.name, "version": self.version.tag,
                 "commit": self.version.commit, "active": self.active,
                 "size_bytes": self.size_bytes, "path": str(self.path),
                 "movable": self.movable}
 
 
-def _marked(path: Path) -> Version:
+def marked_version(path: Path) -> Version:
+    """The version a build folder records it was compiled from; empty when unknown."""
     try:
         raw = json.loads((path / META).read_text())
         return Version(str(raw.get("tag") or ""), str(raw.get("commit") or ""))
@@ -64,29 +77,9 @@ def _marked(path: Path) -> Version:
         return Version("")
 
 
-def _mark(path: Path, version: Version) -> None:
+def mark_version(path: Path, version: Version) -> None:
+    """Record in a build folder which version it was compiled from, atomically."""
     temporary = path / f"{META}.tmp"
     temporary.write_text(json.dumps({"tag": version.tag,
                                      "commit": version.commit}) + "\n")
     temporary.replace(path / META)
-
-
-def _size(path: Path) -> int:
-    total = 0
-    try:
-        for item in path.rglob("*"):
-            try:
-                if item.is_file() and not item.is_symlink():
-                    total += item.stat().st_size
-            except OSError:
-                pass
-    except OSError:
-        pass
-    return total
-
-
-def _free(path: Path | None) -> int:
-    try:
-        return shutil.disk_usage(path).free if path else 0
-    except OSError:
-        return 0

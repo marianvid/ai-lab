@@ -6,7 +6,7 @@ from ai_lab.config_validation import (ENGINE_RULES, absolute_path, file_name, fi
                                       number, one_of, options_pass, positive, text, whole,
                                       validate_configuration)
 
-VALID = {
+VALID: dict[str, dict] = {
     "kokoro": {"language_code": "a", "default_voice": "af", "repo_id": "x/y"},
     "voxcpm": {"cfg_value": 2.0, "inference_timesteps": 10},
     "khala": {"default_bucket": 2, "maximum_bucket": 8},
@@ -81,9 +81,9 @@ class HiggsWorkerPortTests(unittest.TestCase):
 
     def test_worker_port_must_differ_from_every_other_port(self):
         for taken in (8090, 8100):
-            with self.subTest(port=taken):
-                with self.assertRaisesRegex(ValueError, "Higgs worker settings are invalid"):
-                    validate_configuration(self.config(taken), {"higgs"})
+            with self.subTest(port=taken), \
+                    self.assertRaisesRegex(ValueError, "Higgs worker settings are invalid"):
+                validate_configuration(self.config(taken), {"higgs"})
         validate_configuration(self.config(9000), {"higgs"})
 
 

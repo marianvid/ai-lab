@@ -1,4 +1,5 @@
 import unittest
+from typing import Any, cast
 
 from ai_lab.engines.registry import Registry
 from ai_lab.types import Capabilities
@@ -67,7 +68,7 @@ class ConfiguredBinaryTests(unittest.TestCase):
 
     def test_a_configured_binary_beats_whatever_is_on_path(self):
         registry = Registry({"llamacpp": {"binary": "/opt/ai/llama.cpp/build/bin/llama-server"}})
-        self.assertEqual(registry.get("llamacpp").binary,
+        self.assertEqual(cast(Any, registry.get("llamacpp")).binary,
                          "/opt/ai/llama.cpp/build/bin/llama-server")
 
     def test_the_chosen_binary_is_reported_so_it_is_visible(self):
@@ -76,7 +77,7 @@ class ConfiguredBinaryTests(unittest.TestCase):
         self.assertEqual(rows["llamacpp"]["binary"], "/custom/llama-server")
 
     def test_without_configuration_it_falls_back_to_path(self):
-        self.assertTrue(Registry().get("llamacpp").binary.endswith("llama-server"))
+        self.assertTrue(cast(Any, Registry().get("llamacpp")).binary.endswith("llama-server"))
 
     def test_nemo_keeps_its_runtime_and_server_paths_separate(self):
         registry = Registry({"nemo": {
@@ -84,8 +85,8 @@ class ConfiguredBinaryTests(unittest.TestCase):
             "server": "/opt/ai-lab/ai_lab/audio/server.py",
         }})
         engine = registry.get("nemo")
-        self.assertEqual(engine.binary, "/opt/ai/nemo/.venv/bin/python")
-        self.assertEqual(engine.server, "/opt/ai-lab/ai_lab/audio/server.py")
+        self.assertEqual(cast(Any, engine).binary, "/opt/ai/nemo/.venv/bin/python")
+        self.assertEqual(cast(Any, engine).server, "/opt/ai-lab/ai_lab/audio/server.py")
 
     def test_the_configured_binary_reaches_the_command_line(self):
         from ai_lab.types import Format, ModelFile, ModelSet

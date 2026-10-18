@@ -7,14 +7,21 @@ from threading import Lock
 from .contract import ReferenceFile, apply_seed, validate_payload, wav_result
 
 
+# The ranges VoxCPM's own settings take.
+MAX_CFG = 10
+MAX_TIMESTEPS = 100
+
+
 class VoxCpmBackend:
+    """VoxCPM speech: a voice cloned from a reference clip, or its default voice."""
+
     def __init__(self, model_path: Path, cfg_value: float,
                  inference_timesteps: int) -> None:
         from voxcpm import VoxCPM
 
         if not model_path.is_dir():
             raise ValueError("VoxCPM checkpoint directory is absent")
-        if not 0 < cfg_value <= 10 or not 1 <= inference_timesteps <= 100:
+        if not 0 < cfg_value <= MAX_CFG or not 1 <= inference_timesteps <= MAX_TIMESTEPS:
             raise ValueError("VoxCPM inference settings are out of range")
         self.model = VoxCPM.from_pretrained(
             str(model_path), local_files_only=True,
@@ -25,6 +32,7 @@ class VoxCpmBackend:
         self.lock = Lock()
 
     def generate(self, body: dict) -> dict:
+        """One line of speech for the request, as base64 WAV."""
         request = validate_payload(body, seed=True, reference=True)
         if body.get("model") not in (None, self.model_name):
             raise ValueError(f"this engine serves {self.model_name}")

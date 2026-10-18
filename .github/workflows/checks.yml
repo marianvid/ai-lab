@@ -20,4 +20,4 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: python -m pip wheel --no-deps --wheel-dir dist .
-      - run: python scripts/check-wheel.py dist/ai_lab-*.whl
+      - run: python -m ai_lab.wheel_check dist/ai_lab-*.whl

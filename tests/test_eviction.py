@@ -15,7 +15,7 @@ class EvictionPlannerTests(unittest.TestCase):
             {'shape': 'idle-old', 'in_flight': 0, 'last_used': 1},
         ]
         return self.planner.choose('wanted', loaded,
-                                   needs_mb=self.sizes.get, free_mb=free,
+                                   needs_mb=lambda shape: self.sizes[shape], free_mb=free,
                                    capacity_mb=capacity)
 
     def test_idle_victims_are_selected_before_busy(self):

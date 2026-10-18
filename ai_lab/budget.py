@@ -69,6 +69,7 @@ class Pool:
 
     @property
     def free_mb(self) -> float:
+        """What is not in use, by anything."""
         return max(0.0, self.total_mb - self.used_mb)
 
     @property
@@ -101,6 +102,7 @@ class Pool:
         return max(0.0, self.free_mb - self.reserve_mb)
 
     def json(self) -> dict:
+        """The pool for the page, every figure rounded to a megabyte."""
         return {"name": self.name, "kind": self.kind,
                 "total_mb": round(self.total_mb),
                 "used_mb": round(self.used_mb),
@@ -131,6 +133,7 @@ class Budget:
 
     @property
     def held_by_models_mb(self) -> float:
+        """What the engines hold, over all pools."""
         # On unified memory the two readings are two views of one pool, so the
         # card's figure is the whole answer and the pools do not add up.
         return sum(pool.used_by_models_mb for pool in self.pools)
@@ -145,10 +148,12 @@ class Budget:
         """
         return max((pool.reserve_mb for pool in self.pools), default=0.0)
 
-    def pool(self, name: str) -> "Pool | None":
+    def pool(self, name: str) -> Pool | None:
+        """The pool with this name, or None."""
         return next((item for item in self.pools if item.name == name), None)
 
     def json(self) -> dict:
+        """The whole budget for the page."""
         return {"pools": [pool.json() for pool in self.pools],
                 "unified": self.unified,
                 "reserve_mb": round(self.reserve_mb),
@@ -170,28 +175,41 @@ def of(host, reserve_mb: float = DEFAULT_RESERVE_MB, card=None) -> Budget:
     and the caller decides what to do about that.
     """
     if card is None:
-        try:
-            card = host.accelerator()
-        except Exception:
-            card = None
-    try:
-        machine_used, machine_total = host.system_memory()
-    except Exception:
-        machine_used, machine_total = 0.0, 0.0
-
-    unified = bool(card and card.memory_kind == "unified")
-
-    if unified:
+        card = _card(host)
+    machine_used, machine_total = _machine(host)
+    if card and card.memory_kind == "unified":
         # One pool. The machine reading knows about everything, so it is the
         # one to trust for what is free; the card reading knows what our own
         # engines hold, which the machine reading cannot separate out.
         return Budget(unified=True, pools=(Pool(
             name=MACHINE, kind="unified",
-            total_mb=machine_total or (card.memory_total_mb if card else 0.0),
+            total_mb=machine_total or card.memory_total_mb,
             used_mb=machine_used,
-            used_by_models_mb=card.memory_used_mb if card else 0.0,
+            used_by_models_mb=card.memory_used_mb,
             reserve_mb=reserve_mb),))
+    return Budget(pools=_dedicated_pools(card, machine_used, machine_total, reserve_mb),
+                  unified=False)
 
+
+def _card(host):
+    """The accelerator reading, or None when it cannot be taken."""
+    try:
+        return host.accelerator()
+    except Exception:
+        return None
+
+
+def _machine(host) -> tuple[float, float]:
+    """(used, total) of the machine's own memory; zeros when it cannot be read."""
+    try:
+        return host.system_memory()
+    except Exception:
+        return 0.0, 0.0
+
+
+def _dedicated_pools(card, machine_used: float, machine_total: float,
+                     reserve_mb: float) -> tuple[Pool, ...]:
+    """A card of its own and the machine's memory, each as a pool when it can be read."""
     pools = []
     if card and card.available and card.memory_total_mb:
         # The whole card is for models: nothing else on this machine wants it.
@@ -208,4 +226,4 @@ def of(host, reserve_mb: float = DEFAULT_RESERVE_MB, card=None) -> Budget:
                           used_mb=machine_used,
                           used_by_models_mb=0.0,
                           reserve_mb=reserve_mb))
-    return Budget(pools=tuple(pools), unified=False)
+    return tuple(pools)

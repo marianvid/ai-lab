@@ -13,6 +13,8 @@ _TEMPLATES = {
 
 
 def for_model(name: str, platform: str | None = None) -> Path | None:
+    """The native editor ComfyUI's page opens for this model; None when it has none."""
+    filename: str | None
     if name == "flux2-dev-q8-0":
         filename = ("image_flux2_dev_q8_macos.json" if
                     (platform or sys.platform) == "darwin" else

@@ -41,8 +41,8 @@ Library can promote or demote a model. The move works like this
    storage keeps the entry; you do not have to delete and re-create it.
 5. **Only then is the source removed.** A companion file — a tokenizer, say —
    that another model in the same folder still needs is left in place.
-   Every finished move is appended to `model-moves.jsonl` in the state
-   directory.
+   Every finished move is appended to `<state_dir>/model-moves.jsonl` (the host's state
+   directory).
 
 A move is refused before anything is copied when the model is loaded or
 loading (checked again just before step 3, because a copy can take a long
@@ -131,18 +131,18 @@ repositories remain whole directories, NVIDIA NeMo checkpoints remain native
 their upstream project. They are served only by AI-Lab; data-processing clients
 never mount this tree or load the weights directly.
 
-`downloads/`, `cache/hf/` and `audio/` are owned by `ai-lab-manager`; the stable
+`/models/downloads/`, `/models/cache/hf/` and `/models/audio/` are owned by `ai-lab-manager`; the stable
 language-model trees are owned by root inside the container. On the host these
 appear as shifted LXC uids because the container is unprivileged.
 
 ### Two directories that are easy to forget
 
-`downloads/` and `cache/hf/` exist because both `huggingface_hub` and vLLM
+`/models/downloads/` and `/models/cache/hf/` exist because both `huggingface_hub` and vLLM
 default to writing into `~/.cache/huggingface`, which lives on the container's
 512 GB root disk. Setting `HF_HOME=/models/cache/hf` before running any
 downloader keeps that traffic on the model volume instead.
 
-`engines/trtllm/` holds build artefacts, not models. They are tied to a specific
+`/models/engines/trtllm/` holds build artefacts, not models. They are tied to a specific
 GPU, driver and TensorRT version, and are meant to be regenerated rather than
 preserved — treat that subtree as disposable.
 
@@ -159,7 +159,7 @@ rule:
   engine is handed the whole directory, never a single file.
 
 Two repositories may share one folder — the Hugging Face and NeMo
-transcription repositories both read `audio/asr/`. Each one then counts only
+transcription repositories both read `/models/audio/asr/`. Each one then counts only
 the weight files whose file type matches its own format, so a checkpoint
 appears once, under the right repository (`is_weight_for_format` in
 `naming.py`). The `fp8`, `nvfp4`, `awq`, `gptq` and `comfyui` formats all count
@@ -225,7 +225,7 @@ entry pointing at it blocks deleting the real model beside it.
 ## The same layout on the Mac
 
 The M3 Max keeps its models in one folder on its data volume, with the same
-format-first tree — `gguf/`, `safetensors/`, `fp8/`, `nvfp4/` — so a path means
+format-first tree — `/models/gguf/`, `safetensors/`, `fp8/`, `/models/nvfp4/` — so a path means
 the same thing on both machines and a model can be moved across without being
 reorganised.
 
@@ -243,9 +243,9 @@ somebody chose and may differ. A repository that declares a `subpath`, such as
 
 Two differences that are not going away:
 
-- **Only `gguf/` has anything in it, and only llama.cpp reads it.** vLLM needs
+- **Only `/models/gguf/` has anything in it, and only llama.cpp reads it.** vLLM needs
   CUDA; Apple silicon offers Metal. The interface shows vLLM greyed out with
-  that reason rather than pretending it might work. `fp8/` and `nvfp4/` exist
+  that reason rather than pretending it might work. `fp8/` and `/models/nvfp4/` exist
   for symmetry and are empty.
 - **Memory is unified**, so there is no separate pool of video memory to wait
   for after an unload. The step that polls until the card goes quiet is skipped
@@ -282,13 +282,13 @@ hardware's capability.
 
 ## Multiple engines now share the store
 
-Nothing here is llama.cpp specific except the contents of `gguf/`. vLLM reads
+Nothing here is llama.cpp specific except the contents of `/models/gguf/`. vLLM reads
 the native and quantised safetensors trees, NeMo restores native `.nemo`
-checkpoints under `audio/asr/`, and the ONNX adapter serves Silero from
-`audio/vad/`. All run under the same templated systemd supervision.
+checkpoints under `/models/audio/asr/`, and the ONNX adapter serves Silero from
+`/models/audio/vad/`. All run under the same templated systemd supervision.
 
 A repository can now declare both a task and a subtree. That is how two catalog
-views share `audio/asr/`: the safetensors transcription repository recognises
+views share `/models/audio/asr/`: the safetensors transcription repository recognises
 Hugging Face directories, while the NeMo repository recognises `.nemo`
 checkpoints. Neither lists the other's format and no model is duplicated.
 
@@ -311,16 +311,16 @@ reserved for other work is recorded in the private half, `opts`.
 
 ## What is actually stored, 17 August 2026
 
-`nvfp4/` and a second `gguf/` entry stopped being theoretical on 17 August 2026,
+`/models/nvfp4/` and a second `/models/gguf/` entry stopped being theoretical on 17 August 2026,
 when vLLM was installed and the first native-format models were downloaded.
 
 | Path | Model | Size | Engine |
 |---|---|---:|---|
-| `gguf/qwen-coder/` | Qwen3.6-35B-A3B UD-Q4_K_M | 22 GB | llama.cpp |
-| `gguf/gemma-general/` | Gemma-4-E4B-it Q4_0 | 4.6 GB | llama.cpp |
-| `gguf/qwen3-coder-next/` | Qwen3-Coder-Next 80B-A3B UD-Q4_K_XL | 47 GB | llama.cpp |
-| `nvfp4/qwen3-coder-30b-a3b/` | Qwen3-Coder-30B-A3B-Instruct | 17 GB | vLLM |
-| `nvfp4/qwopus3.6-27b-coder/` | Qwopus3.6-27B-Coder | 20 GB | vLLM |
+| `/models/gguf/qwen-coder/` | Qwen3.6-35B-A3B UD-Q4_K_M | 22 GB | llama.cpp |
+| `/models/gguf/gemma-general/` | Gemma-4-E4B-it Q4_0 | 4.6 GB | llama.cpp |
+| `/models/gguf/qwen3-coder-next/` | Qwen3-Coder-Next 80B-A3B UD-Q4_K_XL | 47 GB | llama.cpp |
+| `/models/nvfp4/qwen3-coder-30b-a3b/` | Qwen3-Coder-30B-A3B-Instruct | 17 GB | vLLM |
+| `/models/nvfp4/qwopus3.6-27b-coder/` | Qwopus3.6-27B-Coder | 20 GB | vLLM |
 
 The format-first layout held up: adding vLLM required no file to move.
 
@@ -328,15 +328,15 @@ The format-first layout held up: adding vLLM required no file to move.
 
 | Path | Model | Weights | Engine | Task |
 |---|---|---:|---|---|
-| `audio/asr/whisper-large-v3/` | Whisper large-v3 | 3.09 GB | vLLM | transcription |
-| `audio/asr/whisper-large-v3-turbo/` | Whisper large-v3-turbo | 1.62 GB | vLLM | transcription |
-| `audio/asr/qwen3-asr-0.6b/` | Qwen3-ASR-0.6B | 1.88 GB | vLLM | transcription |
-| `audio/asr/qwen3-asr-1.7b/` | Qwen3-ASR-1.7B | 4.70 GB | vLLM | transcription |
-| `audio/asr/parakeet-tdt-0.6b-v3/` | Parakeet TDT 0.6B v3 | 2.51 GB | NeMo | transcription |
-| `audio/asr/canary-1b-v2/` | Canary 1B v2 | 6.36 GB | NeMo | transcription |
-| `audio/asr/nemotron-3.5-asr-streaming-0.6b/` | Nemotron 3.5 ASR Streaming 0.6B | 2.37 GB | NeMo | transcription |
-| `audio/alignment/qwen3-forced-aligner-0.6b/` | Qwen3 ForcedAligner 0.6B | 1.84 GB | not configured for Romanian | alignment |
-| `audio/vad/silero-vad/` | Silero VAD 6.2.1 | package repository | ONNX Runtime | VAD |
+| `/models/audio/asr/whisper-large-v3/` | Whisper large-v3 | 3.09 GB | vLLM | transcription |
+| `/models/audio/asr/whisper-large-v3-turbo/` | Whisper large-v3-turbo | 1.62 GB | vLLM | transcription |
+| `/models/audio/asr/qwen3-asr-0.6b/` | Qwen3-ASR-0.6B | 1.88 GB | vLLM | transcription |
+| `/models/audio/asr/qwen3-asr-1.7b/` | Qwen3-ASR-1.7B | 4.70 GB | vLLM | transcription |
+| `/models/audio/asr/parakeet-tdt-0.6b-v3/` | Parakeet TDT 0.6B v3 | 2.51 GB | NeMo | transcription |
+| `/models/audio/asr/canary-1b-v2/` | Canary 1B v2 | 6.36 GB | NeMo | transcription |
+| `/models/audio/asr/nemotron-3.5-asr-streaming-0.6b/` | Nemotron 3.5 ASR Streaming 0.6B | 2.37 GB | NeMo | transcription |
+| `/models/audio/alignment/qwen3-forced-aligner-0.6b/` | Qwen3 ForcedAligner 0.6B | 1.84 GB | not configured for Romanian | alignment |
+| `/models/audio/vad/silero-vad/` | Silero VAD 6.2.1 | package repository | ONNX Runtime | VAD |
 
 The forced aligner stays on disk for possible international use, but Romanian
 is not among the languages its model card supports. The diarization directory

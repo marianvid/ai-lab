@@ -10,6 +10,8 @@ MODES = {"voice-design", "custom-voice"}
 
 
 class QwenTtsBackend:
+    """Qwen3-TTS in one of its modes: a voice designed from an instruction, or a named voice."""
+
     def __init__(self, model_path: Path, mode: str) -> None:
         import torch
         from qwen_tts import Qwen3TTSModel
@@ -29,6 +31,7 @@ class QwenTtsBackend:
         self.lock = Lock()
 
     def generate(self, body: dict) -> dict:
+        """One line of speech for the request, as base64 WAV."""
         request = validate_payload(body, seed=True)
         if body.get("model") not in (None, self.model_name):
             raise ValueError(f"this engine serves {self.model_name}")

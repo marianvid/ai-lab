@@ -7,26 +7,31 @@ runtime stays in its own environment and can be replaced independently.
 """
 from __future__ import annotations
 
-import sys
-
-import argparse
 import base64
-import json
 import secrets
 import shutil
+import sys
 import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+
 # This file is launched directly by the runtime's own Python environment.
 # Give it access to the small shared modules beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from ai_lab.media.http_host import MUSIC_PATH, serve
+from ai_lab.music.hosting import PORT, UI_PORT, parse
+from ai_lab.music.request_fields import MAX_LYRICS_CHARS, MAX_PROMPT_CHARS, MAX_SEED
 from ai_lab.network import ALL_INTERFACES
 
-PATH = "/v1/audio/music/generations"
+PATH = MUSIC_PATH
+# What one request may ask for, beside the limits every music engine shares.
+SHORTEST_S, LONGEST_S = 5, 180
+MAX_LANGUAGE_CHARS = 32
 
 
 class AceStepBackend:
+    """ACE-Step 1.5: its music model (DiT) and language model, loaded once."""
+
     def __init__(self, project_root: Path, config_name: str,
                  model_path: Path, output_root: Path) -> None:
         from acestep.handler import AceStepHandler
@@ -48,6 +53,7 @@ class AceStepBackend:
         self.lock = Lock()
 
     def generate(self, body: dict) -> dict:
+        """One piece of music for the request, as base64 WAV."""
         from acestep.inference import GenerationConfig, GenerationParams, generate_music
 
         request = validate_payload(body)
@@ -90,83 +96,43 @@ class AceStepBackend:
 
 
 def validate_payload(body: dict) -> dict:
+    """The request's fields, checked and with their defaults; ValueError says what is wrong."""
     allowed = {"model", "prompt", "lyrics", "duration", "seed",
                "instrumental", "vocal_language"}
     unknown = set(body) - allowed
     if unknown:
         raise ValueError("Unknown music fields: " + ", ".join(sorted(unknown)))
     prompt = str(body.get("prompt", "")).strip()
-    if not prompt or len(prompt) > 4000:
+    if not prompt or len(prompt) > MAX_PROMPT_CHARS:
         raise ValueError("prompt must contain 1–4000 characters")
     lyrics = str(body.get("lyrics", "[Instrumental]"))
-    if len(lyrics) > 12000:
+    if len(lyrics) > MAX_LYRICS_CHARS:
         raise ValueError("lyrics must contain at most 12000 characters")
     duration = float(body.get("duration", 30))
-    if not 5 <= duration <= 180:
+    if not SHORTEST_S <= duration <= LONGEST_S:
         raise ValueError("duration must be between 5 and 180 seconds")
-    seed = int(body["seed"] if "seed" in body else secrets.randbelow(2**32))
-    if not 0 <= seed <= 2**32 - 1:
+    seed = int(body["seed"] if "seed" in body else secrets.randbelow(MAX_SEED + 1))
+    if not 0 <= seed <= MAX_SEED:
         raise ValueError("seed must be a 32-bit unsigned integer")
     instrumental = body.get("instrumental", False)
     if not isinstance(instrumental, bool):
         raise ValueError("instrumental must be true or false")
     language = str(body.get("vocal_language", "unknown"))
-    if len(language) > 32:
+    if len(language) > MAX_LANGUAGE_CHARS:
         raise ValueError("vocal_language is too long")
     return {"prompt": prompt, "lyrics": lyrics, "duration": duration,
             "seed": seed, "instrumental": instrumental,
             "vocal_language": language}
 
 
-class Handler(BaseHTTPRequestHandler):
-    backend: AceStepBackend | None = None
-
-    def do_GET(self):
-        if self.path == "/health":
-            self._json(200, {"status": "ok"})
-        else:
-            self._json(404, {"error": {"message": "not found"}})
-
-    def do_POST(self):
-        if self.path != PATH:
-            self._json(404, {"error": {"message": "not found"}})
-            return
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= 65536:
-                raise ValueError("music request is empty or too large")
-            body = json.loads(self.rfile.read(size))
-            if not isinstance(body, dict):
-                raise ValueError("music request must be an object")
-            self._json(200, self.backend.generate(body))
-        except (ValueError, TypeError) as error:
-            self._json(400, {"error": {"message": str(error)}})
-        except Exception as error:
-            self._json(500, {"error": {"message": str(error)}})
-
-    def _json(self, status: int, body: dict):
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--project-root", type=Path, required=True)
-    parser.add_argument("--config-name", required=True)
-    parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--ui-port", type=int, required=True)
-    args = parser.parse_args()
-    Handler.backend = AceStepBackend(args.project_root, args.config_name,
-                                     args.model_path, args.output_root)
-    launch_native_ui(Handler.backend, args.config_name, args.model_path,
-                     args.ui_port)
-    ThreadingHTTPServer((ALL_INTERFACES, args.port), Handler).serve_forever()
+    """Load ACE-Step and its own editor, then answer music requests."""
+    args = parse(("--project-root", Path), ("--config-name", str), ("--model-path", Path),
+                 ("--output-root", Path), PORT, UI_PORT)
+    backend = AceStepBackend(args.project_root, args.config_name,
+                             args.model_path, args.output_root)
+    launch_native_ui(backend, args.config_name, args.model_path, args.ui_port)
+    serve(backend, args.port, request_path=PATH)
 
 
 def launch_native_ui(backend: AceStepBackend, config_name: str,

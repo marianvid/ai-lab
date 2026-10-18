@@ -8,7 +8,8 @@ from unittest import mock
 from ai_lab.catalog import Catalog
 from ai_lab.config import Repository
 from ai_lab.engines import base
-from ai_lab.engines.mlxlm import MlxLmEngine, default_launcher
+from ai_lab.engines.mlxlm import MlxLmEngine
+from ai_lab.engines.text_launch import default_launcher
 from ai_lab.engines.registry import Registry
 from ai_lab.naming import is_weight_for_format
 from ai_lab.types import Capabilities, Format, ModelFile, ModelSet, Task
@@ -126,8 +127,8 @@ class DescriptionTests(unittest.TestCase):
         self.assertEqual(self.engine.concurrency({"decode_concurrency": 4}), 4)
 
     def test_the_default_launcher_ships_with_the_application(self):
-        self.assertTrue(Path(default_launcher()).is_file())
-        self.assertEqual(MlxLmEngine(binary=PYTHON).server, default_launcher())
+        self.assertTrue(Path(default_launcher("mlxlm_server.py")).is_file())
+        self.assertEqual(MlxLmEngine(binary=PYTHON).server, default_launcher("mlxlm_server.py"))
 
 
 class RegistryTests(unittest.TestCase):

@@ -77,4 +77,5 @@ class ShutdownTests(unittest.TestCase):
         host.start(ProcessSpec("grouped", ["/bin/sleep", "30"], {}))
         self.addCleanup(host.stop, "grouped")
         pid = host.status("grouped").pid
+        assert pid is not None
         self.assertEqual(os.getpgid(pid), os.getpgid(0))

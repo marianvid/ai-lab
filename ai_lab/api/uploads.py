@@ -7,6 +7,6 @@ the job queue must not import from the web layer.
 
 from __future__ import annotations
 
-from ..uploads import ImageInfo, UploadRejected, sniff_image, validate_image
+from ..uploads import ImageInfo, UploadRejectedError, sniff_image, validate_image
 
-__all__ = ["ImageInfo", "UploadRejected", "sniff_image", "validate_image"]
+__all__ = ["ImageInfo", "UploadRejectedError", "sniff_image", "validate_image"]

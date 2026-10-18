@@ -9,6 +9,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from http import HTTPStatus
 from pathlib import Path
 from threading import BoundedSemaphore
 
@@ -35,14 +36,21 @@ def wait_for_free_port(port: int, timeout_s: float = 120) -> None:
         time.sleep(1)
 
 
+# The highest TCP port, and the most requests the worker is handed at once.
+MAX_PORT = 65535
+MAX_PARALLEL = 64
+
+
 class HiggsBackend:
+    """Higgs speech in an SGLang-Omni worker process this backend starts and stops."""
+
     def __init__(self, worker_binary: Path, model_path: Path,
                  worker_port: int, mem_fraction_static: float,
                  max_parallel: int = 1) -> None:
         if not worker_binary.is_file() or not model_path.is_dir():
             raise ValueError("Higgs worker or checkpoint is absent")
-        if (not 1 <= worker_port <= 65535 or not 0 < mem_fraction_static < 1
-                or not 1 <= max_parallel <= 64):
+        if (not 1 <= worker_port <= MAX_PORT or not 0 < mem_fraction_static < 1
+                or not 1 <= max_parallel <= MAX_PARALLEL):
             raise ValueError("Higgs worker settings are invalid")
         self.model_name = model_path.name
         self.model_path = model_path
@@ -77,7 +85,7 @@ class HiggsBackend:
                 with urllib.request.urlopen(
                         f"http://{LOOPBACK}:{self.worker_port}/health",
                         timeout=2) as response:
-                    if response.status == 200:
+                    if response.status == HTTPStatus.OK:
                         return
             except (OSError, urllib.error.URLError):
                 pass
@@ -85,6 +93,7 @@ class HiggsBackend:
         raise TimeoutError("Higgs worker did not become ready")
 
     def generate(self, body: dict) -> dict:
+        """One line of speech from the worker, as base64 WAV."""
         request = validate_payload(body, seed=True, reference=True)
         if body.get("model") not in (None, self.model_name):
             raise ValueError(f"this engine serves {self.model_name}")
@@ -114,6 +123,7 @@ class HiggsBackend:
                           "b64_wav": base64.b64encode(audio).decode()}]}
 
     def close(self) -> None:
+        """Stop the worker: politely, then for good."""
         if self.process.poll() is None:
             self.process.terminate()
             try:

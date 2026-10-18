@@ -7,7 +7,8 @@ from unittest import mock
 
 from ai_lab.engines import base
 from ai_lab.engines.base import withheld
-from ai_lab.engines.mlxvlm import MlxVlmEngine, default_launcher
+from ai_lab.engines.mlxvlm import MlxVlmEngine
+from ai_lab.engines.text_launch import default_launcher
 from ai_lab.engines.registry import Registry
 from ai_lab.text import mlxvlm_server as launcher
 from ai_lab.types import Format, ModelFile, ModelSet, Task
@@ -111,7 +112,7 @@ class DescriptionTests(unittest.TestCase):
         self.assertEqual(self.engine.concurrency({"max_num_seqs": 4}), 4)
 
     def test_the_default_launcher_ships_with_the_application(self):
-        self.assertTrue(Path(default_launcher()).is_file())
+        self.assertTrue(Path(default_launcher("mlxvlm_server.py")).is_file())
 
     def test_the_registry_builds_it_from_configuration(self):
         engine = Registry({"mlxvlm": {"binary": PYTHON}}).get("mlxvlm")

@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from ..hosts.command import which
-from ..types import Format, ModelSet, Task
-from .base import (DIARIZATION_PATHS, LaunchPlan, ParamSpec,
-                   TRANSCRIPTION_PATHS, validate)
-from .probe import http_ok
 from ..network import ALL_INTERFACES
-
+from ..types import Format, ModelSet, Task
+from .base import DIARIZATION_PATHS, TRANSCRIPTION_PATHS, LaunchPlan, ParamSpec, validate
+from .isolated import IsolatedEngine, weights_mb
 
 PARAMS = (
     ParamSpec("precision", "Precision", "choice", "bf16",
@@ -19,28 +14,27 @@ PARAMS = (
                    "choice on this Blackwell card; FP32 uses roughly twice "
                    "the memory and is mainly a diagnostic setting."),
 )
+# Which request shapes each task answers.
+_PATHS = {Task.TRANSCRIPTION: TRANSCRIPTION_PATHS, Task.DIARIZATION: DIARIZATION_PATHS}
 
 
-class NemoEngine:
+class NemoEngine(IsolatedEngine):
+    """NeMo transcription (Canary, Parakeet, Nemotron) and diarization (Sortformer)."""
+
     id = "nemo"
     display_name = "NVIDIA NeMo Speech"
-
-    def __init__(self, binary: str | None = None,
-                 server: str | None = None) -> None:
-        self.binary = binary or which("python") or "python"
-        self.server = server or str(
-            Path(__file__).resolve().parents[1] / "audio" / "server.py")
-
-    def formats(self) -> frozenset[Format]:
-        return frozenset({Format.NEMO})
+    task = Task.TRANSCRIPTION
+    script = ("audio", "server.py")
+    served_formats = frozenset({Format.NEMO})
+    settings = PARAMS
+    finds_python = True
 
     def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.TRANSCRIPTION, Task.DIARIZATION})
-
-    def params(self, task: Task = Task.TRANSCRIPTION) -> tuple[ParamSpec, ...]:
-        return PARAMS if task in (Task.TRANSCRIPTION, Task.DIARIZATION) else ()
+        """Transcription and diarization."""
+        return frozenset(_PATHS)
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
+        """The audio server with the NeMo or Sortformer backend, at the chosen precision."""
         if model.format is not Format.NEMO:
             raise ValueError(f"NeMo cannot load {model.format.value} models")
         if model.task not in self.tasks():
@@ -60,20 +54,11 @@ class NemoEngine:
             env={"PYTHONUNBUFFERED": "1"},
         )
 
-    def ready(self, port: int) -> bool:
-        return http_ok(port)
-
-    def concurrency(self, params: dict) -> int:
-        return 1
-
-    def needs_mb(self, model: ModelSet, params: dict,
-                 card_total_mb: float) -> float:
+    def needs_mb(self, model: ModelSet, params: dict, card_total_mb: float) -> float:
+        """The weights, twice over at FP32."""
         multiplier = 2.0 if validate(PARAMS, params)["precision"] == "fp32" else 1.0
-        return model.size_bytes / (1024 * 1024) * multiplier
+        return weights_mb(model) * multiplier
 
-    def api_paths(self, task: Task = Task.TRANSCRIPTION) -> tuple[str, ...]:
-        if task is Task.TRANSCRIPTION:
-            return TRANSCRIPTION_PATHS
-        if task is Task.DIARIZATION:
-            return DIARIZATION_PATHS
-        return ()
+    def api_paths(self, task: Task | None = None) -> tuple[str, ...]:
+        """Transcription or diarization shapes, by task."""
+        return _PATHS.get(task or self.task, ())

@@ -2,7 +2,8 @@
 
 This is the only place that knows which concrete host is in use and where the
 configuration lives. Everything else receives what it needs as an argument,
-which is what lets tests substitute a fake host and a fake engine.
+which is what lets tests substitute a fake host and a fake engine. A
+composition root: it imports most of the application, and that is its job.
 
 If logic starts appearing in this file, it belongs in `operations.py`.
 """
@@ -14,37 +15,61 @@ from pathlib import Path
 from .builds import Builds
 from .capabilities import Known
 from .catalog import Catalog
-from .config import ConfigStore
+from .config import Config, ConfigStore
 from .config_validation import validate_configuration
 from .downloads import DownloadManager, HuggingFaceClient
 from .engines.registry import Registry
 from .events import EventBus
 from .gateway import Gateway
+from .gateway_limits import GatewayLimits
 from .hosts import current_host
-from .installs import Installs
+from .hosts.base import Host
 from .images.jobs import ImageJobs
-from .media.jobs import MediaJobs
+from .installs import Installs
 from .lastloaded import LastLoaded
+from .media.jobs import MediaJobs
 from .operations import Operations
+from .operations_services import OperationsParts
 from .runtime import Runtime
 from .settings import Settings
 from .storage import Storage
 
 
 def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway]:
+    """The whole manager, from the configuration at `config_path`.
+
+    Returns the operations the routes call, the event bus the page listens
+    on, the configuration store and the model gateway.
+    """
     store = ConfigStore(config_path)
     bus = EventBus()
-    # Engines are built from configuration, so a machine holding two llama.cpp
-    # builds uses the one named in config.json rather than whichever PATH
-    # happens to find first. The host needs the same section: vLLM lives in a
-    # virtual environment, so whether it is installed cannot be read from PATH.
     config = store.load()
+    engine_settings = engine_settings_of(config)
+    engines = Registry(engine_settings)
+    validate_configuration(config, set(engines.known()), check_workflows=True)
+    host = current_host(engine_settings)
+    operations = _operations(store, bus, host, engines, engine_settings)
+    model_gateway = Gateway(operations, gateway_limits(config))
+    operations.image_jobs = ImageJobs(
+        model_gateway, store.load().images, host.state_dir(), bus)
+    operations.media_jobs = MediaJobs(
+        model_gateway, host.state_dir(), bus, settings=config.media_policy)
+    return operations, bus, store, model_gateway
+
+
+def engine_settings_of(config: Config) -> dict:
+    """The `engines` section, with ComfyUI told which workflow each image model uses.
+
+    Engines are built from configuration, so a machine holding two llama.cpp
+    builds uses the one named in config.json rather than whichever PATH
+    happens to find first. The host needs the same section: vLLM lives in a
+    virtual environment, so whether it is installed cannot be read from PATH.
+    """
     engine_settings = dict(config.engines)
-    image_profiles = config.images.get("profiles", {})
     by_instance = {instance.id: instance.model_id for instance in config.instances}
-    presets = {}
+    presets: dict[str, str] = {}
     workflow_root = Path(config.images.get("workflow_root", ".")).resolve()
-    for profile in image_profiles.values():
+    for profile in config.images.get("profiles", {}).values():
         model_id = by_instance.get(profile.get("model"))
         if model_id and profile.get("workflow"):
             workflow = (workflow_root / profile["workflow"]).resolve()
@@ -53,23 +78,41 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
     engine_settings["comfyui"] = {
         **engine_settings.get("comfyui", {}), "preset_workflows": presets,
     }
-    engines = Registry(engine_settings)
-    validate_configuration(config, set(engines.known()), check_workflows=True)
-    host = current_host(engine_settings)
+    return engine_settings
+
+
+def gateway_limits(config: Config) -> GatewayLimits:
+    """The front door's limits, from the configuration.
+
+    How long to wait for an engine and how many requests to hold differ
+    between the two machines this runs on; per-task overrides keep a slow
+    image or OCR job from forcing a text client onto its clock (see
+    `Gateway.timeouts_for`).
+    """
+    front_door = config.gateway_policy
+    return GatewayLimits(
+        first_byte_s=front_door.first_byte_s,
+        between_bytes_s=front_door.between_bytes_s,
+        max_waiting=front_door.max_waiting,
+        task_timeouts=front_door.timeout_mapping(),
+        max_upload_bytes=front_door.max_upload_bytes,
+        max_upload_pixels=front_door.max_upload_pixels,
+        max_upload_dimension=front_door.max_upload_dimension)
+
+
+def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry,
+                engine_settings: dict) -> Operations:
+    """The operations the routes call, with every service they delegate to."""
     builds = Builds(engine_settings, bus)
     # Engines that arrive as packages rather than as source. A new
     # version is installed beside the one that works, never over it.
     installs = Installs(engine_settings, bus)
-    storage = Storage(store.load().storage, bus)
-    # Same reason as the build watcher: the page should already know what
-    # is waiting when it is opened, so there is no button that only asks.
+    # The page should already know what is waiting when it is opened, so there
+    # is no button that only asks; and the version figures stay current
+    # without anyone pressing anything.
     installs.watch()
-    # Keeps the version figures current without anyone pressing anything.
     builds.watch()
-    # What each model's files say it can do, read once and kept beside the
-    # rest of the state: a quarter of a second per GGUF model otherwise, on
-    # every scan of the library.
-    known = Known(host.state_dir())
+    built: list[Operations] = []
 
     def learn_about_new_models(_destination) -> None:
         """Read a newly downloaded model's files now, not when a page asks.
@@ -78,44 +121,22 @@ def build(config_path: Path) -> tuple[Operations, EventBus, ConfigStore, Gateway
         known is answered from memory, so what this actually costs is reading
         the one model that just arrived.
         """
-        operations.models()
+        built[0].models()
 
-    operations = Operations(
+    operations = Operations.assemble(OperationsParts(
         store=store,
-        catalog=Catalog(known),
+        # What each model's files say it can do, read once and kept beside the
+        # rest of the state: a quarter of a second per GGUF model otherwise, on
+        # every scan of the library.
+        catalog=Catalog(Known(host.state_dir())),
         runtime=Runtime(host, bus),
         settings=Settings(store, host, engines),
-        engines=engines,
         downloads=DownloadManager(bus=bus, arrived=learn_about_new_models),
         huggingface=HuggingFaceClient(),
-        host=host,
-        builds=builds,
-        installs=installs,
-        storage=storage,
-        bus=bus,
+        host=host, engines=engines, builds=builds, installs=installs,
+        storage=Storage(store.load().storage, bus), bus=bus,
         # What was on the card when the manager last stopped. The host says
         # where a machine keeps such things.
-        last_loaded=LastLoaded(host.state_dir()),
-    )
-    # Routes a request by model name and loads that model if it is not running,
-    # so an agent workflow can name several models and reach one card. Its own
-    # settings — how long to wait for an engine, how many requests to hold —
-    # come from the configuration, because the right numbers differ between the
-    # two machines this runs on.
-    front_door = config.gateway_policy
-    model_gateway = Gateway(
-        operations,
-        first_byte_s=front_door.first_byte_s,
-        between_bytes_s=front_door.between_bytes_s,
-        max_waiting=front_door.max_waiting,
-        # Per-task overrides — a slow image or OCR job must not force a text
-        # client to wait on the same clock. See `Gateway.timeouts_for`.
-        task_timeouts=front_door.timeout_mapping(),
-        max_upload_bytes=front_door.max_upload_bytes,
-        max_upload_pixels=front_door.max_upload_pixels,
-        max_upload_dimension=front_door.max_upload_dimension)
-    operations.image_jobs = ImageJobs(
-        model_gateway, store.load().images, host.state_dir(), bus)
-    operations.media_jobs = MediaJobs(
-        model_gateway, host.state_dir(), bus, settings=config.media_policy)
-    return operations, bus, store, model_gateway
+        last_loaded=LastLoaded(host.state_dir())))
+    built.append(operations)
+    return operations

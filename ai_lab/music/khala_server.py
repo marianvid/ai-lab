@@ -1,111 +1,99 @@
 #!/usr/bin/env python3
-"""Isolated HTTP host for the Khala music generator."""
+"""Isolated HTTP host for the Khala music generator.
+
+Besides AI-Lab's music contract, this starts Khala's own app for a person: its
+Mac worker (which keeps the model loaded), its dispatcher, and its React page.
+They are started in that order, each waited for, and stopped with this host.
+"""
 from __future__ import annotations
 
-import argparse
-import atexit
+import json
 import os
-import signal
 import subprocess
+import sys
 import time
-import urllib.request
 from pathlib import Path
 
-from ai_lab.music.khala_backend import KhalaBackend
 from ai_lab.media.http_host import serve
+from ai_lab.music.hosting import (
+    PORT,
+    UI_PORT,
+    Readiness,
+    parse,
+    stop_on_exit,
+    wait_until_ready,
+)
+from ai_lab.music.khala_backend import KhalaBackend
 from ai_lab.network import ALL_INTERFACES, LOOPBACK
 
+# Where Khala's own worker and dispatcher listen (their defaults).
+WORKER_PORT = 8001
+API_PORT = 8889
+# How long each may take to come up: the worker loads the model.
+WORKER_START_S = 360
+API_START_S = 30
+PAGE_START_S = 30
+# How long the companions get to stop before they are killed.
+STOP_GRACE_S = 8
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--generator-script", type=Path, required=True)
-    parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--default-bucket", type=int, required=True)
-    parser.add_argument("--maximum-bucket", type=int, required=True)
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--ui-port", type=int, required=True)
-    args = parser.parse_args()
-    backend = KhalaBackend(
-        args.generator_script, args.model_path, args.output_root,
-        args.default_bucket, args.maximum_bucket)
-    launch_official_ui(args.generator_script.parent.parent, args.model_path,
-                       args.ui_port)
+
+def main() -> None:
+    """Start Khala's own app, then answer music requests."""
+    args = parse(("--generator-script", Path), ("--model-path", Path),
+                 ("--output-root", Path), ("--default-bucket", int),
+                 ("--maximum-bucket", int), PORT, UI_PORT)
+    backend = KhalaBackend(args.generator_script, args.model_path, args.output_root,
+                           (args.default_bucket, args.maximum_bucket))
+    launch_official_ui(args.generator_script.parent.parent, args.model_path, args.ui_port)
     serve(backend, args.port)
 
 
-def launch_official_ui(project_root: Path, model_path: Path,
-                       ui_port: int) -> None:
+def launch_official_ui(project_root: Path, model_path: Path, ui_port: int) -> None:
     """Run Khala's complete Mac worker, dispatcher and React frontend."""
-    worker_port = 8001
-    api_port = 8889
-    python = Path(os.sys.executable)
     frontend = project_root / "frontend"
-    required = (project_root / "backend" / "backend_worker.py",
-                project_root / "backend" / "backend_api.py",
-                frontend / "package.json", frontend / "node_modules")
-    if not all(path.exists() for path in required):
+    worker = project_root / "backend" / "backend_worker.py"
+    api = project_root / "backend" / "backend_api.py"
+    if not all(path.exists() for path in (worker, api, frontend / "package.json",
+                                           frontend / "node_modules")):
         raise RuntimeError("Khala's official frontend runtime is incomplete")
-    environment = os.environ.copy()
-    environment.update({
-        "KHALA_BACKEND": "vanilla", "KHALA_DEVICE": "mps",
-        "KHALA_VANILLA_WEIGHTS": str(model_path),
-        "KHALA_TRACKS_PER_JOB": "1", "PYTHONPATH": str(project_root),
-    })
+    environment = {**os.environ, "KHALA_BACKEND": "vanilla", "KHALA_DEVICE": "mps",
+                   "KHALA_VANILLA_WEIGHTS": str(model_path),
+                   "KHALA_TRACKS_PER_JOB": "1", "PYTHONPATH": str(project_root)}
     children: list[subprocess.Popen] = []
+    stop_on_exit(lambda: _stop_all(children))
 
-    def start(command: list[str], cwd: Path) -> subprocess.Popen:
-        child = subprocess.Popen(command, cwd=cwd, env=environment)
-        children.append(child)
-        return child
-
-    def stop_children() -> None:
-        for child in reversed(children):
-            if child.poll() is None:
-                child.terminate()
-        deadline = time.monotonic() + 8
-        for child in reversed(children):
-            if child.poll() is None:
-                try:
-                    child.wait(timeout=max(0.1, deadline - time.monotonic()))
-                except subprocess.TimeoutExpired:
-                    child.kill()
-
-    atexit.register(stop_children)
-    def terminate(_signum, _frame) -> None:
-        stop_children()
-        raise SystemExit(0)
-    signal.signal(signal.SIGTERM, terminate)
-    signal.signal(signal.SIGINT, terminate)
-    start([str(python), str(project_root / "backend" / "backend_worker.py"),
-           "--worker-port", str(worker_port), "--runtime-mode", "keep_loaded"],
-          project_root)
-    _wait_json(f"http://{LOOPBACK}:{worker_port}/health", "status", "idle", 360)
-    start([str(python), str(project_root / "backend" / "backend_api.py"),
-           "--port", str(api_port), "--num-workers", "1",
-           "--worker-base-port", str(worker_port)], project_root)
-    _wait_json(f"http://{LOOPBACK}:{api_port}/status", "total_gpus", 1, 30)
-    start(["npm", "run", "dev", "--", "--host", ALL_INTERFACES,
-           "--port", str(ui_port)], frontend)
-    _wait_json(f"http://{LOOPBACK}:{ui_port}/", None, None, 30)
+    def start(command: list[str], cwd: Path, readiness: Readiness) -> None:
+        children.append(subprocess.Popen(command, cwd=cwd, env=environment))
+        wait_until_ready(readiness, "Khala companion")
+    start([sys.executable, str(worker), "--worker-port", str(WORKER_PORT),
+           "--runtime-mode", "keep_loaded"], project_root,
+          Readiness(f"http://{LOOPBACK}:{WORKER_PORT}/health", WORKER_START_S,
+                    _says("status", "idle")))
+    start([sys.executable, str(api), "--port", str(API_PORT), "--num-workers", "1",
+           "--worker-base-port", str(WORKER_PORT)], project_root,
+          Readiness(f"http://{LOOPBACK}:{API_PORT}/status", API_START_S,
+                    _says("total_gpus", 1)))
+    start(["npm", "run", "dev", "--", "--host", ALL_INTERFACES, "--port", str(ui_port)],
+          frontend, Readiness(f"http://{LOOPBACK}:{ui_port}/", PAGE_START_S))
 
 
-def _wait_json(url: str, key: str | None, expected, timeout: float) -> None:
-    deadline = time.monotonic() + timeout
-    last_error: Exception | None = None
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=2) as response:
-                if key is None:
-                    return
-                import json
-                body = json.load(response)
-                if body.get(key) == expected:
-                    return
-        except Exception as error:
-            last_error = error
-        time.sleep(1)
-    raise RuntimeError(f"Khala companion did not become ready at {url}: {last_error}")
+def _says(key: str, expected):
+    """A readiness test: the JSON answer has `key` set to `expected`."""
+    return lambda response: json.load(response).get(key) == expected
+
+
+def _stop_all(children: list[subprocess.Popen]) -> None:
+    """Stop the companions, newest first, within one shared grace period."""
+    for child in reversed(children):
+        if child.poll() is None:
+            child.terminate()
+    deadline = time.monotonic() + STOP_GRACE_S
+    for child in reversed(children):
+        if child.poll() is None:
+            try:
+                child.wait(timeout=max(0.1, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                child.kill()
 
 
 if __name__ == "__main__":

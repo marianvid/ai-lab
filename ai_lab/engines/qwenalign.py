@@ -1,57 +1,33 @@
 """Qwen forced alignment with local weights and the shared audio gateway."""
 from __future__ import annotations
 
-from pathlib import Path
-
-from ..types import Format, ModelSet, Task
-from .base import ALIGNMENT_PATHS, LaunchPlan
-from .probe import http_ok
 from ..network import ALL_INTERFACES
+from ..types import ModelSet, Task
+from .base import ALIGNMENT_PATHS, LaunchPlan
+from .isolated import IsolatedEngine, model_directory, script_env, with_headroom_mb
+
+# What the aligner holds beside its weights, at least.
+HEADROOM_MB = 1024
 
 
-class QwenAlignEngine:
+class QwenAlignEngine(IsolatedEngine):
+    """Qwen3 forced aligner: when each word of a transcript is spoken."""
+
     id = "qwenalign"
     display_name = "Qwen Forced Aligner"
-
-    def __init__(self, binary: str | None = None,
-                 server: str | None = None) -> None:
-        self.binary = binary or "python"
-        self.server = server or str(Path(__file__).resolve().parents[1] /
-                                    "audio" / "server.py")
-
-    def formats(self) -> frozenset[Format]:
-        return frozenset({Format.SAFETENSORS})
-
-    def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.ALIGNMENT})
-
-    def params(self, task: Task = Task.ALIGNMENT):
-        return ()
+    task = Task.ALIGNMENT
+    paths = ALIGNMENT_PATHS
+    script = ("audio", "server.py")
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
-        if model.format is not Format.SAFETENSORS or model.task is not Task.ALIGNMENT:
-            raise ValueError("Qwen aligner requires an alignment checkpoint")
-        if params:
-            raise ValueError("Qwen aligner has no instance settings")
-        checkpoint = Path(model.entrypoint)
-        model_dir = checkpoint.parent if checkpoint.is_file() else checkpoint
+        """The audio server with the qwen-align backend."""
+        self._checked(model, params)
         return LaunchPlan(argv=[
             self.binary, self.server, "--backend", "qwen-align",
-            "--model", str(model_dir), "--name", model.name,
+            "--model", model_directory(model), "--name", model.name,
             "--host", ALL_INTERFACES, "--port", str(port)],
-            env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
-                 "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
+            env=script_env())
 
-    def ready(self, port: int) -> bool:
-        return http_ok(port)
-
-    def concurrency(self, params: dict) -> int:
-        return 1
-
-    def needs_mb(self, model: ModelSet, params: dict,
-                 card_total_mb: float) -> float:
-        weights_mb = model.size_bytes / (1024 * 1024)
-        return max(weights_mb * 1.5, weights_mb + 1024)
-
-    def api_paths(self, task: Task = Task.ALIGNMENT) -> tuple[str, ...]:
-        return ALIGNMENT_PATHS if task is Task.ALIGNMENT else ()
+    def needs_mb(self, model: ModelSet, params: dict, card_total_mb: float) -> float:
+        """The weights with room for the aligner's working memory."""
+        return with_headroom_mb(model, HEADROOM_MB)

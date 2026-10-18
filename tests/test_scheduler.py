@@ -6,11 +6,12 @@ below are the hard part, and they can be got wrong in ways that only show up
 under load on a machine you cannot easily reproduce.
 """
 
+import contextlib
 import threading
 import time
 import unittest
 
-from ai_lab.scheduler import WillNotFit, Abandoned, QueueFull, Scheduler
+from ai_lab.scheduler import AbandonedError, QueueFullError, Scheduler, WillNotFitError
 
 
 class Card:
@@ -64,7 +65,8 @@ class TogetherTests(unittest.TestCase):
     def test_the_engine_s_own_limit_is_respected(self):
         card = Card(places=2)
         s = scheduler(card)
-        s.enter("a"); s.enter("a")
+        s.enter("a")
+        s.enter("a")
         third = run(s.enter, "a")
         time.sleep(0.05)
         self.assertEqual(s.state()["in_flight"], 2)
@@ -76,7 +78,9 @@ class TogetherTests(unittest.TestCase):
     def test_each_shape_brings_its_own_limit(self):
         card = Card(places={"a": 1, "b": 3})
         s = scheduler(card)
-        s.enter("b"); s.enter("b"); s.enter("b")
+        s.enter("b")
+        s.enter("b")
+        s.enter("b")
         self.assertEqual(s.state()["in_flight"], 3)
 
 
@@ -111,7 +115,8 @@ class DoorClosesTests(unittest.TestCase):
         s.enter("a")
         wants_b = run(s.enter, "b")
         time.sleep(0.05)
-        arrivals = [run(s.enter, "a") for _ in range(20)]
+        for _ in range(20):
+            run(s.enter, "a")
         time.sleep(0.05)
         s.leave()                               # the only one in flight ends
         wants_b.join(timeout=2)
@@ -153,7 +158,8 @@ class PhotographTests(unittest.TestCase):
         card = Card(places=2)
         s = scheduler(card)
         s.enter("a")
-        waiters = [run(s.enter, "b") for _ in range(5)]
+        for _ in range(5):
+            run(s.enter, "b")
         time.sleep(0.05)
         s.leave()
         time.sleep(0.1)
@@ -245,7 +251,7 @@ class AbandonedTests(unittest.TestCase):
         def leaves():
             try:
                 s.enter("b", still_wanted=lambda: False)
-            except Abandoned:
+            except AbandonedError:
                 gone.append(True)
 
         thread = run(leaves)
@@ -299,7 +305,7 @@ class FullTests(unittest.TestCase):
         for _ in range(3):
             run(lambda: _swallow(s.enter, "b"))
         time.sleep(0.1)
-        with self.assertRaises(QueueFull) as caught:
+        with self.assertRaises(QueueFullError) as caught:
             s.enter("b")
         self.assertIn("waiting", str(caught.exception))
 
@@ -316,7 +322,7 @@ class ResetTests(unittest.TestCase):
         def waits():
             try:
                 s.enter("b")
-            except Abandoned as error:
+            except AbandonedError as error:
                 refused.append(str(error))
 
         threads = [run(waits) for _ in range(3)]
@@ -330,7 +336,8 @@ class ResetTests(unittest.TestCase):
     def test_nothing_is_running_and_nothing_is_loaded_afterwards(self):
         card = Card(places=4)
         s = scheduler(card)
-        s.enter("a"); s.enter("a")
+        s.enter("a")
+        s.enter("a")
         s.reset("stopped by hand")
         state = s.state()
         self.assertEqual(state["in_flight"], 0)
@@ -373,10 +380,8 @@ class LockTests(unittest.TestCase):
 
 
 def _swallow(function, *args, **kwargs):
-    try:
+    with contextlib.suppress(Exception):
         function(*args, **kwargs)
-    except Exception:
-        pass
 
 
 if __name__ == "__main__":
@@ -426,7 +431,7 @@ class OverflowTests(unittest.TestCase):
         card = Card(places=1)
         s = scheduler(card)
         s.enter("a")
-        served = []
+        served: list[int] = []
         for index in range(3):
             run(_record, s, "b", served, index)
             time.sleep(0.02)
@@ -525,14 +530,15 @@ class ResetDuringALoadTests(unittest.TestCase):
 
     def test_the_waiting_request_is_turned_away_not_admitted(self):
         s, card = self.scheduler_that_loads_slowly()
-        s.enter("a"); s.leave()
+        s.enter("a")
+        s.leave()
         outcome = []
 
         def waits():
             try:
                 s.enter("b")
                 outcome.append("admitted")
-            except Abandoned:
+            except AbandonedError:
                 outcome.append("turned away")
 
         run(waits)
@@ -544,7 +550,8 @@ class ResetDuringALoadTests(unittest.TestCase):
     def test_the_card_is_left_unknown_rather_than_claimed(self):
         # Whatever is on it now, the next request unloads before it loads.
         s, card = self.scheduler_that_loads_slowly()
-        s.enter("a"); s.leave()
+        s.enter("a")
+        s.leave()
         run(lambda: _swallow(s.enter, "b"))
         time.sleep(0.1)
         s.reset("stopped by hand")
@@ -555,7 +562,8 @@ class ResetDuringALoadTests(unittest.TestCase):
 
     def test_the_next_request_loads_again(self):
         s, card = self.scheduler_that_loads_slowly()
-        s.enter("a"); s.leave()
+        s.enter("a")
+        s.leave()
         run(lambda: _swallow(s.enter, "b"))
         time.sleep(0.1)
         s.reset("stopped by hand")
@@ -683,7 +691,7 @@ class SeveralAtOnce(unittest.TestCase):
         s = scheduler(self.card, make_room=lambda shape, loaded:
                       None if shape == "huge" else [])
         s.enter("a")
-        with self.assertRaises(WillNotFit):
+        with self.assertRaises(WillNotFitError):
             s.enter("huge")
         self.assertEqual(self.card.switches, ["a"], "it tried to load it anyway")
         loaded = {item["shape"] for item in s.state()["loaded"]}

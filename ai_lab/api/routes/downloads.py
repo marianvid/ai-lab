@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 def register(router, operations) -> None:
+    """The transfers' routes: list, start, cancel."""
     router.add("GET", "/api/downloads", lambda **_: operations.transfers())
     router.add("POST", "/api/downloads",
                lambda body=None, **_: operations.download(

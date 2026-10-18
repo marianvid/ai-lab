@@ -21,7 +21,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
-from ..gateway import CardBusy
+from ..gateway import CardBusyError
 from ..lanes import SideLanes
 from ..multipart import MultipartBody
 from ..operations import Operations
@@ -42,7 +42,7 @@ STATUS = {
     FileNotFoundError: HTTPStatus.NOT_FOUND,
     NotImplementedError: HTTPStatus.NOT_IMPLEMENTED,
     # Not a bad request: the same request will succeed once the card is free.
-    CardBusy: HTTPStatus.CONFLICT,
+    CardBusyError: HTTPStatus.CONFLICT,
     # A subscription's allowance is spent: the caller may retry later.
     ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
     # The vendor's CLI could not answer: the caller's fallback should take over.
@@ -88,7 +88,7 @@ def status_for(error: Exception) -> HTTPStatus:
     """The first rule that matches, following inheritance.
 
     Looking the exact type up in the table misses a subclass, and the subclasses
-    are the point: the gateway raises `NotConfigured` for a model name nobody
+    are the point: the gateway raises `NotConfiguredError` for a model name nobody
     serves, and it is a KeyError precisely so that it lands on 404. Matched by
     exact type it would leave as a bad request, which tells an agent the wrong
     thing about its own request.

@@ -1,6 +1,7 @@
 import base64
 import os
 import unittest
+from pathlib import Path
 from threading import BoundedSemaphore, Lock
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -38,6 +39,7 @@ class SpeechContractTests(unittest.TestCase):
 
     def test_reference_file_exists_only_during_use(self):
         with ReferenceFile(WAV) as path:
+            assert path is not None
             with open(path, 'rb') as handle:
                 self.assertEqual(handle.read(), WAV)
         self.assertFalse(os.path.exists(path))
@@ -60,7 +62,7 @@ class HiggsReferenceTests(unittest.TestCase):
     def test_reference_and_seed_reach_the_worker(self):
         backend = HiggsBackend.__new__(HiggsBackend)
         backend.model_name = 'm'
-        backend.model_path = '/models/m'
+        backend.model_path = Path('/models/m')
         backend.worker_port = 8122
         backend.slots = BoundedSemaphore(1)
         seen = {}

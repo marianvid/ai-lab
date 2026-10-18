@@ -26,8 +26,9 @@ import re
 import urllib.error
 import urllib.request
 
+from ..public_services import address
+
 TIMEOUT_S = 20
-API = "https://api.github.com/repos/{repo}/releases?per_page={count}"
 
 # How many releases back to look. Reading notes means reading everything
 # between what is installed and what would be installed, and a machine several
@@ -98,7 +99,7 @@ def _render(releases: list[dict]) -> str:
 
 def _releases(repo: str) -> list[dict]:
     request = urllib.request.Request(
-        API.format(repo=repo, count=HOW_MANY),
+        address("github_releases").format(repo=repo, count=HOW_MANY),
         headers={"Accept": "application/vnd.github+json",
                  # Asked for by name so that a refusal names this application
                  # rather than looking like an anonymous script.

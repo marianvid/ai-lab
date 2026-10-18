@@ -2,6 +2,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, cast
 
 from ai_lab.engines.higgs import HiggsEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
@@ -45,7 +46,7 @@ class HiggsEngineTests(unittest.TestCase):
     def test_parallel_limit_is_bounded(self):
         for bad in (0, 65, 2.0, '8'):
             with self.assertRaises(ValueError):
-                HiggsEngine(max_parallel=bad)
+                HiggsEngine(max_parallel=cast(Any, bad))
 
     def test_unmapped_checkpoint_is_rejected(self):
         self.engine.model_options.clear()

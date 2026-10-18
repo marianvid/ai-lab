@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import Future
-from typing import Callable
+from collections.abc import Callable
+
+# The largest group, and the longest wait for companions, a queue accepts.
+MAX_BATCH = 64
+MAX_WINDOW_S = 5
 
 
 class BatchQueue:
@@ -27,8 +31,8 @@ class BatchQueue:
 
     def __init__(self, run_batch: Callable[[list], list], max_batch: int,
                  window_s: float) -> None:
-        if not 1 <= max_batch <= 64 or not 0 <= window_s <= 5:
-            raise ValueError("batch size must be 1–64 and the window 0–5 s")
+        if not 1 <= max_batch <= MAX_BATCH or not 0 <= window_s <= MAX_WINDOW_S:
+            raise ValueError(f"batch size must be 1–{MAX_BATCH} and the window 0–{MAX_WINDOW_S} s")
         self.run_batch = run_batch
         self.max_batch = max_batch
         self.window_s = window_s
@@ -68,7 +72,7 @@ class BatchQueue:
                 for _, future in group:
                     future.set_exception(error)
                 continue
-            for (_, future), result in zip(group, results):
+            for (_, future), result in zip(group, results, strict=True):
                 if isinstance(result, BaseException):
                     future.set_exception(result)
                 else:

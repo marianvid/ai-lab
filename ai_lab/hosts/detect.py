@@ -20,44 +20,15 @@ def current_host(engines: dict | None = None) -> Host:
     """
     settings = engines or {}
     if sys.platform == "darwin":
-        from .darwin import DarwinHost
+        from .darwin import DARWIN_ENGINES, DarwinHost
 
-        return DarwinHost(
-            llamacpp_binary=settings.get("llamacpp", {}).get("binary"),
-            mlxwhisper_binary=settings.get("mlxwhisper", {}).get("binary"),
-            onnx_binary=settings.get("onnx", {}).get("binary"),
-            pyannote_binary=settings.get("pyannote", {}).get("binary"),
-            paddleocr_binary=settings.get("paddleocr", {}).get("binary"),
-            comfyui_binary=settings.get("comfyui", {}).get("binary"),
-            comfyui_main=settings.get("comfyui", {}).get("comfyui"),
-            acestep_binary=settings.get("acestep", {}).get("binary"),
-            qwentts_binary=settings.get("qwentts", {}).get("binary"),
-            kokoro_binary=settings.get("kokoro", {}).get("binary"),
-            voxcpm_binary=settings.get("voxcpm", {}).get("binary"),
-            qwenalign_binary=settings.get("qwenalign", {}).get("binary"),
-            khala_binary=settings.get("khala", {}).get("binary"),
-            yue2_binary=settings.get("yue2", {}).get("binary"),
-            higgs_local_binary=settings.get("higgs_local", {}).get("binary"),
-            mlxlm_binary=settings.get("mlxlm", {}).get("binary"),
-            mlxvlm_binary=settings.get("mlxvlm", {}).get("binary"),
-            stableaudio3_binary=settings.get("stableaudio3", {}).get("binary"),
-        )
-    from .linux import LinuxHost
+        return DarwinHost(_binaries(settings, DARWIN_ENGINES),
+                          comfyui_main=(settings.get("comfyui") or {}).get("comfyui"))
+    from .linux import LINUX_ENGINES, LinuxHost
 
-    return LinuxHost(
-        vllm_binary=settings.get("vllm", {}).get("binary"),
-        nemo_binary=settings.get("nemo", {}).get("binary"),
-        onnx_binary=settings.get("onnx", {}).get("binary"),
-        pyannote_binary=settings.get("pyannote", {}).get("binary"),
-        paddleocr_binary=settings.get("paddleocr", {}).get("binary"),
-        comfyui_binary=settings.get("comfyui", {}).get("binary"),
-        acestep_binary=settings.get("acestep", {}).get("binary"),
-        qwentts_binary=settings.get("qwentts", {}).get("binary"),
-        higgs_binary=settings.get("higgs", {}).get("binary"),
-        heartmula_binary=settings.get("heartmula", {}).get("binary"),
-        yue2_binary=settings.get("yue2", {}).get("binary"),
-        comfy_music_binary=settings.get("comfy_music", {}).get("binary"),
-        mulacover_binary=settings.get("mulacover", {}).get("binary"),
-        levo2_binary=settings.get("levo2", {}).get("binary"),
-        stableaudio3_binary=settings.get("stableaudio3", {}).get("binary"),
-    )
+    return LinuxHost(_binaries(settings, LINUX_ENGINES))
+
+
+def _binaries(settings: dict, engines: tuple[str, ...]) -> dict[str, str | None]:
+    """Engine id -> the program its section of config.json names, for these engines."""
+    return {engine: (settings.get(engine) or {}).get("binary") for engine in engines}

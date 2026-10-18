@@ -5,15 +5,16 @@ import os
 from pathlib import Path
 
 from aiohttp import web
-from server import PromptServer
-
+from server import PromptServer  # type: ignore[import-not-found]  # ComfyUI's own module
 
 WEB_DIRECTORY = "./web"
-NODE_CLASS_MAPPINGS = {}
+# ComfyUI loads this package as a custom node; it adds a route and no nodes.
+NODE_CLASS_MAPPINGS: dict[str, type] = {}
 
 
 @PromptServer.instance.routes.get("/ai-lab/preset")
 async def preset(_request):
+    """The instance's configured graph, with AI-Lab's markers set to harmless defaults."""
     path = (os.environ.get("AI_LAB_COMFYUI_UI_PRESET")
             or os.environ.get("AI_LAB_COMFYUI_PRESET"))
     if not path:

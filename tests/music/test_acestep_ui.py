@@ -3,6 +3,7 @@
 import sys
 import types
 import unittest
+from typing import Any, cast
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,14 +12,14 @@ from ai_lab.music.server import launch_native_ui
 
 class AceStepNativeUiTests(unittest.TestCase):
     def test_ui_reuses_model_and_opens_on_its_companion_port(self):
-        seen = {}
+        seen: dict[str, Any] = {}
         demo = types.SimpleNamespace(
             queue=lambda **kwargs: seen.setdefault("queue", kwargs),
             launch=lambda **kwargs: seen.setdefault("launch", kwargs),
         )
         package = types.ModuleType("acestep")
         package.__path__ = []
-        pipeline = types.ModuleType("acestep.acestep_v15_pipeline")
+        pipeline: Any = types.ModuleType("acestep.acestep_v15_pipeline")
         pipeline.get_gpu_config = lambda: types.SimpleNamespace(recommended_backend="mlx")
         pipeline.set_global_gpu_config = lambda config: seen.setdefault("gpu", config)
         pipeline.create_demo = lambda **kwargs: seen.setdefault("init", kwargs) and demo
@@ -27,7 +28,7 @@ class AceStepNativeUiTests(unittest.TestCase):
 
         with patch.dict(sys.modules, {"acestep": package,
                                       "acestep.acestep_v15_pipeline": pipeline}):
-            launch_native_ui(backend, "acestep-v15-xl-turbo",
+            launch_native_ui(cast(Any, backend), "acestep-v15-xl-turbo",
                              Path("/models/ace"), 18112)
 
         params = seen["init"]["init_params"]

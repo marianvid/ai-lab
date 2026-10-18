@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TypeVar
+
+# Whatever the scheduler calls a shape: opaque here, compared and passed back.
+ShapeT = TypeVar("ShapeT")
 
 
 class EvictionPlanner:
@@ -12,8 +16,8 @@ class EvictionPlanner:
     lock; reading the accelerator at that point would block every request.
     """
 
-    def choose(self, wanted, loaded: list[dict], *,
-               needs_mb: Callable[[object], float], free_mb: float,
+    def choose(self, wanted: ShapeT, loaded: list[dict], *,
+               needs_mb: Callable[[ShapeT], float], free_mb: float,
                capacity_mb: float) -> list | None:
         """The shapes to unload, oldest idle first; None when it can never fit."""
         needed = needs_mb(wanted)
@@ -48,8 +52,9 @@ def _oldest_idle_first(loaded: list[dict]) -> list[dict]:
 
 
 def _until_it_fits(others: list, needed: float, free_mb: float,
-                   needs_mb: Callable[[object], float],
+                   needs_mb: Callable[[ShapeT], float],
                    capacity_mb: float) -> list | None:
+    """Unload the others in order until the model fits; None when it never will."""
     victims = []
     for shape in others:
         victims.append(shape)

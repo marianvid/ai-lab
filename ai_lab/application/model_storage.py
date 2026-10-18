@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import time
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 
 from ..catalog import Catalog
 from ..config import ConfigStore, ModelRoot, Repository
+from ..disk import sha256_of
 from ..hosts.base import Host
 from .move_files import (
     MovePlan,
@@ -20,13 +19,18 @@ from .move_files import (
     reject_unfit_destination,
     reject_unremovable_sources,
 )
+from .move_jobs import MoveCancelledError, MoveJobRecords
 
 
-class _MoveCancelled(Exception):
-    """An operator cancelled a move; the job records this separately."""
+class ModelStorageService(MoveJobRecords):
+    """Deleting a model's files, and moving them between storage tiers safely.
 
+    A move copies into a staging area, verifies every file by checksum,
+    publishes the copy under its real name, repoints stopped entries, and only
+    then removes the source. Every step is recorded (`move_jobs.MoveJobRecords`)
+    so a crash, a failure or a cancellation is reported rather than lost.
+    """
 
-class ModelStorageService:
     def __init__(self, store: ConfigStore, catalog: Catalog, host: Host,
                  on_change: Callable[[str], None],
                  writable_in_root: Callable[[Repository, ModelRoot], Repository]) -> None:
@@ -58,11 +62,7 @@ class ModelStorageService:
                 + ", ".join(users) + " still points at this model.")
 
         roots = [Path(item.path).resolve() for item in config.repositories]
-        paths = [Path(item.path).resolve() for item in model.files]
-        for path in paths:
-            if not any(path.is_relative_to(root) for root in roots):
-                raise ValueError(f"Refusing to delete outside the repositories: {path}")
-
+        paths = _inside(roots, [Path(item.path).resolve() for item in model.files])
         freed = sum(item.size_bytes for item in model.files)
         for path in paths:
             path.unlink(missing_ok=True)
@@ -119,7 +119,7 @@ class ModelStorageService:
         staging = Path(job["staging"])
         try:
             self._stage_and_publish(plan, job, staging)
-        except _MoveCancelled:
+        except MoveCancelledError:
             shutil.rmtree(staging, ignore_errors=True)
             self._finish_job(job, "cancelled", "Cancelled")
             return True
@@ -179,28 +179,6 @@ class ModelStorageService:
                 f"{source_repository.name}")
         return self._writable_in_root(candidates[0], target_root)
 
-    def _open_move_job(self, plan: MovePlan) -> dict:
-        """Write the durable job record before any byte is copied."""
-        job_id = uuid.uuid4().hex
-        # A sibling of the format directories, not inside one — the catalog
-        # only scans each configured repository's own path (see
-        # `Catalog.scan`), so a directory here never appears as a half-copied
-        # model in the Library while a move is in flight or after one fails.
-        staging_root = Path(plan.target_root.path) / ".ai-lab-staging"
-        staging_root.mkdir(parents=True, exist_ok=True)
-        os.chmod(staging_root, 0o700)
-        job = {"id": job_id, "model_id": plan.model_id,
-               "target_model_id": plan.model_id.replace(
-                   plan.source_repository.id, plan.target_repository.id, 1),
-               "source_tier": plan.source_repository.root_id,
-               "target_tier": plan.target_root.id,
-               "bytes": plan.model.size_bytes, "files": len(plan.sources),
-               "staging": str(staging_root / job_id), "status": "pending",
-               "error": "", "started_at": time.time(),
-               "updated_at": time.time()}
-        self._write_job(job)
-        return job
-
     def _stage_and_publish(self, plan: MovePlan, job: dict, staging: Path) -> None:
         """Copy and verify into staging, publish, then repoint stopped entries."""
         self._move_phase(job, "copying")
@@ -258,13 +236,6 @@ class ModelStorageService:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
         return record
 
-    def _finish_job(self, job: dict, status: str, error: str = "") -> None:
-        if error:
-            job["error"] = error
-        job["status"] = status
-        job["updated_at"] = time.time()
-        self._write_job(job)
-
     def _reject_if_busy(self, config, model_id: str) -> None:
         """Refuse a model that is loaded or loading.
 
@@ -299,13 +270,11 @@ class ModelStorageService:
         """
         tops = {relative.parts[0] if len(relative.parts) > 1 else None
                 for relative in relatives}
-        if len(tops) == 1 and None not in tops:
-            top = tops.pop()
-            final_dir = target_path / top
-            if not final_dir.exists():
-                os.replace(staging / top, final_dir)
-                return
-        for relative, destination in zip(relatives, destinations):
+        top = next(iter(tops)) if len(tops) == 1 else None
+        if top is not None and not (target_path / top).exists():
+            os.replace(staging / top, target_path / top)
+            return
+        for relative, destination in zip(relatives, destinations, strict=True):
             destination.parent.mkdir(parents=True, exist_ok=True)
             (staging / relative).replace(destination)
 
@@ -327,108 +296,6 @@ class ModelStorageService:
             needed |= sibling_paths & source_set
         return needed
 
-    # -- move job records: durable, so a crash can be reported rather than --
-    # -- silently losing the move -------------------------------------------
-
-    def _move_job_dir(self) -> Path:
-        directory = self.host.state_dir() / "moves"
-        directory.mkdir(parents=True, exist_ok=True)
-        return directory
-
-    def _job_path(self, job_id: str) -> Path:
-        return self._move_job_dir() / f"{job_id}.json"
-
-    def _write_job(self, job: dict) -> None:
-        path = self._job_path(job["id"])
-        temporary = path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(job, sort_keys=True))
-        temporary.replace(path)
-        self._changed("models")
-
-    def _read_job(self, job_id: str) -> dict:
-        return json.loads(self._job_path(job_id).read_text())
-
-    def _move_phase(self, job: dict, status: str) -> None:
-        job["status"] = status
-        job["updated_at"] = time.time()
-        self._write_job(job)
-
-    def _check_cancelled(self, job: dict) -> None:
-        """Whether someone asked for this move to stop.
-
-        Reading the job file back, rather than an in-memory flag, is what
-        lets `cancel_move` be called from a different request than the one
-        running the move.
-        """
-        try:
-            current = self._read_job(job["id"])
-        except FileNotFoundError:
-            return
-        if current.get("status") == "cancelling":
-            raise _MoveCancelled()
-
-    def move_jobs(self) -> list[dict]:
-        """Every move job on record, most recently updated first.
-
-        Read after a restart to find one that never reached `completed` — a
-        resumable failure to report, not a move that vanished without a
-        trace.
-        """
-        directory = self._move_job_dir()
-        jobs = []
-        for path in directory.glob("*.json"):
-            try:
-                jobs.append(json.loads(path.read_text()))
-            except (json.JSONDecodeError, OSError):
-                continue
-        jobs.sort(key=lambda item: item.get("updated_at", 0), reverse=True)
-        return jobs
-
-    UNFINISHED_MOVE_STATUSES = ("pending", "copying", "verifying",
-                                "publishing", "cancelling")
-
-    def recover_moves(self) -> list[dict]:
-        """Sweep move jobs left mid-flight by a process that did not exit cleanly.
-
-        Called once at startup, before anything else touches the move job
-        directory. A job still marked `copying` etc. has no thread behind it
-        any more — the process that was running it is the one that just
-        restarted — so it is explicitly marked failed rather than left to
-        claim, forever, that a move is still in progress. Its staged bytes,
-        which live outside the scanned tree (see `move_model`), are removed:
-        recovery is one of the four cases the spec names for cleaning up
-        temporary files, the other three being success, cancellation and
-        timeout.
-        """
-        recovered = []
-        for job in self.move_jobs():
-            if job.get("status") not in self.UNFINISHED_MOVE_STATUSES:
-                continue
-            staging = job.get("staging")
-            if staging:
-                shutil.rmtree(staging, ignore_errors=True)
-            job["status"] = "failed"
-            job["error"] = "Interrupted by a service restart"
-            job["updated_at"] = time.time()
-            self._write_job(job)
-            recovered.append(job)
-        return recovered
-
-    def cancel_move(self, job_id: str) -> dict:
-        """Ask an in-progress move to stop at the next file or phase boundary.
-
-        Does not touch the staged copy — the files already verified stay on
-        disk, so the same job can be inspected or cleaned up rather than the
-        work simply disappearing.
-        """
-        job = self._read_job(job_id)
-        if job["status"] in ("completed", "failed", "cancelled"):
-            return job
-        job["status"] = "cancelling"
-        job["updated_at"] = time.time()
-        self._write_job(job)
-        return job
-
     # Checked between chunks during the copy itself, not only once per file —
     # a single-file GGUF, the common case, previously had exactly one
     # cancellation check (before any bytes moved) and could not be stopped
@@ -448,8 +315,17 @@ class ModelStorageService:
 
     @staticmethod
     def _sha256(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+        return sha256_of(path)
+
+
+
+def _inside(roots: list[Path], paths: list[Path]) -> list[Path]:
+    """`paths`, after checking that every one is under one of the repositories.
+
+    The model id arrives over HTTP, and deleting is the one operation in the
+    application that destroys data.
+    """
+    for path in paths:
+        if not any(path.is_relative_to(root) for root in roots):
+            raise ValueError(f"Refusing to delete outside the repositories: {path}")
+    return paths

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from ai_lab.images.jobs import ImageJobs
 from ai_lab.types import Task
@@ -53,7 +54,7 @@ class ImageJobProfileTests(unittest.TestCase):
         self.assertNotIn("prompt", recovered)
 
     def test_list_does_not_embed_result_bytes(self):
-        job = {"id": "complete", "profile": "safe", "model": "image",
+        job: dict[str, Any] = {"id": "complete", "profile": "safe", "model": "image",
                "task": Task.IMAGE_GENERATION.value, "status": "succeeded",
                "created_at": 1, "updated_at": 1, "error": "",
                "result": {"data": [{"id": "image-0", "mime_type": "image/png",

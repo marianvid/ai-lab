@@ -51,9 +51,9 @@ class StateDirTests(unittest.TestCase):
             self.assertEqual(launch.launch_dir(), Path("/srv/lab/launch"))
 
     def test_an_unset_variable_fails_loudly(self):
-        with mock.patch.dict("os.environ", {launch.STATE_DIR_VARIABLE: ""}):
-            with self.assertRaisesRegex(RuntimeError, launch.STATE_DIR_VARIABLE):
-                launch.state_dir()
+        with mock.patch.dict("os.environ", {launch.STATE_DIR_VARIABLE: ""}), \
+                self.assertRaisesRegex(RuntimeError, launch.STATE_DIR_VARIABLE):
+            launch.state_dir()
 
     def test_the_default_directory_is_used_without_an_argument(self):
         with TemporaryDirectory() as root, \

@@ -15,10 +15,13 @@ from email.message import Message
 
 @dataclass(frozen=True, slots=True)
 class MultipartBody:
+    """A multipart request body, read and edited in place without re-encoding it."""
+
     content_type: str
     data: bytes
 
     def field(self, name: str) -> str | None:
+        """A text part's value, or None when the body has no such part."""
         found = self._part(name)
         if found is None:
             return None
@@ -34,6 +37,7 @@ class MultipartBody:
         return content.removesuffix(b"\r\n")
 
     def replace(self, name: str, value: str) -> bytes:
+        """The whole body with one text part's value replaced; every other byte unchanged."""
         found = self._part(name)
         if found is None:
             raise ValueError(f"multipart request has no {name!r} field")

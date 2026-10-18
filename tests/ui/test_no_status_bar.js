@@ -48,7 +48,8 @@ describe('the page does not narrate itself', () => {
     // on offer. And a tooltip nobody knows is there may as well not be
     // written, so the label carries a faint mark too — the same one a setting
     // with an explanation behind it already had.
-    const css = readFileSync('ai_lab/web/css/app.css', 'utf8');
+    const css = ['app.css', 'pages.css']
+      .map((name) => readFileSync(`ai_lab/web/css/${name}`, 'utf8')).join('\n');
     assert.match(css, /\[title\][^{]*\{[^}]*cursor:\s*help/s,
                  'nothing gives a tooltip its own cursor');
     assert.match(css, /underline dotted/,

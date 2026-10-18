@@ -2,28 +2,24 @@
 """Isolated HTTP host for MuLaCover source-audio remixes."""
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 from ai_lab.media.http_host import serve
+from ai_lab.music.bundles import Checkpoint, Sampling
+from ai_lab.music.hosting import CHECKPOINT_OPTIONS, PORT, SAMPLING_OPTIONS, parse
 from ai_lab.music.mulacover_backend import MulaCoverBackend
+
+# Room for a base64 reference recording of up to 25 MiB.
+MAX_BODY_BYTES = 36 * 1024 * 1024
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--bundle-root", type=Path, required=True)
-    parser.add_argument("--checkpoint-path", type=Path, required=True)
-    parser.add_argument("--checkpoint-subdir", required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--topk", type=int, required=True)
-    parser.add_argument("--temperature", type=float, required=True)
-    parser.add_argument("--cfg-scale", type=float, required=True)
-    parser.add_argument("--port", type=int, required=True)
-    args = parser.parse_args()
+    """Load MuLaCover, then answer cover requests."""
+    args = parse(*CHECKPOINT_OPTIONS, ("--output-root", Path), *SAMPLING_OPTIONS, PORT)
     backend = MulaCoverBackend(
-        args.bundle_root, args.checkpoint_path, args.checkpoint_subdir,
-        args.output_root, args.topk, args.temperature, args.cfg_scale)
-    serve(backend, args.port, max_body_bytes=36 * 1024 * 1024)
+        Checkpoint(args.bundle_root, args.checkpoint_path, args.checkpoint_subdir),
+        args.output_root, Sampling(args.topk, args.temperature, args.cfg_scale))
+    serve(backend, args.port, max_body_bytes=MAX_BODY_BYTES)
 
 
 if __name__ == "__main__":

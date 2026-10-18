@@ -7,7 +7,7 @@ this project's contract.
 ## How the evaluation audio was prepared
 
 The Romanian evaluation audio published for this personal AI-Lab was prepared
-by [`harness/audio/prepare_fleurs.py`](https://github.com/marianvid/ai-lab-benchmarks/blob/main/harness/audio/prepare_fleurs.py)
+by [the FLEURS preparation script](https://github.com/marianvid/ai-lab-benchmarks/blob/main/harness/audio/prepare_fleurs.py)
 in the benchmark repository: a deterministic FLEURS selection and FFmpeg
 normalisation done before the files were sent here.
 

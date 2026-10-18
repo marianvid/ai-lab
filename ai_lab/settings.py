@@ -16,22 +16,24 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import asdict
-
-from . import budget
 from pathlib import Path
 
+from . import budget
 from .config import ConfigStore
 from .engines.registry import Registry
 from .hosts.base import Host
 
 
 class Settings:
+    """The first settings screen, assembled from the configuration and the host."""
+
     def __init__(self, store: ConfigStore, host: Host, engines: Registry) -> None:
         self.store = store
         self.host = host
         self.engines = engines
 
     def view(self) -> dict:
+        """Repositories with their free space, the accelerator, memory and engines."""
         config = self.store.load()
         capabilities = self.host.capabilities()
         # One reading, used twice. Each is an `nvidia-smi` on Linux — 30 ms —
@@ -86,27 +88,23 @@ class Settings:
         # directory and exists, so asking without checking would report a
         # configured store where there is none.
         path = Path(repository.path) if repository.path else None
-        exists = bool(path and path.is_dir())
-        row = {**asdict(repository), "exists": exists,
-               "free_bytes": 0, "total_bytes": 0,
-               "writable": bool(repository.writable and exists
-                                and os.access(path, os.W_OK | os.X_OK))}
-        if exists:
-            usage = shutil.disk_usage(path)
-            row["free_bytes"] = usage.free
-            row["total_bytes"] = usage.total
-        return row
+        return {**asdict(repository), **_space(path, repository.writable)}
 
     @staticmethod
     def _model_root(model_root) -> dict:
         path = Path(model_root.path) if model_root.path else None
-        exists = bool(model_root.enabled and path and path.is_dir())
-        row = {**asdict(model_root), "exists": exists,
-               "free_bytes": 0, "total_bytes": 0,
-               "writable": bool(model_root.writable and exists
-                                and os.access(path, os.W_OK | os.X_OK))}
-        if exists:
-            usage = shutil.disk_usage(path)
-            row["free_bytes"] = usage.free
-            row["total_bytes"] = usage.total
-        return row
+        return {**asdict(model_root),
+                **_space(path if model_root.enabled else None, model_root.writable)}
+
+
+def _space(path: Path | None, writable: bool) -> dict:
+    """Whether a folder is there, how full its disk is, and whether it can be written.
+
+    `writable` is the configuration's intention; it is tested against the
+    filesystem rather than trusted.
+    """
+    if path is None or not path.is_dir():
+        return {"exists": False, "free_bytes": 0, "total_bytes": 0, "writable": False}
+    usage = shutil.disk_usage(path)
+    return {"exists": True, "free_bytes": usage.free, "total_bytes": usage.total,
+            "writable": bool(writable and os.access(path, os.W_OK | os.X_OK))}

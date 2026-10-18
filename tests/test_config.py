@@ -46,9 +46,8 @@ class ConfigStoreTests(unittest.TestCase):
 
     def test_invalid_schema_marker_is_rejected(self):
         for value in (True, -1, "1"):
-            with self.subTest(value=value):
-                with self.assertRaisesRegex(ValueError, "schema_version"):
-                    self.write({"schema_version": value}).load()
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "schema_version"):
+                self.write({"schema_version": value}).load()
 
     def test_unknown_lookups_raise(self):
         config = self.write({}).load()
@@ -169,10 +168,9 @@ class ConfigStoreTests(unittest.TestCase):
     def test_mutate_discards_changes_when_the_block_fails(self):
         store = ConfigStore(self.path)
         store.save(Config(title="original"))
-        with self.assertRaises(ValueError):
-            with store.mutate() as config:
-                config.title = "changed"
-                raise ValueError("rejected")
+        with self.assertRaises(ValueError), store.mutate() as config:
+            config.title = "changed"
+            raise ValueError("rejected")
         self.assertEqual(store.load().title, "original")
 
     def test_save_leaves_no_temporary_file_behind(self):

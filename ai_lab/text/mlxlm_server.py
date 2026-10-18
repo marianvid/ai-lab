@@ -35,6 +35,7 @@ import threading
 
 
 def main() -> None:
+    """Patch mlx-lm's server as described above, then run it with this command line."""
     from mlx_lm import server
 
     loaded = threading.Event()
@@ -61,6 +62,7 @@ def main() -> None:
         self.end_headers()
         self.wfile.write(b'{"status": "loading"}')
         self.wfile.flush()
+        return None
 
     provider_class.load = only_this_model
     provider_class.load_default = load_default_then_say_so

@@ -3,19 +3,16 @@
 
 This file is deliberately executable by a runtime-specific Python environment.
 NeMo and ONNX stay isolated from the manager and from vLLM; only this small
-HTTP contract is shared between them.
+HTTP contract is shared between them. The HTTP side is `media.http_host`'s
+`UploadHost`; this file says how each kind of backend answers an upload.
 """
 
 from __future__ import annotations
 
 import argparse
 import inspect
-import json
 import sys
 import tempfile
-from email import policy
-from email.parser import BytesParser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 
@@ -23,7 +20,16 @@ from threading import Lock
 # Give those environments access to the small adapter beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ai_lab.audio.aligner import QwenAlignBackend
+from ai_lab.media.http_host import Form, UploadHost, form_text, serve_uploads, uploaded_file
 from ai_lab.network import LOOPBACK
+
+# What every backend here is fed: mono audio at 16 kHz.
+TARGET_RATE = 16000
+# The highest sampling rate accepted from an upload.
+MAX_RATE = 192000
+# A diarization segment is (start, end, speaker).
+SEGMENT_PARTS = 3
+STEREO_DIMENSIONS = 2
 
 
 def _torch_device(torch):
@@ -50,60 +56,81 @@ def _vad_samples(samples, sampling_rate: int):
     """Convert an uploaded recording to the mono 16 kHz input Silero expects."""
     import numpy as np
 
-    if not 0 < sampling_rate <= 192000:
+    if not 0 < sampling_rate <= MAX_RATE:
         raise ValueError("Invalid audio sampling rate")
-    if getattr(samples, "ndim", 1) == 2:
+    if getattr(samples, "ndim", 1) == STEREO_DIMENSIONS:
         samples = samples.mean(axis=1)
     if not len(samples):
         raise ValueError("Audio is empty")
-    if sampling_rate == 16000:
+    if sampling_rate == TARGET_RATE:
         return samples
-    count = max(1, round(len(samples) * 16000 / sampling_rate))
-    positions = np.arange(count, dtype=np.float64) * sampling_rate / 16000
+    count = max(1, round(len(samples) * TARGET_RATE / sampling_rate))
+    positions = np.arange(count, dtype=np.float64) * sampling_rate / TARGET_RATE
     return np.interp(positions, np.arange(len(samples)), samples).astype("float32")
 
 
+def _nemo_model(model_path: str, precision: str):
+    """A NeMo checkpoint restored on the card at `precision`, and torch."""
+    import nemo.collections.asr as nemo_asr
+    import torch
+
+    checkpoint = _checkpoint(model_path)
+    model = nemo_asr.models.ASRModel.restore_from(checkpoint)
+    dtype = {"bf16": torch.bfloat16, "fp16": torch.float16,
+             "fp32": torch.float32}[precision]
+    return model.to(device="cuda", dtype=dtype).eval(), torch, checkpoint
+
+
 class NemoBackend:
+    """Transcription with a NeMo model (Canary, Nemotron, Parakeet)."""
+
     owner = "nemo"
     path = "/v1/audio/transcriptions"
-    def __init__(self, model_path: str, precision: str) -> None:
-        import torch
-        import nemo.collections.asr as nemo_asr
 
-        self.torch = torch
-        checkpoint = _checkpoint(model_path)
-        self.model = nemo_asr.models.ASRModel.restore_from(checkpoint)
+    def __init__(self, model_path: str, precision: str) -> None:
+        self.model, self.torch, checkpoint = _nemo_model(model_path, precision)
         name = f"{model_path} {checkpoint} {self.model.__class__.__name__}".lower()
         self.model_kind = next((kind for kind in ("canary", "nemotron", "parakeet")
                                 if kind in name), "generic")
-        dtype = {"bf16": torch.bfloat16, "fp16": torch.float16,
-                 "fp32": torch.float32}[precision]
-        self.model = self.model.to(device="cuda", dtype=dtype).eval()
         self.lock = Lock()
 
     def transcribe(self, audio_path: str, language: str | None = None) -> str:
-        kwargs = {}
-        parameters = inspect.signature(self.model.transcribe).parameters
-        accepts_prompt = any(parameter.kind is inspect.Parameter.VAR_KEYWORD
-                             for parameter in parameters.values())
-        if self.model_kind == "canary":
-            for key, value in (("source_lang", language or "ro"),
-                               ("target_lang", language or "ro"),
-                               ("task", "asr"), ("pnc", "yes")):
-                if key in parameters or accepts_prompt:
-                    kwargs[key] = value
-        elif (self.model_kind == "nemotron"
-              and ("target_lang" in parameters or accepts_prompt) and language):
-            kwargs["target_lang"] = "ro-RO" if language == "ro" else language
-        elif "language" in parameters and language:
-            kwargs["language"] = language
+        """The text of one recording; `language` as the model family spells it."""
         with self.lock, self.torch.inference_mode():
-            result = self.model.transcribe([audio_path], **kwargs)[0]
+            result = self.model.transcribe([audio_path], **self._options(language))[0]
         text = getattr(result, "text", result)
         return str(text or "")
 
+    def _options(self, language: str | None) -> dict:
+        """What this model family's `transcribe` takes for the language, if anything."""
+        parameters = inspect.signature(self.model.transcribe).parameters
+        open_ended = any(parameter.kind is inspect.Parameter.VAR_KEYWORD
+                         for parameter in parameters.values())
+        wanted = _language_options(self.model_kind, language)
+        return {key: value for key, value in wanted.items()
+                if key in parameters or (open_ended and key != "language")}
+
+
+def _language_options(model_kind: str, language: str | None) -> dict:
+    """The language options each NeMo family understands, before checking the signature.
+
+    Canary always gets its source and target language (Romanian unless told)
+    and its task; Nemotron a BCP 47 target language; the others a plain
+    `language`, only when the model's `transcribe` names that parameter.
+    """
+    if model_kind == "canary":
+        return {"source_lang": language or "ro", "target_lang": language or "ro",
+                "task": "asr", "pnc": "yes"}
+    if not language:
+        return {}
+    if model_kind == "nemotron":
+        return {"target_lang": "ro-RO" if language == "ro" else language}
+    return {"language": language}
+
 
 class MlxWhisperBackend:
+    """Transcription with Whisper on Apple silicon (mlx-whisper)."""
+
     owner = "mlx-whisper"
     path = "/v1/audio/transcriptions"
 
@@ -114,6 +141,7 @@ class MlxWhisperBackend:
         self.lock = Lock()
 
     def transcribe(self, audio_path: str, language: str | None = None) -> str:
+        """The text of one recording."""
         options = {"path_or_hf_repo": self.model_path}
         if language:
             options["language"] = language
@@ -122,27 +150,19 @@ class MlxWhisperBackend:
 
 
 class SortformerBackend:
+    """Who speaks when, with NeMo's Sortformer."""
+
     owner = "nemo-sortformer"
     path = "/v1/audio/diarizations"
 
     def __init__(self, model_path: str, precision: str) -> None:
-        import torch
-        import nemo.collections.asr as nemo_asr
-
-        self.torch = torch
-        self.model = nemo_asr.models.ASRModel.restore_from(_checkpoint(model_path))
-        dtype = {"bf16": torch.bfloat16, "fp16": torch.float16,
-                 "fp32": torch.float32}[precision]
-        self.model = self.model.to(device="cuda", dtype=dtype).eval()
+        self.model, self.torch, _ = _nemo_model(model_path, precision)
         self.lock = Lock()
 
     @staticmethod
     def _segment(value) -> dict:
-        if isinstance(value, str):
-            parts = value.split()
-        else:
-            parts = list(value)
-        if len(parts) != 3:
+        parts = value.split() if isinstance(value, str) else list(value)
+        if len(parts) != SEGMENT_PARTS:
             raise ValueError(f"unexpected diarization segment: {value!r}")
         start, end, speaker = parts
         speaker = str(speaker)
@@ -151,6 +171,7 @@ class SortformerBackend:
         return {"start": float(start), "end": float(end), "speaker": speaker}
 
     def diarize(self, audio_path: str) -> list[dict]:
+        """The recording's speaker turns: start, end (seconds) and speaker."""
         with self.lock, self.torch.inference_mode():
             result = self.model.diarize([audio_path], batch_size=1,
                                         verbose=False)[0]
@@ -158,6 +179,8 @@ class SortformerBackend:
 
 
 class PyannoteBackend:
+    """Who speaks when, with a pyannote.audio pipeline."""
+
     owner = "pyannote"
     path = "/v1/audio/diarizations"
 
@@ -171,6 +194,7 @@ class PyannoteBackend:
         self.lock = Lock()
 
     def diarize(self, audio_path: str) -> list[dict]:
+        """The recording's speaker turns: start, end (seconds) and speaker."""
         with self.lock, self.torch.inference_mode():
             output = self.pipeline(audio_path)
         annotation = getattr(output, "speaker_diarization", output)
@@ -180,11 +204,12 @@ class PyannoteBackend:
 
 
 class SileroBackend:
+    """Where speech is, with Silero VAD (ONNX)."""
+
     owner = "silero-vad"
     path = "/v1/audio/speech-segments"
 
     def __init__(self, model_path: str, precision: str = "bf16") -> None:
-        import sys
         checkpoint = Path(model_path).resolve()
         repository = next(
             (candidate for candidate in (checkpoint, *checkpoint.parents)
@@ -203,111 +228,59 @@ class SileroBackend:
 
     def segments(self, audio_path: str, threshold: float = 0.5,
                  min_silence_ms: int = 100) -> list[dict]:
+        """The stretches of speech in the recording, in seconds."""
         samples, sampling_rate = self.soundfile.read(audio_path, dtype="float32")
         audio = self.torch.from_numpy(_vad_samples(samples, sampling_rate))
         with self.lock:
             return self.get_speech_timestamps(
-                audio, self.model, sampling_rate=16000,
+                audio, self.model, sampling_rate=TARGET_RATE,
                 threshold=threshold, min_silence_duration_ms=min_silence_ms,
                 return_seconds=True)
 
 
-class Handler(BaseHTTPRequestHandler):
-    backend = None
-    model_name = ""
+AudioBackend = (NemoBackend | MlxWhisperBackend | SortformerBackend | PyannoteBackend
+                | SileroBackend | QwenAlignBackend)
+BACKENDS: dict[str, type[AudioBackend]] = {
+    "nemo": NemoBackend, "mlx-whisper": MlxWhisperBackend,
+    "sortformer": SortformerBackend, "pyannote": PyannoteBackend,
+    "silero": SileroBackend, "qwen-align": QwenAlignBackend}
 
-    def do_GET(self):
-        if self.path == "/health":
-            self._json(200, {"status": "ok"})
-        elif self.path == "/v1/models":
-            self._json(200, {"object": "list", "data": [{
-                "id": self.model_name, "object": "model",
-                "owned_by": self.backend.owner
-            }]})
-        else:
-            self._json(404, {"error": {"message": "not found"}})
 
-    def do_POST(self):
-        if self.path != self.backend.path:
-            self._json(404, {"error": {"message": "not found"}})
-            return
-        try:
-            fields = self._multipart()
-            uploaded = fields.get("file")
-            if uploaded is None:
-                raise ValueError("the request must contain an audio file")
-            filename, audio = uploaded
-            suffix = Path(filename or "audio.wav").suffix or ".wav"
-            with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
-                temporary.write(audio)
-                temporary.flush()
-                if isinstance(self.backend, (NemoBackend, MlxWhisperBackend)):
-                    language_part = fields.get("language")
-                    language = (language_part[1].decode("utf-8")
-                                if language_part is not None else None)
-                    result = {"text": self.backend.transcribe(temporary.name, language)}
-                elif isinstance(self.backend, (SortformerBackend, PyannoteBackend)):
-                    segments = self.backend.diarize(temporary.name)
-                    result = {"segments": segments,
-                              "speakers": sorted({item["speaker"]
-                                                  for item in segments})}
-                elif isinstance(self.backend, QwenAlignBackend):
-                    text = self._field(fields, "text", "")
-                    language = self._field(fields, "language", "English")
-                    result = {"words": self.backend.align(
-                        temporary.name, text, language)}
-                else:
-                    threshold = self._number(fields, "threshold", 0.5, float)
-                    silence = self._number(fields, "min_silence_duration_ms", 100, int)
-                    result = {"segments": self.backend.segments(
-                        temporary.name, threshold, silence)}
-            self._json(200, result)
-        except Exception as error:
-            self._json(400, {"error": {"message": str(error),
-                                       "type": error.__class__.__name__}})
+class AudioHost(UploadHost):
+    """Answers an uploaded recording with what this process's backend does."""
 
-    def log_message(self, format, *args):
-        print(f"{self.address_string()} {format % args}", flush=True)
+    backend: AudioBackend
 
-    def _multipart(self) -> dict[str, tuple[str | None, bytes]]:
-        length = int(self.headers.get("Content-Length", "0"))
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.lower().startswith("multipart/form-data"):
-            raise ValueError("expected a multipart/form-data request")
-        envelope = (f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()
-                    + self.rfile.read(length))
-        message = BytesParser(policy=policy.default).parsebytes(envelope)
-        fields = {}
-        for part in message.iter_parts():
-            name = part.get_param("name", header="content-disposition")
-            if name:
-                fields[name] = (part.get_filename(), part.get_payload(decode=True) or b"")
-        return fields
+    def answer(self, fields: Form) -> dict:
+        """The recording, saved to a temporary file and handed to the backend."""
+        filename, audio = uploaded_file(fields, "audio")
+        suffix = Path(filename or "audio.wav").suffix or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
+            temporary.write(audio)
+            temporary.flush()
+            return _answer(self.backend, temporary.name, fields)
 
-    @staticmethod
-    def _field(fields, name, default):
-        part = fields.get(name)
-        return part[1].decode("utf-8") if part is not None else default
 
-    @staticmethod
-    def _number(fields, name, default, converter):
-        part = fields.get(name)
-        return converter(part[1].decode("utf-8")) if part is not None else default
-
-    def _json(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+def _answer(backend: AudioBackend, audio_path: str, fields: Form) -> dict:
+    """What each kind of backend makes of one recording."""
+    if isinstance(backend, (NemoBackend, MlxWhisperBackend)):
+        return {"text": backend.transcribe(audio_path, form_text(fields, "language", None))}
+    if isinstance(backend, (SortformerBackend, PyannoteBackend)):
+        segments = backend.diarize(audio_path)
+        return {"segments": segments,
+                "speakers": sorted({item["speaker"] for item in segments})}
+    if isinstance(backend, QwenAlignBackend):
+        return {"words": backend.align(audio_path, form_text(fields, "text", "") or "",
+                                       form_text(fields, "language", "English") or "English")}
+    threshold = float(form_text(fields, "threshold", None) or 0.5)
+    silence = int(form_text(fields, "min_silence_duration_ms", None) or 100)
+    return {"segments": backend.segments(audio_path, threshold, silence)}
 
 
 def main() -> None:
+    """Load the backend named on the command line and answer on its port."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend",
-                        choices=("nemo", "mlx-whisper", "sortformer", "pyannote", "silero", "qwen-align"),
-                        required=True)
+    parser.add_argument("--backend", choices=tuple(BACKENDS), required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--host", default=LOOPBACK)
@@ -315,15 +288,8 @@ def main() -> None:
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"),
                         default="bf16")
     args = parser.parse_args()
-    backends = {"nemo": NemoBackend, "mlx-whisper": MlxWhisperBackend,
-                "sortformer": SortformerBackend,
-                "pyannote": PyannoteBackend, "silero": SileroBackend,
-                "qwen-align": QwenAlignBackend}
-    backend = backends[args.backend]
-    Handler.backend = backend(args.model, args.precision)
-    Handler.model_name = args.name
-    print(f"{args.backend} ready with {args.name} on {args.host}:{args.port}", flush=True)
-    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    backend = BACKENDS[args.backend](args.model, args.precision)
+    serve_uploads(AudioHost, backend, args.name, (args.host, args.port))
 
 
 if __name__ == "__main__":

@@ -14,9 +14,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from queue import Empty, Full, Queue
 from threading import RLock
-from typing import Iterator
-
-from .types import ChangeEvent, LogEvent, RuntimeEvent
+from .types import ChangeEvent, RuntimeEvent
 
 QUEUE_SIZE = 256
 
@@ -24,7 +22,7 @@ QUEUE_SIZE = 256
 class Subscription:
     """One watcher's view of the stream."""
 
-    def __init__(self, bus: "EventBus", queue: Queue) -> None:
+    def __init__(self, bus: EventBus, queue: Queue) -> None:
         self._bus = bus
         self._queue = queue
 
@@ -41,16 +39,20 @@ class Subscription:
                 yield None
 
     def close(self) -> None:
+        """Stop watching: the bus forgets this subscriber."""
         self._bus.unsubscribe(self)
 
 
 class EventBus:
+    """One publisher, many subscribers, each behind its own bounded queue."""
+
     def __init__(self, queue_size: int = QUEUE_SIZE) -> None:
         self._subscribers: list[tuple[Subscription, Queue]] = []
         self._lock = RLock()
         self._queue_size = queue_size
 
     def subscribe(self) -> Subscription:
+        """A new watcher, with an empty queue of its own."""
         queue: Queue = Queue(maxsize=self._queue_size)
         subscription = Subscription(self, queue)
         with self._lock:
@@ -58,6 +60,7 @@ class EventBus:
         return subscription
 
     def unsubscribe(self, subscription: Subscription) -> None:
+        """Forget a watcher; events stop reaching it."""
         with self._lock:
             self._subscribers = [item for item in self._subscribers
                                  if item[0] is not subscription]
@@ -78,6 +81,7 @@ class EventBus:
 
     @property
     def subscriber_count(self) -> int:
+        """How many watchers there are now."""
         with self._lock:
             return len(self._subscribers)
 

@@ -45,10 +45,15 @@ class StableAudio3RequestTests(unittest.TestCase):
 
 class StableAudio3SourceAudioTests(unittest.TestCase):
     def wav(self):
-        import base64, io, struct, wave
+        import base64
+        import io
+        import struct
+        import wave
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as out:
-            out.setnchannels(1); out.setsampwidth(2); out.setframerate(8000)
+            out.setnchannels(1)
+            out.setsampwidth(2)
+            out.setframerate(8000)
             out.writeframes(struct.pack("<4h", 0, 1, 2, 3))
         return base64.b64encode(buffer.getvalue()).decode()
 

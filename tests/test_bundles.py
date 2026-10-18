@@ -13,6 +13,7 @@ import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from ai_lab.catalog import Catalog
 from ai_lab.config import Repository
@@ -177,7 +178,8 @@ class DownloadingABundleTests(unittest.TestCase):
             repo=QWEN, name="qwen-image", format="comfyui",
             task="image-generation",
             files=tuple(RemoteFile(path=path, size_bytes=size, repo=repo, sha256=digest)
-                        for path, size, repo, digest in zip(names, sizes, repos, sha)),
+                        for path, size, repo, digest in zip(names, sizes, repos, sha,
+                                                             strict=True)),
             roles={"a.safetensors": "diffusion_model"},
         )
 
@@ -238,7 +240,7 @@ class DownloadingABundleTests(unittest.TestCase):
             "resolve/main/vae/c.safetensors"])
 
     def test_a_cancelled_bundle_publishes_nothing_and_keeps_its_bytes(self):
-        release = []
+        release: list[Any] = []
 
         def open_range(url, resume_from):
             if "text_encoders" in url:

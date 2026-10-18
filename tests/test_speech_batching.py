@@ -8,9 +8,12 @@ from ai_lab.speech.batching import BatchQueue
 
 class BatchQueueTests(unittest.TestCase):
     def test_requests_arriving_together_share_one_group(self):
-        groups = []
-        queue = BatchQueue(lambda items: groups.append(list(items)) or
-                           [item * 10 for item in items], 8, 0.3)
+        groups: list[list[int]] = []
+
+        def run(items):
+            groups.append(list(items))
+            return [item * 10 for item in items]
+        queue = BatchQueue(run, 8, 0.3)
         with ThreadPoolExecutor(4) as pool:
             results = list(pool.map(queue.submit, [1, 2, 3, 4]))
         self.assertEqual(results, [10, 20, 30, 40])

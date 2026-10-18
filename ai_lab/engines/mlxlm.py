@@ -33,14 +33,11 @@ shrink it.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from ..capabilities import IMAGES
-from ..hosts.command import which
-from ..types import Format, ModelSet, Task
-from .base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
+from .base import ParamSpec
 from .probe import http_ok
-from ..network import ALL_INTERFACES
+from .text_launch import SAMPLING, MlxTextEngine, flag_argv, sampling_argv
 
 PARAMS = (
     # -- memory: decided when the model starts ------------------------------
@@ -79,19 +76,7 @@ PARAMS = (
               help="Tokens to produce when a request does not say. mlx-lm's own "
                    "default is 512, which cuts off a thinking model before it "
                    "starts its answer."),
-    ParamSpec("temperature", "Temperature", "float", 0.8, minimum=0.0,
-              maximum=2.0, group="generation",
-              help="Higher is more varied, lower is more predictable."),
-    ParamSpec("top_p", "Top-p", "float", 0.95, minimum=0.0, maximum=1.0,
-              group="generation",
-              help="Consider only the most likely tokens adding up to this "
-                   "probability. 1.0 disables it."),
-    ParamSpec("top_k", "Top-k", "int", 40, minimum=0, maximum=1000,
-              group="generation",
-              help="Consider only this many candidates. 0 disables it."),
-    ParamSpec("min_p", "Min-p", "float", 0.05, minimum=0.0, maximum=1.0,
-              group="generation",
-              help="Drop candidates below this share of the best one."),
+    *SAMPLING,
     ParamSpec("reasoning", "Thinking", "choice", "auto",
               choices=("auto", "on", "off"), group="generation",
               help="Whether the model thinks before answering. Auto follows "
@@ -103,70 +88,32 @@ PARAMS = (
 # What the Thinking setting puts in the chat template's `enable_thinking`
 # switch when a request does not set it itself. "auto" sets nothing.
 THINKING = {"on": True, "off": False}
-
-# Room on top of the weights: the cache for the requests being answered, and
-# mlx-lm's working memory. A floor like llama.cpp's figure, not a prediction.
-MARGIN_FRACTION = 0.10
-MARGIN_MIN_MB = 2048.0
-
-
-def default_launcher() -> str:
-    """Where AI-Lab's launcher for mlx-lm sits in this checkout."""
-    return str(Path(__file__).resolve().parents[1] / "text" / "mlxlm_server.py")
+# The settings mlx-lm's server takes as they are, and its name for each.
+FLAGS = (("decode_concurrency", "--decode-concurrency"),
+         ("prompt_concurrency", "--prompt-concurrency"),
+         ("prefill_step_size", "--prefill-step-size"),
+         ("prompt_cache_size", "--prompt-cache-size"),
+         ("max_tokens", "--max-tokens"))
 
 
-class MlxLmEngine:
+class MlxLmEngine(MlxTextEngine):
+    """mlx-lm's own server, behind AI-Lab's launcher (`text/mlxlm_server.py`)."""
+
     id = "mlxlm"
     display_name = "MLX LM"
+    settings = PARAMS
+    launcher = "mlxlm_server.py"
+    concurrency_setting = "decode_concurrency"
 
-    def __init__(self, binary: str | None = None,
-                 server: str | None = None) -> None:
-        # The environment's own python. mlx-lm is never on PATH here: it lives
-        # in a versioned environment under the runtime folder.
-        self.binary = binary or which("python") or "python"
-        self.server = server or default_launcher()
-
-    def formats(self) -> frozenset[Format]:
-        return frozenset({Format.MLX})
-
-    def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.TEXT_GENERATION})
-
-    def params(self, task: Task = Task.TEXT_GENERATION) -> tuple[ParamSpec, ...]:
-        return PARAMS if task is Task.TEXT_GENERATION else ()
-
-    def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
-        if model.format is not Format.MLX:
-            raise ValueError(f"MLX LM cannot load {model.format.value} models")
-        if model.task is not Task.TEXT_GENERATION:
-            raise ValueError(f"MLX LM cannot perform {model.task.value}")
-        if not model.complete:
-            raise ValueError(f"{model.name} is missing {len(model.missing)} shard(s)")
-        settings = validate(PARAMS, params)
-        argv = [
-            self.binary, self.server,
-            "--model", model.entrypoint,
-            "--host", ALL_INTERFACES,
-            "--port", str(port),
-            "--decode-concurrency", str(settings["decode_concurrency"]),
-            "--prompt-concurrency", str(settings["prompt_concurrency"]),
-            "--prefill-step-size", str(settings["prefill_step_size"]),
-            "--prompt-cache-size", str(settings["prompt_cache_size"]),
-            "--max-tokens", str(settings["max_tokens"]),
-            "--temp", str(settings["temperature"]),
-            "--top-p", str(settings["top_p"]),
-            "--top-k", str(settings["top_k"]),
-            "--min-p", str(settings["min_p"]),
-        ]
+    def _settings_argv(self, settings: dict) -> list[str]:
+        """These settings as the launcher's command-line options."""
+        argv = [*flag_argv(settings, FLAGS), *sampling_argv(settings)]
         if settings["prompt_cache_mb"] > 0:
             argv += ["--prompt-cache-bytes", f"{settings['prompt_cache_mb']}MB"]
         if settings["reasoning"] in THINKING:
             argv += ["--chat-template-args", json.dumps(
                 {"enable_thinking": THINKING[settings["reasoning"]]})]
-        # No chat page: mlx-lm serves an API and nothing a person can open.
-        return LaunchPlan(argv=argv, env={"PYTHONUNBUFFERED": "1",
-                                          "HF_HUB_OFFLINE": "1"},
-                          health_path="/health", web_ui=False)
+        return argv
 
     def ready(self, port: int) -> bool:
         """The health page, which here means the weights are in memory.
@@ -185,22 +132,3 @@ class MlxLmEngine:
         so an entry on this engine answers text only whatever the files say.
         """
         return frozenset({IMAGES})
-
-    def needs_mb(self, model: ModelSet, params: dict,
-                 card_total_mb: float) -> float:
-        """The weights on disk, plus a margin for the cache.
-
-        The weights are loaded whole, so their size is the bulk of it. What
-        the requests add depends on how long they are and how many run at
-        once, which nobody knows at load time, so a margin stands in for it.
-        """
-        weights = max(0.0, model.size_bytes / (1024 * 1024))
-        return weights + max(MARGIN_MIN_MB, weights * MARGIN_FRACTION)
-
-    def concurrency(self, params: dict) -> int:
-        """Answers produced together — the number the manager lets in at once."""
-        return max(1, int(validate(PARAMS, params)["decode_concurrency"]))
-
-    def api_paths(self, task: Task = Task.TEXT_GENERATION) -> tuple[str, ...]:
-        """The OpenAI shape only. mlx-lm does not serve `/v1/messages`."""
-        return OPENAI_PATHS if task is Task.TEXT_GENERATION else ()

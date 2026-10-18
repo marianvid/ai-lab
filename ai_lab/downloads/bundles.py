@@ -53,12 +53,15 @@ ROLES = frozenset({
 
 @dataclass(frozen=True, slots=True)
 class Component:
+    """One file of a bundle: the part of the model it is, and where it lives upstream."""
+
     role: str
     repo: str
     path: str
 
     @property
     def file_name(self) -> str:
+        """The file's own name, without its folders."""
         return self.path.rsplit("/", 1)[-1]
 
 

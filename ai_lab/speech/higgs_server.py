@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""HTTP host that manages one Higgs worker and exposes AI-Lab speech JSON."""
+"""HTTP host that manages one Higgs worker and exposes AI-Lab speech JSON.
+
+On Linux, Higgs runs inside an SGLang-Omni worker process (`HiggsBackend`
+starts and stops it). Beside it this starts the playground page that ships
+with SGLang-Omni, waits until the page answers, then answers AI-Lab's speech
+contract on `--port` (`media.http_host`). Stopping the host stops both.
+"""
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import signal
 import subprocess
@@ -11,51 +16,23 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http import HTTPStatus
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
-from ai_lab.speech.contract import MAX_REQUEST_BYTES
-from ai_lab.speech.higgs_backend import HiggsBackend
+from ai_lab.media.http_host import GenerationHost
 from ai_lab.network import ALL_INTERFACES, LOOPBACK
+from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH
+from ai_lab.speech.higgs_backend import HiggsBackend
+
+# How long the playground page may take to come up, and how often to look.
+PLAYGROUND_START_S = 30.0
+PLAYGROUND_POLL_S = 0.5
 
 
-class Handler(BaseHTTPRequestHandler):
-    backend = None
-
-    def do_GET(self):
-        if self.path == "/health":
-            self._json(200, {"status": "ok"})
-        else:
-            self._json(404, {"error": {"message": "not found"}})
-
-    def do_POST(self):
-        if self.path != "/v1/audio/speech/generations":
-            self._json(404, {"error": {"message": "not found"}})
-            return
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= MAX_REQUEST_BYTES:
-                raise ValueError("speech request is empty or too large")
-            body = json.loads(self.rfile.read(size))
-            if not isinstance(body, dict):
-                raise ValueError("speech request must be an object")
-            self._json(200, self.backend.generate(body))
-        except (ValueError, TypeError) as error:
-            self._json(400, {"error": {"message": str(error)}})
-        except Exception as error:
-            self._json(500, {"error": {"message": str(error)}})
-
-    def _json(self, status, body):
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-
-def main():
+def main() -> None:
+    """Start the worker and the playground, then answer speech requests until stopped."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker-binary", type=Path, required=True)
     parser.add_argument("--model-path", type=Path, required=True)
@@ -68,43 +45,16 @@ def main():
     backend = HiggsBackend(args.worker_binary, args.model_path,
                            args.worker_port, args.mem_fraction_static,
                            args.max_parallel)
-    Handler.backend = backend
-    playground_root = Path(__file__).resolve().parents[1] / "vendor" / "sglang_omni"
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, (
-        str(playground_root), env.get("PYTHONPATH", ""))))
     try:
-        playground = subprocess.Popen([
-            sys.executable, "-m", "playground.higgs.app", "--api-base",
-            f"http://{LOOPBACK}:{args.worker_port}", "--port", str(args.ui_port)],
-            env=env)
+        playground = _start_playground(args.worker_port, args.ui_port)
     except Exception:
         backend.close()
         raise
     try:
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            if playground.poll() is not None:
-                raise RuntimeError("Higgs playground exited during startup")
-            try:
-                with urllib.request.urlopen(
-                        f"http://{LOOPBACK}:{args.ui_port}/healthz", timeout=2) as response:
-                    if response.status == 200:
-                        break
-            except (OSError, urllib.error.URLError):
-                pass
-            time.sleep(0.5)
-        else:
-            raise TimeoutError("Higgs playground did not become ready")
-        server = ThreadingHTTPServer((ALL_INTERFACES, args.port), Handler)
+        _wait_for_playground(playground, args.ui_port)
+        server = ThreadingHTTPServer((ALL_INTERFACES, args.port), _host_for(backend))
     except Exception:
-        if playground.poll() is None:
-            playground.terminate()
-            try:
-                playground.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                playground.kill()
-                playground.wait(timeout=5)
+        _stop(playground)
         backend.close()
         raise
     signal.signal(signal.SIGTERM, lambda *_: Thread(
@@ -112,15 +62,56 @@ def main():
     try:
         server.serve_forever()
     finally:
-        if playground.poll() is None:
-            playground.terminate()
-            try:
-                playground.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                playground.kill()
-                playground.wait(timeout=5)
+        _stop(playground)
         backend.close()
         server.server_close()
+
+
+def _host_for(backend: HiggsBackend) -> type[GenerationHost]:
+    """The speech handler, bound to this worker."""
+    return type("HiggsHost", (GenerationHost,), {
+        "backend": backend, "max_body_bytes": MAX_REQUEST_BYTES,
+        "request_path": PATH, "noun": "speech"})
+
+
+def _start_playground(worker_port: int, ui_port: int) -> subprocess.Popen:
+    """SGLang-Omni's own playground page, talking to the worker."""
+    playground_root = Path(__file__).resolve().parents[1] / "vendor" / "sglang_omni"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(playground_root), env.get("PYTHONPATH", ""))))
+    return subprocess.Popen([
+        sys.executable, "-m", "playground.higgs.app", "--api-base",
+        f"http://{LOOPBACK}:{worker_port}", "--port", str(ui_port)], env=env)
+
+
+def _wait_for_playground(playground: subprocess.Popen, ui_port: int) -> None:
+    """Until the page answers its health check; an error if it exits or never does."""
+    deadline = time.monotonic() + PLAYGROUND_START_S
+    while time.monotonic() < deadline:
+        if playground.poll() is not None:
+            raise RuntimeError("Higgs playground exited during startup")
+        try:
+            with urllib.request.urlopen(
+                    f"http://{LOOPBACK}:{ui_port}/healthz", timeout=2) as response:
+                if response.status == HTTPStatus.OK:
+                    return
+        except (OSError, urllib.error.URLError):
+            pass
+        time.sleep(PLAYGROUND_POLL_S)
+    raise TimeoutError("Higgs playground did not become ready")
+
+
+def _stop(playground: subprocess.Popen) -> None:
+    """Stop the playground: politely, then for good."""
+    if playground.poll() is not None:
+        return
+    playground.terminate()
+    try:
+        playground.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        playground.kill()
+        playground.wait(timeout=5)
 
 
 if __name__ == "__main__":

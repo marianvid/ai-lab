@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Isolated HTTP host for configurable speech backends."""
+"""Isolated HTTP host for configurable speech backends.
+
+One backend per process (Qwen TTS, Kokoro, VoxCPM or Higgs on a Mac), with
+the backend's own editor on `--ui-port` and AI-Lab's speech JSON contract
+(`speech.contract`) on `--port`, answered by `media.http_host`.
+"""
 from __future__ import annotations
 
 import argparse
-import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Callable
 from pathlib import Path
 
-from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH, validate_payload
+from ai_lab.media.http_host import Generator, serve
+from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH
 from ai_lab.speech.higgs_local_backend import HiggsLocalBackend
 from ai_lab.speech.kokoro_backend import KokoroBackend
 from ai_lab.speech.qwen import MODES, QwenTtsBackend
@@ -15,44 +20,10 @@ from ai_lab.speech.voxcpm_backend import VoxCpmBackend
 from ai_lab.network import ALL_INTERFACES
 
 
-class Handler(BaseHTTPRequestHandler):
-    backend = None
-
-    def do_GET(self):
-        if self.path == "/health":
-            self._json(200, {"status": "ok"})
-        else:
-            self._json(404, {"error": {"message": "not found"}})
-
-    def do_POST(self):
-        if self.path != PATH:
-            self._json(404, {"error": {"message": "not found"}})
-            return
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= MAX_REQUEST_BYTES:
-                raise ValueError("speech request is empty or too large")
-            body = json.loads(self.rfile.read(size))
-            if not isinstance(body, dict):
-                raise ValueError("speech request must be an object")
-            self._json(200, self.backend.generate(body))
-        except (ValueError, TypeError) as error:
-            self._json(400, {"error": {"message": str(error)}})
-        except Exception as error:
-            self._json(500, {"error": {"message": str(error)}})
-
-    def _json(self, status: int, body: dict):
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-
 def main() -> None:
+    """Load the speech backend named on the command line, its own editor, and answer."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=("qwen", "kokoro", "voxcpm", "higgs"), default="qwen")
+    parser.add_argument("--backend", choices=tuple(_BUILDERS), default="qwen")
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--mode", choices=sorted(MODES))
     parser.add_argument("--language-code")
@@ -65,40 +36,49 @@ def main() -> None:
     parser.add_argument("--max-batch", type=int, default=1)
     parser.add_argument("--batch-window-ms", type=int, default=100)
     args = parser.parse_args()
-    if args.backend == "qwen":
-        if not args.mode:
-            parser.error("Qwen speech requires --mode")
-        Handler.backend = QwenTtsBackend(args.model_path, args.mode)
-        if args.ui_port is None:
-            parser.error("Qwen speech requires --ui-port")
-        launch_native_qwen_ui(Handler.backend, args.model_path, args.ui_port)
-    elif args.backend == "kokoro":
-        if not all((args.language_code, args.default_voice, args.repo_id)):
-            parser.error("Kokoro requires language, voice and repo settings")
-        Handler.backend = KokoroBackend(
-            args.model_path, args.language_code, args.default_voice,
-            args.repo_id)
-        if args.ui_port is None:
-            parser.error("Kokoro speech requires --ui-port")
-        launch_native_kokoro_ui(Handler.backend, args.model_path.parent,
-                                args.ui_port)
-    elif args.backend == "higgs":
-        Handler.backend = HiggsLocalBackend(
-            args.model_path, args.max_batch, args.batch_window_ms)
-        if args.ui_port is None:
-            parser.error("Higgs speech requires --ui-port")
-        # The same upstream playground page Linux shows, answered by the
-        # model this process already holds (see higgs_playground.py).
-        from ai_lab.speech import higgs_playground
+    if args.ui_port is None:
+        parser.error(f"{args.backend} speech requires --ui-port")
+    backend = _BUILDERS[args.backend](args, parser)
+    serve(backend, args.port, max_body_bytes=MAX_REQUEST_BYTES, request_path=PATH,
+          noun="speech")
 
-        higgs_playground.serve(Handler.backend, args.ui_port)
-    else:
-        Handler.backend = VoxCpmBackend(
-            args.model_path, args.cfg_value, args.inference_timesteps)
-        if args.ui_port is None:
-            parser.error("VoxCPM speech requires --ui-port")
-        launch_native_voxcpm_ui(Handler.backend, args.model_path, args.ui_port)
-    ThreadingHTTPServer((ALL_INTERFACES, args.port), Handler).serve_forever()
+
+def _qwen(args, parser: argparse.ArgumentParser) -> QwenTtsBackend:
+    if not args.mode:
+        parser.error("Qwen speech requires --mode")
+    backend = QwenTtsBackend(args.model_path, args.mode)
+    launch_native_qwen_ui(backend, args.model_path, args.ui_port)
+    return backend
+
+
+def _kokoro(args, parser: argparse.ArgumentParser) -> KokoroBackend:
+    if not all((args.language_code, args.default_voice, args.repo_id)):
+        parser.error("Kokoro requires language, voice and repo settings")
+    backend = KokoroBackend(args.model_path, args.language_code, args.default_voice,
+                            args.repo_id)
+    launch_native_kokoro_ui(backend, args.model_path.parent, args.ui_port)
+    return backend
+
+
+def _higgs(args, _parser: argparse.ArgumentParser) -> HiggsLocalBackend:
+    backend = HiggsLocalBackend(args.model_path, args.max_batch, args.batch_window_ms)
+    # The same upstream playground page Linux shows, answered by the
+    # model this process already holds (see higgs_playground.py).
+    from ai_lab.speech import higgs_playground
+
+    higgs_playground.serve(backend, args.ui_port)
+    return backend
+
+
+def _voxcpm(args, _parser: argparse.ArgumentParser) -> VoxCpmBackend:
+    backend = VoxCpmBackend(args.model_path, args.cfg_value, args.inference_timesteps)
+    launch_native_voxcpm_ui(backend, args.model_path, args.ui_port)
+    return backend
+
+
+# How each backend is built and given its own editor, by its `--backend` name.
+_BUILDERS: dict[str, Callable[[argparse.Namespace, argparse.ArgumentParser], Generator]] = {
+    "qwen": _qwen, "kokoro": _kokoro, "voxcpm": _voxcpm, "higgs": _higgs}
 
 
 def launch_native_qwen_ui(backend: QwenTtsBackend, model_path: Path,

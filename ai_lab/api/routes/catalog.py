@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 def register(router, operations) -> None:
+    """The library's routes: list, formats, delete, move between storage tiers."""
     router.add("GET", "/api/models",
                lambda query=None, **_: operations.models((query or {}).get("engine")))
     router.add("GET", "/api/formats", lambda **_: operations.supported_formats())

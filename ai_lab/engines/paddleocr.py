@@ -2,57 +2,22 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from ..hosts.command import which
-from ..types import Format, ModelSet, Task
-from .base import LaunchPlan, OCR_PATHS, validate
-from ..network import ALL_INTERFACES
+from ..types import Format, Task
+from .base import OCR_PATHS
+from .isolated import IsolatedEngine
 
 PARAMS = ()
 
 
-class PaddleOcrEngine:
+class PaddleOcrEngine(IsolatedEngine):
+    """PaddleOCR detection and recognition models, behind the image server."""
+
     id = "paddleocr"
     display_name = "PaddleOCR"
-
-    def __init__(self, binary: str | None = None, server: str | None = None) -> None:
-        self.binary = binary or which("python") or "python"
-        self.server = server or str(
-            Path(__file__).resolve().parents[1] / "images" / "server.py")
-
-    def formats(self) -> frozenset[Format]:
-        return frozenset({Format.PADDLEOCR})
-
-    def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.OCR})
-
-    def params(self, task: Task = Task.OCR):
-        return PARAMS if task is Task.OCR else ()
-
-    def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
-        if model.format is not Format.PADDLEOCR:
-            raise ValueError(f"PaddleOCR cannot load {model.format.value} models")
-        if model.task is not Task.OCR:
-            raise ValueError(f"PaddleOCR cannot perform {model.task.value}")
-        validate(PARAMS, params)
-        return LaunchPlan(argv=[self.binary, self.server,
-                                "--backend", "paddleocr",
-                                "--model", model.entrypoint,
-                                "--name", model.name,
-                                "--host", ALL_INTERFACES, "--port", str(port)],
-                          env={"PYTHONUNBUFFERED": "1"})
-
-    def ready(self, port: int) -> bool:
-        from .probe import http_ok
-        return http_ok(port)
-
-    def concurrency(self, params: dict) -> int:
-        return 1
-
-    def needs_mb(self, model: ModelSet, params: dict,
-                 card_total_mb: float) -> float:
-        return model.size_bytes / (1024 * 1024)
-
-    def api_paths(self, task: Task = Task.OCR) -> tuple[str, ...]:
-        return OCR_PATHS if task is Task.OCR else ()
+    task = Task.OCR
+    paths = OCR_PATHS
+    script = ("images", "server.py")
+    served_formats = frozenset({Format.PADDLEOCR})
+    settings = PARAMS
+    finds_python = True
+    backend = "paddleocr"

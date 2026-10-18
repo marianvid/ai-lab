@@ -11,11 +11,18 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from .disk import tree_size
 from .events import EventBus
 from .types import ChangeEvent
 
+# Below this depth a configured path is too broad to delete: `/opt/ai` is
+# three parts, `/opt/ai/cache` four.
+SAFE_DEPTH = 4
+
 
 class Storage:
+    """The configured reclaimable places: what each holds, and emptying one."""
+
     def __init__(self, settings: dict | None, bus: EventBus | None = None) -> None:
         self.bus = bus
         self._items: dict[str, dict] = {}
@@ -35,11 +42,12 @@ class Storage:
             }
 
     def view(self) -> dict:
+        """What is there to reclaim now, with sizes."""
         items = []
         for configured in self._items.values():
             path = configured["path"]
             exists = path.exists() or path.is_symlink()
-            size = _size(path)
+            size = tree_size(path)
             # Configuration describes places worth knowing about; the page is
             # an inventory of what is actually there. A missing leftover, or
             # an empty cache directory recreated by a runtime, offers nothing
@@ -56,6 +64,7 @@ class Storage:
                 "recoverable_bytes": sum(item["size_bytes"] for item in items)}
 
     def clear(self, item_id: str) -> dict:
+        """Delete what one configured item holds, by its id."""
         try:
             item = self._items[item_id]
         except KeyError:
@@ -73,24 +82,5 @@ class Storage:
 
 def _safe(path: Path) -> None:
     """Refuse broad targets even when a configuration has a typo."""
-    if not path.is_absolute() or len(path.parts) < 4:
+    if not path.is_absolute() or len(path.parts) < SAFE_DEPTH:
         raise ValueError(f"Unsafe reclaimable storage path: {path}")
-
-
-def _size(path: Path) -> int:
-    if path.is_file() and not path.is_symlink():
-        try:
-            return path.stat().st_size
-        except OSError:
-            return 0
-    total = 0
-    try:
-        for item in path.rglob("*"):
-            try:
-                if item.is_file() and not item.is_symlink():
-                    total += item.stat().st_size
-            except OSError:
-                pass
-    except OSError:
-        pass
-    return total

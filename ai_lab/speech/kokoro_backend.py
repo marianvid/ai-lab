@@ -8,7 +8,13 @@ from threading import Lock
 from .contract import validate_payload, wav_result
 
 
+# Kokoro's fixed output rate.
+SAMPLE_RATE = 24000
+
+
 class KokoroBackend:
+    """Kokoro speech with the named voices shipped beside the checkpoint."""
+
     def __init__(self, checkpoint: Path, language_code: str,
                  default_voice: str, repo_id: str) -> None:
         import torch
@@ -33,6 +39,7 @@ class KokoroBackend:
         self.lock = Lock()
 
     def generate(self, body: dict) -> dict:
+        """One line of speech for the request, in a voice of this checkpoint, as base64 WAV."""
         request = validate_payload(body)
         if body.get("model") not in (None, self.model_name):
             raise ValueError(f"this engine serves {self.model_name}")
@@ -52,4 +59,4 @@ class KokoroBackend:
         if not chunks:
             raise RuntimeError("Kokoro returned no audio")
         samples = self.torch.cat(chunks).detach().float().cpu().numpy()
-        return wav_result(self.model_name, "kokoro", samples, 24000)
+        return wav_result(self.model_name, "kokoro", samples, SAMPLE_RATE)

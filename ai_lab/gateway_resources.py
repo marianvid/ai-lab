@@ -6,7 +6,7 @@ import time
 
 from . import budget
 from .card_sharing import CardNeighbours, NoNeighbours
-from .gateway_errors import CouldNotLoad
+from .gateway_errors import CouldNotLoadError
 
 
 class GatewayResources:
@@ -89,7 +89,7 @@ class GatewayResources:
                 self._wait_for_release(deadline, keeping=bool(running))
                 return
             if time.perf_counter() > deadline:
-                raise CouldNotLoad(
+                raise CouldNotLoadError(
                     f"{', '.join(still_up)} did not exit within "
                     f"{self.quiet_timeout_s:.0f} seconds. The card is still "
                     f"holding what it was using.")
@@ -117,7 +117,7 @@ class GatewayResources:
             if used <= self.quiet_mb:
                 return
             if time.perf_counter() > deadline:
-                raise CouldNotLoad(
+                raise CouldNotLoadError(
                     f"The card still holds {used:.0f} MB "
                     f"{self.quiet_timeout_s:.0f} seconds after everything was "
                     f"unloaded. Something outside AI-Lab is using it, or an "

@@ -1,6 +1,6 @@
 import unittest
 
-from ai_lab.speech.server import validate_payload
+from ai_lab.speech.contract import validate_payload
 
 
 class SpeechRequestTests(unittest.TestCase):

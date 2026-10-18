@@ -119,8 +119,17 @@ class FakeEngine:
         from ai_lab.types import Task
         return frozenset({Task.TEXT_GENERATION})
 
-    def params(self):
+    def params(self, task=None):
         return ()
+
+    def concurrency(self, params):
+        return 1
+
+    def needs_mb(self, model, params, card_total_mb):
+        return 0.0
+
+    def api_paths(self, task=None):
+        return ("/v1/chat/completions",)
 
     def plan(self, model, port, params):
         from ai_lab.engines.base import LaunchPlan

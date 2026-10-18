@@ -34,11 +34,13 @@ from ...engines.base import (
 from ...gateway import Gateway
 from ...lanes import SideLanes
 from ...network import LOOPBACK
-from ...reservations import ReservationBook
+from ...gateway_state import Lease
+from ...reservations import CardReservedError, ReservationBook, ReservationConflictError
+from ...scheduler_parts import AdmissionWithdrawnError, StillWanted
 from ...types import Task
 from ..multipart import MultipartBody
-from ..passthrough import forward
-from ..uploads import UploadRejected, validate_image
+from ..passthrough import Hooks, Waits, forward
+from ..uploads import UploadRejectedError, validate_image
 
 # Every shape any engine here can answer. Registered as routes whatever is
 # configured: a path that exists and explains why this model cannot serve it is
@@ -51,6 +53,9 @@ FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
 NO_LANES = SideLanes()
 # The header a call under a reservation carries: the reservation's id.
 RESERVATION_HEADER = "X-AI-Lab-Reservation"
+# How many times a call without a reservation, overtaken in the card's queue by
+# a reservation granted meanwhile, goes back to wait at the door (ADR 0005).
+DOOR_RETURNS = 3
 
 # Which task a request path belongs to, for per-task timeouts (see
 # `Gateway.timeouts_for`) and for which uploads get image validation. Paths
@@ -161,18 +166,14 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
         # on this machine — the card's or an embeddings model — only under the
         # holder's reservation, or when the card is not reserved. Subscription
         # models run in the cloud and are never held back.
-        if book is not None and not _in_the_cloud(lanes, wanted):
-            book.admit((headers or {}).get(RESERVATION_HEADER), alive)
+        guarded = book if book is not None and not _in_the_cloud(lanes, wanted) else None
+        admission = _Admission(guarded, (headers or {}).get(RESERVATION_HEADER), alive)
+        admission.at_the_door()
         side = _side_lane(lanes, path, payload, wanted)
         if side is not None:
             return side
         _check_upload(gateway, path, payload)
-        # The lease is held until the last byte of the answer has been read, so
-        # a swap cannot pull the model out from under a stream in progress.
-        # `path` goes with it: an entry whose engine does not answer this shape
-        # is refused before anything is loaded, not after.
-        lease = gateway.acquire(wanted, shape=path, settings=_start_settings(payload),
-                                still_wanted=alive)
+        lease = _take_place(gateway, path, payload, admission)
         # Everything from here gives the place back if it fails: a leaked place
         # breaks nothing visibly, the card simply has one fewer place for ever.
         try:
@@ -181,6 +182,67 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
             lease.release()
             raise
     return handle
+
+
+class _Admission:
+    """Whether one call may reach the card: asked at the door, and again at the head of the queue.
+
+    The door (`ReservationBook.admit`) lets the call in or makes it wait while
+    the card is reserved. The call may then wait in the card's own queue, and
+    by the time it is served the card may have been reserved by another team,
+    or the call's own reservation may have ended. `still_wanted` is what the
+    scheduler asks at the head of its queue, before anything is unloaded: it
+    says whether the client is still there and, through the book, withdraws a
+    call that may no longer reach the card (`AdmissionWithdrawnError`).
+    """
+
+    def __init__(self, book: ReservationBook | None, reservation_id: str | None,
+                 alive: StillWanted | None) -> None:
+        self.book = book
+        self.reservation_id = reservation_id
+        self.alive = alive
+
+    def at_the_door(self) -> None:
+        """Let the call in, wait while the card is held, or refuse it (ADR 0005)."""
+        if self.book is not None:
+            self.book.admit(self.reservation_id, self.alive)
+
+    def still_wanted(self) -> bool:
+        """True while the client is there and the card is still its to use."""
+        if self.alive is not None and not self.alive():
+            return False
+        if self.book is not None:
+            try:
+                self.book.permits(self.reservation_id)
+            except ReservationConflictError as refused:
+                raise AdmissionWithdrawnError(refused) from refused
+        return True
+
+    def may_wait_again(self, reason: BaseException) -> bool:
+        """A call without a reservation, overtaken by one: it waits at the door again."""
+        return self.reservation_id is None and isinstance(reason, CardReservedError)
+
+
+def _take_place(gateway: Gateway, path: str, payload, admission: _Admission) -> Lease:
+    """A place on the card for this call, with the model it names on it.
+
+    A call without a reservation that queued while the card was free, and was
+    overtaken by a reservation granted meanwhile, goes back to the door and
+    waits there as if it had just arrived — at most `DOOR_RETURNS` times, then
+    it gets the 409. A call whose own reservation ended while it queued gets
+    the 409 at once, as it would have at the door.
+    """
+    returns = 0
+    while True:
+        try:
+            return gateway.acquire(_model_name(payload), shape=path,
+                                   settings=_start_settings(payload),
+                                   still_wanted=admission.still_wanted)
+        except AdmissionWithdrawnError as withdrawn:
+            if returns >= DOOR_RETURNS or not admission.may_wait_again(withdrawn.reason):
+                raise withdrawn.reason from None
+            returns += 1
+            admission.at_the_door()
 
 
 def _in_the_cloud(lanes: SideLanes, wanted: str) -> bool:
@@ -218,7 +280,7 @@ def _check_upload(gateway: Gateway, path: str, payload) -> None:
         validate_image(uploaded, max_bytes=gateway.max_upload_bytes,
                        max_pixels=gateway.max_upload_pixels,
                        max_dimension=gateway.max_upload_dimension)
-    except UploadRejected as error:
+    except UploadRejectedError as error:
         raise ValueError(str(error)) from None
 
 
@@ -257,6 +319,6 @@ def _forward(gateway: Gateway, lease, path: str, payload, wanted: str):
     first_byte_s, between_bytes_s = gateway.timeouts_for(
         _TASK_OF_PATH.get(path, Task.TEXT_GENERATION))
     return forward(f"http://{LOOPBACK}:{lease.port}{path}", outgoing,
-                   on_close=lease.release, first_byte_s=first_byte_s,
-                   between_bytes_s=between_bytes_s, on_first_chunk=timed,
+                   Waits(first_byte_s, between_bytes_s),
+                   Hooks(on_close=lease.release, on_first_chunk=timed),
                    content_type=content_type)

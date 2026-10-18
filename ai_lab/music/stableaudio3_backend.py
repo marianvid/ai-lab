@@ -6,13 +6,22 @@ the configuration is pointed at it before loading.
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import json
-import secrets
 from io import BytesIO
 from pathlib import Path
 from threading import Lock
+
+from .request_fields import (
+    MAX_PROMPT_CHARS,
+    TextRule,
+    WavRule,
+    check_fields,
+    decoded_wav,
+    seconds,
+    seed,
+    text,
+    wav_answer,
+)
 
 ALLOWED_FIELDS = {"model", "prompt", "negative_prompt", "duration", "seed",
                   "instrumental", "lyrics", "init_audio", "init_noise_level",
@@ -22,9 +31,20 @@ ALLOWED_FIELDS = {"model", "prompt", "negative_prompt", "duration", "seed",
 # stereo at 44.1 kHz. Both sources together must also fit the media job
 # input limit (`media.max_input_bytes`, 40 MiB by default).
 MAX_SOURCE_BYTES = 25 * 1024 * 1024
+# The longest song the Medium model is configured for, and the default.
+DEFAULT_S, SHORTEST_S, LONGEST_S = 30, 1, 380
+# The render settings the model is run with.
+MAX_STEPS = 100
+MAX_GUIDANCE = 10.0
+# A seed drawn when none is sent stays below 2**31, as the library's own does.
+DRAWN_SEEDS = 2**31
+PROMPT = TextRule("prompt must contain 1–4000 characters", MAX_PROMPT_CHARS, shortest=1)
+NEGATIVE = TextRule("negative_prompt must be text of at most 4000 characters", MAX_PROMPT_CHARS)
 
 
 class StableAudio3Backend:
+    """Stable Audio 3 Medium, loaded once, for instrumentals, restyles and inpainting."""
+
     def __init__(self, model_dir: Path, steps: int, cfg_scale: float) -> None:
         import torch
         from stable_audio_3.loading_utils import load_diffusion_cond
@@ -34,7 +54,7 @@ class StableAudio3Backend:
         checkpoint = model_dir / "model.safetensors"
         if not config_path.is_file() or not checkpoint.is_file():
             raise ValueError("Stable Audio 3 files are absent")
-        if not 1 <= steps <= 100 or not 0 < cfg_scale <= 10:
+        if not 1 <= steps <= MAX_STEPS or not 0 < cfg_scale <= MAX_GUIDANCE:
             raise ValueError("Stable Audio 3 settings are invalid")
         config = local_config(json.loads(config_path.read_text()), model_dir)
         # The NVIDIA card on Linux, Metal on a Mac. Half precision only on
@@ -62,6 +82,7 @@ class StableAudio3Backend:
         self.lock = Lock()
 
     def generate(self, body: dict) -> dict:
+        """One instrumental for the request, as base64 WAV."""
         request = validate(body, self.model_name)
         extra = {}
         if request["init_audio"] is not None:
@@ -78,11 +99,9 @@ class StableAudio3Backend:
                 duration=request["duration"], steps=self.steps,
                 cfg_scale=self.cfg_scale, seed=request["seed"],
                 sample_size=self.sample_size, **extra)
-        wav, seconds = to_wav(audio, self.sample_rate)
-        return {"model": self.model_name, "seed": request["seed"],
-                "duration": seconds, "instrumental": True,
-                "data": [{"mime_type": "audio/wav",
-                          "b64_wav": base64.b64encode(wav).decode()}]}
+        wav, length = to_wav(audio, self.sample_rate)
+        return wav_answer(wav, model=self.model_name, seed=request["seed"],
+                          duration=length, instrumental=True)
 
 
 def local_config(config: dict, model_dir: Path) -> dict:
@@ -98,51 +117,23 @@ def local_config(config: dict, model_dir: Path) -> dict:
 def validate(body: dict, model_name: str) -> dict:
     """Check a request and return it in the form `generate` uses."""
     _refuse_unknown_fields(body, model_name)
-    duration = _duration(body)
+    duration = seconds(body, DEFAULT_S, SHORTEST_S, LONGEST_S)
     init_audio, noise = _restyle_source(body)
     inpaint_audio, starts, ends = _inpaint_source(body, duration)
-    return {"prompt": _text(body, "prompt", required=True),
-            "negative_prompt": _text(body, "negative_prompt", required=False),
-            "duration": duration, "seed": _seed(body),
+    return {"prompt": text(body, "prompt", PROMPT),
+            "negative_prompt": text(body, "negative_prompt", NEGATIVE),
+            "duration": duration, "seed": seed(body, DRAWN_SEEDS),
             "init_audio": init_audio, "init_noise_level": noise,
             "inpaint_audio": inpaint_audio, "inpaint_starts": starts,
             "inpaint_ends": ends}
 
 
 def _refuse_unknown_fields(body: dict, model_name: str) -> None:
-    unknown = set(body) - ALLOWED_FIELDS
-    if unknown:
-        raise ValueError("Unknown Stable Audio 3 fields: " + ", ".join(sorted(unknown)))
-    if body.get("model") not in (None, model_name):
-        raise ValueError(f"this engine serves {model_name}")
+    check_fields(body, ALLOWED_FIELDS, "Stable Audio 3", model_name)
     if body.get("instrumental", True) is not True:
         raise ValueError("Stable Audio 3 makes instrumentals only; send instrumental: true")
     if str(body.get("lyrics", "")).strip():
         raise ValueError("Stable Audio 3 does not sing; leave lyrics out")
-
-
-def _text(body: dict, field: str, *, required: bool) -> str:
-    value = body.get(field, "")
-    shortest = 1 if required else 0
-    if not isinstance(value, str) or not shortest <= len(value.strip()) <= 4000:
-        if required:
-            raise ValueError(f"{field} must contain 1–4000 characters")
-        raise ValueError(f"{field} must be text of at most 4000 characters")
-    return value.strip()
-
-
-def _duration(body: dict) -> float:
-    duration = body.get("duration", 30)
-    if type(duration) not in (int, float) or not 1 <= duration <= 380:
-        raise ValueError("duration must be between 1 and 380 seconds")
-    return duration
-
-
-def _seed(body: dict) -> int:
-    seed = body.get("seed", secrets.randbelow(2**31))
-    if type(seed) is not int or not 0 <= seed <= 2**32 - 1:
-        raise ValueError("seed must be a 32-bit unsigned integer")
-    return seed
 
 
 def _restyle_source(body: dict) -> tuple[bytes | None, float | None]:
@@ -177,16 +168,9 @@ def source_wav(body: dict, field: str) -> bytes | None:
     encoded = body.get(field)
     if encoded is None:
         return None
-    if not isinstance(encoded, str) or not encoded or \
-            len(encoded) > MAX_SOURCE_BYTES * 4 // 3 + 4:
-        raise ValueError(f"{field} must be a base64 WAV of at most 25 MiB")
-    try:
-        audio = base64.b64decode(encoded, validate=True)
-    except binascii.Error:
-        raise ValueError(f"{field} is not valid base64") from None
-    if not audio.startswith(b"RIFF") or len(audio) > MAX_SOURCE_BYTES:
-        raise ValueError(f"{field} must be a WAV of at most 25 MiB")
-    return audio
+    return decoded_wav(encoded, WavRule(
+        MAX_SOURCE_BYTES, f"{field} must be a base64 WAV of at most 25 MiB",
+        f"{field} is not valid base64", f"{field} must be a WAV of at most 25 MiB"))
 
 
 def mask_regions(starts, ends, duration: float) -> tuple[list, list]:
@@ -194,15 +178,24 @@ def mask_regions(starts, ends, duration: float) -> tuple[list, list]:
     if starts is None or ends is None:
         raise ValueError("inpaint_audio needs inpaint_mask_start_seconds and "
                          "inpaint_mask_end_seconds")
-    starts = starts if isinstance(starts, list) else [starts]
-    ends = ends if isinstance(ends, list) else [ends]
+    starts, ends = _as_list(starts), _as_list(ends)
     if not starts or len(starts) != len(ends):
         raise ValueError("inpaint mask starts and ends must have the same length")
-    for start, end in zip(starts, ends):
-        if type(start) not in (int, float) or type(end) not in (int, float) \
-                or not 0 <= start < end <= duration:
-            raise ValueError("each inpaint region needs 0 <= start < end <= duration")
+    if not all(_region_fits(start, end, duration)
+               for start, end in zip(starts, ends, strict=True)):
+        raise ValueError("each inpaint region needs 0 <= start < end <= duration")
     return [float(x) for x in starts], [float(x) for x in ends]
+
+
+def _as_list(value) -> list:
+    """One number, or a list of them, as a list."""
+    return value if isinstance(value, list) else [value]
+
+
+def _region_fits(start, end, duration: float) -> bool:
+    """Both ends are numbers, in order, inside the song."""
+    numbers = type(start) in (int, float) and type(end) in (int, float)
+    return numbers and 0 <= start < end <= duration
 
 
 def read_wav(data: bytes):

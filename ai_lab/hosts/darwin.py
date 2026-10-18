@@ -17,12 +17,15 @@ Two consequences worth remembering:
 from __future__ import annotations
 
 import atexit
+import contextlib
+import os
 import re
 import signal
 import subprocess
 import tempfile
 from pathlib import Path
 from threading import RLock
+from typing import IO
 
 from ..types import AcceleratorSnapshot, Capabilities, ProcessSpec, ProcessStatus
 from .command import run, which
@@ -36,46 +39,20 @@ TERMINATE_GRACE_SECONDS = 20
 # would have fitted.
 USED_PAGES = ("Pages active", "Pages wired down", "Pages occupied by compressor")
 
+# The engines this host can run, each with its program configured per machine.
+DARWIN_ENGINES = ("llamacpp", "mlxwhisper", "onnx", "pyannote", "paddleocr", "comfyui",
+                  "acestep", "qwentts", "kokoro", "voxcpm", "qwenalign", "khala", "yue2",
+                  "higgs_local", "mlxlm", "mlxvlm", "stableaudio3")
+
+
 class DarwinHost:
     """See `base.Host` for what each method promises."""
 
-    def __init__(self, llamacpp_binary: str | None = None,
-                 mlxwhisper_binary: str | None = None,
-                 onnx_binary: str | None = None,
-                 pyannote_binary: str | None = None,
-                 paddleocr_binary: str | None = None,
-                 comfyui_binary: str | None = None,
-                 comfyui_main: str | None = None,
-                 acestep_binary: str | None = None,
-                 qwentts_binary: str | None = None,
-                 kokoro_binary: str | None = None,
-                 voxcpm_binary: str | None = None,
-                 qwenalign_binary: str | None = None,
-                 khala_binary: str | None = None,
-                 yue2_binary: str | None = None,
-                 higgs_local_binary: str | None = None,
-                 mlxlm_binary: str | None = None,
-                 mlxvlm_binary: str | None = None,
-                 stableaudio3_binary: str | None = None) -> None:
-        self.engine_binaries = {
-            "llamacpp": llamacpp_binary,
-            "mlxwhisper": mlxwhisper_binary,
-            "onnx": onnx_binary,
-            "pyannote": pyannote_binary,
-            "paddleocr": paddleocr_binary,
-            "comfyui": comfyui_binary,
-            "acestep": acestep_binary,
-            "qwentts": qwentts_binary,
-            "kokoro": kokoro_binary,
-            "voxcpm": voxcpm_binary,
-            "qwenalign": qwenalign_binary,
-            "khala": khala_binary,
-            "yue2": yue2_binary,
-            "higgs_local": higgs_local_binary,
-            "mlxlm": mlxlm_binary,
-            "mlxvlm": mlxvlm_binary,
-            "stableaudio3": stableaudio3_binary,
-        }
+    def __init__(self, binaries: dict[str, str | None] | None = None,
+                 comfyui_main: str | None = None) -> None:
+        # Engine id -> its program, from the engines section of config.json.
+        self.engine_binaries = {engine: (binaries or {}).get(engine)
+                                for engine in DARWIN_ENGINES}
         self.comfyui_main = comfyui_main
         self._processes: dict[str, subprocess.Popen] = {}
         # Engine output goes to a file rather than being discarded: when a load
@@ -84,7 +61,7 @@ class DarwinHost:
         # The open file each engine writes to. Kept so it can be closed when
         # the process ends: leaving them open leaks a descriptor per start,
         # which on a laptop that swaps models all day eventually runs out.
-        self._handles: dict[str, object] = {}
+        self._handles: dict[str, IO[str]] = {}
         self._lock = RLock()
         # Engines must not outlive the manager. Without this they would keep
         # running and holding their port, and the next manager would find a
@@ -96,11 +73,7 @@ class DarwinHost:
 
     def capabilities(self) -> Capabilities:
         """Portable and Metal-native engines; CUDA-only engines are absent."""
-        supported = frozenset({"llamacpp", "mlxwhisper", "onnx", "pyannote",
-                               "paddleocr", "comfyui", "acestep", "qwentts",
-                               "kokoro", "voxcpm", "qwenalign", "khala",
-                               "yue2", "higgs_local", "mlxlm", "mlxvlm",
-                               "stableaudio3"})
+        supported = frozenset(DARWIN_ENGINES)
         engines = {key for key, binary in self.engine_binaries.items()
                    if self._installed(binary)}
         if "llamacpp" not in engines and which("llama-server"):
@@ -125,14 +98,18 @@ class DarwinHost:
     # -- processes ---------------------------------------------------------
 
     def start(self, spec: ProcessSpec) -> None:
+        """Start the engine as a child process, its output into a log file.
+
+        The log file stays open for as long as the engine runs — it writes
+        there — and is closed when it stops (`_close_log`), so it is opened
+        here rather than in a `with` block.
+        """
         with self._lock:
             if self._alive(spec.instance_id):
                 raise RuntimeError(f"{spec.instance_id} is already running")
-            import os
-
             log_path = Path(tempfile.gettempdir()) / f"ai-lab-{spec.instance_id}.log"
             self._logs[spec.instance_id] = log_path
-            handle = open(log_path, "w")
+            handle = log_path.open("w")  # noqa: SIM115 - closed in _close_log
             self._handles[spec.instance_id] = handle
             self._processes[spec.instance_id] = subprocess.Popen(
                 spec.argv,
@@ -231,21 +208,21 @@ class DarwinHost:
         return {identifier: self.status(identifier) for identifier in instance_ids}
 
     def status(self, instance_id: str) -> ProcessStatus:
+        """Whether one engine runs, and its pid."""
         with self._lock:
             process = self._processes.get(instance_id)
-            running = process is not None and process.poll() is None
-            return ProcessStatus(running=running,
-                                 pid=process.pid if running else None)
+            if process is None or process.poll() is not None:
+                return ProcessStatus(running=False, pid=None)
+            return ProcessStatus(running=True, pid=process.pid)
 
     def _close_log(self, instance_id: str) -> None:
         handle = self._handles.pop(instance_id, None)
         if handle is not None:
-            try:
+            with contextlib.suppress(OSError):
                 handle.close()
-            except OSError:
-                pass
 
     def logs(self, instance_id: str, lines: int = 15) -> list[str]:
+        """The last lines the engine wrote."""
         path = self._logs.get(instance_id)
         if path is None or not path.is_file():
             return []
@@ -256,10 +233,8 @@ class DarwinHost:
         with self._lock:
             identifiers = list(self._processes)
         for instance_id in identifiers:
-            try:
+            with contextlib.suppress(Exception):
                 self.stop(instance_id)
-            except Exception:
-                pass
 
     def _alive(self, instance_id: str) -> bool:
         process = self._processes.get(instance_id)
@@ -268,6 +243,7 @@ class DarwinHost:
     # -- accelerator -------------------------------------------------------
 
     def accelerator(self, pid: int | None = None) -> AcceleratorSnapshot:
+        """Unified memory: what our engines hold, against the machine's total."""
         with self._lock:
             pids = [process.pid for process in self._processes.values()
                     if process.poll() is None]

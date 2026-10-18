@@ -139,7 +139,8 @@ def sift(changes: list[Change], interests: Interests
     Order is preserved within each half, because both engines list newest
     first and that is the order somebody reads them in.
     """
-    yours, others = [], []
+    yours: list[Change] = []
+    others: list[Change] = []
     for change in changes:
         (yours if matters(change.area, interests) else others).append(change)
     return tuple(yours), tuple(others)

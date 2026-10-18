@@ -28,6 +28,10 @@ STATE_DIR_VARIABLE = "AI_LAB_STATE_DIR"
 INSTANCE_ID = __import__("re").compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
+# The program's name and the instance id.
+EXPECTED_ARGUMENTS = 2
+
+
 def state_dir() -> Path:
     """The writable directory the deployment gives the manager."""
     value = os.environ.get(STATE_DIR_VARIABLE, "").strip()
@@ -37,10 +41,12 @@ def state_dir() -> Path:
 
 
 def launch_dir() -> Path:
+    """Where the launch files for the systemd unit are written."""
     return state_dir() / "launch"
 
 
 def write_spec(spec: ProcessSpec, directory: Path | None = None) -> Path:
+    """Write the command line an instance's unit will run, atomically; returns the file."""
     if not INSTANCE_ID.match(spec.instance_id):
         raise ValueError(f"Invalid instance id: {spec.instance_id}")
     directory = directory or launch_dir()
@@ -53,6 +59,7 @@ def write_spec(spec: ProcessSpec, directory: Path | None = None) -> Path:
 
 
 def read_spec(instance_id: str, directory: Path | None = None) -> tuple[list[str], dict]:
+    """The command line and environment written for an instance."""
     if not INSTANCE_ID.match(instance_id):
         raise ValueError(f"Invalid instance id: {instance_id}")
     directory = directory or launch_dir()
@@ -62,7 +69,7 @@ def read_spec(instance_id: str, directory: Path | None = None) -> tuple[list[str
 
 def main() -> None:
     """Entry point for `ai-lab-run <instance-id>`, called by the systemd unit."""
-    if len(sys.argv) != 2:
+    if len(sys.argv) != EXPECTED_ARGUMENTS:
         raise SystemExit("usage: ai-lab-run <instance-id>")
     argv, env = read_spec(sys.argv[1])
     os.execvpe(argv[0], argv, {**os.environ, **env})

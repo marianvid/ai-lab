@@ -2,6 +2,8 @@ import json
 import os
 import time
 import unittest
+from typing import Any, cast
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -10,6 +12,7 @@ from ai_lab.config import ConfigStore
 from ai_lab.downloads import DownloadManager, HuggingFaceClient
 from ai_lab.events import EventBus
 from ai_lab.operations import Operations
+from ai_lab.operations_services import OperationsParts
 from ai_lab.runtime import Runtime
 from ai_lab.engines.registry import Registry
 from ai_lab.settings import Settings
@@ -82,14 +85,14 @@ def operations_with_instances(count, last_loaded=None):
     path.write_text(json.dumps(config))
     host = FakeHost()
     store = ConfigStore(path)
-    operations = Operations(
+    operations = Operations.assemble(OperationsParts(
         store=store, catalog=Catalog(),
         runtime=Runtime(host, EventBus(), sample_interval_s=0),
         settings=Settings(store, host, Registry()),
         downloads=DownloadManager(), huggingface=offline_huggingface(),
         host=host, engines=FakeRegistry(host), bus=EventBus(),
         last_loaded=last_loaded,
-    )
+    ))
     return operations, host
 
 
@@ -134,13 +137,13 @@ class OperationsTests(unittest.TestCase):
         }))
         self.store = ConfigStore(self.path)
         self.host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=self.store, catalog=Catalog(),
             runtime=Runtime(self.host, EventBus(), sample_interval_s=0),
             settings=Settings(self.store, self.host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=self.host, engines=FakeRegistry(self.host),
-        )
+        ))
 
     # -- reading -----------------------------------------------------------
 
@@ -323,13 +326,13 @@ class EffectiveSettingsTests(unittest.TestCase):
         }))
         store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(store, host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=host, engines=FakeRegistry(host),
-        )
+        ))
 
     def test_a_missing_setting_reports_the_engine_default(self):
         params = self.operations.instances()[0]["params"]
@@ -360,13 +363,13 @@ class DeleteModelTests(unittest.TestCase):
         }))
         store = ConfigStore(self.path)
         self.host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(self.host, EventBus(), sample_interval_s=0),
             settings=Settings(store, self.host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=self.host, engines=FakeRegistry(self.host),
-        )
+        ))
 
     def test_a_model_nothing_points_at_is_removed_with_its_files(self):
         result = self.operations.delete_model("gguf/spare/spare")
@@ -424,13 +427,13 @@ class MoveModelTests(unittest.TestCase):
         }))
         self.store = ConfigStore(self.path)
         self.host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=self.store, catalog=Catalog(),
             runtime=Runtime(self.host, EventBus(), sample_interval_s=0),
             settings=Settings(self.store, self.host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=self.host, engines=FakeRegistry(self.host),
-        )
+        ))
 
     def test_a_model_is_copied_verified_and_removed_from_the_source(self):
         self.operations.delete_instance("qwen")
@@ -507,12 +510,9 @@ class MoveModelTests(unittest.TestCase):
                 return False
             return original(path, mode)
 
-        operations_module.os.access = access
-        try:
-            with self.assertRaises(ValueError) as caught:
-                self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        finally:
-            operations_module.os.access = original
+        with (mock.patch.object(operations_module.os, "access", access),
+              self.assertRaises(ValueError) as caught):
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertIn("cannot remove", str(caught.exception))
         self.assertFalse((self.benchmark / "gguf" / "qwen").exists())
         self.assertEqual(self.operations.move_jobs(), [])
@@ -526,19 +526,16 @@ class MoveModelTests(unittest.TestCase):
         # later would leave `_sha256` bound to `self` on every instance call
         # after this test — exactly the bug that broke every other move test
         # once this one ran first.
-        original = operations_module.ModelStorageService.__dict__["_sha256"]
         calls = {"n": 0}
 
         def flaky_sha256(path):
             calls["n"] += 1
             return f"bad-{calls['n']}"
 
-        operations_module.ModelStorageService._sha256 = staticmethod(flaky_sha256)
-        try:
-            with self.assertRaises(ValueError) as caught:
-                self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        finally:
-            operations_module.ModelStorageService._sha256 = original
+        with (mock.patch.object(operations_module.ModelStorageService, "_sha256",
+                                staticmethod(flaky_sha256)),
+              self.assertRaises(ValueError) as caught):
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
         self.assertIn("Checksum", str(caught.exception))
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
                         "source must survive a failed copy")
@@ -606,17 +603,14 @@ class MoveModelTests(unittest.TestCase):
         # `_sha256` patch above — the same unwrap-and-rebind trap applies
         # to `_publish`, and it is what broke every move test that ran
         # after this one.
-        original = operations_module.ModelStorageService.__dict__["_publish"]
 
         def failing_publish(*args, **kwargs):
             raise OSError("disk pulled mid-rename")
 
-        operations_module.ModelStorageService._publish = staticmethod(failing_publish)
-        try:
-            with self.assertRaises(OSError):
-                self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        finally:
-            operations_module.ModelStorageService._publish = original
+        with (mock.patch.object(operations_module.ModelStorageService, "_publish",
+                                staticmethod(failing_publish)),
+              self.assertRaises(OSError)):
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
         # The source must not have been touched: publishing never finished.
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
         jobs = self.operations.move_jobs()
@@ -667,11 +661,9 @@ class MoveModelTests(unittest.TestCase):
                 self.cancel_move(job["id"])
             original(self, job)
 
-        operations_module.ModelStorageService._check_cancelled = cancel_after_first
-        try:
+        with mock.patch.object(operations_module.ModelStorageService, "_check_cancelled",
+                               cancel_after_first):
             result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        finally:
-            operations_module.ModelStorageService._check_cancelled = original
         self.assertFalse(result["moved"])
         self.assertTrue(result["cancelled"])
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists(),
@@ -697,13 +689,10 @@ class MoveModelTests(unittest.TestCase):
                 self.cancel_move(job["id"])
             original(self, job)
 
-        operations_module.ModelStorageService._check_cancelled = cancel_after_first
-        operations_module.ModelStorageService._COPY_CHUNK = 1024
-        try:
+        service = operations_module.ModelStorageService
+        with (mock.patch.object(service, "_check_cancelled", cancel_after_first),
+              mock.patch.object(service, "_COPY_CHUNK", 1024)):
             result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        finally:
-            operations_module.ModelStorageService._check_cancelled = original
-            operations_module.ModelStorageService._COPY_CHUNK = 64 * 1024 * 1024
         self.assertTrue(result["cancelled"])
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
         self.assertFalse((self.benchmark / "gguf" / "qwen").exists(),
@@ -728,11 +717,9 @@ class MoveModelTests(unittest.TestCase):
             seen["ids"] = [item.id for item in self.catalog.scan(config.repositories)]
             original(self, job)
 
-        operations_module.ModelStorageService._check_cancelled = inspect
-        try:
+        with mock.patch.object(operations_module.ModelStorageService, "_check_cancelled",
+                               inspect):
             self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        finally:
-            operations_module.ModelStorageService._check_cancelled = original
         self.assertNotIn("benchmark-gguf/.ai-lab-staging", "".join(seen.get("ids", [])))
         for model_id in seen.get("ids", []):
             self.assertNotIn(".ai-lab-staging", model_id)
@@ -776,7 +763,7 @@ class MoveModelTests(unittest.TestCase):
 
     def test_recover_moves_leaves_finished_jobs_alone(self):
         self.operations.delete_instance("qwen")
-        result = self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.operations.move_model("gguf/qwen/qwen", "benchmark")
         recovered = self.operations.recover_moves()
         self.assertEqual(recovered, [])
         jobs = self.operations.move_jobs()
@@ -813,7 +800,7 @@ class SupportedFormatTests(unittest.TestCase):
         self.path.write_text(json.dumps({"repositories": [], "instances": []}))
         store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(store, host, Registry()),
@@ -823,7 +810,7 @@ class SupportedFormatTests(unittest.TestCase):
                 {"type": "file", "path": "model.safetensors", "size": 20},
             ]),
             host=host, engines=Registry(),
-        )
+        ))
 
     def test_only_runnable_formats_are_offered(self):
         """vLLM is not installed, so safetensors are of no use here yet."""
@@ -838,13 +825,13 @@ class SupportedFormatTests(unittest.TestCase):
         download would be thirty gigabytes of nothing.
         """
         with self.assertRaises(TypeError):
-            self.operations.remote_sets("org/model", only_supported=False)
+            cast(Any, self.operations).remote_sets("org/model", only_supported=False)
 
     def test_supported_formats_follow_the_available_engines(self):
         self.assertEqual(self.operations.supported_formats(), ["gguf"])
 
     def test_search_hides_repositories_without_a_runnable_format(self):
-        self.operations.huggingface.search = lambda query: [
+        cast(Any, self.operations.huggingface).search = lambda query: [
             {"repo": "org/source", "formats": ["safetensors"]},
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
         ]
@@ -856,7 +843,7 @@ class SupportedFormatTests(unittest.TestCase):
         # The one thing the switch was good for. "Nothing found" and "nothing
         # you can run" are different answers, and a list of length zero cannot
         # tell them apart.
-        self.operations.huggingface.search = lambda query: [
+        cast(Any, self.operations.huggingface).search = lambda query: [
             {"repo": "org/source", "formats": ["safetensors"]},
             {"repo": "org/other", "formats": ["safetensors"]},
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
@@ -866,13 +853,13 @@ class SupportedFormatTests(unittest.TestCase):
         self.assertEqual(answer["hidden"], 2)
 
     def test_nothing_hidden_is_reported_as_nothing_hidden(self):
-        self.operations.huggingface.search = lambda query: [
+        cast(Any, self.operations.huggingface).search = lambda query: [
             {"repo": "org/weights-GGUF", "formats": ["gguf"]},
         ]
         self.assertEqual(self.operations.search("weights")["hidden"], 0)
 
     def test_a_search_that_found_nothing_hid_nothing(self):
-        self.operations.huggingface.search = lambda query: []
+        cast(Any, self.operations.huggingface).search = lambda query: []
         answer = self.operations.search("nothing at all")
         self.assertEqual(answer, {"results": [], "hidden": 0})
 
@@ -914,12 +901,12 @@ class WritabilityTests(unittest.TestCase):
         store = ConfigStore(self.path)
         host = FakeHost()
         self.settings = Settings(store, host, Registry())
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=self.settings, downloads=DownloadManager(),
             huggingface=offline_huggingface(), host=host, engines=FakeRegistry(host),
-        )
+        ))
 
     def test_the_settings_view_reports_real_writability(self):
         rows = {item["id"]: item for item in self.settings.view()["repositories"]}
@@ -932,9 +919,8 @@ class WritabilityTests(unittest.TestCase):
         self.assertIn("not writable", str(caught.exception))
 
     def test_a_missing_directory_is_refused_with_its_path(self):
-        with self.store_missing() as operations:
-            with self.assertRaises(ValueError) as caught:
-                operations.download("org/model", "whatever", "gone")
+        with self.store_missing() as operations, self.assertRaises(ValueError) as caught:
+            operations.download("org/model", "whatever", "gone")
         self.assertIn("does not exist", str(caught.exception))
 
     def store_missing(self):
@@ -993,7 +979,7 @@ class DownloadDestinationTests(unittest.TestCase):
         }))
         store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(store, host, Registry()),
@@ -1003,7 +989,7 @@ class DownloadDestinationTests(unittest.TestCase):
                 {"type": "file", "path": "weights.safetensors", "size": 8},
             ]),
             host=host, engines=FakeRegistry(host),
-        )
+        ))
         self.addCleanup(drain, self.operations)
 
     def test_a_gguf_model_goes_to_the_gguf_repository(self):
@@ -1018,9 +1004,8 @@ class DownloadDestinationTests(unittest.TestCase):
             self.operations.transfers()[0]["name"], "weights")
 
     def test_a_format_with_no_repository_says_so(self):
-        with self.store_without_gguf():
-            with self.assertRaises(ValueError) as caught:
-                self.operations.download("org/model", "thing-Q4_K_M")
+        with self.store_without_gguf(), self.assertRaises(ValueError) as caught:
+            self.operations.download("org/model", "thing-Q4_K_M")
         self.assertIn("No repository is configured", str(caught.exception))
 
     def test_an_explicit_destination_still_wins(self):
@@ -1069,7 +1054,7 @@ class DownloadTierConflictTests(unittest.TestCase):
         }))
         store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(store, host, Registry()),
@@ -1078,7 +1063,7 @@ class DownloadTierConflictTests(unittest.TestCase):
                 {"type": "file", "path": "thing-Q4_K_M.gguf", "size": 8},
             ]),
             host=host, engines=FakeRegistry(host),
-        )
+        ))
         self.addCleanup(drain, self.operations)
 
     def test_a_repository_and_tier_that_disagree_are_refused(self):
@@ -1143,7 +1128,7 @@ class BundleDownloadTests(unittest.TestCase):
         }))
         store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(store, host, Registry()),
@@ -1155,7 +1140,7 @@ class BundleDownloadTests(unittest.TestCase):
                  "path": "split_files/diffusion_models/e.safetensors"},
             ]),
             host=host, engines=FakeRegistry(host),
-        )
+        ))
         self.addCleanup(drain, self.operations)
 
     def test_a_benchmark_download_stays_on_the_benchmark_disk(self):
@@ -1202,13 +1187,13 @@ class BrowseTests(unittest.TestCase):
         }))
         self.store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=self.store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(self.store, host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=host, engines=FakeRegistry(host),
-        )
+        ))
 
     def test_it_lists_directories_and_nothing_else(self):
         """Only folder names. This is for picking a place, not reading files."""
@@ -1254,13 +1239,13 @@ class RepositoryEditingTests(unittest.TestCase):
         }))
         self.store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=self.store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(self.store, host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=host, engines=FakeRegistry(host),
-        )
+        ))
 
     def test_moving_the_root_moves_every_repository(self):
         # The whole point of there being one: a model store that moves to
@@ -1427,13 +1412,18 @@ class RestoringTests(unittest.TestCase):
         self.operations, self.host = operations_with_instances(
             2, last_loaded=self.memory)
 
+    def remembered(self) -> dict:
+        memory = self.memory.read()
+        assert memory is not None
+        return memory
+
     def test_loading_a_model_is_remembered(self):
         self.operations.load("model-0")
-        self.assertEqual(self.memory.read()["instance_id"], "model-0")
+        self.assertEqual(self.remembered()["instance_id"], "model-0")
 
     def test_the_settings_it_was_started_with_are_remembered_too(self):
         self.operations.load("model-0", {"context_size": 4096})
-        self.assertEqual(self.memory.read()["settings"]["context_size"], 4096)
+        self.assertEqual(self.remembered()["settings"]["context_size"], 4096)
 
     def test_unloading_it_is_remembered_as_an_empty_card(self):
         self.operations.load("model-0")
@@ -1445,7 +1435,7 @@ class RestoringTests(unittest.TestCase):
         # That is not the card being emptied.
         self.operations.load("model-0")
         self.operations.unload("model-1")
-        self.assertEqual(self.memory.read()["instance_id"], "model-0")
+        self.assertEqual(self.remembered()["instance_id"], "model-0")
 
     def test_a_load_that_failed_is_not_remembered(self):
         original = self.operations.runtime.load
@@ -1631,13 +1621,13 @@ class PointingAnEngineSomewhereElse(unittest.TestCase):
         }))
         self.store = ConfigStore(self.path)
         host = FakeHost()
-        self.operations = Operations(
+        self.operations = Operations.assemble(OperationsParts(
             store=self.store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(self.store, host, Registry()),
             downloads=DownloadManager(), huggingface=offline_huggingface(),
             host=host, engines=FakeRegistry(host),
-        )
+        ))
 
     def test_browsing_shows_only_folders_by_default(self):
         found = self.operations.browse(str(self.root / "bin"))

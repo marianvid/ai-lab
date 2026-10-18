@@ -2,6 +2,7 @@
 
 
 def register(router, operations) -> None:
+    """What can be reclaimed, and clearing it."""
     router.add("GET", "/api/storage", lambda **_: operations.storage_view())
     router.add("DELETE", "/api/storage/{id}",
                lambda id, **_: operations.clear_storage(id))

@@ -26,7 +26,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..network import LOOPBACK
@@ -87,6 +87,10 @@ class _Queue:
     """One model's places and counters."""
 
     places: threading.BoundedSemaphore
+    # Held while a request announces itself and while the model is stopped:
+    # a request either counts as waiting before the stop looks, or arrives
+    # after the stop is done and starts the server again — never in between.
+    door: threading.Lock = field(default_factory=threading.Lock)
     in_flight: int = 0
     waiting: int = 0
     requests: int = 0
@@ -131,7 +135,8 @@ class CpuLane:
             raise ValueError(f"processor models answer only {EMBEDDINGS_PATH}")
         name = payload["model"]
         placement, queue = self.placements[name], self._queues[name]
-        self._change(queue, waiting=1)
+        with queue.door:
+            self._change(queue, waiting=1)
         with queue.places:
             self._change(queue, waiting=-1, in_flight=1, requests=1)
             try:
@@ -175,9 +180,10 @@ class CpuLane:
     def stop(self, name: str) -> dict:
         """Stop a model by hand, unless a request is using it."""
         placement = self._known(name)
-        if self._busy(name):
-            raise ValueError(f"{name} is answering requests; stop it when they are done")
-        placement.stop()
+        with self._queues[name].door:
+            if self._busy(name):
+                raise ValueError(f"{name} is answering requests; stop it when they are done")
+            placement.stop()
         return self.stats()[name]
 
     def stop_all(self) -> None:
@@ -187,8 +193,12 @@ class CpuLane:
 
     def reap_idle(self) -> list[str]:
         """Stop every server nothing has used for its idle limit; `name/device` stopped."""
-        return [f"{name}/{device}" for name, placement in self.placements.items()
-                for device in placement.stop_if_idle(busy=self._busy(name))]
+        stopped = []
+        for name, placement in self.placements.items():
+            with self._queues[name].door:
+                stopped += [f"{name}/{device}"
+                            for device in placement.stop_if_idle(busy=self._busy(name))]
+        return stopped
 
     def start_reaper(self) -> threading.Thread:
         """Check for idle models in the background, every `REAP_EVERY_S`."""

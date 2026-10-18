@@ -83,53 +83,23 @@ from __future__ import annotations
 import itertools
 import threading
 import time
-from dataclasses import dataclass, field
+from .scheduler_parts import (
+    AbandonedError,
+    AdmissionWithdrawnError,
+    QueueFullError,
+    StillWanted,
+    Waiting,
+    WillNotFitError,
+    release,
+)
+from .scheduler_planning import QueuePlanning
+
+# Re-exported: callers import the scheduler's errors from here.
+__all__ = ["AbandonedError", "AdmissionWithdrawnError", "QueueFullError", "Scheduler",
+           "WillNotFitError"]
 
 
-class QueueFull(RuntimeError):
-    """More requests are waiting than this manager will hold."""
-
-
-class WillNotFit(RuntimeError):
-    """This model does not fit on this machine, whatever else is unloaded.
-
-    Told to the request rather than discovered by emptying the machine and
-    failing anyway: unloading what was working, to load something that was
-    never going to fit, is the worst of both.
-
-    `detail` is filled in by whoever knows the numbers — this file does not —
-    and reaches the client as fields it can act on rather than a sentence it
-    would have to parse.
-    """
-
-    kind = "insufficient_memory"
-    code = "model_does_not_fit"
-
-    def __init__(self, message: str, detail: dict | None = None) -> None:
-        super().__init__(message)
-        self.detail = detail or {}
-
-
-class Abandoned(RuntimeError):
-    """The client went away before its turn came."""
-
-
-@dataclass(slots=True)
-class _Waiting:
-    """One request, from arriving to being let in."""
-
-    number: int                       # arrival order, and the tie-break
-    shape: object                     # opaque; equal shapes may run together
-    arrived: float
-    admitted: threading.Event = field(default_factory=threading.Event)
-    # Set when this one will never be admitted, and why.
-    failure: BaseException | None = None
-    # Asked before it is let in. A client that has gone is dropped rather than
-    # served, which matters most when serving it means a forty-second load.
-    still_wanted: object = None
-
-
-class Scheduler:
+class Scheduler(QueuePlanning):
     """The queue, the places, and the decision to swap.
 
     Every public method may be called from any thread: one per request, which
@@ -177,7 +147,7 @@ class Scheduler:
         # Shape -> when it last had a request admitted, so the choice of what
         # to unload can prefer whatever nobody has wanted for longest.
         self._last_used: dict = {}
-        self._queue: list[_Waiting] = []
+        self._queue: list[Waiting] = []
         self._switching = False
         # Bumped by `reset`. A load already under way finishes after it — the
         # engine is starting and cannot be called back — and its result must
@@ -186,23 +156,24 @@ class Scheduler:
 
     # -- what a request does ------------------------------------------------
 
-    def enter(self, shape, still_wanted=None) -> None:
+    def enter(self, shape, still_wanted: StillWanted | None = None) -> None:
         """Wait until this request may run. Returns once it has a place.
 
-        Raises QueueFull if too many are already waiting, Abandoned if the
-        client went away first, or whatever the load raised.
+        Raises QueueFullError if too many are already waiting, AbandonedError
+        if the client went away first (or `still_wanted` withdrew it), or
+        whatever the load raised.
         """
         with self._lock:
             if self._admits_now(shape):
                 self._take_place(shape)
                 return
             if len(self._queue) >= self.max_waiting:
-                raise QueueFull(
+                raise QueueFullError(
                     f"{len(self._queue)} requests are already waiting for the "
                     f"card, which is as many as this manager will hold. Try "
                     f"again shortly.")
-            entry = _Waiting(number=next(self._numbers), shape=shape,
-                             arrived=time.time(), still_wanted=still_wanted)
+            entry = Waiting(number=next(self._numbers), shape=shape,
+                            arrived=time.time(), still_wanted=still_wanted)
             self._queue.append(entry)
         # An idle card with the wrong model on it has nobody to start things
         # off but the request that just arrived.
@@ -228,14 +199,10 @@ class Scheduler:
                         break
         self._pump()
 
-    def _take_place(self, shape) -> None:
-        """One more request on this shape. Called holding the lock."""
-        self._loaded[shape] = self._loaded.get(shape, 0) + 1
-        self._last_used[shape] = time.time()
-
     # -- what the interface asks --------------------------------------------
 
     def state(self) -> dict:
+        """What is loaded, how busy each model is, and who waits — for the page."""
         with self._lock:
             waiting = [{"shape": entry.shape,
                         "waiting_s": round(time.time() - entry.arrived, 1)}
@@ -270,8 +237,7 @@ class Scheduler:
             self._loaded = {}
             self._last_used = {}
         for entry in turned_away:
-            entry.failure = Abandoned(reason)
-            entry.admitted.set()
+            entry.fail(AbandonedError(reason))
         return len(turned_away)
 
     def adopt(self, *shapes) -> None:
@@ -291,8 +257,8 @@ class Scheduler:
             if any(self._loaded.values()) or self._queue or self._switching:
                 return
             now = time.time()
-            self._loaded = {shape: 0 for shape in shapes}
-            self._last_used = {shape: now for shape in shapes}
+            self._loaded = dict.fromkeys(shapes, 0)
+            self._last_used = dict.fromkeys(shapes, now)
 
     def forget_current(self) -> None:
         """Note that the machine no longer holds what it did.
@@ -313,17 +279,6 @@ class Scheduler:
                 and shape in self._loaded
                 and self._loaded[shape] < self._places(shape))
 
-    def _loaded_now(self) -> list[dict]:
-        """What is on the machine, for whoever decides what has to go.
-
-        Called holding the lock, and handed out as plain dictionaries so the
-        decision can be taken outside this file — which knows nothing about
-        memory and should not learn.
-        """
-        return [{"shape": shape, "in_flight": count,
-                 "last_used": self._last_used.get(shape, 0.0)}
-                for shape, count in self._loaded.items()]
-
     def _pump(self) -> None:
         """Move things along until nothing more can happen without waiting.
 
@@ -334,160 +289,13 @@ class Scheduler:
         while True:
             with self._lock:
                 ready, job = self._plan()
-            _release(ready)
+            release(ready)
             if job is None:
                 return
-            shape, victims, photograph, epoch = job
+            shape, victims, _, _ = job
             failure = None
             try:
                 self._switch(shape, victims)
             except BaseException as error:      # reported to everyone waiting
                 failure = error
-            _release(self._settle(shape, victims, photograph, failure, epoch))
-
-    def _plan(self) -> tuple[list[_Waiting], tuple | None]:
-        """Decide what can happen now. Called holding the lock.
-
-        Returns the entries to wake and, at most, one switch for the caller to
-        perform after the lock is dropped. Waking happens outside the lock too:
-        a thread waking up wants the lock, and handing it out while holding it
-        is how a deadlock gets written.
-        """
-        ready: list[_Waiting] = []
-        while self._queue and not self._switching:
-            head = self._queue[0]
-            if head.shape in self._loaded:
-                if self._loaded[head.shape] >= self._places(head.shape):
-                    break                       # full: wait for a place
-                self._queue.pop(0)
-                if self._gone(head):
-                    continue
-                self._take_place(head.shape)
-                ready.append(head)
-                continue
-
-            # The head wants something that is not on the machine. Who has to
-            # go for it to fit? Empty means it fits beside what is there and
-            # nothing is taken off.
-            victims = self._make_room(head.shape, self._loaded_now())
-            if victims is None:
-                # It will not fit however much is unloaded. Say so to the whole
-                # run rather than emptying the machine to discover it.
-                self._queue.pop(0)
-                if not self._gone(head):
-                    head.failure = WillNotFit(
-                        "there is not enough memory for this model on this "
-                        "machine, whatever else is unloaded")
-                    head.admitted.set()
-                continue
-            if any(self._loaded.get(shape, 0) for shape in victims):
-                # One of them is still answering. Everything waits until it
-                # finishes — including requests behind this one for models that
-                # are loaded and idle. That is the ordering rule doing its job:
-                # letting them past is how the request at the head never gets
-                # served. And because the door is shut, nothing new joins those
-                # models either, so the wait is bounded by what is already in
-                # flight.
-                break
-            # The run at the front of the queue, and only that. Everything
-            # from the first request wanting something else stays where it is,
-            # however many more of this shape are behind it.
-            #
-            # Taking all of them would serve requests younger than the one
-            # already waiting, and the whole point of oldest-first is that a
-            # workflow may be held up by exactly that older request. Whether
-            # somebody younger could have been served cheaply is not the
-            # question; whether they arrived later is.
-            #
-            # Clients that have gone are dropped while the run is taken, not
-            # after. After is too late: the swap has happened, the model that
-            # was working is off the card, and the load was for nobody. That is
-            # the fault this whole file exists to prevent, and checking a
-            # moment too late reproduces it exactly.
-            shape = head.shape
-            photograph = []
-            taken = 0
-            while taken < len(self._queue) and self._queue[taken].shape == shape:
-                entry = self._queue[taken]
-                taken += 1
-                if not self._gone(entry):
-                    photograph.append(entry)
-            self._queue = self._queue[taken:]
-            if not photograph:
-                continue                        # all gone: try the next shape
-            self._switching = True
-            return ready, (shape, tuple(victims), photograph, self._epoch)
-        return ready, None
-
-    def _settle(self, shape, victims: tuple, photograph: list[_Waiting],
-                failure: BaseException | None, epoch: int) -> list[_Waiting]:
-        """Publish what the load did, and admit who fits.
-
-        Unless everything was thrown away while it ran. A forced stop empties
-        the card and turns away everyone waiting; a load that started before it
-        cannot be called back, so its result is discarded instead. The card is
-        left unknown rather than claimed — whatever is on it now, the next
-        request unloads before it loads.
-        """
-        ready: list[_Waiting] = []
-        with self._lock:
-            self._switching = False
-            if epoch != self._epoch:
-                for entry in photograph:
-                    entry.failure = failure or Abandoned(
-                        "everything was stopped while this model was loading")
-                    entry.admitted.set()
-                return ready
-            # Whatever was taken off is off, whether the load that followed
-            # worked or not. Claiming otherwise would send the next request to
-            # a port with nothing behind it.
-            for gone in victims:
-                self._loaded.pop(gone, None)
-                self._last_used.pop(gone, None)
-            if failure is not None:
-                for entry in photograph:
-                    entry.failure = failure
-                    entry.admitted.set()
-                return ready
-            self._loaded[shape] = 0
-            self._last_used[shape] = time.time()
-            room = self._places(shape)
-            overflow = []
-            for entry in photograph:
-                if self._gone(entry):
-                    continue
-                if self._loaded[shape] >= room:
-                    overflow.append(entry)
-                    continue
-                self._take_place(shape)
-                ready.append(entry)
-            # More were in the run than fit. They go back at the front, in
-            # order, and are let in as places free — they are still the oldest
-            # requests waiting, and putting them behind newer ones would be the
-            # same unfairness by another route.
-            self._queue[:0] = overflow
-        return ready
-
-    @staticmethod
-    def _gone(entry: _Waiting) -> bool:
-        """Whether the client has given up. Dropped rather than served.
-
-        Asked at the last possible moment, because the expensive part is what
-        comes after: a client that walked away should not cost a swap and a
-        forty-second load, nor take the card off the model that was working.
-        """
-        if entry.still_wanted is None:
-            return False
-        try:
-            if entry.still_wanted():
-                return False
-        except Exception:
-            return False                        # cannot tell: serve it
-        entry.failure = Abandoned("the client closed the connection while waiting")
-        entry.admitted.set()
-        return True
-
-
-def _release(ready: list[_Waiting]) -> None:
-    for entry in ready:
-        entry.admitted.set()
+            release(self._settle(job, failure))

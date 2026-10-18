@@ -3,9 +3,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from ai_lab.builds import Builds, SourceBuild, Version, _mark
+from ai_lab.builds import Builds
+from ai_lab.source_build import BuildOptions, SourceBuild
+from ai_lab.source_versions import Version, mark_version
 from ai_lab.events import EventBus
 from ai_lab.types import LogEvent
+
+
+def finish(build):
+    """Wait for the build started in the background."""
+    assert build._thread is not None
+    build._thread.join(timeout=5)
 
 
 class VersionTests(unittest.TestCase):
@@ -69,7 +77,7 @@ class SourceBuildTests(unittest.TestCase):
         self.assertTrue(status["update_available"])
 
     def test_the_nightly_line_is_followed_when_that_is_what_was_asked_for(self):
-        build = SourceBuild("llamacpp", str(self.path), self.bus, line="nightly")
+        build = SourceBuild("llamacpp", str(self.path), self.bus, BuildOptions(line="nightly"))
         with patch.object(SourceBuild, "_git",
                           side_effect=["", "b10587\nb10448\n",
                                        "b10448\n", "abc\n"]) as git, \
@@ -83,7 +91,7 @@ class SourceBuildTests(unittest.TestCase):
         self.assertIn("refs/tags/b*", listing.args)
 
     def test_an_unrecognised_line_falls_back_rather_than_breaking(self):
-        build = SourceBuild("llamacpp", str(self.path), self.bus, line="whatever")
+        build = SourceBuild("llamacpp", str(self.path), self.bus, BuildOptions(line="whatever"))
         self.assertEqual(build.line, "stable")
 
     def test_tags_from_the_other_line_are_ignored(self):
@@ -117,9 +125,9 @@ class SourceBuildTests(unittest.TestCase):
                         "a smaller number on the other line is still an update")
 
     def test_a_remote_without_tags_on_that_line_is_an_error_not_a_silent_zero(self):
-        with patch.object(SourceBuild, "_git", return_value=""):
-            with self.assertRaises(ValueError):
-                self.build.check()
+        with patch.object(SourceBuild, "_git", return_value=""), \
+                self.assertRaises(ValueError):
+            self.build.check()
 
     def test_output_is_streamed_line_by_line_and_kept(self):
         """A ten-minute compile with nothing on screen looks like a hang."""
@@ -133,7 +141,7 @@ class SourceBuildTests(unittest.TestCase):
         with patch.object(SourceBuild, "_stream", fake_stream), \
              patch.object(SourceBuild, "_git", side_effect=["v0.2.0\n"] * 40):
             self.build.update()
-            self.build._thread.join(timeout=5)
+            finish(self.build)
 
         self.assertEqual(self.build.status()["state"], "done")
         self.assertEqual([item[0] for item in commands], ["git", "git", "cmake"])
@@ -154,7 +162,7 @@ class SourceBuildTests(unittest.TestCase):
                           lambda self, command, elapsed, timeout: commands.append(command)), \
              patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
             self.build.update()
-            self.build._thread.join(timeout=5)
+            finish(self.build)
         cmake = [item for item in commands if item[0] == "cmake"][0]
         self.assertEqual(cmake[:3], ["cmake", "--build", "build"])
         self.assertNotIn("-DGGML_CUDA=ON", cmake)
@@ -166,7 +174,7 @@ class SourceBuildTests(unittest.TestCase):
         with patch.object(SourceBuild, "_stream", explode), \
              patch.object(SourceBuild, "_git", side_effect=["v0.1.0\n"] * 40):
             self.build.update()
-            self.build._thread.join(timeout=5)
+            finish(self.build)
         status = self.build.status()
         self.assertEqual(status["state"], "failed")
         self.assertIn("cmake exited 2", status["error"])
@@ -178,7 +186,7 @@ class SourceBuildTests(unittest.TestCase):
             self.build.update()
             with self.assertRaises(ValueError):
                 self.build.update()
-            self.build._thread.join(timeout=5)
+            finish(self.build)
 
 
 class BuildsTests(unittest.TestCase):
@@ -203,20 +211,20 @@ class VersionedBuildTests(unittest.TestCase):
         self.legacy = self.source / "build"
         (self.legacy / "bin").mkdir(parents=True)
         (self.legacy / "bin" / "llama-server").write_text("binary")
-        _mark(self.legacy, Version("b10448", "oldcommit"))
+        mark_version(self.legacy, Version("b10448", "oldcommit"))
         self.builds = self.root / "compiled"
         self.builds.mkdir()
         self.build = SourceBuild(
-            "llamacpp", str(self.source), EventBus(), builds=str(self.builds),
-            legacy_build=str(self.legacy),
-            cmake_args=["-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"])
+            "llamacpp", str(self.source), EventBus(), BuildOptions(
+                builds=str(self.builds), legacy_build=str(self.legacy),
+                cmake_args=["-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"]))
         self.build.point_at(self.legacy)
 
     def _compiled(self, tag="v0.3.0", commit="newcommit"):
         path = self.builds / f"build-{tag}"
         (path / "bin").mkdir(parents=True)
         (path / "bin" / "llama-server").write_text("binary")
-        _mark(path, Version(tag, commit))
+        mark_version(path, Version(tag, commit))
         return path
 
     def test_the_active_binary_not_checkout_is_the_installed_version(self):
@@ -262,7 +270,7 @@ class VersionedBuildTests(unittest.TestCase):
              patch.object(SourceBuild, "_git",
                           side_effect=["v0.3.0\n", "v0.3.0\n", "newcommit\n"]):
             self.build.update()
-            self.build._thread.join(timeout=5)
+            finish(self.build)
 
         status = self.build.status()
         self.assertEqual(status["state"], "done", status["error"])
@@ -285,7 +293,7 @@ class VersionedBuildTests(unittest.TestCase):
              patch.object(SourceBuild, "_git",
                           side_effect=["v0.3.0\n", "v0.3.0\n", "newcommit\n", ""]):
             self.build.update()
-            self.build._thread.join(timeout=5)
+            finish(self.build)
 
         self.assertEqual(self.build.status()["state"], "failed")
         self.assertEqual(self.build.active(), self.legacy.resolve())
@@ -389,11 +397,11 @@ class WatchTests(unittest.TestCase):
         builds = self.builds()
         self.addCleanup(builds.stop)
         builds.watch(interval_s=60)
-        first = builds._timer
+        first = builds.watcher.thread
         builds.watch(interval_s=60)
-        self.assertIs(builds._timer, first)
+        self.assertIs(builds.watcher.thread, first)
 
     def test_nothing_is_started_when_no_source_is_configured(self):
         builds = Builds({}, EventBus())
         builds.watch(interval_s=60)
-        self.assertIsNone(builds._timer)
+        self.assertIsNone(builds.watcher.thread)

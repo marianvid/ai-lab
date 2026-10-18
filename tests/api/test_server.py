@@ -11,12 +11,15 @@ import urllib.error
 import urllib.request
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
+from typing import Any, ClassVar, cast
+from unittest import mock
 
-from ai_lab.api.server import Handler, build_router
-from ai_lab.multipart import MultipartBody
-from ai_lab.api.server import status_for
-from ai_lab.gateway import CardBusy, NotConfigured
+import ai_lab.api.routes.gateway as gateway_routes
+from ai_lab.api.router import Router
+from ai_lab.api.server import Handler, build_router, status_for
 from ai_lab.events import EventBus
+from ai_lab.gateway import CardBusyError, NotConfiguredError
+from ai_lab.multipart import MultipartBody
 
 
 class FakeOperations:
@@ -86,16 +89,19 @@ class _Operation:
         return {"ok": True, "total_ms": 42}
 
 
-class ServerTests(unittest.TestCase):
+class LiveServer(unittest.TestCase):
+    """A real server on a free port for the whole class, and a way to call it."""
+
+    server: ClassVar[ThreadingHTTPServer]
+    base: ClassVar[str]
+
     @classmethod
-    def setUpClass(cls):
-        cls.operations = FakeOperations()
-        handler = type("TestHandler", (Handler,), {
-            "router": build_router(cls.operations), "bus": EventBus()})
+    def start(cls, router: Router) -> None:
+        handler = type(f"{cls.__name__}Handler", (Handler,), {
+            "router": router, "bus": EventBus()})
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-        cls.thread.start()
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
@@ -111,6 +117,15 @@ class ServerTests(unittest.TestCase):
                 return response.status, json.loads(response.read())
         except urllib.error.HTTPError as error:
             return error.code, json.loads(error.read())
+
+
+class ServerTests(LiveServer):
+    operations: ClassVar[FakeOperations]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.operations = FakeOperations()
+        cls.start(build_router(cast(Any, cls.operations)))
 
     def test_a_get_returns_json(self):
         status, payload = self.call("GET", "/api/instances")
@@ -163,7 +178,7 @@ class ServerTests(unittest.TestCase):
         # leaves as a bad request. The gateway raises one for a model name
         # nobody serves, and 400 tells an agent the wrong thing about its own
         # request: it would retry differently instead of fixing the name.
-        self.assertEqual(status_for(NotConfigured("no such model")),
+        self.assertEqual(status_for(NotConfiguredError("no such model")),
                          HTTPStatus.NOT_FOUND)
 
     def test_an_unknown_route_is_a_404(self):
@@ -190,7 +205,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class CachingTests(unittest.TestCase):
+class CachingTests(LiveServer):
     """Nothing may be cached by the browser.
 
     With no cache headers a browser caches static files by its own guesswork,
@@ -201,17 +216,7 @@ class CachingTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        handler = type("CacheHandler", (Handler,), {
-            "router": build_router(FakeOperations()), "bus": EventBus()})
-        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-        cls.thread.start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.server.shutdown()
-        cls.server.server_close()
+        cls.start(build_router(cast(Any, FakeOperations())))
 
     def headers_for(self, path):
         with urllib.request.urlopen(self.base + path, timeout=5) as response:
@@ -227,7 +232,7 @@ class CachingTests(unittest.TestCase):
         self.assertIn("no-store", self.headers_for("/api/instances").get("Cache-Control", ""))
 
 
-class BusyCardTests(unittest.TestCase):
+class BusyCardTests(LiveServer):
     """The whole round trip of the refusal, because the page acts on it.
 
     A message alone is not enough. The page has to be able to tell this
@@ -239,16 +244,16 @@ class BusyCardTests(unittest.TestCase):
         """Busy until told otherwise, which is all the routes need of it."""
 
         def __init__(self):
-            self.holder = {"instance_id": "coder", "answering": True}
-            self.guarded = []
-            self.resets = []
+            self.holder: dict | None = {"instance_id": "coder", "answering": True}
+            self.guarded: list[tuple[str, str]] = []
+            self.resets: list[str] = []
             self.told = 0
 
         def guard(self, action, instance_id):
             self.guarded.append((action, instance_id))
             if self.holder is None:
                 return
-            raise CardBusy(f"coder is answering a request; {action} on "
+            raise CardBusyError(f"coder is answering a request; {action} on "
                            f"{instance_id} would cut it off", self.holder)
 
         def reset(self, reason):
@@ -259,22 +264,14 @@ class BusyCardTests(unittest.TestCase):
         def card_changed(self):
             self.told += 1
 
+    operations: ClassVar[FakeOperations]
+    gateway: ClassVar[Gateway]
+
     @classmethod
     def setUpClass(cls):
         cls.operations = FakeOperations()
         cls.gateway = cls.Gateway()
-        handler = type("BusyHandler", (Handler,), {
-            "router": build_router(cls.operations, cls.gateway),
-            "bus": EventBus()})
-        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-        cls.thread.start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.server.shutdown()
-        cls.server.server_close()
+        cls.start(build_router(cast(Any, cls.operations), cls.gateway))
 
     def setUp(self):
         self.gateway.holder = {"instance_id": "coder", "answering": True}
@@ -282,8 +279,6 @@ class BusyCardTests(unittest.TestCase):
         self.gateway.guarded.clear()
         self.gateway.resets.clear()
         self.gateway.told = 0
-
-    call = ServerTests.call
 
     def test_loading_while_the_card_is_busy_is_refused(self):
         status, payload = self.call("POST", "/api/instances/qwen/load")
@@ -389,22 +384,16 @@ class SettingsFieldTests(unittest.TestCase):
     def test_the_field_is_read_and_removed(self):
         from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder
         gateway = self.Gateway()
-        forwarded = {}
+        forwarded: dict = {}
 
-        def fake_forward(url, payload, on_close=None, **_):
+        def fake_forward(url, payload, _waits, hooks, **_):
             forwarded.update(payload)
-            if on_close:
-                on_close()
-            return None
+            hooks.closed()
 
-        import ai_lab.api.routes.gateway as module
-        original, module.forward = module.forward, fake_forward
-        try:
-            handle = _forwarder(gateway, "/v1/chat/completions")
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            handle = _forwarder(cast(Any, gateway), "/v1/chat/completions")
             handle(body={"model": "qwen", "messages": [], "temperature": 0.5,
                          SETTINGS_FIELD: {"context_size": 65536}})
-        finally:
-            module.forward = original
 
         self.assertEqual(gateway.asked[0][2], {"context_size": 65536},
                          "the settings never reached the gateway")
@@ -416,7 +405,7 @@ class SettingsFieldTests(unittest.TestCase):
 
     def test_a_field_that_is_not_an_object_is_refused(self):
         from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder
-        handle = _forwarder(self.Gateway(), "/v1/chat/completions")
+        handle = _forwarder(cast(Any, self.Gateway()), "/v1/chat/completions")
         with self.assertRaises(ValueError) as caught:
             handle(body={"model": "qwen", "messages": [],
                          SETTINGS_FIELD: "context_size=65536"})
@@ -435,20 +424,14 @@ class SettingsFieldTests(unittest.TestCase):
             "Content-Type: audio/wav\r\n\r\n"
         ).encode() + b"\x00\x01audio\xff\r\n" + f"--{boundary}--\r\n".encode()
         body = MultipartBody(f"multipart/form-data; boundary={boundary}", data)
-        forwarded = {}
+        forwarded: dict = {}
 
-        def fake_forward(url, payload, on_close=None, **kwargs):
+        def fake_forward(url, payload, _waits, hooks, **kwargs):
             forwarded.update(url=url, payload=payload, kwargs=kwargs)
-            if on_close:
-                on_close()
-            return None
+            hooks.closed()
 
-        import ai_lab.api.routes.gateway as module
-        original, module.forward = module.forward, fake_forward
-        try:
-            _forwarder(self.Gateway(), "/v1/audio/transcriptions")(body=body)
-        finally:
-            module.forward = original
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            _forwarder(cast(Any, self.Gateway()), "/v1/audio/transcriptions")(body=body)
 
         sent = MultipartBody(body.content_type, forwarded["payload"])
         self.assertEqual(sent.field("model"), "qwen-real")
@@ -481,17 +464,11 @@ class SettingsFieldTests(unittest.TestCase):
         gateway.max_upload_pixels = 1_000_000
         gateway.max_upload_dimension = 1000
 
-        def fake_forward(url, payload, on_close=None, **_):
-            if on_close:
-                on_close()
-            return None
+        def fake_forward(url, payload, _waits, hooks, **_):
+            hooks.closed()
 
-        import ai_lab.api.routes.gateway as module
-        original, module.forward = module.forward, fake_forward
-        try:
-            _forwarder(gateway, "/v1/images/ocr")(body=self._ocr_upload(png))
-        finally:
-            module.forward = original
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            _forwarder(cast(Any, gateway), "/v1/images/ocr")(body=self._ocr_upload(png))
         self.assertEqual(gateway.asked[0][0], "ocr")
 
     def test_an_oversized_ocr_upload_is_rejected_before_forwarding(self):
@@ -499,7 +476,7 @@ class SettingsFieldTests(unittest.TestCase):
         gateway = self.Gateway()
         gateway.max_upload_bytes = 4     # smaller than any real image
         with self.assertRaises(ValueError) as caught:
-            _forwarder(gateway, "/v1/images/ocr")(body=self._ocr_upload(b"\x89PNGfiller"))
+            _forwarder(cast(Any, gateway), "/v1/images/ocr")(body=self._ocr_upload(b"\x89PNGfiller"))
         self.assertIn("byte", str(caught.exception))
         self.assertEqual(gateway.asked, [], "a rejected upload must never reach acquire()")
 
@@ -507,7 +484,7 @@ class SettingsFieldTests(unittest.TestCase):
         from ai_lab.api.routes.gateway import _forwarder
         gateway = self.Gateway()
         with self.assertRaises(ValueError):
-            _forwarder(gateway, "/v1/images/ocr")(
+            _forwarder(cast(Any, gateway), "/v1/images/ocr")(
                 body=self._ocr_upload(b"not an image at all, just text"))
         self.assertEqual(gateway.asked, [])
 
@@ -522,6 +499,8 @@ class NoGatewayTests(unittest.TestCase):
 
     def test_loading_works_with_no_gateway_wired(self):
         operations = FakeOperations()
-        router = build_router(operations)
-        handler, captured = router.match("POST", "/api/instances/qwen/load")
+        router = build_router(cast(Any, operations))
+        matched = router.match("POST", "/api/instances/qwen/load")
+        assert matched is not None
+        handler, captured = matched
         self.assertEqual(handler(query={}, body={}, **captured)["total_ms"], 42)

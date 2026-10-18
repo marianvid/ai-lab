@@ -38,8 +38,7 @@ def _without_prefix(line: str) -> str:
         closing = text.find(") ")
         if closing != -1:
             text = text[closing + 2:].strip()
-    text = LOG_PREFIX.sub("", text, count=1).strip()
-    return text
+    return LOG_PREFIX.sub("", text, count=1).strip()
 
 
 LOG_PREFIX = re.compile(
@@ -55,7 +54,13 @@ def _is_noise(text: str) -> bool:
             or any(marker in lowered for marker in NOISE))
 
 
+# Words that make a line worth showing when nothing in the log was raised.
+TROUBLE = ("error", "failed", "cannot", "out of memory", "unable")
+
+
 class RuntimeDiagnostics:
+    """Why an engine died, in its own words, read from its log."""
+
     def __init__(self, host) -> None:
         self.host = host
 
@@ -113,21 +118,19 @@ class RuntimeDiagnostics:
     def cause(cls, lines: list[str]) -> str:
         """The one sentence out of a few hundred that says what went wrong."""
         lines = cls.this_run(lines)
-        candidates = []
-        for line in lines:
-            text = _without_prefix(line)
-            if not text or _is_noise(text):
-                continue
-            if RAISED.match(text):
-                candidates.append(text)
-        if candidates:
-            return candidates[0]
-        # Nothing that looks like a raised exception. Fall back to the last
-        # line that at least mentions trouble, which is what this used to do
-        # for every case.
-        mentions = [_without_prefix(line) for line in lines
-                    if any(marker in line.lower()
-                           for marker in ("error", "failed", "cannot",
-                                          "out of memory", "unable"))
-                    and not _is_noise(_without_prefix(line))]
-        return mentions[-1] if mentions else ""
+        texts = [_without_prefix(line) for line in lines]
+        # The first raised exception; failing that, the last line that at least
+        # mentions trouble, which is what this used to do for every case.
+        return _first_raised(texts) or _last_trouble(lines, texts)
+
+
+def _first_raised(texts: list[str]) -> str:
+    """The first line that is a raised exception and not noise; "" when none is."""
+    return next((text for text in texts if not _is_noise(text) and RAISED.match(text)), "")
+
+
+def _last_trouble(lines: list[str], texts: list[str]) -> str:
+    """The last line mentioning trouble that is not noise; "" when none does."""
+    mentions = [text for line, text in zip(lines, texts, strict=True)
+                if any(marker in line.lower() for marker in TROUBLE) and not _is_noise(text)]
+    return mentions[-1] if mentions else ""

@@ -41,7 +41,7 @@ from threading import Thread
 
 from ai_lab.multipart import MultipartBody
 
-from .higgs_local_backend import sampling_settings
+from .higgs_local_backend import HiggsLocalBackend, sampling_settings
 from ..network import ALL_INTERFACES
 
 FRONTEND = (Path(__file__).resolve().parents[1] / "vendor" / "sglang_omni"
@@ -52,7 +52,7 @@ MAX_FORM_BYTES = 32 * 1024 * 1024
 STATIC_FILES = ("app.js", "styles.css", "favicon.ico", "sgl-omni-logo.png")
 
 
-def serve(backend, port: int) -> ThreadingHTTPServer:
+def serve(backend: HiggsLocalBackend, port: int) -> ThreadingHTTPServer:
     """Start the playground on `port` in a background thread and return it."""
     handler = type("PlaygroundHandler", (Handler,), {"backend": backend})
     server = ThreadingHTTPServer((ALL_INTERFACES, port), handler)
@@ -62,9 +62,16 @@ def serve(backend, port: int) -> ThreadingHTTPServer:
 
 
 class Handler(BaseHTTPRequestHandler):
-    backend = None
+    """The playground's page, its files, and its two synthesis requests.
+
+    Bound to the loaded model by `serve`, which makes a copy of this class
+    with `backend` set: it is never missing while a request is answered.
+    """
+
+    backend: HiggsLocalBackend
 
     def do_GET(self):
+        """The page, its health check and its static files."""
         path = self.path.split("?", 1)[0]
         if path == "/":
             self._send(200, index_html(), "text/html; charset=utf-8",
@@ -82,6 +89,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"detail": "Not Found"})
 
     def do_POST(self):
+        """One line of speech for the page's form: a WAV file, or raw PCM to stream."""
         path = self.path.split("?", 1)[0]
         if path not in ("/api/synthesize", "/api/synthesize/stream"):
             self._json(404, {"detail": "Not Found"})
@@ -109,8 +117,8 @@ class Handler(BaseHTTPRequestHandler):
             "Cache-Control": "no-store", "X-Sample-Rate": str(rate),
             "X-Channels": str(channels), "X-Bit-Depth": str(width * 8)})
 
-    def log_message(self, *_args):  # the engine log has no use for page hits
-        pass
+    def log_message(self, *_args):
+        """Nothing: the engine log has no use for page hits."""
 
     def _json(self, status: int, body: dict):
         self._send(status, json.dumps(body).encode(), "application/json")

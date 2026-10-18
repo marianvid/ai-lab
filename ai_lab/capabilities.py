@@ -70,7 +70,7 @@ class Known:
     a page over it would cost more.
     """
 
-    def __init__(self, directory: "Path | None" = None) -> None:
+    def __init__(self, directory: Path | None = None) -> None:
         self.path = Path(directory) / FILE_NAME if directory else None
         self._known: dict[str, list[str]] = self._load()
 

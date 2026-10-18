@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from http import HTTPStatus
+
 from ..network import LOOPBACK
 
 
@@ -21,7 +23,7 @@ def http_json(port: int, path: str, timeout: float = 1.0) -> dict:
     """
     try:
         with urllib.request.urlopen(f"http://{LOOPBACK}:{port}{path}", timeout=timeout) as response:
-            if response.status != 200:
+            if response.status != HTTPStatus.OK:
                 return {}
             payload = json.loads(response.read())
     except (OSError, urllib.error.URLError, ValueError):
@@ -30,9 +32,10 @@ def http_json(port: int, path: str, timeout: float = 1.0) -> dict:
 
 
 def http_ok(port: int, path: str = "/health", timeout: float = 1.0) -> bool:
+    """Whether the engine answers 200 at `path`, and a JSON `status` there is "ok" if it has one."""
     try:
         with urllib.request.urlopen(f"http://{LOOPBACK}:{port}{path}", timeout=timeout) as response:
-            if response.status != 200:
+            if response.status != HTTPStatus.OK:
                 return False
             body = response.read()
     except (OSError, urllib.error.URLError, ValueError):

@@ -15,6 +15,11 @@ from ai_lab.lastloaded import LastLoaded
 
 
 class RememberingTests(unittest.TestCase):
+    def remembered(self) -> dict:
+        found = self.memory.read()
+        assert found is not None
+        return found
+
     def setUp(self):
         self._temporary = TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
@@ -44,7 +49,7 @@ class RememberingTests(unittest.TestCase):
         # must not read as the card having been emptied.
         self.memory.remember("coder-fast")
         self.memory.forget("gemma-general")
-        self.assertEqual(self.memory.read()["instance_id"], "coder-fast")
+        self.assertEqual(self.remembered()["instance_id"], "coder-fast")
 
     def test_forgetting_without_naming_anything_clears_it(self):
         self.memory.remember("coder-fast")
@@ -54,7 +59,7 @@ class RememberingTests(unittest.TestCase):
     def test_the_newest_answer_wins(self):
         self.memory.remember("a", {"context_size": 1024})
         self.memory.remember("b", {"context_size": 2048})
-        self.assertEqual(self.memory.read()["instance_id"], "b")
+        self.assertEqual(self.remembered()["instance_id"], "b")
 
 
 class BrokenFileTests(unittest.TestCase):

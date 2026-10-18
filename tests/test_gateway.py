@@ -14,9 +14,9 @@ import unittest
 
 from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
                                  validate)
-from ai_lab.gateway import (CardBusy, CouldNotLoad, Gateway, NotConfigured,
-                            ShapeNotServed)
-from ai_lab.scheduler import WillNotFit
+from ai_lab.gateway import (CardBusyError, CouldNotLoadError, Gateway, GatewayLimits, NotConfiguredError,
+                            ShapeNotServedError)
+from ai_lab.scheduler import WillNotFitError
 from ai_lab.runtime import Operation
 from ai_lab.types import AcceleratorSnapshot, Task
 
@@ -185,9 +185,8 @@ class FakeOperations:
         return Operation(instance_id=instance_id, kind="unload", ok=True)
 
 
-def entry(identifier, name, model_id, port, running=False, engine="llamacpp"):
-    """`name` is kept as an argument and thrown away: the entries here read
-    better for having it written down, and the application no longer has one."""
+def entry(identifier, model_id, port, running=False, engine="llamacpp"):
+    """One configured entry, as the operations layer lists it."""
     return {"id": identifier, "model_id": model_id, "port": port,
             "engine": engine, "running": running, "ready": running,
             "params": {"context_size": 32768, "parallel": 1},
@@ -198,16 +197,16 @@ def entry(identifier, name, model_id, port, running=False, engine="llamacpp"):
 
 def two_models(lag=0, **running):
     return FakeOperations([
-        entry("coder", "Coding", "gguf/qwen/Qwen3.6-35B", 8080,
+        entry("coder", "gguf/qwen/Qwen3.6-35B", 8080,
               running.get("coder", False)),
-        entry("reviewer", "Review", "nvfp4/qwopus-27b", 8083,
+        entry("reviewer", "nvfp4/qwopus-27b", 8083,
               running.get("reviewer", False)),
     ], lag=lag)
 
 
 def quick(operations):
     """A gateway that does not sit through real waits in a test."""
-    return Gateway(operations, quiet_timeout_s=1.0, poll_s=0.001)
+    return Gateway(operations, GatewayLimits(quiet_timeout_s=1.0, poll_s=0.001))
 
 
 class NamingTests(unittest.TestCase):
@@ -232,18 +231,18 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(self.gateway.resolve("  coder ")["id"], "coder")
 
     def test_the_label_is_for_reading_and_is_not_a_name_to_send(self):
-        with self.assertRaises(NotConfigured):
+        with self.assertRaises(NotConfiguredError):
             self.gateway.resolve("Coding")
 
     def test_the_model_file_is_not_a_name_to_send(self):
         # The one that would have collided.
-        with self.assertRaises(NotConfigured):
+        with self.assertRaises(NotConfiguredError):
             self.gateway.resolve("Qwen3.6-35B")
-        with self.assertRaises(NotConfigured):
+        with self.assertRaises(NotConfiguredError):
             self.gateway.resolve("gguf/qwen/Qwen3.6-35B")
 
     def test_an_unknown_name_says_which_ones_are_known(self):
-        with self.assertRaises(NotConfigured) as caught:
+        with self.assertRaises(NotConfiguredError) as caught:
             self.gateway.resolve("gpt-4")
         message = str(caught.exception)
         self.assertIn("coder", message)
@@ -306,7 +305,8 @@ class DescribingTests(unittest.TestCase):
 
     def test_text_only_takes_pictures_away(self):
         # vLLM's rule: "Text only" drops the picture reader.
-        rule = lambda params: {"images"} if params.get("language_model_only") else set()
+        def rule(params):
+            return {"images"} if params.get("language_model_only") else set()
         rows = {row["id"]: row for row in
                 quick(self.with_engine(rule, language_model_only=True)).catalogue()}
         self.assertEqual(rows["coder"]["capabilities"], ["tools"])
@@ -338,7 +338,7 @@ class DescribingTests(unittest.TestCase):
         self.assertIn("speech_form", row)
 
     def test_an_unknown_model_is_not_configured(self):
-        with self.assertRaises(NotConfigured):
+        with self.assertRaises(NotConfiguredError):
             quick(self.operations()).describe("gpt-4")
 
     def test_the_route_keeps_the_openai_shape(self):
@@ -395,7 +395,7 @@ class LoadingTests(unittest.TestCase):
         # Not "one fewer than before" — one, full stop.
         operations = two_models(coder=True, reviewer=True)
         gateway = quick(operations)
-        operations._entries["third"] = entry("third", "Third", "gguf/x/third", 8085)
+        operations._entries["third"] = entry("third", "gguf/x/third", 8085)
         with gateway.acquire("third"):
             pass
         running = {i["id"] for i in operations.instances() if i["running"]}
@@ -406,7 +406,7 @@ class LoadingTests(unittest.TestCase):
         # whatever is left is how a model that is known to fit stops fitting.
         operations = two_models(coder=True, reviewer=True)
         gateway = quick(operations)
-        operations._entries["third"] = entry("third", "Third", "gguf/x/third", 8085)
+        operations._entries["third"] = entry("third", "gguf/x/third", 8085)
         with gateway.acquire("third"):
             pass
         self.assertEqual(sorted(operations.unloads), ["coder", "reviewer"])
@@ -424,7 +424,7 @@ class LoadingTests(unittest.TestCase):
     def test_a_card_that_never_goes_quiet_fails_with_a_readable_reason(self):
         operations = two_models(lag=10_000, coder=True)
         gateway = quick(operations)
-        with self.assertRaises(CouldNotLoad) as caught:
+        with self.assertRaises(CouldNotLoadError) as caught:
             gateway.acquire("reviewer")
         self.assertIn("still holds", str(caught.exception))
         self.assertEqual(operations.loads, [])
@@ -449,7 +449,7 @@ class LoadingTests(unittest.TestCase):
                              error="engine died during startup")
         operations.load = refuse
         gateway = quick(operations)
-        with self.assertRaises(CouldNotLoad) as caught:
+        with self.assertRaises(CouldNotLoadError) as caught:
             gateway.acquire("coder")
         self.assertIn("engine died", str(caught.exception))
 
@@ -461,7 +461,7 @@ class LoadingTests(unittest.TestCase):
         operations.load = lambda i, s=None: Operation(instance_id=i, kind="load",
                                               ok=False, error="boom")
         gateway = quick(operations)
-        with self.assertRaises(CouldNotLoad):
+        with self.assertRaises(CouldNotLoadError):
             gateway.acquire("coder")
         operations.load = original
         with gateway.acquire("coder") as lease:
@@ -762,9 +762,8 @@ class BusyGuardTests(unittest.TestCase):
 
     def test_stopping_a_model_that_is_answering_is_refused(self):
         gateway = quick(two_models(coder=True))
-        with gateway.acquire("coder"):
-            with self.assertRaises(CardBusy) as caught:
-                gateway.guard("unload", "coder")
+        with gateway.acquire("coder"), self.assertRaises(CardBusyError) as caught:
+            gateway.guard("unload", "coder")
         self.assertIn("coder", str(caught.exception))
         self.assertTrue(caught.exception.detail["busy"]["answering"])
 
@@ -772,9 +771,8 @@ class BusyGuardTests(unittest.TestCase):
         # The page cannot offer a useful choice without knowing which model is
         # working — the one being stopped may not be the one that is busy.
         gateway = quick(two_models(coder=True))
-        with gateway.acquire("coder"):
-            with self.assertRaises(CardBusy) as caught:
-                gateway.guard("load", "reviewer")
+        with gateway.acquire("coder"), self.assertRaises(CardBusyError) as caught:
+            gateway.guard("load", "reviewer")
         self.assertEqual(caught.exception.detail["busy"]["instance_id"], "coder")
 
     def test_the_card_is_free_again_once_the_answer_is_finished(self):
@@ -802,7 +800,7 @@ class BusyGuardTests(unittest.TestCase):
         time.sleep(0.05)
         try:
             gateway.guard("unload", "coder")
-        except CardBusy as error:
+        except CardBusyError as error:
             seen.append(error.detail["busy"])
         thread.join(timeout=5)
 
@@ -819,7 +817,7 @@ class BusyGuardTests(unittest.TestCase):
         operations.load = refuse
 
         gateway = quick(operations)
-        with self.assertRaises(CouldNotLoad):
+        with self.assertRaises(CouldNotLoadError):
             gateway.acquire("coder")
         self.assertIsNone(gateway.busy())
         gateway.guard("unload", "coder")        # does not raise
@@ -903,9 +901,9 @@ class OverheadTests(unittest.TestCase):
 def mixed_engines(**running):
     """One entry on each engine, which is the whole point of these tests."""
     return FakeOperations([
-        entry("coder", "Coding", "gguf/qwen/Qwen3.6-35B", 8080,
+        entry("coder", "gguf/qwen/Qwen3.6-35B", 8080,
               running.get("coder", False), engine="llamacpp"),
-        entry("fast", "Fast", "nvfp4/qwen3-coder-30b", 8082,
+        entry("fast", "nvfp4/qwen3-coder-30b", 8082,
               running.get("fast", False), engine="vllm"),
     ])
 
@@ -934,7 +932,7 @@ class RequestShapeTests(unittest.TestCase):
 
     def test_the_other_shape_is_refused_where_it_is_not_answered(self):
         gateway = quick(mixed_engines(coder=True))
-        with self.assertRaises(ShapeNotServed) as caught:
+        with self.assertRaises(ShapeNotServedError) as caught:
             gateway.acquire("coder", shape="/v1/messages")
         self.assertIn("llamacpp", str(caught.exception))
 
@@ -942,15 +940,15 @@ class RequestShapeTests(unittest.TestCase):
         # A client does not know which of its models is on which engine, and a
         # refusal that only says no leaves it with nowhere to go.
         gateway = quick(mixed_engines(coder=True))
-        with self.assertRaises(ShapeNotServed) as caught:
+        with self.assertRaises(ShapeNotServedError) as caught:
             gateway.acquire("coder", shape="/v1/messages")
         self.assertIn("fast", str(caught.exception))
 
     def test_it_says_so_plainly_when_nothing_answers_the_shape(self):
         operations = FakeOperations([
-            entry("only", "Only", "gguf/a/a", 8080, True, engine="llamacpp")])
+            entry("only", "gguf/a/a", 8080, True, engine="llamacpp")])
         gateway = quick(operations)
-        with self.assertRaises(ShapeNotServed) as caught:
+        with self.assertRaises(ShapeNotServedError) as caught:
             gateway.acquire("only", shape="/v1/messages")
         self.assertIn("No configured model answers it", str(caught.exception))
 
@@ -959,7 +957,7 @@ class RequestShapeTests(unittest.TestCase):
         # forty seconds and then saying no would be the worst of both.
         operations = mixed_engines()
         gateway = quick(operations)
-        with self.assertRaises(ShapeNotServed):
+        with self.assertRaises(ShapeNotServedError):
             gateway.acquire("coder", shape="/v1/messages")
         self.assertEqual(operations.loads, [])
         self.assertEqual(operations.unloads, [])
@@ -967,7 +965,7 @@ class RequestShapeTests(unittest.TestCase):
     def test_a_refused_shape_does_not_leave_the_card_taken(self):
         operations = mixed_engines(coder=True)
         gateway = quick(operations)
-        with self.assertRaises(ShapeNotServed):
+        with self.assertRaises(ShapeNotServedError):
             gateway.acquire("coder", shape="/v1/messages")
         self.assertIsNone(gateway.busy())
         with gateway.acquire("coder", shape="/v1/chat/completions"):
@@ -1195,7 +1193,7 @@ class BusyMessageTests(unittest.TestCase):
         gateway = quick(busy_models(coder=True))
         gateway.acquire("coder")
         gateway.acquire("coder")
-        with self.assertRaises(CardBusy) as caught:
+        with self.assertRaises(CardBusyError) as caught:
             gateway.guard("unload", "coder")
         self.assertIn("2 requests", str(caught.exception))
 
@@ -1208,7 +1206,7 @@ class BusyMessageTests(unittest.TestCase):
             threading.Thread(target=lambda: _ignore(gateway.acquire, "reviewer"),
                              daemon=True).start()
         time.sleep(0.05)
-        with self.assertRaises(CardBusy) as caught:
+        with self.assertRaises(CardBusyError) as caught:
             gateway.guard("unload", "coder")
         self.assertIn("3 more are waiting", str(caught.exception))
 
@@ -1463,7 +1461,7 @@ class RefusingWhatCannotFit(unittest.TestCase):
     def test_it_is_refused_rather_than_attempted(self):
         operations, gateway = self._gateway()
         before = list(operations.loads)
-        with self.assertRaises(WillNotFit):
+        with self.assertRaises(WillNotFitError):
             gateway.acquire("reviewer")
         self.assertEqual(operations.loads, before, "it tried to load it anyway")
         self.assertEqual(operations.unloads, [],
@@ -1471,7 +1469,7 @@ class RefusingWhatCannotFit(unittest.TestCase):
 
     def test_the_refusal_carries_numbers_a_client_can_act_on(self):
         _, gateway = self._gateway()
-        with self.assertRaises(WillNotFit) as caught:
+        with self.assertRaises(WillNotFitError) as caught:
             gateway.acquire("reviewer")
         found = caught.exception.detail["ai_lab"]
         self.assertEqual(found["model"], "reviewer")
@@ -1484,7 +1482,7 @@ class RefusingWhatCannotFit(unittest.TestCase):
         # So a client behind an OpenAI library can branch on the code instead
         # of matching words in a sentence.
         _, gateway = self._gateway()
-        with self.assertRaises(WillNotFit) as caught:
+        with self.assertRaises(WillNotFitError) as caught:
             gateway.acquire("reviewer")
         self.assertEqual(caught.exception.kind, "insufficient_memory")
         self.assertEqual(caught.exception.code, "model_does_not_fit")
@@ -1494,20 +1492,21 @@ class TaskTimeoutTests(unittest.TestCase):
     """A slow image or OCR job must not force a text client onto its clock."""
 
     def test_an_unconfigured_task_gets_the_machine_defaults(self):
-        gateway = Gateway(two_models(), first_byte_s=120.0, between_bytes_s=30.0)
+        gateway = Gateway(two_models(), GatewayLimits(first_byte_s=120.0, between_bytes_s=30.0))
         self.assertEqual(gateway.timeouts_for(Task.TEXT_GENERATION), (120.0, 30.0))
 
     def test_a_configured_task_overrides_the_defaults(self):
-        gateway = Gateway(two_models(), first_byte_s=120.0, between_bytes_s=30.0,
-                          task_timeouts={"ocr": {"first_byte_s": 60.0,
-                                                 "between_bytes_s": 15.0}})
+        gateway = Gateway(two_models(), GatewayLimits(
+            first_byte_s=120.0, between_bytes_s=30.0,
+            task_timeouts={"ocr": {"first_byte_s": 60.0, "between_bytes_s": 15.0}}))
         self.assertEqual(gateway.timeouts_for(Task.OCR), (60.0, 15.0))
         # Unrelated tasks are unaffected by another task's override.
         self.assertEqual(gateway.timeouts_for(Task.TEXT_GENERATION), (120.0, 30.0))
 
     def test_a_partial_override_falls_back_for_the_missing_half(self):
-        gateway = Gateway(two_models(), first_byte_s=120.0, between_bytes_s=30.0,
-                          task_timeouts={"ocr": {"first_byte_s": 60.0}})
+        gateway = Gateway(two_models(), GatewayLimits(
+            first_byte_s=120.0, between_bytes_s=30.0,
+            task_timeouts={"ocr": {"first_byte_s": 60.0}}))
         self.assertEqual(gateway.timeouts_for(Task.OCR), (60.0, 30.0))
 
     def test_apply_settings_replaces_task_timeouts_at_once(self):

@@ -3,7 +3,16 @@
 import json
 import unittest
 
+from pathlib import Path
+
 from ai_lab.comfyui_templates import for_model
+
+
+def template(name: str, platform: str | None = None) -> Path:
+    """The editor's file, which every model named here must have."""
+    path = for_model(name, platform)
+    assert path is not None, name
+    return path
 
 
 class NativeTemplatesTests(unittest.TestCase):
@@ -16,7 +25,7 @@ class NativeTemplatesTests(unittest.TestCase):
         }
         for name, checkpoint in variants.items():
             with self.subTest(name=name):
-                path = for_model(name)
+                path = template(name)
                 self.assertTrue(path.is_file())
                 graph = json.loads(path.read_text())
                 self.assertTrue(graph["definitions"]["subgraphs"])
@@ -26,13 +35,13 @@ class NativeTemplatesTests(unittest.TestCase):
         for platform, name in (("linux", "flux2-dev-Q8_0.gguf"),
                                ("darwin", "flux2-dev-q8-0/diffusion_models/flux2-dev-Q8_0.gguf")):
             with self.subTest(platform=platform):
-                graph = json.loads(for_model("flux2-dev-q8-0", platform).read_text())
+                graph = json.loads(template("flux2-dev-q8-0", platform).read_text())
                 loaders = [node for sub in graph["definitions"]["subgraphs"]
                            for node in sub["nodes"] if node["type"] == "UnetLoaderGGUF"]
                 self.assertEqual(loaders[0]["widgets_values"], [name])
 
     def test_klein_runs_only_the_installed_distilled_branch(self):
-        graph = json.loads(for_model("flux2-klein-4b-bf16").read_text())
+        graph = json.loads(template("flux2-klein-4b-bf16").read_text())
         self.assertEqual(len(graph["definitions"]["subgraphs"]), 1)
         self.assertEqual(len([node for node in graph["nodes"]
                               if node["type"] == "SaveImage"]), 1)
@@ -46,7 +55,7 @@ class NativeTemplatesTests(unittest.TestCase):
         ]
         for name in names:
             with self.subTest(name=name):
-                graph = json.loads(for_model(name).read_text())
+                graph = json.loads(template(name).read_text())
                 for subgraph in graph["definitions"]["subgraphs"]:
                     nodes = {node["id"]: node for node in subgraph["nodes"]}
                     links = {link["id"]: link for link in subgraph["links"]}

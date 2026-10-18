@@ -7,9 +7,14 @@ from ai_lab.engines.khala import KhalaEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
+def made(engine_class, **settings):
+    """An engine as the registry builds it, from its configuration section."""
+    return engine_class.from_settings(settings)
+
+
 class KhalaEngineTests(unittest.TestCase):
     def setUp(self):
-        self.engine = KhalaEngine(
+        self.engine = made(KhalaEngine,
             binary='/khala/python', generator_script='/runtime/generate.py',
             output_root='/tmp/khala', model_options={
                 'future-checkpoint': {'default_bucket': 0,

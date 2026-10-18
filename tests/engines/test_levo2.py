@@ -3,6 +3,11 @@ import unittest
 from ai_lab.engines.levo2 import Levo2Engine
 from ai_lab.types import Format, ModelSet, Task
 
+
+def made(engine_class, **settings):
+    """An engine as the registry builds it, from its configuration section."""
+    return engine_class.from_settings(settings)
+
 OPTIONS = {"levo2-gguf": {"lm": "LeVo2-v2-large-F16.gguf",
                           "flow": "LeVo2-v2-flow-F32.gguf",
                           "vae": "LeVo2-v2-vae-F32.gguf", "steps": 50,
@@ -17,7 +22,7 @@ def model(name="levo2-gguf"):
 
 class Levo2EngineTests(unittest.TestCase):
     def setUp(self):
-        self.engine = Levo2Engine(binary="/py", cantor="/opt/levo-cantor",
+        self.engine = made(Levo2Engine, binary="/py", cantor="/opt/levo-cantor",
                                   output_root="/var/jobs", model_options=OPTIONS)
 
     def test_plan_passes_the_three_files_and_render_settings(self):

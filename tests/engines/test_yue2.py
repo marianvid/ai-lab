@@ -6,11 +6,17 @@ from ai_lab.engines.yue2 import Yue2Engine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
+def made(engine_class, **settings):
+    """An engine as the registry builds it, from its configuration section."""
+    return engine_class.from_settings(settings)
+
+
 class Yue2EngineTests(unittest.TestCase):
     def test_plan_uses_configured_paths_and_generation_mode(self):
-        engine = Yue2Engine(binary='/yue2/python', vae_path='/models/vae',
-                            output_root='/tmp/music', webui_root='/opt/yue-studio',
-                            model_options={
+        engine = made(Yue2Engine,
+            binary='/yue2/python', vae_path='/models/vae',
+            output_root='/tmp/music', webui_root='/opt/yue-studio',
+            model_options={
             'next-checkpoint': {'cot': 'full', 'memory_budget_gib': 24,
                                 'memory_reservation_mb': 28000}})
         with TemporaryDirectory() as root:
@@ -31,7 +37,7 @@ class Yue2EngineTests(unittest.TestCase):
             self.assertEqual(engine.needs_mb(model, {}, 32623), 28000)
             self.assertTrue(engine.music_form(model.name)['editable_score'])
             self.assertEqual(plan.argv[plan.argv.index('--device') + 1], 'cuda')
-            metal = Yue2Engine(binary='/yue2/python', vae_path='/models/vae',
+            metal = made(Yue2Engine, binary='/yue2/python', vae_path='/models/vae',
                                output_root='/tmp/music', webui_root='/opt/yue-studio',
                                model_options=engine.model_options, device='mps')
             plan = metal.plan(model, 8124, {})
@@ -40,7 +46,7 @@ class Yue2EngineTests(unittest.TestCase):
     def test_unknown_accelerator_is_refused(self):
         for bad in ('cpu', 'metal', ''):
             with self.assertRaises(ValueError):
-                Yue2Engine(device=bad)
+                made(Yue2Engine, device=bad)
 
     def test_studio_uses_metal_fallback_only_on_mac(self):
         import os

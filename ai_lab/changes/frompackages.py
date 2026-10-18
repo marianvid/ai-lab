@@ -47,9 +47,11 @@ class Move:
 
     @property
     def heavy(self) -> bool:
+        """Whether it is one of the packages that take gigabytes (torch and the like)."""
         return any(self.name.lower().startswith(item) for item in HEAVY)
 
     def json(self) -> dict:
+        """The move as the update page shows it."""
         return {"name": self.name, "was": self.was, "becomes": self.becomes,
                 "backwards": self.backwards, "heavy": self.heavy}
 

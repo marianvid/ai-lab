@@ -13,34 +13,62 @@ silently picks whichever comes first. That may not be the one you tuned.
 
 from __future__ import annotations
 
+import importlib
+import inspect
+import pkgutil
 from dataclasses import asdict
 
-from ..types import Capabilities, Task
+from ..types import Capabilities
 from .base import Engine
-from .llamacpp import LlamaCppEngine
-from .mlxlm import MlxLmEngine
-from .mlxvlm import MlxVlmEngine
-from .mlxwhisper import MlxWhisperEngine
-from .nemo import NemoEngine
-from .onnx import OnnxEngine
-from .paddleocr import PaddleOcrEngine
-from .comfyui import ComfyUiEngine
-from .acestep import AceStepEngine
-from .qwentts import QwenTtsEngine
-from .kokoro import KokoroEngine
-from .voxcpm import VoxCpmEngine
-from .qwenalign import QwenAlignEngine
-from .khala import KhalaEngine
-from .higgs import HiggsEngine
-from .higgs_local import HiggsLocalEngine
-from .heartmula import HeartMulaEngine
-from .yue2 import Yue2Engine
-from .levo2 import Levo2Engine
-from .stableaudio3 import StableAudio3Engine
-from .comfy_music import ComfyMusicEngine
-from .mulacover import MulaCoverEngine
-from .pyannote import PyannoteEngine
-from .vllm import VllmEngine
+
+# Modules of this package that hold no engine.
+_NOT_ENGINES = frozenset({"base", "isolated", "probe", "registry", "text_launch"})
+
+
+def engine_classes() -> dict[str, type]:
+    """Every engine this package defines, by id, found by looking.
+
+    An engine registers itself by being a module of this package with a class
+    that has an `id`, a `display_name` and a `plan` method — the shape of
+    `base.Engine`. Adding one touches only its own file; nothing here lists
+    them by name. Ordered by module name, so the list is the same each time.
+    """
+    found: dict[str, type] = {}
+    package = importlib.import_module(__package__ or "ai_lab.engines")
+    for module_info in sorted(pkgutil.iter_modules(package.__path__),
+                              key=lambda item: item.name):
+        if module_info.name in _NOT_ENGINES or module_info.name.startswith("_"):
+            continue
+        module = importlib.import_module(f"{package.__name__}.{module_info.name}")
+        for _, cls in inspect.getmembers(module, inspect.isclass):
+            if cls.__module__ == module.__name__ and _is_engine(cls):
+                found[getattr(cls, "id", "")] = cls
+    return found
+
+
+def _is_engine(cls: type) -> bool:
+    """Whether a class has the shape of an engine (see `base.Engine`)."""
+    return (isinstance(getattr(cls, "id", None), str)
+            and isinstance(getattr(cls, "display_name", None), str)
+            and callable(getattr(cls, "plan", None)))
+
+
+def _construct(cls: type, settings: dict) -> Engine:
+    """One engine, given the settings its constructor takes.
+
+    An engine's section of the configuration can hold more than the engine
+    reads — `source` and `update`, for example, belong to the builds and
+    installs that maintain it — so only the names its constructor declares
+    are passed. An engine with nothing configured falls back to its defaults
+    (usually: look on PATH). An engine whose settings are grouped (more than
+    a constructor should take one by one) reads its section itself, with a
+    `from_settings` class method.
+    """
+    make = getattr(cls, "from_settings", None)
+    if make is not None:
+        return make(settings)
+    accepted = inspect.signature(cls).parameters
+    return cls(**{key: value for key, value in settings.items() if key in accepted})
 
 
 def build(settings: dict | None = None) -> dict[str, Engine]:
@@ -48,56 +76,10 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
 
     `settings` is the `engines` section of config.json, for example
     `{"llamacpp": {"binary": "/opt/ai/llama.cpp/build/bin/llama-server"}}`.
-    An engine with nothing configured falls back to looking on PATH.
     """
     settings = settings or {}
-    return {
-        LlamaCppEngine.id: LlamaCppEngine(
-            binary=settings.get(LlamaCppEngine.id, {}).get("binary")),
-        MlxLmEngine.id: MlxLmEngine(
-            binary=settings.get(MlxLmEngine.id, {}).get("binary"),
-            server=settings.get(MlxLmEngine.id, {}).get("server")),
-        MlxVlmEngine.id: MlxVlmEngine(
-            binary=settings.get(MlxVlmEngine.id, {}).get("binary"),
-            server=settings.get(MlxVlmEngine.id, {}).get("server")),
-        MlxWhisperEngine.id: MlxWhisperEngine(
-            binary=settings.get(MlxWhisperEngine.id, {}).get("binary"),
-            server=settings.get(MlxWhisperEngine.id, {}).get("server")),
-        VllmEngine.id: VllmEngine(
-            binary=settings.get(VllmEngine.id, {}).get("binary")),
-        NemoEngine.id: NemoEngine(
-            binary=settings.get(NemoEngine.id, {}).get("binary"),
-            server=settings.get(NemoEngine.id, {}).get("server")),
-        OnnxEngine.id: OnnxEngine(
-            binary=settings.get(OnnxEngine.id, {}).get("binary"),
-            server=settings.get(OnnxEngine.id, {}).get("server")),
-        PyannoteEngine.id: PyannoteEngine(
-            binary=settings.get(PyannoteEngine.id, {}).get("binary"),
-            server=settings.get(PyannoteEngine.id, {}).get("server")),
-        PaddleOcrEngine.id: PaddleOcrEngine(
-            binary=settings.get(PaddleOcrEngine.id, {}).get("binary"),
-            server=settings.get(PaddleOcrEngine.id, {}).get("server")),
-        ComfyUiEngine.id: ComfyUiEngine(
-            binary=settings.get(ComfyUiEngine.id, {}).get("binary"),
-            server=settings.get(ComfyUiEngine.id, {}).get("server"),
-            comfyui=settings.get(ComfyUiEngine.id, {}).get("comfyui"),
-            model_paths=settings.get(ComfyUiEngine.id, {}).get("model_paths", []),
-            preset_workflows=settings.get(ComfyUiEngine.id, {}).get("preset_workflows", {})),
-        AceStepEngine.id: AceStepEngine(**settings.get(AceStepEngine.id, {})),
-        QwenTtsEngine.id: QwenTtsEngine(**settings.get(QwenTtsEngine.id, {})),
-        KokoroEngine.id: KokoroEngine(**settings.get(KokoroEngine.id, {})),
-        VoxCpmEngine.id: VoxCpmEngine(**settings.get(VoxCpmEngine.id, {})),
-        QwenAlignEngine.id: QwenAlignEngine(**settings.get(QwenAlignEngine.id, {})),
-        KhalaEngine.id: KhalaEngine(**settings.get(KhalaEngine.id, {})),
-        HiggsEngine.id: HiggsEngine(**settings.get(HiggsEngine.id, {})),
-        HiggsLocalEngine.id: HiggsLocalEngine(**settings.get(HiggsLocalEngine.id, {})),
-        HeartMulaEngine.id: HeartMulaEngine(**settings.get(HeartMulaEngine.id, {})),
-        Yue2Engine.id: Yue2Engine(**settings.get(Yue2Engine.id, {})),
-        Levo2Engine.id: Levo2Engine(**settings.get(Levo2Engine.id, {})),
-        StableAudio3Engine.id: StableAudio3Engine(**settings.get(StableAudio3Engine.id, {})),
-        ComfyMusicEngine.id: ComfyMusicEngine(**settings.get(ComfyMusicEngine.id, {})),
-        MulaCoverEngine.id: MulaCoverEngine(**settings.get(MulaCoverEngine.id, {})),
-    }
+    return {engine_id: _construct(cls, settings.get(engine_id) or {})
+            for engine_id, cls in engine_classes().items()}
 
 
 class Registry:
@@ -107,15 +89,18 @@ class Registry:
         self._engines = build(settings)
 
     def get(self, engine_id: str) -> Engine:
+        """The engine with this id; KeyError when there is none."""
         engine = self._engines.get(engine_id)
         if engine is None:
             raise KeyError(f"Unknown engine: {engine_id}")
         return engine
 
     def known(self) -> dict[str, Engine]:
+        """Every engine, whether or not this machine can run it."""
         return dict(self._engines)
 
     def available(self, capabilities: Capabilities) -> dict[str, Engine]:
+        """The engines this machine can run."""
         return {key: engine for key, engine in self._engines.items()
                 if key in capabilities.engines}
 
@@ -150,9 +135,7 @@ class Registry:
 
 
 def _reason(engine_id: str, capabilities: Capabilities) -> str:
-    if engine_id == "vllm" and capabilities.accelerator_kind != "cuda":
-        return "Requires an NVIDIA GPU"
-    if engine_id == "nemo" and capabilities.accelerator_kind != "cuda":
+    if engine_id in ("vllm", "nemo") and capabilities.accelerator_kind != "cuda":
         return "Requires an NVIDIA GPU"
     if engine_id in ("vllm", "nemo", "mlxlm", "mlxvlm", "mlxwhisper", "onnx", "pyannote",
                      "paddleocr", "comfyui", "acestep", "qwentts", "kokoro"):

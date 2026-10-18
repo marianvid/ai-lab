@@ -1,74 +1,41 @@
 """LeVo 2 (SongGeneration 2): songs or instrumentals, research licence only."""
 from __future__ import annotations
 
-from pathlib import Path
-
-from ..types import Format, ModelSet, Task
-from .base import LaunchPlan, MUSIC_PATHS
-from .probe import http_ok
+from ..types import ModelSet, Task
+from .base import MUSIC_PATHS, LaunchPlan
+from .isolated import ConfiguredEngine, model_directory, script_env
 
 
-class Levo2Engine:
+class Levo2Engine(ConfiguredEngine):
+    """LeVo 2 through the native LeVo2.cpp program (`cantor`)."""
+
     id = "levo2"
     display_name = "LeVo 2"
-
-    def __init__(self, binary: str | None = None, server: str | None = None,
-                 cantor: str | None = None, output_root: str | None = None,
-                 model_options: dict[str, dict] | None = None) -> None:
-        # `binary` is the Python that runs the small HTTP host; `cantor` is
-        # the native LeVo2.cpp program that makes the song.
-        self.binary = binary or "python"
-        self.server = server or str(Path(__file__).resolve().parents[1] /
-                                    "music" / "levo2_server.py")
-        self.cantor = cantor or ""
-        self.output_root = output_root or ""
-        self.model_options = dict(model_options or {})
-
-    def formats(self) -> frozenset[Format]:
-        return frozenset({Format.SAFETENSORS})
-
-    def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.MUSIC_GENERATION})
-
-    def params(self, task: Task = Task.MUSIC_GENERATION):
-        return ()
+    task = Task.MUSIC_GENERATION
+    paths = MUSIC_PATHS
+    script = ("music", "levo2_server.py")
+    reserves_memory = True
+    # `binary` is the Python that runs the small HTTP host; `cantor` is the
+    # native LeVo2.cpp program that makes the song.
+    location_settings = ("cantor", "output_root")
 
     def supports(self, model: ModelSet) -> bool:
-        return (model.task is Task.MUSIC_GENERATION
-                and model.name in self.model_options)
+        """Whether the configuration names this music model (its files are GGUF or safetensors)."""
+        return model.task is self.task and self.configured(model.name)
 
     def music_form(self, model_name: str) -> dict:
+        """What the music page shows: optional lyrics, a length in seconds."""
         return {"lyrics_required": False, "duration_kind": "seconds"}
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
-        if not self.supports(model):
-            raise ValueError(f"LeVo 2 is not configured for {model.name}")
-        if params:
-            raise ValueError("LeVo 2 has no instance settings")
-        if not self.cantor or not self.output_root:
-            raise ValueError("LeVo 2 runtime and output paths must be configured")
-        options = self.model_options[model.name]
-        entry = Path(model.entrypoint)
-        model_dir = entry.parent if entry.is_file() else entry
+        """The LeVo 2 host for this model's language, flow and VAE files."""
+        options = self._options(
+            model, params, "LeVo 2 runtime and output paths must be configured")
         return LaunchPlan(argv=[
-            self.binary, self.server, "--cantor", self.cantor,
-            "--model-path", str(model_dir), "--lm", options["lm"],
+            self.binary, self.server, "--cantor", self.locations["cantor"],
+            "--model-path", model_directory(model), "--lm", options["lm"],
             "--flow", options["flow"], "--vae", options["vae"],
-            "--output-root", self.output_root,
+            "--output-root", self.locations["output_root"],
             "--steps", str(options["steps"]), "--cfg", str(options["cfg"]),
             "--port", str(port)],
-            env={"PYTHONUNBUFFERED": "1",
-                 "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
-
-    def ready(self, port: int) -> bool:
-        return http_ok(port)
-
-    def concurrency(self, params: dict) -> int:
-        return 1
-
-    def needs_mb(self, model: ModelSet, params: dict,
-                 card_total_mb: float) -> float:
-        return float(self.model_options[model.name]["memory_reservation_mb"])
-
-    def api_paths(self, task: Task = Task.MUSIC_GENERATION) -> tuple[str, ...]:
-        return MUSIC_PATHS if task is Task.MUSIC_GENERATION else ()
+            env=script_env(offline=False))

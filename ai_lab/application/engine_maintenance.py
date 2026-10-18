@@ -2,33 +2,51 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any
 
 from ..capabilities import IMAGES, TOOLS
 from ..changes import Reader, counted
 from ..types import Interests
 
 if TYPE_CHECKING:
+    from ..builds import Builds
     from ..installs import Installs
 
 
+@dataclass(frozen=True)
+class MaintenanceParts:
+    """What engine maintenance reads and acts on; `builds` and `installs` may be absent."""
+
+    store: Any
+    catalog: Any
+    host: Any
+    engines: Any
+    builds: Builds | None = None
+    installs: Installs | None = None
+
+
 class EngineMaintenanceService:
-    def __init__(self, store, catalog, host, engines, builds, installs,
+    """Updating engines (source builds and package installs), never under a running model."""
+
+    def __init__(self, parts: MaintenanceParts,
                  instances: Callable[[], list[dict]]) -> None:
-        self.store = store
-        self.catalog = catalog
-        self.host = host
-        self.engines = engines
-        self.builds = builds
-        self.installs = installs
+        self.store = parts.store
+        self.catalog = parts.catalog
+        self.host = parts.host
+        self.engines = parts.engines
+        self.builds = parts.builds
+        self.installs = parts.installs
         self.instances = instances
 
     def build_status(self, with_sizes: bool = True) -> list[dict]:
+        """Every source build's status, for the settings page."""
         return self.builds.all(with_sizes=with_sizes) if self.builds else []
 
     def check_for_update(self, engine_id: str) -> dict:
-        return self.builds.get(engine_id).check()
+        """Ask upstream now whether a newer version of this engine's source exists."""
+        return self._builds().get(engine_id).check()
 
     # -- reading an update before taking it --------------------------------
 
@@ -48,30 +66,8 @@ class EngineMaintenanceService:
         engine = self.engines.get(engine_id)
         reader = Reader(engine_id, settings.get("source"),
                         binary=settings.get("binary", ""))
-        installed, latest = "", ""
-        try:
-            build = self.builds.get(engine_id)
-            status = build.status()
-            installed = status.get("installed") or ""
-            latest = status.get("latest") or ""
-        except KeyError:
-            pass                       # not built from source; notes still apply
-        if not installed or not latest:
-            try:
-                managed = self._installs().get(engine_id).status()
-                installed = installed or managed.get("installed", "")
-                latest = latest or managed.get("latest", "")
-            except KeyError:
-                pass
-        # For an engine installed as packages there is no build to ask, so the
-        # versions come from the environment and from what the package manager
-        # says it would do. Asked before the notes are fetched, because the
-        # notes are chosen by which versions lie between the two.
         moves, trouble = reader.moves()
-        if not installed or not latest:
-            from_packages = reader.versions(moves)
-            installed = installed or from_packages[0]
-            latest = latest or from_packages[1]
+        installed, latest = self._versions(engine_id, reader, moves)
         found = reader.read(installed, latest, self.interests())
         return {
             "engine": engine_id,
@@ -87,6 +83,39 @@ class EngineMaintenanceService:
             "unreadable": " ".join(part for part in
                                    (found.unreadable, trouble) if part),
         }
+
+    def _versions(self, engine_id: str, reader: Reader, moves: list) -> tuple[str, str]:
+        """(installed, latest): from the source build, the package install, then the packages.
+
+        For an engine installed as packages there is no build to ask, so the
+        versions come from the environment and from what the package manager
+        says it would do. Settled before the notes are fetched, because the
+        notes are chosen by which versions lie between the two.
+        """
+        installed, latest = "", ""
+        for status in (self._build_status_of, self._install_status_of,
+                       lambda _: dict(zip(("installed", "latest"), reader.versions(moves),
+                                          strict=True))):
+            if installed and latest:
+                break
+            found = status(engine_id)
+            installed = installed or found.get("installed") or ""
+            latest = latest or found.get("latest") or ""
+        return installed, latest
+
+    def _build_status_of(self, engine_id: str) -> dict:
+        """The source build's status; empty when it is not built from source."""
+        try:
+            return self._builds().get(engine_id).status()
+        except KeyError:
+            return {}
+
+    def _install_status_of(self, engine_id: str) -> dict:
+        """The package install's status; empty when it is not installed as packages."""
+        try:
+            return self._installs().get(engine_id).status()
+        except KeyError:
+            return {}
 
     def interests(self) -> Interests:
         """What this machine uses, so an update can be read against it.
@@ -119,15 +148,22 @@ class EngineMaintenanceService:
     # -- engines that arrive as packages -----------------------------------
 
     def install_status(self, engine_id: str) -> dict:
+        """One package install's status."""
         return self._installs().get(engine_id).status()
 
     def installs_available(self) -> list[dict]:
+        """Every package install's status."""
         return self.installs.all() if self.installs else []
 
     def _installs(self) -> Installs:
         if self.installs is None:
             raise KeyError("No engine on this machine is installed as packages")
         return self.installs
+
+    def _builds(self) -> Builds:
+        if self.builds is None:
+            raise KeyError("No engine on this machine is built from source")
+        return self.builds
 
     def install_engine(self, engine_id: str, version: str = "") -> dict:
         """Install a new version beside the one in use.
@@ -162,6 +198,7 @@ class EngineMaintenanceService:
         return self._installs().get(engine_id).remove(name)
 
     def update_install_component(self, engine_id: str, name: str) -> dict:
+        """Move one extension (a ComfyUI custom node) to its newest version."""
         self._nothing_running("The engine and its extensions are being replaced.")
         install = self._installs().get(engine_id)
         if not hasattr(install, "update_component"):
@@ -172,11 +209,11 @@ class EngineMaintenanceService:
         """Select a compiled source version without rebuilding it."""
         self._nothing_running("The engine is about to be launched from "
                               "somewhere else.")
-        return self.builds.get(engine_id).activate(name)
+        return self._builds().get(engine_id).activate(name)
 
     def remove_build(self, engine_id: str, name: str) -> dict:
         """Delete a compiled source version that is not in use."""
-        return self.builds.get(engine_id).remove(name)
+        return self._builds().get(engine_id).remove(name)
 
     def _nothing_running(self, why: str) -> None:
         running = [item["id"] for item in self.instances() if item["running"]]
@@ -194,4 +231,4 @@ class EngineMaintenanceService:
         """
         self._nothing_running("The engine binary cannot be replaced while it "
                               "is executing.")
-        return self.builds.get(engine_id).update()
+        return self._builds().get(engine_id).update()

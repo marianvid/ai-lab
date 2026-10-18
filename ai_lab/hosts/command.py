@@ -12,7 +12,9 @@ import subprocess
 
 
 class Result:
-    __slots__ = ("returncode", "stdout", "stderr")
+    """What a command answered: its exit code and its two outputs."""
+
+    __slots__ = ("returncode", "stderr", "stdout")
 
     def __init__(self, returncode: int, stdout: str, stderr: str) -> None:
         self.returncode = returncode
@@ -21,6 +23,7 @@ class Result:
 
     @property
     def ok(self) -> bool:
+        """Whether it exited with 0."""
         return self.returncode == 0
 
 
@@ -43,4 +46,5 @@ def run(argv: list[str], timeout: float = 10.0) -> Result:
 
 
 def which(name: str) -> str | None:
+    """Where a program is on PATH, or None."""
     return shutil.which(name)

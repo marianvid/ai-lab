@@ -1,10 +1,12 @@
 import time
 import unittest
+from typing import cast
 
 from ai_lab.config import Instance
 from ai_lab.events import EventBus
 from ai_lab.engines.llamacpp import LlamaCppEngine
 from ai_lab.engines.vllm import VllmEngine
+from ai_lab.hosts.base import Host
 from ai_lab.runtime import Runtime
 from ai_lab.types import (AcceleratorSnapshot, Format, ModelFile, ModelSet, Phase,
                           ProcessStatus, RuntimeEvent)
@@ -142,8 +144,10 @@ class EventTests(unittest.TestCase):
         runtime = Runtime(host, bus, sample_interval_s=0)
         self.assertIsNone(runtime.last("qwen"))
         runtime.load(instance(), model(), FakeEngine(host=host))
-        self.assertEqual(runtime.last("qwen")["kind"], "load")
-        self.assertTrue(runtime.last("qwen")["ok"])
+        last = runtime.last("qwen")
+        assert last is not None
+        self.assertEqual(last["kind"], "load")
+        self.assertTrue(last["ok"])
 
 
 if __name__ == "__main__":
@@ -532,7 +536,7 @@ class WhenTheWeightsWillNotFit(unittest.TestCase):
 
     def _runtime(self, free_mb=1000.0):
         card = self.Card(free_mb)
-        return card, Runtime(card, EventBus(), sample_interval_s=0)
+        return card, Runtime(cast(Host, card), EventBus(), sample_interval_s=0)
 
     def _instance(self, **params):
         return Instance(id="big", engine="llamacpp", model_id="gguf/big/big",

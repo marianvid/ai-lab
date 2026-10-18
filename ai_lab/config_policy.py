@@ -7,7 +7,7 @@ boundary used by application services so defaults and limits have one owner.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from collections.abc import Mapping
 
 from .types import Task
 
@@ -20,8 +20,9 @@ def _number(raw: Mapping, name: str, default: float, *, minimum: float,
     return float(value)
 
 
-def _integer(raw: Mapping, name: str, default: int, *, minimum: int,
-             maximum: int, section: str) -> int:
+def _integer(raw: Mapping, name: str, default: int, *, bounds: tuple[int, int],
+             section: str) -> int:
+    minimum, maximum = bounds
     value = raw.get(name, default)
     if type(value) is not int or not minimum <= value <= maximum:
         raise ValueError(f"{section} {name} must be between {minimum} and {maximum}")
@@ -30,12 +31,16 @@ def _integer(raw: Mapping, name: str, default: int, *, minimum: int,
 
 @dataclass(frozen=True, slots=True)
 class TaskTimeout:
+    """The two waits for one kind of request: to the first byte, and between bytes."""
+
     first_byte_s: float
     between_bytes_s: float
 
 
 @dataclass(frozen=True, slots=True)
 class GatewayPolicy:
+    """The `gateway` section: how long to wait for an engine, how many to hold, upload limits."""
+
     first_byte_s: float = 120.0
     between_bytes_s: float = 30.0
     max_waiting: int = 150
@@ -46,6 +51,7 @@ class GatewayPolicy:
 
     @classmethod
     def from_mapping(cls, raw: Mapping | None) -> GatewayPolicy:
+        """Read and check the section; ValueError names what is wrong."""
         raw = {} if raw is None else raw
         if not isinstance(raw, Mapping):
             raise ValueError("Gateway settings must be an object")
@@ -68,19 +74,19 @@ class GatewayPolicy:
         return cls(
             first_byte_s=first,
             between_bytes_s=between,
-            max_waiting=_integer(raw, "max_waiting", 150, minimum=1,
-                                 maximum=10000, section="Gateway"),
+            max_waiting=_integer(raw, "max_waiting", 150, bounds=(1, 10000),
+                                 section="Gateway"),
             task_timeouts=by_task,
-            max_upload_bytes=_integer(raw, "max_upload_bytes", 0, minimum=0,
-                                      maximum=1024 ** 3, section="Gateway"),
-            max_upload_pixels=_integer(raw, "max_upload_pixels", 0, minimum=0,
-                                       maximum=1024 ** 3, section="Gateway"),
+            max_upload_bytes=_integer(raw, "max_upload_bytes", 0, bounds=(0, 1024 ** 3),
+                                      section="Gateway"),
+            max_upload_pixels=_integer(raw, "max_upload_pixels", 0, bounds=(0, 1024 ** 3),
+                                       section="Gateway"),
             max_upload_dimension=_integer(raw, "max_upload_dimension", 0,
-                                          minimum=0, maximum=100000,
-                                          section="Gateway"),
+                                          bounds=(0, 100000), section="Gateway"),
         )
 
     def timeout_mapping(self) -> dict[str, dict[str, float]]:
+        """The per-task waits as plain dictionaries, as the gateway takes them."""
         return {task: {"first_byte_s": value.first_byte_s,
                        "between_bytes_s": value.between_bytes_s}
                 for task, value in self.task_timeouts.items()}
@@ -88,6 +94,8 @@ class GatewayPolicy:
 
 @dataclass(frozen=True, slots=True)
 class MediaPolicy:
+    """The `media` section: how long results are kept, and the queue and size limits."""
+
     result_ttl_s: int = 86400
     max_queue: int = 32
     max_input_bytes: int = 40 * 1024 * 1024
@@ -95,6 +103,7 @@ class MediaPolicy:
 
     @classmethod
     def from_mapping(cls, raw: Mapping | None) -> MediaPolicy:
+        """Read and check the section; unknown keys are refused."""
         raw = {} if raw is None else raw
         if not isinstance(raw, Mapping):
             raise ValueError("Media settings must be an object")
@@ -107,6 +116,6 @@ class MediaPolicy:
             "max_input_bytes": (40 * 1024 * 1024, 1024, 512 * 1024 * 1024),
             "max_result_bytes": (256 * 1024 * 1024, 1024, 1024 * 1024 * 1024),
         }
-        return cls(**{name: _integer(raw, name, default, minimum=minimum,
-                                     maximum=maximum, section="Media")
+        return cls(**{name: _integer(raw, name, default, bounds=(minimum, maximum),
+                                     section="Media")
                       for name, (default, minimum, maximum) in limits.items()})

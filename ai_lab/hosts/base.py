@@ -53,7 +53,7 @@ class Host(Protocol):
         """
         ...
 
-    def state_dir(self) -> "Path":
+    def state_dir(self) -> Path:
         """Where this machine keeps things the manager must not lose.
 
         Not configuration — that is a file somebody edits, and it lives

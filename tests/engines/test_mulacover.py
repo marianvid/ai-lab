@@ -4,9 +4,14 @@ from ai_lab.engines.mulacover import MulaCoverEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
+def made(engine_class, **settings):
+    """An engine as the registry builds it, from its configuration section."""
+    return engine_class.from_settings(settings)
+
+
 class MulaCoverEngineTests(unittest.TestCase):
     def test_configured_bundle_and_reference_form(self):
-        engine = MulaCoverEngine(binary='/cover/python', bundle_root='/cover/ckpt',
+        engine = made(MulaCoverEngine, binary='/cover/python', bundle_root='/cover/ckpt',
                                  output_root='/tmp/music', model_options={
             'future-cover': {'checkpoint_subdir': 'MuLaCover', 'topk': 250,
                              'temperature': 1.0, 'cfg_scale': 1.5,

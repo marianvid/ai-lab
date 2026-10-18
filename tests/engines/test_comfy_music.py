@@ -4,9 +4,14 @@ from ai_lab.engines.comfy_music import ComfyMusicEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
+def made(engine_class, **settings):
+    """An engine as the registry builds it, from its configuration section."""
+    return engine_class.from_settings(settings)
+
+
 class ComfyMusicTests(unittest.TestCase):
     def test_plan_uses_configured_components_and_workflow(self):
-        engine = ComfyMusicEngine(binary='/comfy/python', comfyui='/comfy/main.py',
+        engine = made(ComfyMusicEngine, binary='/comfy/python', comfyui='/comfy/main.py',
                                   model_options={'future-music': {
             'workflow': '/private/music.json',
             'component_subdirs': ['diffusion_models', 'text_encoders', 'vae'],

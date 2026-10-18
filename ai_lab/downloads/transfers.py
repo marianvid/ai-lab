@@ -30,18 +30,20 @@ continues from where it stopped instead of beginning again.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from queue import Queue
-from typing import Callable
 
+from ..disk import sha256_of
 from ..events import EventBus
 from ..types import ChangeEvent
 from .huggingface import RemoteFile, RemoteSet
@@ -60,6 +62,8 @@ ANNOUNCE_EVERY_S = 0.5
 
 
 class State(str, Enum):
+    """Where a transfer is: waiting, downloading, or finished one of three ways."""
+
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
@@ -90,11 +94,13 @@ class Transfer:
 
     @property
     def percent(self) -> float:
+        """How much has arrived, 0 to 100."""
         if self.total_bytes <= 0:
             return 0.0
         return min(100.0, self.received_bytes * 100.0 / self.total_bytes)
 
     def json(self) -> dict:
+        """The transfer as the download page shows it."""
         return {"id": self.id, "repo": self.repo, "name": self.name,
                 "state": self.state.value, "percent": round(self.percent, 1),
                 "received_bytes": self.received_bytes,
@@ -151,6 +157,7 @@ class DownloadManager:
         return transfer
 
     def cancel(self, transfer_id: str) -> None:
+        """Stop one transfer; KeyError when there is no such transfer."""
         with self._lock:
             transfer = self._transfers.get(transfer_id)
         if transfer is None:
@@ -161,6 +168,7 @@ class DownloadManager:
             self._announce(force=True)
 
     def list(self) -> list[dict]:
+        """Every transfer, running or recent."""
         with self._lock:
             return [item.json() for item in self._transfers.values()]
 
@@ -197,28 +205,8 @@ class DownloadManager:
     def _download(self, transfer: Transfer, remote: RemoteSet, destination: Path) -> None:
         transfer.state = State.RUNNING
         self._announce(force=True)
-        working = _working(destination, transfer.id)
         try:
-            working.mkdir(parents=True, exist_ok=True)
-            os.chmod(working, 0o700)
-            staged = []
-            for item in remote.files:
-                if transfer._cancel.is_set():
-                    transfer.state = State.CANCELLED
-                    return
-                # A file already sitting at its final name, the right size, is
-                # one somebody has already waited for. Asking for the same
-                # model again should not fetch twenty gigabytes a second time.
-                if _already_there(destination, item):
-                    transfer.received_bytes += item.size_bytes
-                    transfer.files_done += 1
-                    continue
-                self._file(transfer, remote.repo, item, working)
-                staged.append(item)
-                transfer.files_done += 1
-            _verify(transfer, remote, working, destination, staged)
-            _publish(working, destination, staged)
-            transfer.state = State.DONE
+            self._fetch_all(transfer, remote, destination)
         except Exception as error:
             if transfer._cancel.is_set():
                 transfer.state = State.CANCELLED
@@ -229,19 +217,46 @@ class DownloadManager:
         # The working folder is deliberately left behind on anything but
         # success. It holds the bytes already fetched, and asking for the same
         # model again continues from them.
-        # A finished transfer also means a new model on disk.
         self._announce(force=True)
         if transfer.state is State.DONE:
-            if self._bus is not None:
-                self._bus.publish(ChangeEvent(topic="models"))
-            if self._arrived is not None:
-                # Never let this stop the queue. The download succeeded; that
-                # is the promise made to whoever asked for it, and whatever
-                # this was going to do can be done again later.
-                try:
-                    self._arrived(destination)
-                except Exception:
-                    pass
+            self._arrived_at(destination)
+
+    def _fetch_all(self, transfer: Transfer, remote: RemoteSet, destination: Path) -> None:
+        """Fetch every file not already there, verify them all, then publish the model."""
+        working = _working(destination, transfer.id)
+        working.mkdir(parents=True, exist_ok=True)
+        os.chmod(working, 0o700)
+        staged = []
+        for item in remote.files:
+            if transfer._cancel.is_set():
+                transfer.state = State.CANCELLED
+                return
+            # A file already sitting at its final name, the right size, is
+            # one somebody has already waited for. Asking for the same
+            # model again should not fetch twenty gigabytes a second time.
+            if _already_there(destination, item):
+                transfer.received_bytes += item.size_bytes
+                transfer.files_done += 1
+                continue
+            self._file(transfer, remote.repo, item, working)
+            staged.append(item)
+            transfer.files_done += 1
+        _verify(transfer, remote, working, destination, staged)
+        _publish(working, destination, staged)
+        transfer.state = State.DONE
+
+    def _arrived_at(self, destination: Path) -> None:
+        """A finished transfer means a new model on disk: say so, and run the follow-up.
+
+        The follow-up never stops the queue. The download succeeded; that is
+        the promise made to whoever asked for it, and whatever this was going
+        to do can be done again later.
+        """
+        if self._bus is not None:
+            self._bus.publish(ChangeEvent(topic="models"))
+        if self._arrived is not None:
+            with contextlib.suppress(Exception):
+                self._arrived(destination)
 
     def _file(self, transfer: Transfer, repo: str, item: RemoteFile,
               destination: Path) -> None:
@@ -260,17 +275,17 @@ class DownloadManager:
         resume_from = partial.stat().st_size if partial.exists() else 0
         transfer.received_bytes += resume_from
 
-        with self._open(item.url(repo), resume_from) as response:
-            with open(partial, "ab" if resume_from else "wb") as handle:
-                while True:
-                    if transfer._cancel.is_set():
-                        raise RuntimeError("cancelled")
-                    chunk = response.read(CHUNK)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    transfer.received_bytes += len(chunk)
-                    self._announce()
+        with self._open(item.url(repo), resume_from) as response, \
+                partial.open("ab" if resume_from else "wb") as handle:
+            while True:
+                if transfer._cancel.is_set():
+                    raise RuntimeError("cancelled")
+                chunk = response.read(CHUNK)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                transfer.received_bytes += len(chunk)
+                self._announce()
         partial.replace(target)
 
 
@@ -329,20 +344,11 @@ def _verify(transfer: Transfer, remote: RemoteSet, working: Path,
         transfer.checked_size += 1
         if not item.sha256:
             continue
-        if _sha256(path) != item.sha256:
+        if sha256_of(path) != item.sha256:
             raise ValueError(
                 f"{path.name} arrived complete but its contents do not match "
                 "the checksum upstream publishes for it")
         transfer.checked_hash += 1
-
-
-def _sha256(path: Path) -> str:
-    import hashlib
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _publish(working: Path, destination: Path, staged: list) -> None:

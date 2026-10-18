@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .gateway import Gateway
 
+
 @dataclass(slots=True)
 class Lease:
     """A place on the card, held for the length of one request.
@@ -23,7 +24,7 @@ class Lease:
     else.
     """
 
-    gateway: "Gateway"
+    gateway: Gateway
     instance_id: str
     port: int
     # What the engine calls its own model. llama.cpp and vLLM are both started
@@ -38,13 +39,14 @@ class Lease:
     _given_back: bool = False
 
     def release(self) -> None:
+        """Give the place back, once; a second call does nothing."""
         if self._given_back:
             return
         self._given_back = True
         self.gateway.finished(time.perf_counter() - self.started
                               if self.started else 0.0)
 
-    def __enter__(self) -> "Lease":
+    def __enter__(self) -> Lease:
         return self
 
     def __exit__(self, *_exception) -> None:
@@ -65,8 +67,10 @@ class Shape:
     settings: tuple = ()                # (key, value) pairs, sorted
 
     @classmethod
-    def of(cls, instance_id: str, settings: dict | None) -> "Shape":
+    def of(cls, instance_id: str, settings: dict | None) -> Shape:
+        """The shape for an entry and its settings, in a canonical order."""
         return cls(instance_id, tuple(sorted((settings or {}).items())))
 
     def as_dict(self) -> dict:
+        """The settings back as a dictionary."""
         return dict(self.settings)

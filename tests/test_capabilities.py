@@ -122,7 +122,10 @@ class Remembering(unittest.TestCase):
         # file is not read, and a stopwatch would only say it was quick.
         reads = []
         original = capabilities._read
-        capabilities._read = lambda *args: reads.append(1) or frozenset()
+        def counted(*_args):
+            reads.append(1)
+            return frozenset()
+        capabilities._read = counted
         try:
             answer = Known(self.state).of(str(self.weights), True, ["model.gguf"])
         finally:

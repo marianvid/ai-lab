@@ -53,9 +53,9 @@ class ControlTests(unittest.TestCase):
     def test_a_failing_helper_raises_with_its_message(self):
         host = LinuxHost()
         with patch("ai_lab.hosts.linux.run",
-                   return_value=result(returncode=1, stderr="unit not found")):
-            with self.assertRaises(RuntimeError) as caught:
-                host.stop("qwen")
+                   return_value=result(returncode=1, stderr="unit not found")), \
+                self.assertRaises(RuntimeError) as caught:
+            host.stop("qwen")
         self.assertIn("unit not found", str(caught.exception))
 
     def test_status_reads_the_templated_unit(self):
@@ -168,7 +168,7 @@ class EngineDetectionTests(unittest.TestCase):
             return host.capabilities()
 
     def test_a_configured_path_counts_as_installed(self):
-        host = LinuxHost(vllm_binary="/opt/ai/vllm/.venv/bin/vllm")
+        host = LinuxHost({"vllm": "/opt/ai/vllm/.venv/bin/vllm"})
         self.assertIn("vllm", self.capabilities(host).engines)
 
     def test_without_a_path_or_a_binary_it_is_absent(self):
@@ -180,7 +180,7 @@ class EngineDetectionTests(unittest.TestCase):
         self.assertIn("vllm", self.capabilities(host, on_path=("vllm",)).engines)
 
     def test_llama_cpp_is_unaffected(self):
-        host = LinuxHost(vllm_binary="/opt/ai/vllm/.venv/bin/vllm")
+        host = LinuxHost({"vllm": "/opt/ai/vllm/.venv/bin/vllm"})
         engines = self.capabilities(host, on_path=("llama-server",)).engines
         self.assertIn("llamacpp", engines)
 
@@ -208,7 +208,7 @@ class StopTimeoutTests(unittest.TestCase):
             stripped = line.strip()
             if stripped.startswith("TimeoutStopSec="):
                 return float(stripped.split("=", 1)[1].rstrip("s"))
-        self.fail("the unit no longer sets TimeoutStopSec")
+        raise AssertionError("the unit no longer sets TimeoutStopSec")
 
     def test_the_unit_still_bounds_how_long_a_stop_takes(self):
         # Without it, systemd waits 90 seconds by default and an engine that

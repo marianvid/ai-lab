@@ -8,8 +8,8 @@ neither the configuration schema nor the front end.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Protocol
 
 from ..types import Format, ModelSet, Task
@@ -45,34 +45,48 @@ class ParamSpec:
         in the interface.
         """
         if self.kind == "bool":
-            if isinstance(value, bool):
-                return value
-            raise ValueError(f"{self.label} must be true or false")
+            return self._flag(value)
         if self.kind in ("int", "float"):
-            converter = int if self.kind == "int" else float
-            noun = "whole number" if self.kind == "int" else "number"
-            try:
-                number = converter(value)
-            except (TypeError, ValueError):
-                raise ValueError(f"{self.label} must be a {noun}") from None
-            if self.minimum is not None and number < self.minimum:
-                raise ValueError(f"{self.label} must be at least {self.minimum}")
-            if self.maximum is not None and number > self.maximum:
-                raise ValueError(f"{self.label} must be at most {self.maximum}")
-            return number
+            return self._number(value)
         if self.kind == "identifier":
-            if not isinstance(value, str):
-                raise ValueError(f"{self.label} must be a simple engine option name")
-            text = value.strip()
-            if text and not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}", text):
-                raise ValueError(f"{self.label} must be a simple engine option name")
-            return text
+            return self._identifier(value)
         if self.kind == "choice":
-            text = str(value)
-            if text not in self.choices:
-                raise ValueError(f"{self.label} must be one of {', '.join(self.choices)}")
-            return text
+            return self._choice(value)
         raise ValueError(f"Unsupported setting kind: {self.kind}")
+
+    def _flag(self, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        raise ValueError(f"{self.label} must be true or false")
+
+    def _number(self, value: object) -> float:
+        whole = self.kind == "int"
+        noun = "whole number" if whole else "number"
+        if not isinstance(value, (str, int, float)):
+            raise ValueError(f"{self.label} must be a {noun}")
+        try:
+            number: float = int(value) if whole else float(value)
+        except ValueError:
+            raise ValueError(f"{self.label} must be a {noun}") from None
+        if self.minimum is not None and number < self.minimum:
+            raise ValueError(f"{self.label} must be at least {self.minimum}")
+        if self.maximum is not None and number > self.maximum:
+            raise ValueError(f"{self.label} must be at most {self.maximum}")
+        return number
+
+    def _identifier(self, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"{self.label} must be a simple engine option name")
+        text = value.strip()
+        if text and not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}", text):
+            raise ValueError(f"{self.label} must be a simple engine option name")
+        return text
+
+    def _choice(self, value: object) -> str:
+        text = str(value)
+        if text not in self.choices:
+            raise ValueError(f"{self.label} must be one of {', '.join(self.choices)}")
+        return text
 
 
 def validate(specs: tuple[ParamSpec, ...], values: dict) -> dict:
@@ -140,6 +154,12 @@ class LaunchPlan:
 
 
 class Engine(Protocol):
+    """What every engine provides: its name, what it reads, and how to start it.
+
+    A structural type: an engine is any class with these members, found by
+    `registry.engine_classes` in this package. Nothing inherits from it.
+    """
+
     id: str
     display_name: str
 

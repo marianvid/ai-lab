@@ -114,6 +114,27 @@ class ReservationBook:
         else:
             self._wait_until_free(still_wanted)
 
+    def permits(self, reservation_id: str | None) -> None:
+        """Raise unless this call may reach the card now; asked again at the head of its queue.
+
+        A call is let through the door (`admit`) and may then wait a long time
+        in the card's queue, behind other calls or a three-minute load. By the
+        time it reaches the head, the card may have been reserved by someone
+        else, or the call's own reservation may have ended. This is asked
+        there, before anything is unloaded (ADR 0005), and raises what the door
+        would have: `CardReservedError` for a call without a reservation while
+        the card is held, `ReservationEndedError` or `ReservationNotGrantedError`
+        for a call whose reservation does not hold the card.
+        """
+        with self._changed:
+            self._settle_locked()
+            if reservation_id:
+                self._holding(reservation_id)
+                return
+            held = self._granted()
+            if held is not None:
+                raise CardReservedError(_reserved_message(held), {"holder": self._view(held)})
+
     def holder(self) -> dict | None:
         """The reservation holding the card, if any."""
         with self._changed:
@@ -160,15 +181,20 @@ class ReservationBook:
     def _admit_holder(self, reservation_id: str) -> None:
         with self._changed:
             self._settle_locked()
-            reservation = self._find_for_call(reservation_id)
-            if reservation.state == QUEUED:
-                position = self._queue().index(reservation) + 1
-                raise ReservationNotGrantedError(
-                    f"reservation {reservation_id} is not granted yet "
-                    f"(position {position} in the queue)", {"reservation": self._view(reservation)})
+            reservation = self._holding(reservation_id)
             if reservation.first_call_at is None:
                 reservation.first_call_at = self._clock()
                 self._save_locked()
+
+    def _holding(self, reservation_id: str) -> Reservation:
+        """The reservation, if it holds the card now; otherwise the 409 that says why."""
+        reservation = self._find_for_call(reservation_id)
+        if reservation.state == QUEUED:
+            position = self._queue().index(reservation) + 1
+            raise ReservationNotGrantedError(
+                f"reservation {reservation_id} is not granted yet "
+                f"(position {position} in the queue)", {"reservation": self._view(reservation)})
+        return reservation
 
     def _find_for_call(self, reservation_id: str) -> Reservation:
         found = next((item for item in self._items if item.id == reservation_id), None)

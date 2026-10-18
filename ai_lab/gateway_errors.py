@@ -1,6 +1,7 @@
 """Gateway refusals translated into HTTP responses by the API layer."""
 
-class NotConfigured(KeyError):
+
+class NotConfiguredError(KeyError):
     """No entry serves that model name.
 
     A KeyError so the web layer answers 404 without being told, since that is
@@ -15,11 +16,11 @@ class NotConfigured(KeyError):
         return self.args[0] if self.args else ""
 
 
-class CouldNotLoad(RuntimeError):
+class CouldNotLoadError(RuntimeError):
     """The entry exists but the card could not be made ready for it."""
 
 
-class ShapeNotServed(ValueError):
+class ShapeNotServedError(ValueError):
     """The entry exists, but its engine does not answer that kind of request.
 
     A request can arrive in more than one shape, and not every engine speaks
@@ -29,7 +30,7 @@ class ShapeNotServed(ValueError):
     """
 
 
-class CardBusy(RuntimeError):
+class CardBusyError(RuntimeError):
     """The card is serving a request, and the action asked for would cut it off.
 
     Raised at the request of the interface, not by the gateway's own work: the

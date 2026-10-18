@@ -86,6 +86,7 @@ class ModelSet:
 
     @property
     def size_bytes(self) -> int:
+        """The size of all its files together."""
         return sum(item.size_bytes for item in self.files)
 
 
@@ -136,6 +137,8 @@ class ProcessSpec:
 
 @dataclass(frozen=True, slots=True)
 class ProcessStatus:
+    """Whether an engine process is running, and its process id when it is."""
+
     running: bool
     pid: int | None = None
 

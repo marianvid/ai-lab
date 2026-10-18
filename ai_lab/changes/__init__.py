@@ -80,8 +80,7 @@ class Reader:
                 troubles.append(f"Could not read the checkout: {error}")
 
         if self.releases:
-            found, trouble = between(self.releases, installed, latest)
-            notes = found
+            notes, trouble = between(self.releases, installed, latest)
             if trouble:
                 troubles.append(trouble)
 
@@ -100,9 +99,8 @@ class Reader:
         if not self.package or not self.binary:
             return "", ""
         installed = installed_version(venv_of(self.binary), self.package)
-        canonical = lambda name: name.lower().replace("_", "-").replace(".", "-")
         moving = next((move for move in moves
-                       if canonical(move.name) == canonical(self.package)), None)
+                       if _canonical(move.name) == _canonical(self.package)), None)
         latest = moving.becomes if moving and moving.becomes else installed
         return installed or (moving.was if moving else ""), latest
 
@@ -117,3 +115,8 @@ class Reader:
             return would_move(venv_of(self.binary), self.install, self.uv), ""
         except ValueError as error:
             return [], f"Could not work out which packages would change: {error}"
+
+
+def _canonical(name: str) -> str:
+    """A package name as the index compares it: `Nemo_Toolkit` and `nemo-toolkit` are one."""
+    return name.lower().replace("_", "-").replace(".", "-")

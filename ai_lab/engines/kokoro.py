@@ -1,39 +1,25 @@
 """Kokoro speech engine with checkpoint and voice settings from configuration."""
 from __future__ import annotations
 
-from pathlib import Path
+from ..types import ModelSet, Task
+from .base import SPEECH_PATHS, LaunchPlan
+from .isolated import ConfiguredEngine, script_env, ui_port
 
-from ..types import Format, ModelSet, Task
-from .base import LaunchPlan, SPEECH_PATHS
-from .probe import http_ok
+# What each model's options must name.
+REQUIRED_OPTIONS = ("language_code", "default_voice", "repo_id")
 
 
-class KokoroEngine:
+class KokoroEngine(ConfiguredEngine):
+    """Kokoro, with its language, default voice and voice repository per model."""
+
     id = "kokoro"
     display_name = "Kokoro"
-
-    def __init__(self, binary: str | None = None, server: str | None = None,
-                 model_options: dict[str, dict] | None = None) -> None:
-        self.binary = binary or "python"
-        self.server = server or str(Path(__file__).resolve().parents[1] /
-                                    "speech" / "server.py")
-        self.model_options = dict(model_options or {})
-
-    def formats(self) -> frozenset[Format]:
-        return frozenset({Format.SAFETENSORS})
-
-    def tasks(self) -> frozenset[Task]:
-        return frozenset({Task.SPEECH_SYNTHESIS})
-
-    def params(self, task: Task = Task.SPEECH_SYNTHESIS):
-        return ()
-
-    def supports(self, model: ModelSet) -> bool:
-        return (model.format is Format.SAFETENSORS
-                and model.task is Task.SPEECH_SYNTHESIS
-                and model.name in self.model_options)
+    task = Task.SPEECH_SYNTHESIS
+    paths = SPEECH_PATHS
+    script = ("speech", "server.py")
 
     def speech_form(self, model_name: str) -> dict:
+        """What the speech page shows: a voice, with the configured default as the hint."""
         options = self.model_options.get(model_name, {})
         return {"instruction_required": False,
                 "instruction_visible": False,
@@ -44,13 +30,9 @@ class KokoroEngine:
                 "seed_supported": False, "reference_supported": False}
 
     def plan(self, model: ModelSet, port: int, params: dict) -> LaunchPlan:
-        if not self.supports(model):
-            raise ValueError(f"Kokoro is not configured for {model.name}")
-        if params:
-            raise ValueError("Kokoro has no instance settings")
-        options = self.model_options[model.name]
-        required = ("language_code", "default_voice", "repo_id")
-        if any(not options.get(key) for key in required):
+        """The speech host with the Kokoro backend and its own editor."""
+        options = self._options(model, params)
+        if any(not options.get(key) for key in REQUIRED_OPTIONS):
             raise ValueError(f"Kokoro settings are incomplete for {model.name}")
         return LaunchPlan(argv=[
             self.binary, self.server, "--backend", "kokoro",
@@ -58,19 +40,5 @@ class KokoroEngine:
             "--language-code", options["language_code"],
             "--default-voice", options["default_voice"],
             "--repo-id", options["repo_id"], "--port", str(port),
-            "--ui-port", str(port + 10000)],
-            env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1",
-                 "PYTHONPATH": str(Path(__file__).resolve().parents[2])})
-
-    def ready(self, port: int) -> bool:
-        return http_ok(port)
-
-    def concurrency(self, params: dict) -> int:
-        return 1
-
-    def needs_mb(self, model: ModelSet, params: dict,
-                 card_total_mb: float) -> float:
-        return model.size_bytes / (1024 * 1024)
-
-    def api_paths(self, task: Task = Task.SPEECH_SYNTHESIS) -> tuple[str, ...]:
-        return SPEECH_PATHS if task is Task.SPEECH_SYNTHESIS else ()
+            "--ui-port", ui_port(port)],
+            env=script_env())

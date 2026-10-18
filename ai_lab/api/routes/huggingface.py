@@ -14,6 +14,7 @@ from __future__ import annotations
 
 
 def register(router, operations) -> None:
+    """Search Hugging Face, and list the files of one repository."""
     router.add("GET", "/api/hf/search",
                lambda query=None, **_: operations.search((query or {}).get("q", "")))
     router.add("GET", "/api/hf/sets",

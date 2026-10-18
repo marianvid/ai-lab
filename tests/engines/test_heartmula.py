@@ -7,9 +7,14 @@ from ai_lab.engines.heartmula import HeartMulaEngine
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
+def made(engine_class, **settings):
+    """An engine as the registry builds it, from its configuration section."""
+    return engine_class.from_settings(settings)
+
+
 class HeartMulaEngineTests(unittest.TestCase):
     def setUp(self):
-        self.engine = HeartMulaEngine(
+        self.engine = made(HeartMulaEngine,
             binary='/heartlib/python', bundle_root='/runtime/bundle',
             output_root='/tmp/music', heartmuse_root='/opt/heartmuse',
             model_options={

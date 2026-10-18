@@ -4,24 +4,29 @@ from ai_lab.api.router import Router
 
 
 class RouterTests(unittest.TestCase):
+    def matched(self, method, path):
+        found = self.router.match(method, path)
+        assert found is not None, path
+        return found
+
     def setUp(self):
         self.router = Router()
         self.router.add("GET", "/api/models", lambda **_: "models")
         self.router.add("POST", "/api/instances/{id}/load", lambda **kw: kw)
 
     def test_a_literal_path_matches(self):
-        handler, captured = self.router.match("GET", "/api/models")
+        handler, captured = self.matched("GET", "/api/models")
         self.assertEqual(handler(), "models")
         self.assertEqual(captured, {})
 
     def test_a_placeholder_is_captured(self):
-        _, captured = self.router.match("POST", "/api/instances/qwen/load")
+        _, captured = self.matched("POST", "/api/instances/qwen/load")
         self.assertEqual(captured, {"id": "qwen"})
 
     def test_encoded_segments_are_decoded(self):
         """Model ids contain slashes, so the browser sends them encoded."""
         self.router.add("GET", "/api/models/{model_id}", lambda **kw: kw)
-        _, captured = self.router.match("GET", "/api/models/repo%2Fqwen%2Fmodel")
+        _, captured = self.matched("GET", "/api/models/repo%2Fqwen%2Fmodel")
         self.assertEqual(captured, {"model_id": "repo/qwen/model"})
 
     def test_the_method_must_match(self):

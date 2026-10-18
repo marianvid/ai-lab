@@ -28,6 +28,17 @@ SAMPLE_RATE = 24000
 FRAMES_PER_SECOND = 27  # measured on the M3 Max: 155 frames made 5.9 s
 TEMPERATURE, TOP_P, TOP_K = 1.0, 0.95, 50
 MAX_FRAMES = 2048  # the model's own ceiling on audio frames for one answer
+# The ranges a request may set the sampling knobs in.
+LOWEST_TEMPERATURE, HIGHEST_TEMPERATURE = 0.05, 2.0
+HIGHEST_TOP_K = 1000
+KNOBS = ("temperature", "top_p", "top_k")
+# How many encoded reference voices are remembered.
+MAX_REFERENCES = 32
+# The fewest frames an answer may be cut to, whatever its text.
+MIN_FRAMES = 64
+# The end-of-audio tail: after the end code, every codebook but the first two
+# still has frames to give before the line is complete.
+EOC_TAIL = 2
 
 
 def sampling_settings(temperature: float | None = None,
@@ -44,25 +55,34 @@ def sampling_settings(temperature: float | None = None,
     - `max_new_tokens` caps the length, in audio frames (27 per second).
     A value outside its range is refused rather than quietly clamped.
     """
-    result = {"temperature": TEMPERATURE, "top_p": TOP_P, "top_k": TOP_K,
-              "max_frames": MAX_FRAMES}
-    if temperature is not None:
-        if not 0.05 <= float(temperature) <= 2.0:
-            raise ValueError("temperature must be from 0.05 to 2")
-        result["temperature"] = float(temperature)
-    if top_p is not None:
-        if not 0.0 < float(top_p) <= 1.0:
-            raise ValueError("top_p must be above 0 and at most 1")
-        result["top_p"] = float(top_p)
-    if top_k is not None:
-        if type(top_k) is not int or not 1 <= top_k <= 1000:
-            raise ValueError("top_k must be an integer from 1 to 1000")
-        result["top_k"] = top_k
-    if max_new_tokens is not None:
-        if type(max_new_tokens) is not int or max_new_tokens < 1:
-            raise ValueError("max_new_tokens must be a positive integer")
-        result["max_frames"] = min(max_new_tokens, MAX_FRAMES)
-    return result
+    return {"temperature": TEMPERATURE if temperature is None else _temperature(temperature),
+            "top_p": TOP_P if top_p is None else _top_p(top_p),
+            "top_k": TOP_K if top_k is None else _top_k(top_k),
+            "max_frames": MAX_FRAMES if max_new_tokens is None else _frames(max_new_tokens)}
+
+
+def _temperature(value) -> float:
+    if not LOWEST_TEMPERATURE <= float(value) <= HIGHEST_TEMPERATURE:
+        raise ValueError("temperature must be from 0.05 to 2")
+    return float(value)
+
+
+def _top_p(value) -> float:
+    if not 0.0 < float(value) <= 1.0:
+        raise ValueError("top_p must be above 0 and at most 1")
+    return float(value)
+
+
+def _top_k(value) -> int:
+    if type(value) is not int or not 1 <= value <= HIGHEST_TOP_K:
+        raise ValueError("top_k must be an integer from 1 to 1000")
+    return value
+
+
+def _frames(value) -> int:
+    if type(value) is not int or value < 1:
+        raise ValueError("max_new_tokens must be a positive integer")
+    return min(value, MAX_FRAMES)
 
 
 def frame_limit(text: str) -> int:
@@ -75,10 +95,12 @@ def frame_limit(text: str) -> int:
     ceiling.
     """
     seconds = 0.13 * max(len(text), 1) + 3.0
-    return max(64, min(MAX_FRAMES, int(seconds * FRAMES_PER_SECOND)))
+    return max(MIN_FRAMES, min(MAX_FRAMES, int(seconds * FRAMES_PER_SECOND)))
 
 
 class HiggsLocalBackend:
+    """Higgs TTS 3 in this process, lines arriving together generated as one group."""
+
     def __init__(self, model_path: Path, max_batch: int = 8,
                  window_ms: int = 100) -> None:
         import torch
@@ -138,7 +160,7 @@ class HiggsLocalBackend:
             samples, rate = sf.read(io.BytesIO(audio), dtype="float32", always_2d=True)
             codes = self.model._encode_reference(torch.from_numpy(samples).mean(dim=1), rate)
             self._references[key] = self.port.apply_delay_pattern(codes.cpu())
-            while len(self._references) > 32:
+            while len(self._references) > MAX_REFERENCES:
                 self._references.popitem(last=False)
         self._references.move_to_end(key)
         return self._references[key], (text or None)
@@ -163,83 +185,25 @@ class HiggsLocalBackend:
             waves = self._generate([prepared[i] for i in good],
                                    [requests[i] for i in good]) if good else []
             results = list(prepared)
-            for i, wave in zip(good, waves):
+            for i, wave in zip(good, waves, strict=True):
                 results[i] = wave
             return results
 
     def _generate(self, embeds: list, requests: list[dict]) -> list:
+        """Every line of the group, frame by frame, then decoded to samples."""
+        group = _Group(self, embeds, requests)
+        while group.active and group.step():
+            pass
+        return [self._decode(row) for row in group.rows]
+
+    def _decode(self, row: list):
+        """One line's frames as audio samples; empty when it never got going."""
         import torch
 
-        m, port, device = self.model, self.port, self.device
-        N = m.num_codebooks
-        B = len(embeds)
-        generators = []
-        for request in requests:
-            generator = torch.Generator()
-            generator.manual_seed(request["seed"])
-            generators.append(generator)
-        limits = [min(frame_limit(r["text"]), r["sampling"]["max_frames"])
-                  for r in requests]
-        # Each line keeps its own sampling knobs, one value per row.
-        knobs = {name: [r["sampling"][name] for r in requests]
-                 for name in ("temperature", "top_p", "top_k")}
-
-        # Left padding: every row ends in the same column, so the next
-        # position of every row is the same cache slot.
-        S = max(e.shape[0] for e in embeds)
-        x = torch.zeros(B, S, embeds[0].shape[1], dtype=embeds[0].dtype, device=device)
-        mask = torch.zeros(B, S, dtype=torch.long, device=device)
-        for b, e in enumerate(embeds):
-            x[b, S - e.shape[0]:] = e
-            mask[b, S - e.shape[0]:] = 1
-        positions = (mask.cumsum(-1) - 1).clamp(min=0)
-        out = m.model(inputs_embeds=x, attention_mask=mask, position_ids=positions,
-                      use_cache=True)
-        past, hidden = out.past_key_values, out.last_hidden_state[:, -1, :]
-        last = positions[:, -1]
-        states = [port._SamplerState(num_codebooks=N) for _ in range(B)]
-        rows: list[list] = [[] for _ in range(B)]
-        active, length = list(range(B)), S
-
-        while active:
-            probs = self._probabilities(
-                m.audio_head(hidden).to(torch.float32),
-                *(torch.tensor([knobs[name][b] for b in active], device=device)
-                  for name in ("temperature", "top_p", "top_k"))).cpu()
-            codes, keep = [], []
-            for j, b in enumerate(active):
-                drawn = torch.multinomial(probs[j], 1, generator=generators[b]).squeeze(-1)
-                code = self._advance(drawn.to(torch.long), states[b], N)
-                if states[b].generation_done or len(rows[b]) >= limits[b]:
-                    continue
-                rows[b].append(code.clone())
-                codes.append(code)
-                keep.append(j)
-            if not keep:
-                break
-            if len(keep) < len(active):  # finished lines leave the group and the cache
-                index = torch.tensor(keep, device=device)
-                past.batch_select_indices(index)
-                mask, last = mask[index], last[index]
-                active = [active[j] for j in keep]
-            step = m.audio_embedding(torch.stack(codes).to(device)).unsqueeze(1).to(x.dtype)
-            mask = torch.cat([mask, torch.ones(len(active), 1, dtype=mask.dtype,
-                                               device=device)], dim=1)
-            last = last + 1
-            out = m.model(inputs_embeds=step, attention_mask=mask,
-                          position_ids=last[:, None], past_key_values=past, use_cache=True,
-                          cache_position=torch.tensor([length], device=device))
-            past, hidden = out.past_key_values, out.last_hidden_state[:, -1, :]
-            length += 1
-
-        waves = []
-        for b in range(B):
-            if len(rows[b]) < N:
-                waves.append(torch.zeros(0).numpy())
-                continue
-            codes_TN = port.reverse_delay_pattern(torch.stack(rows[b]).cpu())
-            waves.append(m._decode_codes(codes_TN).float().cpu().numpy())
-        return waves
+        if len(row) < self.model.num_codebooks:
+            return torch.zeros(0).numpy()
+        codes = self.port.reverse_delay_pattern(torch.stack(row).cpu())
+        return self.model._decode_codes(codes).float().cpu().numpy()
 
     @staticmethod
     def _probabilities(logits, temperature, top_p, top_k):
@@ -267,11 +231,11 @@ class HiggsLocalBackend:
         scattered.scatter_(-1, order, remove)
         return torch.where(scattered, float("-inf"), logits).softmax(-1)
 
-    def _advance(self, codes, state, N: int):
+    def _advance(self, codes, state, codebooks: int):
         """The port's delay/end-of-audio state machine, on codes drawn here."""
         port = self.port
-        if state.delay_count < N:
-            if state.delay_count + 1 < N:
+        if state.delay_count < codebooks:
+            if state.delay_count + 1 < codebooks:
                 codes[state.delay_count + 1:] = port.BOC_ID
             state.delay_count += 1
         elif state.eoc_countdown is not None:
@@ -279,8 +243,101 @@ class HiggsLocalBackend:
             if state.eoc_countdown <= 0:
                 state.generation_done = True
         elif int(codes[0]) == port.EOC_ID:
-            if N <= 2:
+            if codebooks <= EOC_TAIL:
                 state.generation_done = True
             else:
-                state.eoc_countdown = N - 2
+                state.eoc_countdown = codebooks - EOC_TAIL
         return codes
+
+
+class _Group:
+    """One group of lines generated together: its cache, its rows and sampler states.
+
+    Left padding: every row ends in the same column, so the next position of
+    every row is the same cache slot. Each line keeps its own sampling knobs
+    and its own seeded random generator. A finished line leaves the group and
+    the cache.
+    """
+
+    def __init__(self, backend: HiggsLocalBackend, embeds: list, requests: list[dict]) -> None:
+        import torch
+
+        self.torch, self.backend = torch, backend
+        self.model, self.device = backend.model, backend.device
+        self.codebooks = self.model.num_codebooks
+        self.generators = [torch.Generator() for _ in requests]
+        for generator, request in zip(self.generators, requests, strict=True):
+            generator.manual_seed(request["seed"])
+        self.limits = [min(frame_limit(r["text"]), r["sampling"]["max_frames"])
+                       for r in requests]
+        self.knobs = {name: [r["sampling"][name] for r in requests] for name in KNOBS}
+        self.states = [backend.port._SamplerState(num_codebooks=self.codebooks)
+                       for _ in requests]
+        self.rows: list[list] = [[] for _ in requests]
+        self.active = list(range(len(requests)))
+        self._prefill(embeds)
+
+    def _prefill(self, embeds: list) -> None:
+        """Every prompt through the model at once, left-padded to one width."""
+        torch, device = self.torch, self.device
+        width = max(e.shape[0] for e in embeds)
+        self.dtype = embeds[0].dtype
+        x = torch.zeros(len(embeds), width, embeds[0].shape[1], dtype=self.dtype, device=device)
+        mask = torch.zeros(len(embeds), width, dtype=torch.long, device=device)
+        for row, embed in enumerate(embeds):
+            x[row, width - embed.shape[0]:] = embed
+            mask[row, width - embed.shape[0]:] = 1
+        positions = (mask.cumsum(-1) - 1).clamp(min=0)
+        out = self.model.model(inputs_embeds=x, attention_mask=mask, position_ids=positions,
+                               use_cache=True)
+        self.past, self.hidden = out.past_key_values, out.last_hidden_state[:, -1, :]
+        self.mask, self.last, self.length = mask, positions[:, -1], width
+
+    def step(self) -> bool:
+        """One frame for every line still going; False when none goes on."""
+        codes, keep = self._draw()
+        if not keep:
+            return False
+        if len(keep) < len(self.active):
+            self._drop_finished(keep)
+        self._feed(codes)
+        return True
+
+    def _draw(self) -> tuple[list, list[int]]:
+        """Sample each active line's next codes; which lines (by position) go on."""
+        torch = self.torch
+        probs = HiggsLocalBackend._probabilities(
+            self.model.audio_head(self.hidden).to(torch.float32),
+            *(torch.tensor([self.knobs[name][b] for b in self.active], device=self.device)
+              for name in KNOBS)).cpu()
+        codes, keep = [], []
+        for j, b in enumerate(self.active):
+            drawn = torch.multinomial(probs[j], 1, generator=self.generators[b]).squeeze(-1)
+            code = self.backend._advance(drawn.to(torch.long), self.states[b], self.codebooks)
+            if self.states[b].generation_done or len(self.rows[b]) >= self.limits[b]:
+                continue
+            self.rows[b].append(code.clone())
+            codes.append(code)
+            keep.append(j)
+        return codes, keep
+
+    def _drop_finished(self, keep: list[int]) -> None:
+        """Finished lines leave the group and the cache."""
+        index = self.torch.tensor(keep, device=self.device)
+        self.past.batch_select_indices(index)
+        self.mask, self.last = self.mask[index], self.last[index]
+        self.active = [self.active[j] for j in keep]
+
+    def _feed(self, codes: list) -> None:
+        """The frames just drawn, through the model, one cache slot further."""
+        torch, device = self.torch, self.device
+        step = self.model.audio_embedding(torch.stack(codes).to(device)).unsqueeze(1).to(self.dtype)
+        self.mask = torch.cat([self.mask, torch.ones(len(self.active), 1, dtype=self.mask.dtype,
+                                                     device=device)], dim=1)
+        self.last = self.last + 1
+        out = self.model.model(inputs_embeds=step, attention_mask=self.mask,
+                               position_ids=self.last[:, None], past_key_values=self.past,
+                               use_cache=True,
+                               cache_position=torch.tensor([self.length], device=device))
+        self.past, self.hidden = out.past_key_values, out.last_hidden_state[:, -1, :]
+        self.length += 1

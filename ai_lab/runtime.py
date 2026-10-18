@@ -23,17 +23,36 @@ which is what makes the whole lifecycle testable on a laptop with no GPU.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from threading import RLock
 
 from .config import Instance
 from .engines.base import Engine, withheld
 from .events import EventBus
-from .runtime_diagnostics import RuntimeDiagnostics
-from .runtime_state import (Operation, RuntimeProgress, Step, LOAD_SPAN,
-                            UNLOAD_SPAN, SWAP_UNLOAD_SPAN, SWAP_LOAD_SPAN)
 from .hosts.base import Host
-from .types import (ChangeEvent, ModelSet, Phase, ProcessSpec, ProcessStatus,
-                    RuntimeEvent)
+from .runtime_checks import MIB, StartChecks
+from .runtime_diagnostics import RuntimeDiagnostics
+from .runtime_state import (
+    LOAD_SPAN,
+    SWAP_LOAD_SPAN,
+    SWAP_UNLOAD_SPAN,
+    UNLOAD_SPAN,
+    Operation,
+    RuntimeProgress,
+    Step,
+)
+from .types import (
+    AcceleratorSnapshot,
+    ChangeEvent,
+    ModelSet,
+    Phase,
+    ProcessSpec,
+    ProcessStatus,
+    RuntimeEvent,
+)
+
+__all__ = ["EngineDiedError", "LoadTimeoutError", "Operation", "Runtime"]
 
 SAMPLE_INTERVAL_S = 0.2
 # Starting a process takes seconds; loading weights can take minutes. They get
@@ -46,15 +65,30 @@ UNLOAD_TIMEOUT_S = 120.0
 # consecutive samples. Drivers free asynchronously, so the process exiting is
 # not the same moment as the memory coming back.
 SETTLED_SAMPLES = 3
-class Timeout(RuntimeError):
-    pass
+# A sample this much lower than the one before still counts as memory holding still.
+SETTLED_TOLERANCE_MB = 1.0
 
 
-class EngineDied(RuntimeError):
+class LoadTimeoutError(RuntimeError):
+    """A step of a load or unload took longer than its limit."""
+
+
+class EngineDiedError(RuntimeError):
     """The engine process exited before it finished loading."""
 
 
-class Runtime:
+@dataclass(frozen=True)
+class _Wait:
+    """What one wait is for: the phase shown meanwhile, its limit, and what it waits for."""
+
+    phase: Phase
+    timeout_s: float
+    description: str
+
+
+class Runtime(StartChecks):
+    """Loading, unloading and swapping models, timed step by step and published as events."""
+
     def __init__(self, host: Host, bus: EventBus,
                  sample_interval_s: float = SAMPLE_INTERVAL_S,
                  start_timeout_s: float = START_TIMEOUT_S,
@@ -81,6 +115,7 @@ class Runtime:
     # -- public operations -------------------------------------------------
 
     def load(self, instance: Instance, model: ModelSet, engine: Engine) -> Operation:
+        """Start the engine with the model and wait until it answers; never raises."""
         with self._lock_for(instance.id):
             operation = Operation(instance.id, "load")
             self._begin(instance.id, LOAD_SPAN, target_mb=_megabytes(model))
@@ -94,6 +129,7 @@ class Runtime:
             return self._remember(operation)
 
     def unload(self, instance_id: str) -> Operation:
+        """Stop the engine and wait until its memory is back; never raises."""
         with self._lock_for(instance_id):
             operation = Operation(instance_id, "unload")
             self._begin(instance_id, UNLOAD_SPAN,
@@ -130,7 +166,7 @@ class Runtime:
             return self._remember(operation)
 
     def status(self, instance: Instance, engine: Engine,
-               process: "ProcessStatus | None" = None) -> dict:
+               process: ProcessStatus | None = None) -> dict:
         """One row of the model list.
 
         `process` is the supervisor's answer, when the caller has already got
@@ -177,13 +213,14 @@ class Runtime:
                 if instance.params.get(key) != value}
 
     def last(self, instance_id: str) -> dict | None:
+        """The last load, unload or swap of an instance, or None."""
         operation = self._last.get(instance_id)
         return operation.json() if operation else None
 
     # -- the sequences -----------------------------------------------------
 
     def _load(self, instance: Instance, model: ModelSet, engine: Engine,
-              operation: Operation, clock: "_Clock") -> None:
+              operation: Operation, clock: _Clock) -> None:
         params = self._split_if_it_will_not_fit(instance, model, engine)
         plan = engine.plan(model, instance.port, params)
         self._active[instance.id] = dict(params)
@@ -192,30 +229,29 @@ class Runtime:
         self._mark(operation, clock, Phase.STARTING, f"Starting {model.name}")
         self.host.start(ProcessSpec(instance.id, plan.argv, plan.env))
 
-        self._await(lambda: self.host.status(instance.id).running,
-                    instance.id, clock, Phase.STARTING, self.start_timeout_s,
-                    "waiting for the process to start")
+        self._await(lambda: self.host.status(instance.id).running, instance.id, clock,
+                    _Wait(Phase.STARTING, self.start_timeout_s,
+                          "waiting for the process to start"))
         # From here on the samples can be attributed to this process, which is
         # what makes the bar mean something when another model is resident.
         self._pids[instance.id] = self.host.status(instance.id).pid
         self._mark(operation, clock, Phase.PROCESS_UP, "Process running")
 
-        self._await(lambda: engine.ready(instance.port),
-                    instance.id, clock, Phase.WEIGHTS_LOADING, self.load_timeout_s,
-                    "waiting for the weights to load",
+        self._await(lambda: engine.ready(instance.port), instance.id, clock,
+                    _Wait(Phase.WEIGHTS_LOADING, self.load_timeout_s,
+                          "waiting for the weights to load"),
                     alive=lambda: self.host.status(instance.id).running)
         self._mark(operation, clock, Phase.READY, f"{model.name} ready")
 
-    def _unload(self, instance_id: str, operation: Operation, clock: "_Clock") -> None:
+    def _unload(self, instance_id: str, operation: Operation, clock: _Clock) -> None:
         # Remember the pid before stopping, so the samples during the stop can
         # still be attributed to it as its memory falls away.
         self._pids.setdefault(instance_id, self.host.status(instance_id).pid)
         self._mark(operation, clock, Phase.STOPPING, "Stopping")
         self.host.stop(instance_id)
 
-        self._await(lambda: not self.host.status(instance_id).running,
-                    instance_id, clock, Phase.STOPPING, UNLOAD_TIMEOUT_S,
-                    "waiting for the process to exit")
+        self._await(lambda: not self.host.status(instance_id).running, instance_id, clock,
+                    _Wait(Phase.STOPPING, UNLOAD_TIMEOUT_S, "waiting for the process to exit"))
         self._mark(operation, clock, Phase.PROCESS_GONE, "Process gone")
 
         self._await_settled(instance_id, clock, UNLOAD_TIMEOUT_S)
@@ -223,97 +259,10 @@ class Runtime:
         self._active.pop(instance_id, None)
         self._mark(operation, clock, Phase.MEMORY_RELEASED, "Memory released")
 
-    def _split_if_it_will_not_fit(self, instance: Instance, model: ModelSet,
-                                  engine: Engine) -> dict:
-        """Let an engine that can split do so, rather than refusing.
-
-        llama.cpp measures the card at startup and puts on as many layers as
-        fit, leaving the rest in system memory. It knows something this cannot:
-        the weights are only the floor, and the cache on top of them varies by
-        architecture — measured at 32k on the container, the gap between file
-        size and card usage ran from -476 MiB to +6,663 across four models. So
-        when the weights alone will not fit, the honest move is to hand the
-        decision to whoever can measure, not to guess a layer count here.
-
-        vLLM has no such setting: it either fits or it does not, and it says so
-        itself in a sentence naming the largest context that would have fitted.
-        Nothing is changed for it.
-
-        Only the default is relaxed. `gpu_layers = -1` means "all on the card"
-        and is what an entry has when nobody chose; a layer count, or automatic
-        already, is somebody's decision and is left exactly as it is.
-
-        The entry's own settings are not touched. What changes is how *this*
-        start is made, and the row says so — the same way it does for a request
-        that asked for a bigger context than the entry is configured with.
-        """
-        params = dict(instance.params)
-        splitting = getattr(engine, "split_setting", None)
-        if not splitting:
-            return params
-        name, only_when, value = splitting
-        if params.get(name) != only_when:
-            # A layer count, or automatic already: somebody chose that.
-            return params
-        snapshot = self.host.accelerator()
-        if snapshot.memory_kind != "dedicated" or not snapshot.memory_total_mb:
-            return params
-        free_mb = snapshot.memory_total_mb - snapshot.memory_used_mb
-        if model.size_bytes / (1024 * 1024) <= free_mb:
-            return params                       # the weights fit; leave it be
-        params[name] = value
-        return params
-
-    def _refuse_if_it_cannot_fit(self, instance: Instance, model: ModelSet,
-                                 plan) -> None:
-        """Refuse a model that is larger than the memory left on the card.
-
-        Only a necessary condition, not a sufficient one: the weights are the
-        floor, and the context cache sits on top of them, so a model that
-        passes this check can still turn out not to fit. But when the weights
-        alone exceed what is free, there is no need to start anything to find
-        out — and the alternative is a confusing crash a few seconds later.
-
-        A plan that deliberately leaves part of the model in system memory is
-        exempt. There the weights are not all meant to be on the card, so
-        comparing the whole file against free memory answers a question nobody
-        asked. It is slow, and it is a choice — the setting that turns it on
-        says how slow.
-        """
-        if getattr(plan, "splits_across_cpu", False):
-            return
-        snapshot = self.host.accelerator()
-        if snapshot.memory_kind != "dedicated" or not snapshot.memory_total_mb:
-            return
-        free_mb = snapshot.memory_total_mb - snapshot.memory_used_mb
-        needed_mb = model.size_bytes / (1024 * 1024)
-        if needed_mb > free_mb:
-            raise RuntimeError(
-                f"{model.name} needs about {needed_mb / 1024:.1f} GB but only "
-                f"{free_mb / 1024:.1f} GB is free on the card. Unload another "
-                f"model, choose a smaller one, or set how many layers go on the "
-                f"card and leave the rest in system memory.")
-
-    def _refuse_stranger(self, instance: Instance, engine: Engine) -> None:
-        """Refuse to start when something else already holds the port.
-
-        Otherwise the readiness probe answers yes — from a process this
-        manager did not start — and a load that never happened is reported as
-        a success. The likely culprit is an engine left behind by a previous
-        manager, or a second AI-Lab on the same machine.
-        """
-        if self.host.status(instance.id).running:
-            return
-        if engine.ready(instance.port):
-            raise RuntimeError(
-                f"Port {instance.port} is already answering, but this manager did "
-                f"not start it. Stop the other process before loading {instance.id}.")
-
     # -- waiting, while publishing what the accelerator is doing ------------
 
-    def _await(self, condition, instance_id: str, clock: "_Clock",
-               phase: Phase, timeout_s: float, description: str,
-               alive=None) -> None:
+    def _await(self, condition: Callable[[], bool], instance_id: str, clock: _Clock,
+               wait: _Wait, alive: Callable[[], bool] | None = None) -> None:
         """Poll until the condition holds, publishing a reading each time.
 
         The readings are the progress bar: this is the only place that decides
@@ -324,22 +273,23 @@ class Runtime:
         without this the manager would sit through the full timeout — fifteen
         minutes of "loading" for a failure that happened immediately.
         """
-        deadline = time.monotonic() + timeout_s
+        deadline = time.monotonic() + wait.timeout_s
         while True:
-            self._publish(instance_id, phase, clock)
+            self._publish(instance_id, wait.phase, clock)
             if condition():
                 return
             if alive is not None and not alive():
-                raise EngineDied(self._why(instance_id))
+                raise EngineDiedError(self._why(instance_id))
             if time.monotonic() > deadline:
                 detail = self._why(instance_id)
-                raise Timeout(f"Timed out after {timeout_s:.0f}s {description}. {detail}")
+                raise LoadTimeoutError(
+                    f"Timed out after {wait.timeout_s:.0f}s {wait.description}. {detail}")
             time.sleep(self.sample_interval_s)
 
     def _why(self, instance_id: str) -> str:
         return self.diagnostics.why(instance_id)
 
-    def _await_settled(self, instance_id: str, clock: "_Clock", timeout_s: float) -> None:
+    def _await_settled(self, instance_id: str, clock: _Clock, timeout_s: float) -> None:
         """Wait for memory to stop falling.
 
         The process exiting and the driver returning its memory are separate
@@ -352,24 +302,27 @@ class Runtime:
             # The card total, not the process: by now the process is gone, and
             # what we are waiting for is the driver handing its memory back.
             used = snapshot.memory_used_mb
-            steady = steady + 1 if previous is not None and used >= previous - 1.0 else 0
+            holding = previous is not None and used >= previous - SETTLED_TOLERANCE_MB
+            steady = steady + 1 if holding else 0
             previous = used
             if time.monotonic() > deadline:
                 return          # good enough; do not fail an unload over this
             time.sleep(self.sample_interval_s)
 
-    def _publish(self, instance_id: str, phase: Phase, clock: "_Clock"):
+    def _publish(self, instance_id: str, phase: Phase, clock: _Clock) -> AcceleratorSnapshot:
         snapshot = self.host.accelerator(pid=self._pids.get(instance_id))
         self.bus.publish(self._event(instance_id, phase, clock, snapshot))
         return snapshot
 
-    def _event(self, instance_id: str, phase: Phase, clock: "_Clock", snapshot,
-               message: str = "", completed: bool = False) -> RuntimeEvent:
+    def _event(self, instance_id: str, phase: Phase, clock: _Clock,
+               snapshot: AcceleratorSnapshot, mark: str | None = None) -> RuntimeEvent:
         """One update: how far along, and how much memory, kept separate.
 
         The memory figures are per instance rather than per card, since with
-        two models resident the card total says nothing about either.
+        two models resident the card total says nothing about either. `mark`
+        is the message of a step completed; None for a reading on the way.
         """
+        completed, message = mark is not None, mark or ""
         bar = self._progress.get(instance_id) or RuntimeProgress()
         return RuntimeEvent(
             instance_id=instance_id, phase=phase, elapsed_ms=clock.elapsed_ms(),
@@ -396,13 +349,12 @@ class Runtime:
 
     # -- bookkeeping -------------------------------------------------------
 
-    def _mark(self, operation: Operation, clock: "_Clock", phase: Phase, message: str) -> None:
+    def _mark(self, operation: Operation, clock: _Clock, phase: Phase, message: str) -> None:
         operation.steps.append(Step(phase, clock.elapsed_ms()))
         snapshot = self.host.accelerator(pid=self._pids.get(operation.instance_id))
-        self.bus.publish(self._event(operation.instance_id, phase, clock,
-                                     snapshot, message, completed=True))
+        self.bus.publish(self._event(operation.instance_id, phase, clock, snapshot, message))
 
-    def _fail(self, operation: Operation, clock: "_Clock", error: Exception) -> None:
+    def _fail(self, operation: Operation, clock: _Clock, error: Exception) -> None:
         operation.ok = False
         operation.error = str(error) or error.__class__.__name__
         self._mark(operation, clock, Phase.FAILED, operation.error)
@@ -422,12 +374,15 @@ class Runtime:
 
 def _megabytes(model: ModelSet) -> float:
     """Where a load is heading: the weights have to arrive in full."""
-    return model.size_bytes / (1024 * 1024)
+    return model.size_bytes / MIB
 
 
 class _Clock:
+    """Milliseconds since an operation began."""
+
     def __init__(self) -> None:
         self._start = time.monotonic()
 
     def elapsed_ms(self) -> int:
+        """How long since it began."""
         return int((time.monotonic() - self._start) * 1000)

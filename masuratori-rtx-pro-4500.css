@@ -1,0 +1,148 @@
+/* Styles of the RTX PRO 4500 measurement pages (masuratori-rtx-pro-4500*.html). */
+
+:root {
+  --ground:      #f6f7f4;
+  --surface:     #ffffff;
+  --surface-alt: #eef1ec;
+  --ink:         #131a17;
+  --ink-soft:    #4c554f;
+  --ink-faint:   #77807a;
+  --rule:        #d7ddd6;
+  --fit:         #1d6f52;
+  --fit-wash:    #dfeee7;
+  --spill:       #9a5a1e;
+  --spill-wash:  #f4e6d6;
+  --flag:        #8d2f36;
+  --flag-wash:   #f7e3e4;
+  --shadow:      0 1px 2px rgba(19, 26, 23, .06), 0 8px 24px -16px rgba(19, 26, 23, .3);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #0f1411;
+    --surface:     #171d19;
+    --surface-alt: #1e2622;
+    --ink:         #e7ebe6;
+    --ink-soft:    #a8b1ab;
+    --ink-faint:   #79837c;
+    --rule:        #2b342e;
+    --fit:         #57c396;
+    --fit-wash:    #16301f;
+    --spill:       #d99a4e;
+    --spill-wash:  #33240f;
+    --flag:        #e08b91;
+    --flag-wash:   #38191c;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:      #0f1411;
+  --surface:     #171d19;
+  --surface-alt: #1e2622;
+  --ink:         #e7ebe6;
+  --ink-soft:    #a8b1ab;
+  --ink-faint:   #79837c;
+  --rule:        #2b342e;
+  --fit:         #57c396;
+  --fit-wash:    #16301f;
+  --spill:       #d99a4e;
+  --spill-wash:  #33240f;
+  --flag:        #e08b91;
+  --flag-wash:   #38191c;
+  --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--ground); color: var(--ink);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 17px; line-height: 1.62; margin: 0; padding: 0 24px 96px;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1140px; margin: 0 auto; }
+.col  { max-width: 64ch; }
+
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2.1rem, 5.2vw, 3.1rem); letter-spacing: -.028em; font-weight: 660; }
+h2 { font-size: clamp(1.35rem, 2.6vw, 1.7rem); letter-spacing: -.02em; font-weight: 640; }
+h3 { font-size: 1.06rem; letter-spacing: -.008em; font-weight: 640; }
+p  { margin: 0; }
+
+.eyebrow { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+           font-size: .705rem; letter-spacing: .14em; text-transform: uppercase;
+           color: var(--ink-faint); font-weight: 600; }
+.lede { font-size: 1.16rem; color: var(--ink-soft); }
+
+header.masthead { padding: 72px 0 40px; border-bottom: 2px solid var(--ink);
+                  display: flex; flex-direction: column; gap: 20px; }
+section { padding-top: 56px; display: flex; flex-direction: column; gap: 20px; }
+.stack  { display: flex; flex-direction: column; gap: 14px; }
+
+.verdict { background: var(--surface); border: 1px solid var(--rule);
+           border-left: 4px solid var(--fit); border-radius: 3px;
+           padding: 22px 26px; box-shadow: var(--shadow);
+           display: flex; flex-direction: column; gap: 10px; }
+.verdict.alt { border-left-color: var(--spill); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; }
+.card { background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+        padding: 22px; box-shadow: var(--shadow);
+        display: flex; flex-direction: column; gap: 12px; }
+.tag { align-self: flex-start; font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+       font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+       padding: 3px 9px; border-radius: 2px; font-weight: 650; }
+.tag.fit   { background: var(--fit-wash);   color: var(--fit); }
+.tag.spill { background: var(--spill-wash); color: var(--spill); }
+.kv { display: flex; flex-direction: column; gap: 7px; font-size: .9rem; }
+.kv div { display: flex; justify-content: space-between; gap: 16px;
+          border-bottom: 1px dotted var(--rule); padding-bottom: 6px; }
+.kv .k { color: var(--ink-faint); }
+.kv .v { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+         font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.scroller { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .875rem; min-width: 700px; }
+caption { text-align: left; padding: 16px 18px 12px; color: var(--ink-faint);
+          font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: .705rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; }
+th, td { padding: 10px 16px; text-align: right; border-top: 1px solid var(--rule); }
+th:first-child, td:first-child { text-align: left; }
+thead th { color: var(--ink-faint); font-weight: 600; font-size: .78rem;
+           background: var(--surface-alt); border-top: none; }
+tbody td.n { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+             font-variant-numeric: tabular-nums; }
+tbody tr.group-head td { background: var(--surface-alt); font-weight: 640; text-align: left; }
+tbody tr.hi td { background: var(--fit-wash); }
+.best  { color: var(--fit);   font-weight: 700; }
+.worst { color: var(--spill); }
+.weak  { color: var(--flag);  font-weight: 650; }
+
+.chart { display: flex; flex-direction: column; gap: 16px; }
+.bar-row { display: grid; grid-template-columns: minmax(170px, 230px) 1fr; gap: 16px; align-items: center; }
+.bar-label { font-size: .87rem; color: var(--ink-soft); }
+.bar-lane { display: flex; align-items: center; gap: 10px; }
+.bar { height: 20px; border-radius: 2px; min-width: 2px; display: block; }
+.bar.fit { background: var(--fit); } .bar.spill { background: var(--spill); }
+.bar-val { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+           font-variant-numeric: tabular-nums; font-size: .84rem; font-weight: 650; white-space: nowrap; }
+
+code { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+       font-size: .87em; background: var(--surface-alt); padding: 1px 6px;
+       border-radius: 2px; border: 1px solid var(--rule); }
+ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 9px; }
+li::marker { color: var(--ink-faint); }
+hr { border: none; border-top: 1px solid var(--rule); margin: 0; }
+.caveat { background: var(--spill-wash); border: 1px solid var(--spill); border-radius: 3px;
+          padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+.errbox { background: var(--flag-wash); border: 1px solid var(--flag); border-radius: 3px;
+          padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+footer { padding-top: 56px; color: var(--ink-faint); font-size: .84rem; }
+a { color: var(--fit); }
+:focus-visible { outline: 2px solid var(--fit); outline-offset: 3px; }
+
+/* Shared one-off styles that used to be written into the pages. */
+.note { font-size: .88rem; color: var(--ink-soft); }
+.note-wide { font-size: .9rem; color: var(--ink-soft); }
+.w-957 { width: 95.7%; }
+.w-931 { width: 93.1%; }
+.w-900 { width: 90.0%; }
+.w-864 { width: 86.4%; }

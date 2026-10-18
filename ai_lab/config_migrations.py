@@ -10,6 +10,7 @@ SCHEMA_VERSION = 1
 
 
 def migrate(raw: dict) -> dict:
+    """The configuration brought up to the current schema; refuses one from a newer release."""
     if not isinstance(raw, dict):
         raise ValueError("AI-Lab configuration must be a JSON object")
     version = raw.get("schema_version", 0)

@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import unittest
+from typing import Any, cast
 import urllib.error
 import urllib.request
 import wave
@@ -55,7 +56,7 @@ def form(fields, files=None):
 class PlaygroundTests(unittest.TestCase):
     def setUp(self):
         self.backend = FakeBackend()
-        self.server = higgs_playground.serve(self.backend, 0)
+        self.server = higgs_playground.serve(cast(Any, self.backend), 0)
         self.base = f'http://127.0.0.1:{self.server.server_address[1]}'
 
     def tearDown(self):

@@ -17,7 +17,7 @@ build-backend = "setuptools.build_meta"
 include = ["ai_lab*"]
 
 [tool.setuptools.package-data]
-ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*",
+ai_lab = ["public_services.json", "web/*", "web/css/*", "web/js/*", "web/js/views/*",
           "comfyui_custom_nodes/ai_lab_preset/web/*",
           "comfyui_templates/*.json",
           "vendor/sglang_omni/playground/higgs/frontend/*",
@@ -26,3 +26,24 @@ ai_lab = ["web/*", "web/css/*", "web/js/*", "web/js/views/*",
 [tool.coverage.run]
 # Code copied from other projects is not ours to test; see ai_lab/vendor/__init__.py.
 omit = ["ai_lab/vendor/*"]
+
+[tool.mypy]
+# The benchmark harness's scripts import their neighbours by plain name
+# (`shared.*`, `evalcommon`), the way they are run.
+mypy_path = "benchmark/harness"
+
+# The engines' own libraries live in each engine's environment, not in the
+# manager's, so the type checker cannot read them here. Listed by name, so a
+# typo in one of AI-Lab's own imports is still reported.
+[[tool.mypy.overrides]]
+module = [
+    "acestep.*", "aiohttp", "chatterbox.*", "cv2", "dia2", "fireredtts3.*",
+    "fish_speech.*", "funasr", "gradio", "heartlib", "infer_preview", "insightface.*",
+    "kokoro", "librosa", "mlx_lm", "mlx_lm.*", "mlx_vlm", "mlx_vlm.*", "mlx_whisper",
+    "mmgp", "mulacover", "nemo", "nemo.*", "numpy", "omnivoice.*", "ormsgpack",
+    "paddleocr", "PIL", "PIL.*", "pyannote.*", "pyarrow", "pyarrow.*", "qwen_asr",
+    "qwen_tts", "qwen_tts.*", "sacrebleu.*", "silero_vad", "soundfile",
+    "stable_audio_3", "stable_audio_3.*", "talking_avatar.*", "tangoflux", "torch",
+    "torch.*", "torchaudio", "torchmetrics.*", "transformers", "voxcpm", "voxcpm.*",
+]
+ignore_missing_imports = true

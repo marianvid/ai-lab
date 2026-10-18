@@ -37,6 +37,14 @@ GPU_QUERY = "name,memory.used,memory.total,temperature.gpu,utilization.gpu"
 APPS_QUERY = "pid,used_gpu_memory"
 
 
+# The engines whose program is configured per machine (llama.cpp is found on PATH).
+LINUX_ENGINES = ("vllm", "nemo", "onnx", "pyannote", "paddleocr", "comfyui", "acestep",
+                 "qwentts", "higgs", "heartmula", "yue2", "comfy_music", "mulacover",
+                 "levo2", "stableaudio3")
+# A line of `--query-compute-apps` is (pid, memory), of `--query-gpu` five fields.
+APP_FIELDS = 2
+GPU_FIELDS = 5
+
 # Engines whose own program name is looked up on PATH when none is configured.
 _FOUND_ON_PATH = {"vllm": "vllm", "nemo": "nemo", "onnx": "onnxruntime"}
 
@@ -49,40 +57,12 @@ SUPPORTED_ENGINES = frozenset({"llamacpp", "vllm", "nemo", "onnx", "pyannote",
 class LinuxHost:
     """See `base.Host` for what each method promises."""
 
-    def __init__(self, control_helper: str = CONTROL_HELPER,
-                 vllm_binary: str | None = None,
-                 nemo_binary: str | None = None,
-                 onnx_binary: str | None = None,
-                 pyannote_binary: str | None = None,
-                 paddleocr_binary: str | None = None,
-                 comfyui_binary: str | None = None,
-                 acestep_binary: str | None = None,
-                 qwentts_binary: str | None = None,
-                 higgs_binary: str | None = None,
-                 heartmula_binary: str | None = None,
-                 yue2_binary: str | None = None,
-                 comfy_music_binary: str | None = None,
-                 mulacover_binary: str | None = None,
-                 levo2_binary: str | None = None,
-                 stableaudio3_binary: str | None = None) -> None:
+    def __init__(self, binaries: dict[str, str | None] | None = None,
+                 control_helper: str = CONTROL_HELPER) -> None:
         self.control_helper = control_helper
-        # Passed in from the engines section of config.json, because a
-        # virtualenv install is invisible to PATH.
-        self.vllm_binary = vllm_binary
-        self.nemo_binary = nemo_binary
-        self.onnx_binary = onnx_binary
-        self.pyannote_binary = pyannote_binary
-        self.paddleocr_binary = paddleocr_binary
-        self.comfyui_binary = comfyui_binary
-        self.acestep_binary = acestep_binary
-        self.qwentts_binary = qwentts_binary
-        self.higgs_binary = higgs_binary
-        self.heartmula_binary = heartmula_binary
-        self.yue2_binary = yue2_binary
-        self.comfy_music_binary = comfy_music_binary
-        self.mulacover_binary = mulacover_binary
-        self.levo2_binary = levo2_binary
-        self.stableaudio3_binary = stableaudio3_binary
+        # Engine id -> its program, from the engines section of config.json,
+        # because a virtualenv install is invisible to PATH.
+        self.binaries = {engine: (binaries or {}).get(engine) for engine in LINUX_ENGINES}
         # What kind of accelerator this machine has, once it has said. It does
         # not change while the machine is running, and asking costs 30 ms.
         self._kind = ""
@@ -90,6 +70,7 @@ class LinuxHost:
     # -- capabilities ------------------------------------------------------
 
     def capabilities(self) -> Capabilities:
+        """The engines installed here, the supervisor (systemd) and the accelerator."""
         # An engine counts as installed when its program is configured.
         # vLLM, NeMo and ONNX live in their own virtual environments, normally
         # absent from PATH even when present, so PATH is only their fallback.
@@ -109,14 +90,7 @@ class LinuxHost:
 
     def _configured_binaries(self) -> dict[str, str | None]:
         """Engine id → the program configured for it in config.json."""
-        return {"vllm": self.vllm_binary, "nemo": self.nemo_binary,
-                "onnx": self.onnx_binary, "pyannote": self.pyannote_binary,
-                "paddleocr": self.paddleocr_binary, "comfyui": self.comfyui_binary,
-                "acestep": self.acestep_binary, "qwentts": self.qwentts_binary,
-                "higgs": self.higgs_binary, "heartmula": self.heartmula_binary,
-                "yue2": self.yue2_binary, "comfy_music": self.comfy_music_binary,
-                "mulacover": self.mulacover_binary, "levo2": self.levo2_binary,
-                "stableaudio3": self.stableaudio3_binary}
+        return dict(self.binaries)
 
     def _accelerator_kind(self) -> str:
         """Whether there is a card here, remembered once it says yes.
@@ -162,13 +136,16 @@ class LinuxHost:
     # -- processes ---------------------------------------------------------
 
     def start(self, spec: ProcessSpec) -> None:
+        """Write the launch file and start the instance's unit."""
         launch.write_spec(spec)
         self._control("start", spec.instance_id)
 
     def stop(self, instance_id: str) -> None:
+        """Stop the instance's unit; returns once systemd has stopped it."""
         self._control("stop", instance_id)
 
     def logs(self, instance_id: str, lines: int = 15) -> list[str]:
+        """The last lines of the instance's journal."""
         unit = UNIT.format(instance_id=instance_id)
         result = run(["journalctl", "-u", unit, "-n", str(lines),
                       "--no-pager", "--output=cat"], timeout=10)
@@ -186,6 +163,7 @@ class LinuxHost:
         """
 
     def status(self, instance_id: str) -> ProcessStatus:
+        """Whether one instance runs, and its pid."""
         return self.statuses([instance_id])[instance_id]
 
     def statuses(self, instance_ids: list[str]) -> dict[str, ProcessStatus]:
@@ -249,6 +227,7 @@ class LinuxHost:
     # -- accelerator -------------------------------------------------------
 
     def accelerator(self, pid: int | None = None) -> AcceleratorSnapshot:
+        """The card's reading, with `pid`'s share of its memory when one is given."""
         result = run(["nvidia-smi", f"--query-gpu={GPU_QUERY}",
                       "--format=csv,noheader,nounits"], timeout=5)
         if not result.ok or not result.stdout.strip():
@@ -273,7 +252,7 @@ class LinuxHost:
             return 0.0
         for line in result.stdout.splitlines():
             fields = [item.strip() for item in line.split(",")]
-            if len(fields) == 2 and fields[0].isdigit() and int(fields[0]) == pid:
+            if len(fields) == APP_FIELDS and fields[0].isdigit() and int(fields[0]) == pid:
                 try:
                     return float(fields[1])
                 except ValueError:
@@ -283,10 +262,10 @@ class LinuxHost:
     @staticmethod
     def _parse(line: str) -> AcceleratorSnapshot:
         fields = [item.strip() for item in line.split(",")]
-        if len(fields) < 5:
+        if len(fields) < GPU_FIELDS:
             return AcceleratorSnapshot(available=False, name="", kind="none",
                                        memory_kind="dedicated")
-        name, used, total, temperature, utilization = fields[:5]
+        name, used, total, temperature, utilization = fields[:GPU_FIELDS]
 
         def number(text: str) -> float | None:
             try:

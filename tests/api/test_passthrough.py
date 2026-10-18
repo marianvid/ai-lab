@@ -9,7 +9,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from ai_lab.api.passthrough import forward
+from ai_lab.api.passthrough import Hooks, Waits, forward
 
 # Scaled-down limits: the idle limit is shorter than the prompt-reading pause,
 # the first-byte limit is longer.
@@ -74,10 +74,10 @@ class ForwardTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         return f"http://127.0.0.1:{server.server_address[1]}/v1/chat/completions"
 
-    def forward(self, behaviour, **kwargs):
+    def forward(self, behaviour, on_first_chunk=None):
         return forward(self.serve(behaviour), {"stream": True},
-                       first_byte_s=FIRST_BYTE_S,
-                       between_bytes_s=BETWEEN_BYTES_S, **kwargs)
+                       Waits(FIRST_BYTE_S, BETWEEN_BYTES_S),
+                       Hooks(on_first_chunk=on_first_chunk))
 
     def test_a_long_silent_prompt_is_covered_by_the_first_byte_limit(self):
         # The fault seen live: a 34k-token prompt on llama.cpp came back empty

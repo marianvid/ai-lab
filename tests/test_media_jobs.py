@@ -12,9 +12,9 @@ from ai_lab.types import Task
 
 
 class Handler(BaseHTTPRequestHandler):
-    requests = []
-    block = None
-    refuse = None
+    requests: list[tuple[str, dict]] = []
+    block: threading.Event | None = None
+    refuse: str | None = None
 
     def do_POST(self):
         if self.path.endswith('/cancel'):
@@ -93,7 +93,7 @@ class MediaJobTests(unittest.TestCase):
             if job['status'] == status:
                 return job
             time.sleep(.01)
-        self.fail(f'job never reached {status}')
+        raise self.failureException(f'job never reached {status}')
 
     def submit(self):
         return self.jobs.submit({'model': 'music',
@@ -122,13 +122,13 @@ class MediaJobTests(unittest.TestCase):
         self.assertFalse((self.jobs.store.results_dir / (job['id'] + '.json')).exists())
 
     def test_queued_job_can_be_cancelled_before_it_runs(self):
-        Handler.block = threading.Event()
+        block = Handler.block = threading.Event()
         first = self.submit()
         self.wait_for(first['id'], 'running')
         second = self.submit()
         cancelled = self.jobs.cancel(second['id'])
         self.assertEqual(cancelled['status'], 'cancelled')
-        Handler.block.set()
+        block.set()
         self.wait_for(first['id'], 'succeeded')
         self.assertEqual(len(Handler.requests), 1)
 
