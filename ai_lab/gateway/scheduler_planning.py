@@ -118,7 +118,7 @@ class Planner:
         if state.loaded[head.shape] >= self._places(head.shape):
             return False
         state.queue.pop(0)
-        if not self.gone(head):
+        if not self._gone(head):
             self.take_place(state, head.shape)
             ready.append(head)
         return True
@@ -137,7 +137,7 @@ class Planner:
             # It will not fit however much is unloaded. Say so to the whole
             # run rather than emptying the machine to discover it.
             state.queue.pop(0)
-            if not self.gone(head):
+            if not self._gone(head):
                 head.fail(WillNotFitError(
                     "there is not enough memory for this model on this "
                     "machine, whatever else is unloaded"))
@@ -174,7 +174,7 @@ class Planner:
         while taken < len(state.queue) and state.queue[taken].shape == shape:
             entry = state.queue[taken]
             taken += 1
-            if not self.gone(entry):
+            if not self._gone(entry):
                 photograph.append(entry)
         state.queue = state.queue[taken:]
         return photograph
@@ -223,7 +223,7 @@ class Planner:
         overflow = []
         room = self._places(shape)
         for entry in photograph:
-            if self.gone(entry):
+            if self._gone(entry):
                 continue
             if state.loaded[shape] >= room:
                 overflow.append(entry)
@@ -234,7 +234,7 @@ class Planner:
         return ready
 
     @staticmethod
-    def gone(entry: Waiting) -> bool:
+    def _gone(entry: Waiting) -> bool:
         """Whether the request is no longer to be served. Dropped, and woken.
 
         Asked at the last possible moment, because the expensive part is what

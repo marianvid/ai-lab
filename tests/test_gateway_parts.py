@@ -165,14 +165,22 @@ class PlanningTests(unittest.TestCase):
         def withdrawn():
             raise AdmissionWithdrawnError(reason)
         entry = waiting("b", withdrawn)
-        self.assertTrue(Planner.gone(entry))
+        self.state.queue = [entry]
+        _, switch = self.planner.plan(self.state)
+        self.assertIsNone(switch)                       # nothing loaded for it
+        self.assertTrue(entry.admitted.is_set())
         assert isinstance(entry.failure, AdmissionWithdrawnError)
         self.assertIs(entry.failure.reason, reason)
 
     def test_a_question_that_cannot_be_answered_serves_the_request(self):
         def broken():
             raise RuntimeError("no idea")
-        self.assertFalse(Planner.gone(waiting("b", broken)))
+        entry = waiting("b", broken)
+        self.state.queue = [entry]
+        _, switch = self.planner.plan(self.state)
+        assert switch is not None
+        self.assertEqual(switch[2], [entry])            # in the run the switch is for
+        self.assertIsNone(entry.failure)
 
     def test_a_load_that_failed_fails_its_whole_run(self):
         photograph = [waiting("b", number=1), waiting("b", number=2)]
