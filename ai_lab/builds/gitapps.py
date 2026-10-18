@@ -6,12 +6,12 @@ import json
 import re
 import shutil
 import subprocess
-import threading
 import time
 from pathlib import Path
 
 from ..disk import free_bytes, tree_size
 from ..events import EventBus
+from .background_job import BackgroundJob, fail_and_clean
 from .install_log import Command, Elapsed, InstallLog, since
 from .package_environments import replace_link
 
@@ -40,10 +40,9 @@ class GitApplicationInstall:
         self.uv = source.get("uv", "uv")
         self.verify_module = source.get("verify_module", "server")
         self.requires_cuda = bool(source.get("requires_cuda", False))
-        self.log = InstallLog(engine_id, bus)
-        self._lock = threading.RLock()
-        self._thread: threading.Thread | None = None
-        self._state, self._error, self._latest = "idle", "", ""
+        self.job = BackgroundJob(f"install-{engine_id}", "an update")
+        self.log = InstallLog(engine_id, bus, self.job.lines)
+        self._latest = ""
         self._component_latest: dict[str, str] = {}
 
     @property
@@ -106,8 +105,8 @@ class GitApplicationInstall:
                 "update_available": bool(installed and self._latest and installed != self._latest),
                 "environments": environments,
                 "spare_bytes": sum(x["size_bytes"] for x in environments if not x["active"]),
-                "free_bytes": free_bytes(self.root), "state": self._state,
-                "error": self._error, "log": list(self.log.lines),
+                "free_bytes": free_bytes(self.root), "state": self.job.state,
+                "error": self.job.error, "log": self.job.log(),
                 "components": self._components(True)}
 
     def install(self, version: str = "") -> dict:
@@ -129,14 +128,7 @@ class GitApplicationInstall:
         return self._start(self._metadata(active).get("core_commit") or "HEAD", name)
 
     def _start(self, core_ref: str, component: str) -> dict:
-        with self._lock:
-            if self._state == "running":
-                raise ValueError("A ComfyUI update is already running")
-            self.log.lines.clear()
-            self._error, self._state = "", "running"
-            self._thread = threading.Thread(target=self._run, args=(core_ref, component),
-                                            daemon=True, name=f"install-{self.engine_id}")
-            self._thread.start()
+        self.job.start(self._run, core_ref, component)
         return self.status()
 
     def _run(self, core_ref: str, component: str) -> None:
@@ -150,14 +142,13 @@ class GitApplicationInstall:
             target.mkdir(parents=True)
             self._build(target, commit, component, elapsed)
             self.point_at(target)
-            self._state, self._latest = "done", commit[:SHORT]
+            self._latest = commit[:SHORT]
+            self.job.succeeded()
             self._say("status", f"ComfyUI now runs {commit[:SHORT]}; previous release retained",
                       elapsed())
         except Exception as error:
-            self._state, self._error = "failed", str(error) or error.__class__.__name__
-            self._say("err", self._error, elapsed())
-            if target is not None and target.exists() and target != self.active():
-                shutil.rmtree(target, ignore_errors=True)
+            fail_and_clean(self.job, error, target, self.active(),
+                           lambda text: self._say("err", text, elapsed()))
         self._announce()
 
     def _build(self, target: Path, commit: str, component: str, elapsed: Elapsed) -> None:
@@ -214,22 +205,24 @@ class GitApplicationInstall:
         replace_link(self.link, release)
 
     def activate(self, name: str) -> dict:
-        """Run the installed release called `name`."""
+        """Run the installed release called `name` (refused while an update runs)."""
         release = self.root / name
-        if release not in [Path(x["path"]) for x in self.environments(False)]:
-            raise KeyError(f"No installed release called {name}")
-        self.point_at(release)
+        with self.job.idle("switch releases"):
+            if release not in [Path(x["path"]) for x in self.environments(False)]:
+                raise KeyError(f"No installed release called {name}")
+            self.point_at(release)
         self._announce()
         return self.status()
 
     def remove(self, name: str) -> dict:
-        """Delete an installed release that is not the one in use."""
+        """Delete an installed release that is not the one in use (refused while an update runs)."""
         release = self.root / name
-        if self.active() == release.resolve():
-            raise ValueError(f"{name} is the release in use")
-        if release not in [Path(x["path"]) for x in self.environments(False)]:
-            raise KeyError(f"No installed release called {name}")
-        shutil.rmtree(release)
+        with self.job.idle("remove a release"):
+            if self.active() == release.resolve():
+                raise ValueError(f"{name} is the release in use")
+            if release not in [Path(x["path"]) for x in self.environments(False)]:
+                raise KeyError(f"No installed release called {name}")
+            shutil.rmtree(release)
         self._announce()
         return self.status()
 

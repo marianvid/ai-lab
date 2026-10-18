@@ -47,11 +47,34 @@ class GitApplicationInstallTests(unittest.TestCase):
         with patch.object(self.install, "_remote_commit", return_value="b" * 40), \
              patch.object(self.install, "_stream", side_effect=ValueError("install failed")):
             self.install.install("HEAD")
-            assert self.install._thread is not None
-            self.install._thread.join(timeout=2)
+            assert self.install.job.thread is not None
+            self.install.job.thread.join(timeout=2)
         self.assertEqual(self.install.active(), active.resolve())
         self.assertEqual(self.install.status()["state"], "failed")
         self.assertFalse((self.root / (".release-" + "b" * 12)).exists())
+
+    def test_a_release_is_not_switched_or_removed_while_an_update_runs(self):
+        import threading
+        active = self.release(".release-first", "a" * 40)
+        self.install.point_at(active)
+        started, release = threading.Event(), threading.Event()
+
+        def hold(*_args, **_kwargs):
+            started.set()
+            release.wait(5)
+        with patch.object(self.install, "_remote_commit", return_value="b" * 40), \
+             patch.object(self.install, "_stream", side_effect=hold):
+            self.install.install("HEAD")
+            self.assertTrue(started.wait(5))
+            try:
+                with self.assertRaisesRegex(ValueError, "while .* running"):
+                    self.install.activate(active.name)
+                with self.assertRaisesRegex(ValueError, "while .* running"):
+                    self.install.remove(active.name)
+            finally:
+                release.set()
+                assert self.install.job.thread is not None
+                self.install.job.thread.join(timeout=5)
 
     def test_dirty_custom_node_is_never_updated(self):
         active = self.release(".release-first", "a" * 40)

@@ -13,22 +13,20 @@ the new binary starts, and switch to it — or put everything back on failure.
 from __future__ import annotations
 
 import shutil
-import threading
 import time
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..disk import free_bytes
 from ..events import EventBus
+from .background_job import BackgroundJob
 from .build_commands import BuildTools, SubprocessStream
 from .source_checkout import GitCheckout
 from .source_compiled import CHECKOUT_S, CompiledVersions
 from .source_versions import DEFAULT_LINE, LINES, Version, mark_version, marked_version
 from ..types import ChangeEvent, LogEvent
 
-LOG_LINES = 500
 BUILD_TIMEOUT = 3600
 VERIFY_TIMEOUT = 60
 
@@ -75,8 +73,10 @@ class _Attempt:
 class SourceBuild:
     """One engine's source checkout, and the ability to update it.
 
-    It alone owns its lock, which guards the update's state and log lines; its
-    checkout and compiled versions hold no state that needs one.
+    Its update runs as a `BackgroundJob`, which owns the only lock: it guards
+    the update's state, error and log lines, and keeps a version from being
+    switched or removed while the update runs. The checkout and the compiled
+    versions hold no state that needs one.
     """
 
     def __init__(self, engine_id: str, path: str, bus: EventBus,
@@ -94,11 +94,7 @@ class SourceBuild:
             Path(options.builds) if options.builds else None,
             Path(options.legacy_build) if options.legacy_build else None, self.checkout)
         self.commands = tools.commands or SubprocessStream()
-        self._lines: deque[str] = deque(maxlen=LOG_LINES)
-        self._lock = threading.RLock()
-        self._thread: threading.Thread | None = None
-        self._state = "idle"          # idle, running, done, failed
-        self._error = ""
+        self.job = BackgroundJob(f"build-{engine_id}", "a build")
         self._latest: Version | None = None
 
     # -- the checkout and the compiled versions, as before ------------------
@@ -136,13 +132,15 @@ class SourceBuild:
 
     def activate(self, name: str) -> dict:
         """Run the compiled build called `name`, with the checkout moved to its source."""
-        self.compiled.activate(name)
+        with self.job.idle("switch versions"):
+            self.compiled.activate(name)
         self._announce()
         return self.status()
 
     def remove(self, name: str) -> dict:
         """Delete a compiled build that is not the one in use."""
-        self.compiled.remove(name)
+        with self.job.idle("remove a version"):
+            self.compiled.remove(name)
         self._announce()
         return self.status()
 
@@ -159,8 +157,8 @@ class SourceBuild:
             "latest": latest.tag if latest else "", "line": self.line,
             "lines": list(LINES),
             "update_available": self.checkout.update_available(installed, latest),
-            "note": self.checkout.note(installed), "state": self._state, "error": self._error,
-            "log": list(self._lines),
+            "note": self.checkout.note(installed), "state": self.job.state, "error": self.job.error,
+            "log": self.job.log(),
             "environments": [item.json() for item in environments],
             "spare_bytes": sum(item.size_bytes for item in environments
                                if not item.active),
@@ -220,18 +218,12 @@ class SourceBuild:
 
         Returns immediately; progress arrives on the event stream.
         """
-        with self._lock:
-            if self._state == "running":
-                raise ValueError("A build is already running")
-            if not self.exists:
-                raise ValueError(f"No git checkout at {self.path}")
-            self._lines.clear()
-            self._error = ""
-            self._state = "running"
-            self._thread = threading.Thread(target=self._run, daemon=True,
-                                            name=f"build-{self.engine_id}")
-            self._thread.start()
+        self.job.start(self._run, check=self._refuse_without_checkout)
         return self.status()
+
+    def _refuse_without_checkout(self) -> None:
+        if not self.exists:
+            raise ValueError(f"No git checkout at {self.path}")
 
     def _run(self) -> None:
         attempt = _Attempt(time.monotonic(), self.installed())
@@ -241,7 +233,7 @@ class SourceBuild:
             if attempt.target_dir:
                 self._verify_and_select(attempt.target_dir, source, attempt)
             after = self.installed()
-            self._state = "done"
+            self.job.succeeded()
             self._latest = None          # force a fresh check before offering another
             self._announce()
             self._say("status", f"Finished at {after.tag}", attempt.elapsed())
@@ -304,10 +296,12 @@ class SourceBuild:
                   + (f" {old.name} is kept for rollback." if old else ""), attempt.elapsed())
 
     def _failed(self, error: Exception, attempt: _Attempt) -> None:
-        """Say why, delete the half-made build, and put the checkout back."""
-        self._state = "failed"
-        self._error = str(error) or error.__class__.__name__
-        self._say("err", self._error, attempt.elapsed())
+        """Say why, delete the half-made build, put the checkout back — then mark it failed.
+
+        Marked last, so a version cannot be switched while the checkout is
+        still being put back.
+        """
+        self._say("err", str(error) or error.__class__.__name__, attempt.elapsed())
         target_dir = attempt.target_dir
         if attempt.created and target_dir and target_dir.exists() \
                 and target_dir != self.active():
@@ -317,6 +311,7 @@ class SourceBuild:
         # upstream with the binary that actually runs.
         if self.build_root:
             self.compiled.back_to(attempt.previous)
+        self.job.failed(error)
         self._announce()
 
     def _stream(self, command: list[str], elapsed: Elapsed, timeout: int) -> None:
@@ -331,7 +326,6 @@ class SourceBuild:
         self.bus.publish(ChangeEvent(topic="engines"))
 
     def _say(self, stream: str, text: str, elapsed_ms: int) -> None:
-        with self._lock:
-            self._lines.append(text)
+        self.job.say(text)
         self.bus.publish(LogEvent(source=self.engine_id, stream=stream,
                                   text=text, elapsed_ms=elapsed_ms))

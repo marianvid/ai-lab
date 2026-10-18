@@ -24,8 +24,8 @@ from ai_lab.builds.package_install import CURRENT, InstallTools, PackageInstall,
 
 def finish(install):
     """Wait for the install started in the background."""
-    assert install._thread is not None
-    install._thread.join(timeout=10)
+    assert install.job.thread is not None
+    install.job.thread.join(timeout=10)
 
 
 class FakeUv:
@@ -276,6 +276,28 @@ class Installing(unittest.TestCase):
             holding.set()
             finish(self.install)
         self.assertEqual(self.install.status()["state"], "done")
+
+    def test_a_version_is_not_switched_or_removed_while_an_install_runs(self):
+        import threading
+        holding, started = threading.Event(), threading.Event()
+
+        def slow(argv):
+            makes_the_folder(argv)
+            started.set()
+            holding.wait(timeout=10)
+
+        self.install = self._installer(FakeUv(slow), FakeCheck())
+        with patch("ai_lab.builds.package_install.version_in", lambda path, package: "0.27.1"):
+            self.install.install("0.27.1")
+            self.assertTrue(started.wait(timeout=5), "the install never started")
+            try:
+                with self.assertRaisesRegex(ValueError, "while .* running"):
+                    self.install.activate("v0.26.0")
+                with self.assertRaisesRegex(ValueError, "while .* running"):
+                    self.install.remove("v0.26.0")
+            finally:
+                holding.set()
+                finish(self.install)
 
     def test_configured_minimum_versions_are_checked_before_activation(self):
         check = FakeCheck()

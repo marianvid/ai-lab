@@ -14,8 +14,8 @@ from ai_lab.types import LogEvent
 
 def finish(build):
     """Wait for the build started in the background."""
-    assert build._thread is not None
-    build._thread.join(timeout=5)
+    assert build.job.thread is not None
+    build.job.thread.join(timeout=5)
 
 
 class FakeGit:
@@ -213,6 +213,25 @@ class SourceBuildTests(unittest.TestCase):
             build.update()
         release.set()
         finish(build)
+
+    def test_a_version_is_not_switched_or_removed_while_a_build_runs(self):
+        started, release = threading.Event(), threading.Event()
+
+        def hold(command):
+            started.set()
+            release.wait(5)
+
+        build = self.build(FakeGit(["v0.1.0\n"] * 40), FakeStream(hold))
+        build.update()
+        self.assertTrue(started.wait(5))
+        try:
+            with self.assertRaisesRegex(ValueError, "while .* running"):
+                build.activate("b10000-abc")
+            with self.assertRaisesRegex(ValueError, "while .* running"):
+                build.remove("b10000-abc")
+        finally:
+            release.set()
+            finish(build)
 
 
 class BuildsTests(unittest.TestCase):

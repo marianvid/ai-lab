@@ -11,9 +11,7 @@ default, fakes in a test. It alone owns its lock.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
-import threading
 import time
 import urllib.request
 from collections.abc import Callable
@@ -23,6 +21,7 @@ from typing import Protocol
 
 from ..disk import free_bytes
 from ..events import EventBus
+from .background_job import BackgroundJob, fail_and_clean
 from .install_log import Command, Elapsed, InstallLog, since
 from .package_environments import CURRENT, PREFIX, Environment, EnvironmentFolders, version_in
 from .public_services import address
@@ -115,7 +114,9 @@ class PackageInstall:
     """The installed versions of one engine, and the ability to add or drop one.
 
     `root` is the directory holding them. `package` is what to install — for
-    vLLM, "vllm". It alone owns its lock, which guards the install's state.
+    vLLM, "vllm". The install runs as a `BackgroundJob`, which owns the only
+    lock (state, error, log lines) and keeps a version from being switched or
+    removed while an install runs.
     """
 
     def __init__(self, engine_id: str, root: str, package: str, bus: EventBus,
@@ -133,14 +134,11 @@ class PackageInstall:
         self.bus = bus
         self.uv = options.uv
         self.python = options.python
-        self.log = InstallLog(engine_id, bus)
+        self.job = BackgroundJob(f"install-{engine_id}", "an install")
+        self.log = InstallLog(engine_id, bus, self.job.lines)
         self.folders = EnvironmentFolders(self.root, package)
         self.commands: InstallCommands = options.tools.commands or self.log
         self.checker: EnvironmentCheck = options.tools.check or SubprocessCheck()
-        self._lock = threading.RLock()
-        self._thread: threading.Thread | None = None
-        self._state = "idle"          # idle, running, done, failed
-        self._error = ""
         self._latest = ""             # what the index last said
 
     # -- the environment folders, as before -----------------------------
@@ -168,15 +166,16 @@ class PackageInstall:
 
     def activate(self, name: str) -> dict:
         """Go back — or forward — to an installed version, by folder name."""
-        return self._after(self.folders.activate, name)
+        return self._after(self.folders.activate, name, "switch versions")
 
     def remove(self, name: str) -> dict:
         """Delete an installed version that is not the one in use."""
-        return self._after(self.folders.remove, name)
+        return self._after(self.folders.remove, name, "remove a version")
 
-    def _after(self, change: Callable[[str], None], name: str) -> dict:
-        """Make one change to the folders, tell the page, and say how things stand."""
-        change(name)
+    def _after(self, change: Callable[[str], None], name: str, what: str) -> dict:
+        """Make one change to the folders while no install runs, tell the page, say how things stand."""
+        with self.job.idle(what):
+            change(name)
         self._announce()
         return self.status()
 
@@ -207,8 +206,8 @@ class PackageInstall:
             "environments": [item.json() for item in environments],
             "spare_bytes": sum(item.size_bytes for item in environments
                                if not item.active),
-            "free_bytes": free_bytes(self.root), "state": self._state,
-            "error": self._error, "log": list(self.log.lines),
+            "free_bytes": free_bytes(self.root), "state": self.job.state,
+            "error": self.job.error, "log": self.job.log(),
         }
 
     # -- adding one --------------------------------------------------------
@@ -219,16 +218,7 @@ class PackageInstall:
         `version` empty means whatever the package manager resolves to newest.
         Returns immediately; progress arrives on the event stream.
         """
-        with self._lock:
-            if self._state == "running":
-                raise ValueError("An install is already running")
-            self.log.lines.clear()
-            self._error = ""
-            self._state = "running"
-            self._thread = threading.Thread(
-                target=self._run, args=(version,), daemon=True,
-                name=f"install-{self.engine_id}")
-            self._thread.start()
+        self.job.start(self._run, version)
         return self.status()
 
     def _run(self, version: str) -> None:
@@ -245,18 +235,15 @@ class PackageInstall:
             self._build(target, landed, elapsed)
             previous = self.active()
             self.point_at(target)
-            self._state = "done"
+            self.job.succeeded()
             self._say("status", f"{self.engine_id} now runs from {target.name}."
                       + (f" {previous.name} is kept, so going back is one press."
                          if previous else ""), elapsed())
         except Exception as error:
-            self._state = "failed"
-            self._error = str(error) or error.__class__.__name__
-            self._say("err", self._error, elapsed())
             # Whatever was half-built goes. What was working is untouched: it
             # was never written to.
-            if target is not None and target.exists() and target != self.active():
-                shutil.rmtree(target, ignore_errors=True)
+            fail_and_clean(self.job, error, target, self.active(),
+                           lambda text: self._say("err", text, elapsed()))
         self._announce()
 
     def _new_folder(self, landed: str) -> Path:
