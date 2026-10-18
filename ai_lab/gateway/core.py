@@ -16,7 +16,7 @@ from .control import GatewayControl
 from .errors import CardBusyError, CouldNotLoadError, NotConfiguredError, ShapeNotServedError
 from .limits import GatewayLimits
 from .loading import CardLoader, CardMemory
-from .resources import GatewayResources
+from .resources import GatewayResources, ask_engine
 from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats, StatsSources
 from ..operations import Operations
@@ -220,13 +220,8 @@ class Gateway:
         """
         if shape is None:
             return 1
-        try:
-            instance = self._operations.instance(shape.instance_id)
-            engine = self._operations.engines.get(instance["engine"])
-            return max(1, engine.concurrency({**instance["params"],
-                                              **shape.as_dict()}))
-        except Exception:
-            return 1
+        return ask_engine(self._operations, shape,
+                          lambda engine, settings: max(1, engine.concurrency(settings)), 1)
 
     # -- how long to wait, per kind of request --------------------------
 

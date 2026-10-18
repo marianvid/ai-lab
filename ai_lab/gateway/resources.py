@@ -3,10 +3,33 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from .. import budget
 from .card_sharing import CardNeighbours, NoNeighbours
 from .errors import CouldNotLoadError
+
+
+Answer = TypeVar("Answer")
+
+
+def ask_engine(operations, shape, question: Callable[[Any, dict], Answer],
+               default: Answer) -> Answer:
+    """Ask the engine of a shape's entry `question(engine, settings)`; `default` if it cannot.
+
+    The settings are the entry's own merged with the shape's. Any failure —
+    an entry deleted meanwhile, an engine that cannot be found, an estimate
+    that raises — gives `default`: the gateway must keep deciding with a safe
+    answer rather than fail a request over a figure. The one place that does
+    this, for the places a shape serves and the memory it needs.
+    """
+    try:
+        instance = operations.instance(shape.instance_id)
+        engine = operations.engines.get(instance["engine"])
+        return question(engine, {**instance["params"], **shape.as_dict()})
+    except Exception:
+        return default
 
 
 class GatewayResources:
@@ -22,15 +45,11 @@ class GatewayResources:
         self._neighbours: CardNeighbours = neighbours or NoNeighbours()
 
     def needs_mb(self, shape, card_total_mb: float) -> float:
-        """Ask the selected engine how much this request shape needs."""
-        try:
-            instance = self.operations.instance(shape.instance_id)
-            engine = self.operations.engines.get(instance["engine"])
+        """Ask the selected engine how much this request shape needs; 0 when it cannot say."""
+        def estimate(engine, settings: dict) -> float:
             model = self.operations.model_for(shape.instance_id)
-            params = {**instance["params"], **shape.as_dict()}
-            return float(engine.needs_mb(model, params, card_total_mb))
-        except Exception:
-            return 0.0
+            return float(engine.needs_mb(model, settings, card_total_mb))
+        return ask_engine(self.operations, shape, estimate, 0.0)
 
     def card_total_mb(self) -> float:
         """The card's whole memory, or 0 when it cannot be read."""
