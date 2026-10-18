@@ -86,14 +86,19 @@ class _Wait:
     description: str
 
 
-class Runtime(StartChecks):
-    """Loading, unloading and swapping models, timed step by step and published as events."""
+class Runtime:
+    """Loading, unloading and swapping models, timed step by step and published as events.
+
+    It holds its `StartChecks` (asked before every start) and owns every lock:
+    one per instance, and `_guard` for the dictionaries below.
+    """
 
     def __init__(self, host: Host, bus: EventBus,
                  sample_interval_s: float = SAMPLE_INTERVAL_S,
                  start_timeout_s: float = START_TIMEOUT_S,
                  load_timeout_s: float = LOAD_TIMEOUT_S) -> None:
         self.host = host
+        self.checks = StartChecks(host)
         self.diagnostics = RuntimeDiagnostics(host)
         self.bus = bus
         self.sample_interval_s = sample_interval_s
@@ -221,11 +226,11 @@ class Runtime(StartChecks):
 
     def _load(self, instance: Instance, model: ModelSet, engine: Engine,
               operation: Operation, clock: _Clock) -> None:
-        params = self._split_if_it_will_not_fit(instance, model, engine)
+        params = self.checks.split_if_it_will_not_fit(instance, model, engine)
         plan = engine.plan(model, instance.port, params)
         self._active[instance.id] = dict(params)
-        self._refuse_stranger(instance, engine)
-        self._refuse_if_it_cannot_fit(instance, model, plan)
+        self.checks.refuse_stranger(instance, engine)
+        self.checks.refuse_if_it_cannot_fit(instance, model, plan)
         self._mark(operation, clock, Phase.STARTING, f"Starting {model.name}")
         self.host.start(ProcessSpec(instance.id, plan.argv, plan.env))
 

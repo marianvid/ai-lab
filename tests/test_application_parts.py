@@ -176,9 +176,9 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(type(host).__name__, "DarwinHost")
 
 
-class Checks(StartChecks):
-    def __init__(self, snapshot):
-        self.host = cast(Any, Host(None, snapshot))
+def checks_on(snapshot):
+    """Start checks asking a host whose card reads `snapshot`."""
+    return StartChecks(cast(Any, Host(None, snapshot)))
 
 
 class StartChecksTests(unittest.TestCase):
@@ -188,8 +188,8 @@ class StartChecksTests(unittest.TestCase):
                                    memory_total_mb=32000)
         model = SimpleNamespace(name="big", size_bytes=10 * 1024 ** 3)
         with self.assertRaisesRegex(RuntimeError, "needs about 10.0 GB"):
-            Checks(card)._refuse_if_it_cannot_fit(cast(Any, None), cast(Any, model),
-                                                  SimpleNamespace())
+            checks_on(card).refuse_if_it_cannot_fit(cast(Any, None), cast(Any, model),
+                                                    SimpleNamespace())
 
 
 class StateTests(unittest.TestCase):

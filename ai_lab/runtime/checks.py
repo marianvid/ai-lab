@@ -1,9 +1,10 @@
 """The checks made before an engine is started, so a failure says why at once.
 
-A base class of `Runtime` (a mixin): let an engine that can split a model
+`StartChecks` is held by `Runtime`: let an engine that can split a model
 between card and system memory do so when the weights will not fit, refuse a
 model larger than the card's free memory, and refuse to start when something
-this manager did not start already answers on the port.
+this manager did not start already answers on the port. It only asks the
+host and keeps no state, so it needs no lock; `Runtime` owns the locks.
 """
 
 from __future__ import annotations
@@ -17,11 +18,12 @@ MIB = 1024 * 1024
 
 
 class StartChecks:
-    """Checks before a start (see `Runtime`, which owns `host`)."""
+    """Checks before a start, asked of the host."""
 
-    host: Host
+    def __init__(self, host: Host) -> None:
+        self.host = host
 
-    def _split_if_it_will_not_fit(self, instance: Instance, model: ModelSet,
+    def split_if_it_will_not_fit(self, instance: Instance, model: ModelSet,
                                   engine: Engine) -> dict:
         """Let an engine that can split do so, rather than refusing.
 
@@ -62,7 +64,7 @@ class StartChecks:
         params[name] = value
         return params
 
-    def _refuse_if_it_cannot_fit(self, instance: Instance, model: ModelSet,
+    def refuse_if_it_cannot_fit(self, instance: Instance, model: ModelSet,
                                  plan) -> None:
         """Refuse a model that is larger than the memory left on the card.
 
@@ -92,7 +94,7 @@ class StartChecks:
                 f"model, choose a smaller one, or set how many layers go on the "
                 f"card and leave the rest in system memory.")
 
-    def _refuse_stranger(self, instance: Instance, engine: Engine) -> None:
+    def refuse_stranger(self, instance: Instance, engine: Engine) -> None:
         """Refuse to start when something else already holds the port.
 
         Otherwise the readiness probe answers yes — from a process this

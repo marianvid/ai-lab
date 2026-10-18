@@ -550,14 +550,14 @@ class WhenTheWeightsWillNotFit(unittest.TestCase):
 
     def test_llama_cpp_is_told_to_split_rather_than_refused(self):
         card, runtime = self._runtime(free_mb=1000.0)
-        params = runtime._split_if_it_will_not_fit(
+        params = runtime.checks.split_if_it_will_not_fit(
             self._instance(), self._model(), LlamaCppEngine(binary="/bin/true"))
         self.assertEqual(params["gpu_layers"], -2,
                          "it refused instead of letting llama.cpp fit it")
 
     def test_a_model_that_fits_is_left_exactly_as_configured(self):
         card, runtime = self._runtime(free_mb=30000.0)
-        params = runtime._split_if_it_will_not_fit(
+        params = runtime.checks.split_if_it_will_not_fit(
             self._instance(), self._model(), LlamaCppEngine(binary="/bin/true"))
         self.assertEqual(params["gpu_layers"], -1,
                          "it split a model that would have fitted whole")
@@ -565,7 +565,7 @@ class WhenTheWeightsWillNotFit(unittest.TestCase):
     def test_a_deliberate_layer_count_is_not_overridden(self):
         # Somebody who set 20 meant 20.
         card, runtime = self._runtime(free_mb=1000.0)
-        params = runtime._split_if_it_will_not_fit(
+        params = runtime.checks.split_if_it_will_not_fit(
             self._instance(gpu_layers=20), self._model(),
             LlamaCppEngine(binary="/bin/true"))
         self.assertEqual(params["gpu_layers"], 20)
@@ -576,6 +576,6 @@ class WhenTheWeightsWillNotFit(unittest.TestCase):
         card, runtime = self._runtime(free_mb=1000.0)
         instance = Instance(id="big", engine="vllm", model_id="nvfp4/big/big",
                             port=8080, params={"gpu_memory_fraction": 0.9})
-        params = runtime._split_if_it_will_not_fit(
+        params = runtime.checks.split_if_it_will_not_fit(
             instance, self._model(), VllmEngine(binary="/bin/true"))
         self.assertEqual(params, {"gpu_memory_fraction": 0.9})

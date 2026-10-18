@@ -109,7 +109,7 @@ there is exactly one place to look.
 | `vendor/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000. The Higgs page is used by both Higgs engines | AI-Lab rules — it is vendored code |
 | `catalog/core.py` | Finding models on disk and grouping files into complete sets | HTTP, downloads |
 | `catalog/capabilities.py` | Reading a model's own files to find out whether it can call tools or read pictures, and remembering the answer | Which engine will run it, and what any setting says |
-| `runtime/core.py` | Load, unload and swap, with timings and progress events | Direct systemctl or nvidia-smi calls — it is handed a host |
+| `runtime/core.py`, `runtime/checks.py` | Load, unload and swap, with timings and progress events; `Runtime` holds its `StartChecks` (split, refuse what cannot fit, refuse a stranger on the port) and owns every lock | Direct systemctl or nvidia-smi calls — it is handed a host |
 | `runtime/state.py`, `runtime/diagnostics.py` | The record of one load or unload; finding the useful line in an engine's noisy log when it fails | — |
 | `downloads/` | Hugging Face browsing (`huggingface.py`), the download queue (`transfers.py`), and models made of files from several places (`bundles.py`) | Deciding what a model *is* — that is the catalog's rule |
 | `settings.py` | Assembling the settings screen from configuration and host | Writing to the accelerator |
