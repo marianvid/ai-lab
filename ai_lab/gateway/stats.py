@@ -22,6 +22,11 @@ class GatewayCounters:
     A lifetime total of requests says nothing: it grows while you watch it and
     means the same at 40 as at 40,000. What is worth showing is a rate, an
     average, and a share — figures that stay comparable to themselves.
+
+    The counts are approximate: they are added to from the request threads and
+    the switch, with no lock of their own, so two updates at the same instant
+    can lose one. They feed rates and shares on a page; nothing decides
+    anything from them.
     """
 
     requests: int = 0

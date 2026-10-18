@@ -8,14 +8,16 @@ dropped.
 
 It owns two things and nothing else touches them: the last memory reading
 (`read_the_card` refreshes it, outside the scheduler's lock) and whether
-something outside may have changed the card (`card_changed`, cleared by the
-next sweep or adoption). The memory comes
+something outside may have changed the card (`card_changed`, taken and
+cleared under a lock of its own before the next sweep or adoption reads the
+card, so a press while the card is being read is kept). The memory comes
 in through the `CardMemory` interface, built by the gateway by default.
 """
 
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
 from collections.abc import Callable
 from typing import Protocol
@@ -80,12 +82,25 @@ class CardLoader:
         # Whether anything outside may have changed what is on the card. Set at
         # startup and whenever a button on the page loads or unloads something.
         # The next switch sweeps: one expensive read after an outside change
-        # rather than one on every request.
+        # rather than one on every request. Taken and cleared in one step
+        # under its own lock (`_take_resweep`), before the card is read.
         self._resweep = True
+        self._resweep_lock = threading.Lock()
 
     def card_changed(self) -> None:
         """Something outside may have changed the card: sweep and adopt again."""
-        self._resweep = True
+        with self._resweep_lock:
+            self._resweep = True
+
+    def _take_resweep(self) -> bool:
+        """Whether a sweep was asked for, clearing the request in the same step.
+
+        Cleared before the card is read, not after: a button pressed while the
+        listing is under way sets it again, and the next adoption reads again.
+        """
+        with self._resweep_lock:
+            asked, self._resweep = self._resweep, False
+        return asked
 
     def adopt_what_is_there(self, adopt: Callable[..., None]) -> None:
         """Tell the scheduler (`adopt`) what is already on the card, once.
@@ -106,14 +121,14 @@ class CardLoader:
         requests to a port with nothing behind it; giving up on it for good
         would leave it invisible until something else changed.
         """
-        if not self._resweep:
+        if not self._take_resweep():
             return
         # The expensive question, asked once after an outside change rather
         # than on every request.
         running = [item for item in self.operations.instances() if item["running"]]
         if any(not item["ready"] for item in running):
-            return                      # still coming up: ask again next time
-        self._resweep = False
+            self.card_changed()         # still coming up: ask again next time
+            return
         adopt(*[Shape.of(item["id"], {**item.get("params", {}),
                                       **item.get("active_params", {})})
                 for item in running])
@@ -176,8 +191,8 @@ class CardLoader:
         how a model that is known to fit fails to fit.
         """
         started = time.perf_counter()
+        self._take_resweep()            # this sweep answers any change made before it
         unloaded = self._clear(victims)
-        self._resweep = False
         self._memory.wait_until_quiet(unloaded)
         self.read_the_card()
         self._refuse_if_still_full(shape)

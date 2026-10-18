@@ -112,6 +112,47 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(self.operations.loads, ["big"])
 
 
+class PressedWhileListing(Loads):
+    """Entries whose listing is interrupted by a button on the page (`card_changed`)."""
+
+    def __init__(self, *ids):
+        super().__init__(*ids)
+        self.listings = 0
+        self.press = lambda: None
+
+    def instances(self):
+        self.listings += 1
+        listed = super().instances()
+        self.press()
+        return listed
+
+
+class ResweepTests(unittest.TestCase):
+    """A button pressed while the loader is reading the card is not lost."""
+
+    def setUp(self):
+        self.operations = PressedWhileListing("big")
+        self.loader = CardLoader(self.operations, Memory(0.0, 0.0),  # type: ignore[arg-type]
+                                 GatewayCounters(), lambda: {"loaded": []}, lambda shape: "")
+
+    def press_once(self):
+        self.operations.press = lambda: None
+        self.loader.card_changed()
+
+    def test_a_press_during_adoption_makes_the_next_adoption_read_again(self):
+        self.operations.press = self.press_once
+        self.loader.adopt_what_is_there(lambda *shapes: None)
+        self.loader.adopt_what_is_there(lambda *shapes: None)
+        self.assertEqual(self.operations.listings, 2)
+
+    def test_a_press_during_a_switch_makes_the_next_adoption_read_again(self):
+        self.loader.adopt_what_is_there(lambda *shapes: None)
+        self.operations.press = self.press_once
+        self.loader.put_on_card(Shape.of("big", {}))
+        self.loader.adopt_what_is_there(lambda *shapes: None)
+        self.assertEqual(self.operations.listings, 3)
+
+
 def one_model_of_two_places():
     """The decisions alone, with one model of two places loaded."""
     planner = Planner(lambda shape: 2, lambda shape, loaded: [item["shape"] for item in loaded])
