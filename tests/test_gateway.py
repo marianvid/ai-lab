@@ -16,7 +16,9 @@ from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
                                  validate)
 from ai_lab.gateway.core import (CardBusyError, CouldNotLoadError, Gateway, GatewayLimits, NotConfiguredError,
                             ShapeNotServedError)
+from ai_lab.gateway.resources import GatewayResources
 from ai_lab.gateway.scheduler import WillNotFitError
+from ai_lab.gateway.stats import GatewayStats
 from ai_lab.runtime.core import Operation
 from ai_lab.types import AcceleratorSnapshot, Task
 
@@ -204,9 +206,58 @@ def two_models(lag=0, **running):
     ], lag=lag)
 
 
+QUICK = GatewayLimits(quiet_timeout_s=1.0, poll_s=0.001)
+
+
 def quick(operations):
     """A gateway that does not sit through real waits in a test."""
-    return Gateway(operations, GatewayLimits(quiet_timeout_s=1.0, poll_s=0.001))
+    return Gateway(operations, QUICK)
+
+
+class LazyWeights(GatewayResources):
+    """The machine's own memory, every model needing 15 GB, and one stale reading.
+
+    Some servers load their weights only on the first inference, so the
+    reading taken right after such a load (the third reading of a first
+    switch: before choosing, after the card goes quiet, after the load) still
+    shows the card nearly empty.
+    """
+
+    STALE_READING = 3
+
+    def __init__(self, operations):
+        super().__init__(operations, QUICK.quiet_mb, QUICK.quiet_timeout_s, QUICK.poll_s)
+        self.reads = 0
+
+    def needs_mb(self, shape, card_total_mb):
+        return 15000.0
+
+    def read_pools(self):
+        self.reads += 1
+        pools = super().read_pools()
+        if self.reads == self.STALE_READING:
+            pools["card"]["available_mb"] = 31998.0
+        return pools
+
+
+class FullMachine(GatewayResources):
+    """A machine with no room for anything, so every request is refused for the same reason.
+
+    The one being asked for is far too big; what is already there is small, so
+    taking it off frees nothing worth having. Both numbers matter: an earlier
+    version of this test made every model want 30 GB, so unloading the loaded
+    one appeared to free 30 GB and the refusal never happened.
+    """
+
+    def __init__(self, operations):
+        super().__init__(operations, QUICK.quiet_mb, QUICK.quiet_timeout_s, QUICK.poll_s)
+
+    def read_pools(self):
+        return {"card": {"name": "card", "available_mb": 100.0,
+                         "for_models_mb": 200.0, "total_mb": 32000.0}}
+
+    def needs_mb(self, shape, card_total_mb):
+        return 30000.0 if shape.instance_id == "reviewer" else 50.0
 
 
 class NamingTests(unittest.TestCase):
@@ -379,13 +430,14 @@ class LoadingTests(unittest.TestCase):
 
     def test_switch_refreshes_memory_after_lazy_weight_load(self):
         operations = two_models()
-        gateway = quick(operations)
-        gateway._needs_mb = lambda shape: 15000.0
+        memory = LazyWeights(operations)
+        gateway = Gateway(operations, QUICK, memory=memory)
         with gateway.acquire("coder"):
             pass
         # The server initially appeared to use almost no memory, then loaded
-        # its weights during inference without a process change.
-        gateway._budget_pools["card"]["available_mb"] = 31998.0
+        # its weights during inference without a process change: the reading
+        # taken right after its load (the third) said the card was nearly empty.
+        self.assertEqual(memory.reads, LazyWeights.STALE_READING)
         with gateway.acquire("reviewer"):
             pass
         self.assertEqual(operations.unloads, ["coder"])
@@ -1306,7 +1358,7 @@ class ShapesOfferedTests(unittest.TestCase):
             reads["n"] += 1
             return original()
         operations.instances = counted
-        quick(operations)._shapes_offered()
+        GatewayStats(quick(operations)).shapes_offered()
         self.assertEqual(reads["n"], 0)
 
 
@@ -1442,20 +1494,7 @@ class RefusingWhatCannotFit(unittest.TestCase):
 
     def _gateway(self):
         operations = two_models(coder=True)
-        gateway = quick(operations)
-        # A machine with no room for anything, so every request is refused for
-        # the same reason and the numbers are the thing under test.
-        gateway._budget_pools = {"card": {"name": "card", "available_mb": 100.0,
-                                          "for_models_mb": 200.0,
-                                          "total_mb": 32000.0}}
-        gateway._read_the_card = lambda: None
-        # The one being asked for is far too big; what is already there is
-        # small, so taking it off frees nothing worth having. Both numbers
-        # matter: an earlier version of this test made every model want 30 GB,
-        # so unloading the loaded one appeared to free 30 GB and the refusal
-        # never happened.
-        gateway._needs_mb = lambda shape: (
-            30000.0 if shape.instance_id == "reviewer" else 50.0)
+        gateway = Gateway(operations, QUICK, memory=FullMachine(operations))
         return operations, gateway
 
     def test_it_is_refused_rather_than_attempted(self):

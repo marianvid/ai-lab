@@ -1,8 +1,9 @@
 """What the gateway tells a client about its models, and which name means which.
 
-A base class of `Gateway` (a mixin): the listing, one model's description, the
-one name each entry answers to, and which request shapes its engine answers.
-Nothing here touches the card or the queue.
+`Catalogue`, an object the `Gateway` holds: the listing, one model's
+description, the one name each entry answers to, and which request shapes its
+engine answers. It reads only the configuration and the engines; nothing here
+touches the card or the queue, and it keeps no state of its own.
 """
 
 from __future__ import annotations
@@ -13,10 +14,11 @@ from ..operations import Operations
 from ..types import Task
 
 
-class GatewayCatalogue:
+class Catalogue:
     """Names, listings and shapes, read from the configuration and the engines."""
 
-    operations: Operations
+    def __init__(self, operations: Operations) -> None:
+        self.operations = operations
 
     def catalogue(self) -> list[dict]:
         """Every configured entry, loaded or not, with the names it answers to.
@@ -91,7 +93,7 @@ class GatewayCatalogue:
             return []
 
     @staticmethod
-    def _engine_name(instance: dict) -> str:
+    def engine_name(instance: dict) -> str:
         """What this entry's engine calls its own model.
 
         The last segment of the model path, which is the name the engine is
@@ -136,8 +138,8 @@ class GatewayCatalogue:
         task = Task(instance.get("task", Task.TEXT_GENERATION.value))
         return shape in engine.api_paths(task)
 
-    def _refuse_wrong_shape(self, instance: dict, shape: str,
-                            instances: list[dict]) -> None:
+    def refuse_wrong_shape(self, instance: dict, shape: str,
+                           instances: list[dict]) -> None:
         """Say no, and say which entries would have worked.
 
         A client that sent the wrong shape does not know which of its models
@@ -154,7 +156,8 @@ class GatewayCatalogue:
             + (f"Configured models that do: {', '.join(able)}." if able
                else "No configured model answers it."))
 
-    def _engine_name_of(self, shape) -> str:
+    def engine_name_of(self, shape) -> str:
+        """The display name of the engine a shape's entry runs on; "" when unknown."""
         if shape is None:
             return ""
         try:

@@ -47,7 +47,7 @@ class ResourcesTests(unittest.TestCase):
         self.assertEqual(self.resources.free_mb(pools), 5300.0)
 
     def test_neighbours_leave_before_the_card_is_read_even_when_nothing_was_stopped(self):
-        self.resources._wait_until_quiet([])
+        self.resources.wait_until_quiet([])
         self.assertEqual(self.neighbours.calls, ["make_way"])
         self.assertEqual(self.resources.free_mb({"card": {"available_mb": 4000}}), 4000.0)
 

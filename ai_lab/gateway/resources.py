@@ -59,7 +59,7 @@ class GatewayResources:
         found = budget.of(self.operations.host, self.operations.reserve_mb())
         return {pool.name: pool.json() for pool in found.pools}
 
-    def _wait_until_quiet(self, stopped: list) -> None:
+    def wait_until_quiet(self, stopped: list) -> None:
         """Wait for the driver to hand back what those models held.
 
         A process exits before its VRAM is released. Loading in that gap fails

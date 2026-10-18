@@ -1,27 +1,26 @@
 """Model routing, admission and load coordination for agent requests.
 
 Scheduling, memory accounting, request state and telemetry live in their
-respective modules; the listing is `gateway_catalogue`, making room and loading
-is `gateway_loading` (both base classes of `Gateway`). See
-docs/gateway-behavior.md for the operating contract.
+respective modules. The gateway holds its collaborators: the `Catalogue`
+(names, listings, request shapes), the `CardLoader` (making room and loading,
+with the memory reading it owns) and the `Scheduler` (the queue and its lock).
+See docs/gateway-behavior.md for the operating contract.
 """
 
 from __future__ import annotations
 
 import time
 
-from .eviction import EvictionPlanner
-from .catalogue import GatewayCatalogue
+from .catalogue import Catalogue
 from .control import GatewayControl
 from .errors import CardBusyError, CouldNotLoadError, NotConfiguredError, ShapeNotServedError
 from .limits import GatewayLimits
-from .loading import CardLoading
+from .loading import CardLoader, CardMemory
 from .resources import GatewayResources
 from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats
 from ..operations import Operations
-from .scheduler import AbandonedError, Scheduler, WillNotFitError
-from .scheduler_parts import StillWanted
+from .scheduler import AbandonedError, Scheduler, StillWanted, WillNotFitError
 from ..types import Task
 
 # The gateway's errors are part of its interface: callers import them from here.
@@ -29,16 +28,23 @@ __all__ = ["CardBusyError", "CouldNotLoadError", "Gateway", "GatewayLimits", "No
            "ShapeNotServedError"]
 
 
-class Gateway(GatewayCatalogue, CardLoading):
+class Gateway:
     """Routes by model name and puts that model on the card if it is not there.
 
     The queueing itself is `scheduler.Scheduler`, which knows nothing about
     models: it is handed a way to put a shape on the card and a way to ask how
     many requests that shape serves at once. Everything about names, engines
     and settings is here; everything about who goes next is there.
+
+    Its collaborators are objects it holds, each with its own state: the
+    `Catalogue` (none), the `CardLoader` (the memory reading and the sweep
+    flag) and the `Scheduler` (the queue, guarded by the scheduler's own
+    lock). `memory` is the machine's memory (`CardMemory`); without one the
+    gateway builds a `GatewayResources` from the operations and the limits.
     """
 
-    def __init__(self, operations: Operations, limits: GatewayLimits | None = None) -> None:
+    def __init__(self, operations: Operations, limits: GatewayLimits | None = None,
+                 memory: CardMemory | None = None) -> None:
         limits = limits or GatewayLimits()
         self.operations = operations
         self.quiet_mb = limits.quiet_mb
@@ -52,21 +58,33 @@ class Gateway(GatewayCatalogue, CardLoading):
         self.max_upload_bytes = limits.max_upload_bytes
         self.max_upload_pixels = limits.max_upload_pixels
         self.max_upload_dimension = limits.max_upload_dimension
-        # What the last card reading said, per pool. Refreshed around every
-        # load, never from inside the scheduler's lock.
-        self._budget_pools: dict = {}
-        self.resources = GatewayResources(operations, limits.quiet_mb,
-                                          limits.quiet_timeout_s, limits.poll_s)
-        self.eviction = EvictionPlanner()
-        self.scheduler = Scheduler(self._put_on_card, self._places, self._make_room,
-                                   max_waiting=limits.max_waiting)
-        # Whether anything outside may have changed what is on the card. Set at
-        # startup and whenever a button on the page loads or unloads something.
-        # The next switch sweeps: one expensive read after an outside change
-        # rather than one on every request.
-        self._resweep = True
-        self.control = GatewayControl(self.scheduler)
+        self.resources: CardMemory = memory or GatewayResources(
+            operations, limits.quiet_mb, limits.quiet_timeout_s, limits.poll_s)
         self.counters = GatewayCounters()
+        self._catalogue = Catalogue(operations)
+        self.scheduler = Scheduler(self._switch, self._places, self._make_room,
+                                   max_waiting=limits.max_waiting)
+        self._loader = CardLoader(operations, self.resources, self.counters,
+                                  self.scheduler.state, self._catalogue.engine_name_of)
+        self.control = GatewayControl(self.scheduler)
+
+    # -- what a client can ask for -----------------------------------------
+
+    def catalogue(self) -> list[dict]:
+        """Every configured entry, loaded or not, with the names it answers to."""
+        return self._catalogue.catalogue()
+
+    def describe(self, wanted: str) -> dict:
+        """Everything a client needs to know about one model before using it."""
+        return self._catalogue.describe(wanted)
+
+    def resolve(self, wanted: str, instances: list[dict] | None = None) -> dict:
+        """The entry with this id, or NotConfiguredError naming what is known."""
+        return self._catalogue.resolve(wanted, instances)
+
+    def engine_name_of(self, shape) -> str:
+        """The display name of the engine a loaded shape runs on, for the page."""
+        return self._catalogue.engine_name_of(shape)
 
     # -- taking a place on the card -----------------------------------------
 
@@ -102,7 +120,7 @@ class Gateway(GatewayCatalogue, CardLoading):
             self.counters.requests += 1
             self.counters.waited_s += time.perf_counter() - started
             self.counters.arrivals.append((time.time(), instance["id"]))
-            return Lease(self, instance["id"], instance["port"], self._engine_name(instance),
+            return Lease(self, instance["id"], instance["port"], Catalogue.engine_name(instance),
                          started=time.perf_counter())
         except BaseException:
             # The place has been taken. Anything that goes wrong between there
@@ -129,19 +147,19 @@ class Gateway(GatewayCatalogue, CardLoading):
         entries = self.operations.configured()
         instance = self.resolve(wanted, entries)
         if shape is not None:
-            self._refuse_wrong_shape(instance, shape, entries)
+            self._catalogue.refuse_wrong_shape(instance, shape, entries)
         return instance, self.operations.effective_params(instance["id"], settings or {})
 
     def _enter(self, requested: Shape, asked_for: dict,
                still_wanted: StillWanted | None) -> None:
         """Wait in the scheduler's queue until this shape has a place."""
-        self._adopt_what_is_there()
+        self.adopt_what_is_there()
         # Some engines load weights only on their first inference. The card
         # reading taken when the server started is then too optimistic for the
         # next model. Refresh only for a switch; warm requests stay cheap.
         if not any(item["shape"] == requested
                    for item in self.scheduler.state()["loaded"]):
-            self._read_the_card()
+            self._loader.read_the_card()
         try:
             self.scheduler.enter(requested, still_wanted=still_wanted)
         except WillNotFitError as error:
@@ -149,7 +167,7 @@ class Gateway(GatewayCatalogue, CardLoading):
             # numbers are attached here. A client that can read them can correct
             # itself — a smaller context, a smaller share of the card — without
             # anybody parsing an English sentence.
-            error.detail = {"ai_lab": self._why_it_does_not_fit(
+            error.detail = {"ai_lab": self._loader.why_it_does_not_fit(
                 requested.instance_id, asked_for)}
             self.counters.last_error = str(error)
             raise
@@ -179,40 +197,19 @@ class Gateway(GatewayCatalogue, CardLoading):
         counters.first_tokens[instance_id] = (
             counters.first_tokens.get(instance_id, 0) + 1)
 
-    def _adopt_what_is_there(self) -> None:
-        """Tell the scheduler what is already on the card, once.
-
-        Only after something outside may have changed it — a manager that has
-        just started, or a button on the page. Otherwise the scheduler is the
-        authority and reading again would only be a chance to disagree with
-        itself.
-
-        Everything that is up and answering, however many. This used to insist
-        on exactly one and give up otherwise — two engines up was not a card to
-        adopt but a card to clear — and with a memory budget that is simply
-        the ordinary state. The page reported "nothing loaded" while two models
-        were serving.
-
-        A model that is up but not yet answering is left for later, and the
-        flag stays set so the question is asked again. Adopting it would send
-        requests to a port with nothing behind it; giving up on it for good
-        would leave it invisible until something else changed.
-        """
-        if not self._resweep:
-            return
-        # The expensive question, asked once after an outside change rather
-        # than on every request.
-        instances = self.operations.instances()
-        running = [item for item in instances if item["running"]]
-        if any(not item["ready"] for item in running):
-            return                      # still coming up: ask again next time
-        self._resweep = False
-        self.scheduler.adopt(*[
-            Shape.of(item["id"], {**item.get("params", {}),
-                                  **item.get("active_params", {})})
-            for item in running])
+    def adopt_what_is_there(self) -> None:
+        """Tell the scheduler what is already on the card, once after an outside change."""
+        self._loader.adopt_what_is_there(self.scheduler.adopt)
 
     # -- what the scheduler asks of us --------------------------------------
+
+    def _switch(self, shape: Shape, victims: tuple = ()) -> None:
+        """Take those off and put this on: the loader's job, with the lock dropped."""
+        self._loader.put_on_card(shape, victims)
+
+    def _make_room(self, shape: Shape, loaded: list[dict]) -> list | None:
+        """Which loaded shapes must go for this one, from the last memory reading."""
+        return self._loader.make_room(shape, loaded)
 
     def _places(self, shape: Shape | None) -> int:
         """How many requests this shape serves at once. The engine's own number.
@@ -271,7 +268,7 @@ class Gateway(GatewayCatalogue, CardLoading):
         that no longer holds what it thinks.
         """
         self.scheduler.forget_current()
-        self._resweep = True
+        self._loader.card_changed()
 
     def reset(self, reason: str) -> int:
         """Throw everything away. What a forced stop means.
@@ -280,7 +277,7 @@ class Gateway(GatewayCatalogue, CardLoading):
         engine. Everyone waiting is turned away rather than left queueing for a
         state that no longer exists. Returns how many were turned away.
         """
-        self._resweep = True
+        self._loader.card_changed()
         return self.scheduler.reset(reason)
 
     # -- what the buttons on the page have to respect -----------------------
@@ -298,6 +295,3 @@ class Gateway(GatewayCatalogue, CardLoading):
     def stats(self) -> dict:
         """Everything the Gateway page shows, read now."""
         return GatewayStats(self).snapshot()
-
-    def _shapes_offered(self) -> list[dict]:
-        return GatewayStats(self)._shapes_offered()

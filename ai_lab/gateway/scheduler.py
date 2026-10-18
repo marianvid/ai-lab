@@ -96,7 +96,7 @@ from .scheduler_planning import Planner, QueueState
 
 # Re-exported: callers import the scheduler's errors from here.
 __all__ = ["AbandonedError", "AdmissionWithdrawnError", "QueueFullError", "Scheduler",
-           "WillNotFitError"]
+           "StillWanted", "WillNotFitError"]
 
 
 class Scheduler:

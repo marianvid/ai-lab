@@ -87,15 +87,15 @@ class GatewayStats:
         # The page is as good a reason to look as a request is. Without this
         # a manager that has just started reports an empty card until somebody
         # sends something — which is exactly when a person is watching it.
-        # `_adopt_what_is_there` clears the flag, so this costs the expensive
+        # `adopt_what_is_there` clears the flag, so this costs the expensive
         # read once after a restart rather than on every refresh.
-        self.gateway._adopt_what_is_there()
+        self.gateway.adopt_what_is_there()
         state = self.scheduler.state()
         return {**self._card_part(state), **self._queue_part(state["waiting"]),
                 # Which shapes of request each model answers. Configuration only
                 # — an entry's engine and what that engine serves — so the page
                 # can say it without the expensive question.
-                "shapes": self._shapes_offered(),
+                "shapes": self.shapes_offered(),
                 # What the machine has room for, pool by pool. The same answer
                 # an admission decision would use, so the page cannot disagree
                 # with the thing that says no. One accelerator reading gives
@@ -134,7 +134,7 @@ class GatewayStats:
         """
         instance_id = item["shape"].instance_id
         return {"instance_id": instance_id,
-                "engine": self.gateway._engine_name_of(item["shape"]),
+                "engine": self.gateway.engine_name_of(item["shape"]),
                 "settings": item["shape"].as_dict(),
                 "in_flight": item["in_flight"],
                 "places": item["places"],
@@ -240,7 +240,7 @@ class GatewayStats:
         working = counters.switch_s + counters.served_s
         return round(100.0 * counters.switch_s / working, 1) if working else 0.0
 
-    def _shapes_offered(self) -> list[dict]:
+    def shapes_offered(self) -> list[dict]:
         """The kinds of request that can be sent here, and to which models.
 
         Two are in circulation. Nearly every client speaks the OpenAI one and

@@ -3,11 +3,14 @@
 import dataclasses
 import unittest
 
-from ai_lab.gateway.catalogue import GatewayCatalogue
+from ai_lab.gateway.card_sharing import NoNeighbours
+from ai_lab.gateway.catalogue import Catalogue
 from ai_lab.gateway.errors import CouldNotLoadError, NotConfiguredError
 from ai_lab.gateway.limits import FIRST_BYTE_S, MAX_WAITING, GatewayLimits
-from ai_lab.gateway.loading import CardLoading
+from ai_lab.gateway.loading import CardLoader
 from ai_lab.gateway.state import Shape
+from ai_lab.gateway.stats import GatewayCounters
+from ai_lab.runtime.core import Operation
 from ai_lab.gateway.scheduler_parts import (
     AbandonedError,
     AdmissionWithdrawnError,
@@ -27,6 +30,9 @@ class Entries:
     def configured(self):
         return self.entries
 
+    def instances(self):
+        return [{**entry, "running": False, "ready": False} for entry in self.entries]
+
 
 class LimitsTests(unittest.TestCase):
     def test_the_defaults_are_the_machine_s_starting_values(self):
@@ -41,8 +47,7 @@ class LimitsTests(unittest.TestCase):
 
 class CatalogueTests(unittest.TestCase):
     def setUp(self):
-        self.catalogue = GatewayCatalogue()
-        self.catalogue.operations = Entries("coder", "reviewer")  # type: ignore[assignment]
+        self.catalogue = Catalogue(Entries("coder", "reviewer"))  # type: ignore[arg-type]
 
     def test_an_entry_answers_to_its_id_in_any_case(self):
         self.assertEqual(self.catalogue.resolve(" Coder ")["id"], "coder")
@@ -52,12 +57,15 @@ class CatalogueTests(unittest.TestCase):
             self.catalogue.resolve("nobody")
 
     def test_the_engine_s_name_is_the_last_segment_of_the_model(self):
-        self.assertEqual(GatewayCatalogue._engine_name({"model_id": "gguf/qwen/Q3"}), "Q3")
+        self.assertEqual(Catalogue.engine_name({"model_id": "gguf/qwen/Q3"}), "Q3")
 
 
-class Resources:
+class Memory:
+    """A machine's memory as the loader sees it: a fixed need and a fixed free amount."""
+
     def __init__(self, needs_mb, free_mb):
         self.needs, self.free = needs_mb, free_mb
+        self.neighbours = NoNeighbours()
 
     def needs_mb(self, _shape, _card_total_mb):
         return self.needs
@@ -65,23 +73,45 @@ class Resources:
     def card_total_mb(self):
         return 32000.0
 
+    def capacity_mb(self, _pools):
+        return 32000.0
+
     def free_mb(self, _pools):
         return self.free
 
+    def read_pools(self):
+        return {}
+
+    def wait_until_quiet(self, _stopped):
+        return None
+
+
+class Loads(Entries):
+    """Entries that record what was asked to load."""
+
+    def __init__(self, *ids):
+        super().__init__(*ids)
+        self.loads = []
+
+    def load(self, instance_id, settings=None):
+        self.loads.append(instance_id)
+        return Operation(instance_id=instance_id, kind="load", ok=True, total_ms=1)
+
 
 class LoadingTests(unittest.TestCase):
-    def loading(self, needs_mb, free_mb):
-        loading = CardLoading()
-        loading.resources = Resources(needs_mb, free_mb)  # type: ignore[assignment]
-        loading._budget_pools = {}
-        return loading
+    def loader(self, needs_mb, free_mb):
+        self.operations = Loads("big")
+        return CardLoader(self.operations, Memory(needs_mb, free_mb),  # type: ignore[arg-type]
+                          GatewayCounters(), lambda: {"loaded": []}, lambda shape: "")
 
     def test_a_model_that_cannot_fit_is_refused_before_it_is_started(self):
         with self.assertRaisesRegex(CouldNotLoadError, "needs about 9.8 GB"):
-            self.loading(10000.0, 2000.0)._refuse_if_still_full(Shape.of("big", {}))
+            self.loader(10000.0, 2000.0).put_on_card(Shape.of("big", {}))
+        self.assertEqual(self.operations.loads, [])
 
     def test_without_numbers_it_goes_ahead(self):
-        self.loading(10000.0, 0.0)._refuse_if_still_full(Shape.of("big", {}))
+        self.loader(10000.0, 0.0).put_on_card(Shape.of("big", {}))
+        self.assertEqual(self.operations.loads, ["big"])
 
 
 def one_model_of_two_places():
