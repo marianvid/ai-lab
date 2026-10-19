@@ -75,6 +75,21 @@ say so. Free disk space says nothing about whether a disk is available — a dis
 can look empty and still be reserved for other work. Which disks are reserved
 is in `opts/CLAUDE.md`.
 
+## Rule 5 — Say what you will do before you do it, then report while you work
+
+Decided 2026-10-19, binding on every turn. It takes precedence over Rule 3's
+"execute and report at the end"; approvals are still needed where they were.
+
+- **Before starting any work** (any tool call beyond reading what is needed to
+  understand the question), tell the owner, in Romanian and in plain words,
+  **what** you intend to do and **why**, as one short list. A question is
+  answered first; work starts only when the answer or the task needs it.
+- **While working**, send a short status at each step that takes noticeable
+  time: what is done, what is next.
+- **At the end**, say what was done and what is left.
+- When woken by another discussion's ring, the first message names who rang
+  and what is asked, and adds what you will do.
+
 ## Project facts worth knowing
 
 - **ParallaxVox is the owner's company.** It belongs only as a branding label in
