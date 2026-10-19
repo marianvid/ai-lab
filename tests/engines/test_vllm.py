@@ -211,6 +211,36 @@ class ReasoningParserTests(unittest.TestCase):
             self.argv({"reasoning_parser": "qwen3;rm"})
 
 
+class TokenizerModeTests(unittest.TestCase):
+    """Choosing the tokenizer for checkpoints that bring their own.
+
+    A Mistral checkpoint with tekken.json loads a tokenizer that has no chat
+    template, so with vLLM's automatic choice every chat request is refused.
+    """
+
+    def setUp(self):
+        self.engine = VllmEngine(binary="/opt/ai/vllm/.venv/bin/vllm")
+
+    def argv(self, params=None):
+        return self.engine.plan(model(), 8082, params or {}).argv
+
+    def test_automatic_by_default_and_left_unsaid(self):
+        self.assertNotIn("--tokenizer-mode", self.argv())
+        self.assertNotIn("--tokenizer-mode", self.argv({"tokenizer_mode": "auto"}))
+
+    def test_a_named_mode_reaches_the_command_line(self):
+        argv = self.argv({"tokenizer_mode": "mistral"})
+        self.assertEqual(argv[argv.index("--tokenizer-mode") + 1], "mistral")
+
+    def test_mode_name_cannot_contain_shell_syntax(self):
+        with self.assertRaisesRegex(ValueError, "Tokenizer"):
+            self.argv({"tokenizer_mode": "mistral;rm"})
+
+    def test_a_transcription_model_does_not_get_it(self):
+        self.assertNotIn("tokenizer_mode",
+                         {spec.key for spec in self.engine.params(Task.TRANSCRIPTION)})
+
+
 class MemorySettingsTests(unittest.TestCase):
     """The three settings that decide whether a context fits at all."""
 

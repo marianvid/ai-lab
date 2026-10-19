@@ -121,6 +121,17 @@ PARAMS = (
                    "gemma4 for Gemma-4. It does not switch thinking on or off; "
                    "a request does that with "
                    "chat_template_kwargs.enable_thinking."),
+    ParamSpec("tokenizer_mode", "Tokenizer", "identifier", "auto",
+              group="memory",
+              help="Which tokenizer reads the model's text and builds its chat "
+                   "prompt. `auto` lets vLLM choose and suits almost every "
+                   "model. `mistral` uses Mistral's own library, for checkpoints "
+                   "that ship `tekken.json`. Measured here on "
+                   "Mistral-Small-3.2-24B NVFP4: with `auto` every chat request "
+                   "was refused with \"default chat template is no longer "
+                   "allowed\", because the tokenizer loaded from tekken.json "
+                   "carries no chat template. Enter a mode the installed vLLM "
+                   "version supports; the engine checks it when loaded."),
     ParamSpec("compact_json", "Compact forced JSON", "bool", True,
               group="memory",
               help="When a request forces a JSON answer (response_format), "
@@ -169,6 +180,8 @@ def _text_flags(settings: dict) -> list[str]:
     # the flag off keeps the command line to what was chosen.
     if settings["kv_cache_dtype"] != "auto":
         flags += ["--kv-cache-dtype", settings["kv_cache_dtype"]]
+    if settings["tokenizer_mode"] != "auto":
+        flags += ["--tokenizer-mode", settings["tokenizer_mode"]]
     if settings["prefix_caching"]:
         flags.append("--enable-prefix-caching")
     # The two flags go together. vLLM refuses "auto" tool choice unless it has
