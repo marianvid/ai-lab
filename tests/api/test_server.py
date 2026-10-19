@@ -350,8 +350,9 @@ class SettingsFieldTests(unittest.TestCase):
     """
 
     class Gateway:
-        def __init__(self):
+        def __init__(self, drop=frozenset()):
             self.asked = []
+            self.drop = drop
 
         first_byte_s = 5.0
         between_bytes_s = 1.0
@@ -378,6 +379,7 @@ class SettingsFieldTests(unittest.TestCase):
             self.instance_id = "qwen"
             self.port = 9
             self.model_name = "qwen-real"
+            self.drop = gateway.drop
 
         def release(self):
             pass
@@ -403,6 +405,27 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertEqual(forwarded["temperature"], 0.5,
                          "the rest of the body must go through untouched")
         self.assertEqual(forwarded["model"], "qwen-real")
+
+    def test_fields_the_engine_refuses_are_left_out(self):
+        # Mistral's tokenizer answers 400 to chat_template_kwargs; callers send
+        # it to every model to switch thinking off.
+        from ai_lab.api.routes.gateway import _forwarder
+        gateway = self.Gateway(drop=frozenset({"chat_template_kwargs"}))
+        forwarded: dict = {}
+
+        def fake_forward(url, payload, _waits, hooks, **_):
+            forwarded.update(payload)
+            hooks.closed()
+
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            handle = _forwarder(cast(Any, gateway), "/v1/chat/completions")
+            handle(body={"model": "qwen", "messages": [],
+                         "chat_template_kwargs": {"enable_thinking": False},
+                         "response_format": {"type": "json_object"}})
+
+        self.assertNotIn("chat_template_kwargs", forwarded)
+        self.assertEqual(forwarded["response_format"], {"type": "json_object"},
+                         "only the refused field may be left out")
 
     def test_a_field_that_is_not_an_object_is_refused(self):
         from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder

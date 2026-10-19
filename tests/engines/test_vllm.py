@@ -236,6 +236,14 @@ class TokenizerModeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Tokenizer"):
             self.argv({"tokenizer_mode": "mistral;rm"})
 
+    def test_the_mistral_tokenizer_refuses_chat_template_arguments(self):
+        self.assertEqual(self.engine.refuses({"tokenizer_mode": "mistral"}),
+                         {"chat_template_kwargs"})
+
+    def test_other_modes_refuse_nothing(self):
+        self.assertEqual(self.engine.refuses({}), frozenset())
+        self.assertEqual(self.engine.refuses({"tokenizer_mode": "auto"}), frozenset())
+
     def test_a_transcription_model_does_not_get_it(self):
         self.assertNotIn("tokenizer_mode",
                          {spec.key for spec in self.engine.params(Task.TRANSCRIPTION)})

@@ -34,6 +34,9 @@ class Lease:
     # afterwards meant reading every instance's state a second time, which is
     # the expensive question, for an answer that is pure configuration.
     model_name: str = ""
+    # Request fields the engine refuses with the settings it runs with
+    # (`refused` in engines/base.py); left out when forwarding.
+    drop: frozenset[str] = frozenset()
     # When the place was taken, so giving it back can say how long it was held.
     started: float = 0.0
     _given_back: bool = False

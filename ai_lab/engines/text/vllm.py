@@ -249,6 +249,18 @@ class VllmEngine:
         """Whether the server answers its health check."""
         return http_ok(port, "/health")
 
+    def refuses(self, params: dict) -> frozenset[str]:
+        """Mistral's own tokenizer takes no chat-template arguments.
+
+        Measured on Mistral-Small-3.2-24B NVFP4 with `tokenizer_mode` mistral:
+        a request carrying `chat_template_kwargs` was answered 400 "chat_template
+        is not supported for Mistral tokenizers"; the same request without it
+        answered, strict JSON included.
+        """
+        if params.get("tokenizer_mode") == "mistral":
+            return frozenset({"chat_template_kwargs"})
+        return frozenset()
+
     def withholds(self, params: dict) -> frozenset[str]:
         """"Text only" loads a model that can see without the part that sees."""
         return frozenset({IMAGES}) if params.get("language_model_only") else frozenset()

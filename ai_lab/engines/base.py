@@ -215,6 +215,10 @@ class Engine(Protocol):
         """
         ...
 
+    # Optional: `refuses(params) -> frozenset[str]`, the request fields this
+    # engine, started with these settings, answers with an error. Read
+    # through `refused` below; the gateway leaves them out when forwarding.
+
     # Optional: `withholds(params) -> frozenset[str]`, the capabilities (see
     # `capabilities.py`) this engine will not offer with these settings even
     # when the weights have them. Read through `withheld` below, so an engine
@@ -230,6 +234,24 @@ class Engine(Protocol):
         engine that will reject it in its own words.
         """
         ...
+
+
+def refused(engine, params: dict | None) -> frozenset[str]:
+    """The request fields this engine, started with these settings, refuses.
+
+    vLLM reading a Mistral checkpoint with Mistral's own tokenizer answers 400
+    to any `chat_template_kwargs`, which callers send to switch thinking off on
+    the models that think. The gateway drops such a field rather than making
+    every caller learn which models refuse it. Asked of the engine, like
+    `withheld`, so the gateway does not need to know which engine is which.
+    """
+    ask = getattr(engine, "refuses", None)
+    if ask is None:
+        return frozenset()
+    try:
+        return frozenset(ask(params or {}))
+    except Exception:
+        return frozenset()
 
 
 def withheld(engine, params: dict | None) -> frozenset[str]:

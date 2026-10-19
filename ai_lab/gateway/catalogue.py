@@ -8,7 +8,7 @@ touches the card or the queue, and it keeps no state of its own.
 
 from __future__ import annotations
 
-from ..engines.base import withheld
+from ..engines.base import refused, withheld
 from .errors import NotConfiguredError, ShapeNotServedError
 from .card_operations import CardOperations
 from ..types import Task
@@ -84,6 +84,14 @@ class Catalogue:
         except KeyError:
             return sorted(able)
         return sorted(able - withheld(engine, instance.get("params")))
+
+    def refused_fields(self, instance: dict, params: dict) -> frozenset[str]:
+        """The request fields this entry's engine refuses with these settings."""
+        try:
+            engine = self.operations.engine(instance["engine"])
+        except KeyError:
+            return frozenset()
+        return refused(engine, params)
 
     def _shapes(self, instance: dict) -> list[str]:
         try:

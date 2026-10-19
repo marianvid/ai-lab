@@ -120,14 +120,19 @@ class Gateway:
             self._counters.requests += 1
             self._counters.waited_s += time.perf_counter() - started
             self._counters.arrivals.append((time.time(), instance["id"]))
-            return Lease(self, instance["id"], instance["port"], Catalogue.engine_name(instance),
-                         started=time.perf_counter())
+            return self._lease(instance, asked_for)
         except BaseException:
             # The place has been taken. Anything that goes wrong between there
             # and handing it to the caller has to give it back, or the card
             # loses a place with nobody using it.
             self._scheduler.leave()
             raise
+
+    def _lease(self, instance: dict, asked_for: dict) -> Lease:
+        """The place handed to the caller, with what forwarding must know."""
+        return Lease(self, instance["id"], instance["port"], Catalogue.engine_name(instance),
+                     drop=self._catalogue.refused_fields(instance, asked_for),
+                     started=time.perf_counter())
 
     def _what_is_asked(self, wanted: str, shape: str | None,
                        settings: dict | None) -> tuple[dict, dict]:

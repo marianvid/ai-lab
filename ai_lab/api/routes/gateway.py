@@ -307,7 +307,10 @@ def _forward(gateway: Gateway, lease, path: str, payload, wanted: str):
         content_type = payload.content_type
         streaming = False
     else:
-        request = {key: value for key, value in payload.items() if key != SETTINGS_FIELD}
+        # Fields the engine refuses with its settings are left out rather than
+        # turned into an error every caller would have to learn to avoid.
+        request = {key: value for key, value in payload.items()
+                   if key != SETTINGS_FIELD and key not in lease.drop}
         request["model"] = name
         outgoing = request
         content_type = "application/json"

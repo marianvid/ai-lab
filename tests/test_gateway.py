@@ -11,6 +11,7 @@ time, and a switch empties the card completely before loading.
 import threading
 import time
 import unittest
+from typing import Any, cast
 
 from ai_lab import budget
 from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
@@ -391,6 +392,34 @@ class DescribingTests(unittest.TestCase):
         self.assertEqual(withheld(VllmEngine(binary="vllm"), {}), frozenset())
         self.assertEqual(withheld(LlamaCppEngine(binary="llama-server"), {}),
                          frozenset())
+
+    def test_what_an_engine_refuses_is_asked_of_the_engine(self):
+        from ai_lab.engines.base import refused
+        from ai_lab.engines.text.llamacpp import LlamaCppEngine
+
+        class Broken:
+            def refuses(self, params):
+                raise RuntimeError("no answer")
+
+        self.assertEqual(refused(LlamaCppEngine(binary="llama-server"), {}), frozenset())
+        self.assertEqual(refused(Broken(), {}), frozenset(),
+                         "an engine that cannot answer refuses nothing")
+
+    def test_the_catalogue_names_the_refused_fields_of_an_entry(self):
+        from ai_lab.engines.text.vllm import VllmEngine
+        from ai_lab.gateway.catalogue import Catalogue
+
+        class Operations:
+            def engine(self, engine_id):
+                if engine_id != "vllm":
+                    raise KeyError(engine_id)
+                return VllmEngine(binary="vllm")
+
+        catalogue = Catalogue(cast(Any, Operations()))
+        self.assertEqual(catalogue.refused_fields({"engine": "vllm"},
+                                                  {"tokenizer_mode": "mistral"}),
+                         {"chat_template_kwargs"})
+        self.assertEqual(catalogue.refused_fields({"engine": "gone"}, {}), frozenset())
 
     def test_one_model_carries_its_settings_and_forms(self):
         row = quick(self.operations()).describe("CODER")
