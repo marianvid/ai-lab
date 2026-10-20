@@ -94,3 +94,15 @@ class ForwardTests(unittest.TestCase):
             answer = module.forward("http://x/v1/chat/completions", {}, module.Waits(),
                                     module.Hooks())
         self.assertEqual(body_of(answer)["ai_lab"]["context_size"], 32768)
+
+
+class DescriptionTests(unittest.TestCase):
+    def test_one_models_details_carry_the_live_pool(self):
+        from ai_lab.api.routes.gateway import _one_model
+        row = {"id": "q", "engine": "vllm", "loaded": True, "ready": True, "port": 8141,
+               "shapes": [], "task": "text-generation", "capabilities": [],
+               "params": {}, "live": {"kv_cache_tokens": 130389}}
+        self.assertEqual(_one_model(row, detailed=True)["ai_lab"]["live"],
+                         {"kv_cache_tokens": 130389})
+        self.assertNotIn("live", _one_model(row)["ai_lab"],
+                         "the listing stays short")

@@ -131,7 +131,8 @@ def _describe(gateway: Gateway, lanes: SideLanes, name: str) -> dict:
 
 
 # Extra details only `GET /v1/models/{model}` carries: too long for a listing.
-_DETAIL_FIELDS = ("model_id", "params", "speech_form", "music_form")
+# `live` is the running engine's own report (the context pool for vLLM).
+_DETAIL_FIELDS = ("model_id", "params", "speech_form", "music_form", "live")
 
 
 def _one_model(row: dict, detailed: bool = False) -> dict:
