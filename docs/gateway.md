@@ -80,6 +80,24 @@ back with its own message unchanged, and with the numbers under `ai_lab`:
 `prompt_tokens` is missing when vLLM refused on the text's length in characters
 before counting it. In that case the refusal has `prompt_characters` instead.
 
+**How full the pool is.** For a vLLM model on the card, `GET /v1/models/{id}`
+also carries `live`, read from the engine at that moment:
+
+```json
+"live": {"kv_cache_tokens": 130389, "kv_cache_used": 0.62,
+         "requests_running": 14, "requests_waiting": 0}
+```
+
+`kv_cache_tokens` is the shared pool's size. It changes with every reload, so
+it is read live rather than configured. `kv_cache_used` is the share in use,
+between 0 and 1. A model that is not loaded has no `live`.
+
+A client sending many long requests can keep the tokens it has in flight
+under about 80 % of the pool. Measured on 20 October 2026, `qwen38-nvfp4` held
+16 places and a pool of 130,389 tokens. When clusters of long Chinese batches
+filled 92–98 % of the pool, vLLM ran only 4–5 requests and parked 10–12. The
+parked ones kept their 120 s running, and two of them timed out with 504.
+
 ### OCR and image workflows
 
 OCR is exposed at `POST /v1/images/ocr` and uses an isolated PaddleOCR 3.x

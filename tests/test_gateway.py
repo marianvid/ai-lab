@@ -421,6 +421,52 @@ class DescribingTests(unittest.TestCase):
                          {"chat_template_kwargs"})
         self.assertEqual(catalogue.refused_fields({"engine": "gone"}, {}), frozenset())
 
+    def test_live_state_is_asked_of_the_engine_and_never_raises(self):
+        from ai_lab.engines.base import live_state
+
+        class Broken:
+            def live(self, port):
+                raise RuntimeError("no answer")
+
+        self.assertEqual(live_state(object(), 1), {})
+        self.assertEqual(live_state(Broken(), 1), {})
+
+    def test_a_loaded_model_describes_its_pool_and_an_idle_one_does_not(self):
+        from ai_lab.gateway.catalogue import Catalogue
+
+        class Engine:
+            def api_paths(self, task):
+                return OPENAI_PATHS
+
+            def live(self, port):
+                return {"kv_cache_tokens": 130389, "kv_cache_used": 0.5, "port": port}
+
+        class Operations:
+            def __init__(self, running):
+                self.entry = {"id": "q", "model_id": "nvfp4/q", "engine": "vllm",
+                              "port": 8141, "running": running, "ready": running,
+                              "params": {}}
+
+            def instances(self):
+                return [self.entry]
+
+            def engine(self, engine_id):
+                if engine_id != "vllm":
+                    raise KeyError(engine_id)
+                return Engine()
+
+            def model_for(self, instance_id):
+                raise KeyError(instance_id)
+
+        loaded = Catalogue(cast(Any, Operations(True))).describe("q")
+        self.assertEqual(loaded["live"], {"kv_cache_tokens": 130389,
+                                          "kv_cache_used": 0.5, "port": 8141})
+        idle = Catalogue(cast(Any, Operations(False))).describe("q")
+        self.assertNotIn("live", idle)
+        gone = Operations(True)
+        gone.entry["engine"] = "gone"
+        self.assertNotIn("live", Catalogue(cast(Any, gone)).describe("q"))
+
     def test_one_model_carries_its_settings_and_forms(self):
         row = quick(self.operations()).describe("CODER")
         self.assertEqual(row["id"], "coder")

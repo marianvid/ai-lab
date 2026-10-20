@@ -253,6 +253,44 @@ class TokenizerModeTests(unittest.TestCase):
                          {spec.key for spec in self.engine.params(Task.TRANSCRIPTION)})
 
 
+METRICS = """# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="qwen3.8-27b"} 5.0
+vllm:num_requests_waiting{engine="0",model_name="qwen3.8-27b"} 11.0
+vllm:kv_cache_usage_perc{engine="0",model_name="qwen3.8-27b"} 0.95812
+vllm:cache_config_info{block_size="1056",kv_cache_size_tokens="130389",num_gpu_blocks="None"} 1.0
+"""
+
+
+class LiveStateTests(unittest.TestCase):
+    """The pool's size and use, read from a running vLLM's /metrics."""
+
+    def test_the_pool_and_its_use_are_read(self):
+        from ai_lab.engines.text.vllm import pool_state
+        self.assertEqual(pool_state(METRICS), {"kv_cache_tokens": 130389,
+                                               "kv_cache_used": 0.9581,
+                                               "requests_running": 5,
+                                               "requests_waiting": 11})
+
+    def test_nothing_answered_is_nothing_known(self):
+        from ai_lab.engines.text.vllm import pool_state
+        self.assertEqual(pool_state(""), {})
+
+    def test_the_engine_asks_its_own_port(self):
+        from unittest import mock
+
+        import ai_lab.engines.text.vllm as module
+        asked = []
+
+        def answer(port, path):
+            asked.append((port, path))
+            return METRICS
+
+        with mock.patch.object(module, "http_text", answer):
+            state = VllmEngine(binary="vllm").live(8141)
+        self.assertEqual(asked, [(8141, "/metrics")])
+        self.assertEqual(state["kv_cache_tokens"], 130389)
+
+
 class MemorySettingsTests(unittest.TestCase):
     """The three settings that decide whether a context fits at all."""
 

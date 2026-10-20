@@ -5,7 +5,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from ai_lab.engines.probe import http_json, http_ok
+from ai_lab.engines.probe import http_json, http_ok, http_text
 
 
 class Engine(BaseHTTPRequestHandler):
@@ -61,3 +61,16 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(http_json(self.port, "/health"), json.loads(b'{"status": "ok"}'))
         self.assertEqual(http_json(self.port, "/list"), {})
         self.assertEqual(http_json(self.port, "/down"), {})
+
+
+class TextTests(ProbeTests):
+    def test_text_is_the_body_answered_or_nothing(self):
+        self.assertEqual(http_text(self.port, "/plain"), "OK")
+        self.assertEqual(http_text(self.port, "/down"), "")
+
+    def test_nobody_listening_is_empty_text(self):
+        import socket
+        with socket.socket() as spare:
+            spare.bind(("127.0.0.1", 0))
+            free = spare.getsockname()[1]
+        self.assertEqual(http_text(free, "/metrics", timeout=0.5), "")

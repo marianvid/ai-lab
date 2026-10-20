@@ -21,12 +21,14 @@ startup — which is why every setting below belongs to the memory group.
 
 from __future__ import annotations
 
+import re
+
 from ...catalog.capabilities import IMAGES
 from ...types import Format, ModelSet, Task
 from ...hosts.command import which
 from ..base import (ANTHROPIC_PATHS, OPENAI_PATHS, TOKENIZE_PATHS, TRANSCRIPTION_PATHS,
                    LaunchPlan, ParamSpec, validate)
-from ..probe import http_ok
+from ..probe import http_ok, http_text
 from ...network import ALL_INTERFACES
 
 # Every one of these was arrived at by running it on this machine. The help
@@ -197,6 +199,31 @@ def _text_flags(settings: dict) -> list[str]:
     return flags
 
 
+# vLLM's Prometheus lines that describe its context pool. The pool's size is a
+# label of `cache_config_info` (printed at load as "GPU KV cache size: N
+# tokens"); its use, and the requests running and parked, are plain gauges.
+_POOL_TOKENS = re.compile(r'^vllm:cache_config_info\{[^}]*kv_cache_size_tokens="(\d+)"', re.M)
+_GAUGES = {
+    "kv_cache_used": re.compile(r"^vllm:kv_cache_usage_perc\{[^}]*\}\s+([0-9.eE+-]+)", re.M),
+    "requests_running": re.compile(r"^vllm:num_requests_running\{[^}]*\}\s+([0-9.eE+-]+)", re.M),
+    "requests_waiting": re.compile(r"^vllm:num_requests_waiting\{[^}]*\}\s+([0-9.eE+-]+)", re.M),
+}
+
+
+def pool_state(metrics: str) -> dict:
+    """The context pool's size and use, read from vLLM's `/metrics` text."""
+    state: dict = {}
+    found = _POOL_TOKENS.search(metrics)
+    if found:
+        state["kv_cache_tokens"] = int(found[1])
+    for key, pattern in _GAUGES.items():
+        found = pattern.search(metrics)
+        if found:
+            value = float(found[1])
+            state[key] = round(value, 4) if key == "kv_cache_used" else int(value)
+    return state
+
+
 class VllmEngine:
     """vLLM as an AI-Lab engine: text and speech models, many requests at once."""
 
@@ -248,6 +275,14 @@ class VllmEngine:
     def ready(self, port: int) -> bool:
         """Whether the server answers its health check."""
         return http_ok(port, "/health")
+
+    def live(self, port: int) -> dict:
+        """The context pool of the running server: its size in tokens and how full it is.
+
+        `kv_cache_used` is a share between 0 and 1. Read from `/metrics` each
+        time, because the pool's size changes with every reload.
+        """
+        return pool_state(http_text(port, "/metrics"))
 
     def refuses(self, params: dict) -> frozenset[str]:
         """Mistral's own tokenizer takes no chat-template arguments.

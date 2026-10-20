@@ -239,6 +239,23 @@ class Engine(Protocol):
         ...
 
 
+def live_state(engine, port: int) -> dict:
+    """What a loaded engine says about its own load right now, or {}.
+
+    Optional (`live(port)`): vLLM reports the size of its shared context pool
+    and how full it is, so a client can keep the tokens it has in flight under
+    that pool instead of making requests wait inside the engine while their
+    time limit runs (measured on qwen38-nvfp4, 20 October 2026). Never raises.
+    """
+    ask = getattr(engine, "live", None)
+    if ask is None:
+        return {}
+    try:
+        return dict(ask(port))
+    except Exception:
+        return {}
+
+
 def refused(engine, params: dict | None) -> frozenset[str]:
     """The request fields this engine, started with these settings, refuses.
 

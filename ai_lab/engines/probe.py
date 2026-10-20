@@ -31,6 +31,20 @@ def http_json(port: int, path: str, timeout: float = 1.0) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def http_text(port: int, path: str, timeout: float = 1.0) -> str:
+    """The text an engine answers with, or "" when it does not answer.
+
+    For pages that are not JSON, such as vLLM's Prometheus `/metrics`.
+    """
+    try:
+        with urllib.request.urlopen(f"http://{LOOPBACK}:{port}{path}", timeout=timeout) as response:
+            if response.status != HTTPStatus.OK:
+                return ""
+            return response.read().decode("utf-8", "replace")
+    except (OSError, urllib.error.URLError, ValueError):
+        return ""
+
+
 def http_ok(port: int, path: str = "/health", timeout: float = 1.0) -> bool:
     """Whether the engine answers 200 at `path`, and a JSON `status` there is "ok" if it has one."""
     try:

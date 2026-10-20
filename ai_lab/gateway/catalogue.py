@@ -8,7 +8,7 @@ touches the card or the queue, and it keeps no state of its own.
 
 from __future__ import annotations
 
-from ..engines.base import refused, withheld
+from ..engines.base import live_state, refused, withheld
 from .errors import NotConfiguredError, ShapeNotServedError
 from .card_operations import CardOperations
 from ..types import Task
@@ -42,7 +42,18 @@ class Catalogue:
         for form in ("speech_form", "music_form"):
             if form in instance:
                 row[form] = instance[form]
+        live = self._live(instance) if row["loaded"] else {}
+        if live:
+            row["live"] = live
         return row
+
+    def _live(self, instance: dict) -> dict:
+        """What the running engine says about its load, asked only for one loaded model."""
+        try:
+            engine = self.operations.engine(instance["engine"])
+        except KeyError:
+            return {}
+        return live_state(engine, instance["port"])
 
     def _rows(self, instances: list[dict]) -> list[dict]:
         """One listing row per entry already read."""
