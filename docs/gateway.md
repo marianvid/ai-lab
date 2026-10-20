@@ -38,6 +38,48 @@ The list is built from the configured models' engines, so an endpoint
 absent from this block has no model here that answers it. How to write each
 request is in [Writing a request](requests.md).
 
+### Long texts: counting before sending, and what a refusal says
+
+A text model accepts at most `context_size` tokens in one request, prompt and
+answer together (`GET /v1/models/{id}` gives it under `params`). That is a
+limit **per request**. The cache behind it is one pool shared by every request
+in flight: when the pool is full, vLLM makes the extra requests wait instead of
+refusing them. So a refusal for length means that one text is too long, and
+sending fewer requests at once does not help.
+
+Measured on 20 October 2026, `qwen38-nvfp4` was started with a 0.93 share of
+the card and a `context_size` of 98,304. With these settings the pool held
+107,985 tokens, and bge-m3 still had room on the card. The 32,768 it had before
+refused long Chinese articles. Chinese text needs many more tokens per
+character than English.
+
+**Counting first.** `POST /tokenize` counts a text's tokens for one model,
+exactly as that model will count them. It is answered by vLLM models. Send the
+same `messages` you are about to send, so that the chat template's own tokens
+are counted too:
+
+```sh
+curl http://localhost:8090/tokenize -H 'Content-Type: application/json' \
+  -d '{"model": "qwen38-nvfp4", "messages": [{"role": "user", "content": "..."}]}'
+```
+
+The answer carries `count` (the tokens) and `max_model_len` (the limit). A
+client cuts a text when `count` plus the `max_tokens` it will ask for is
+larger than the limit. Like any request, counting loads the model if it is not
+on the card.
+
+**What a refusal says.** When a text is too long anyway, the engine's 400 comes
+back with its own message unchanged, and with the numbers under `ai_lab`:
+
+```json
+{"error": {"message": "This model's maximum context length is 98304 tokens. ..."},
+ "ai_lab": {"reason": "context_too_long", "context_size": 98304,
+            "prompt_tokens": 120000, "max_output_tokens": 1000}}
+```
+
+`prompt_tokens` is missing when vLLM refused on the text's length in characters
+before counting it. In that case the refusal has `prompt_characters` instead.
+
 ### OCR and image workflows
 
 OCR is exposed at `POST /v1/images/ocr` and uses an isolated PaddleOCR 3.x

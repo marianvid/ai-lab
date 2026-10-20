@@ -121,6 +121,9 @@ def validate(specs: tuple[ParamSpec, ...], values: dict) -> dict:
 # engine from another.
 OPENAI_PATHS = ("/v1/chat/completions", "/v1/completions")
 ANTHROPIC_PATHS = ("/v1/messages", "/v1/messages/count_tokens")
+# Counting a text's tokens for one model before sending it: vLLM answers with
+# `count` and `max_model_len`, so a client can cut a text that would not fit.
+TOKENIZE_PATHS = ("/tokenize",)
 TRANSCRIPTION_PATHS = ("/v1/audio/transcriptions", "/v1/chat/completions")
 VAD_PATHS = ("/v1/audio/speech-segments",)
 DIARIZATION_PATHS = ("/v1/audio/diarizations",)

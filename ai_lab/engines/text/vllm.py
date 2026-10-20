@@ -24,7 +24,7 @@ from __future__ import annotations
 from ...catalog.capabilities import IMAGES
 from ...types import Format, ModelSet, Task
 from ...hosts.command import which
-from ..base import (ANTHROPIC_PATHS, OPENAI_PATHS, TRANSCRIPTION_PATHS,
+from ..base import (ANTHROPIC_PATHS, OPENAI_PATHS, TOKENIZE_PATHS, TRANSCRIPTION_PATHS,
                    LaunchPlan, ParamSpec, validate)
 from ..probe import http_ok
 from ...network import ALL_INTERFACES
@@ -302,4 +302,4 @@ class VllmEngine:
         """
         if task is Task.TRANSCRIPTION:
             return TRANSCRIPTION_PATHS
-        return OPENAI_PATHS + ANTHROPIC_PATHS
+        return OPENAI_PATHS + ANTHROPIC_PATHS + TOKENIZE_PATHS

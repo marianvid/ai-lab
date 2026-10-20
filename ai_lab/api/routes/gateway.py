@@ -23,6 +23,7 @@ from ...cpu_models import EMBEDDINGS_PATH
 from ...engines.base import (
     ALIGNMENT_PATHS,
     ANTHROPIC_PATHS,
+    TOKENIZE_PATHS,
     DIARIZATION_PATHS,
     MUSIC_PATHS,
     OCR_PATHS,
@@ -39,7 +40,7 @@ from ...reservations import CardReservedError, ReservationBook, ReservationConfl
 from ...gateway.scheduler_parts import AdmissionWithdrawnError, StillWanted
 from ...types import Task
 from ..multipart import MultipartBody
-from ..passthrough import Hooks, Waits, forward
+from ..context_limit import Hooks, Waits, forward
 from ..uploads import UploadRejectedError, validate_image
 
 # Every shape any engine here can answer. Registered as routes whatever is
@@ -49,7 +50,7 @@ FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
                                 + TRANSCRIPTION_PATHS + VAD_PATHS
                                 + DIARIZATION_PATHS + OCR_PATHS + MUSIC_PATHS
                                 + SPEECH_PATHS + ALIGNMENT_PATHS
-                                + (EMBEDDINGS_PATH,)))
+                                + TOKENIZE_PATHS + (EMBEDDINGS_PATH,)))
 NO_LANES = SideLanes()
 # The header a call under a reservation carries: the reservation's id.
 RESERVATION_HEADER = "X-AI-Lab-Reservation"
@@ -63,7 +64,7 @@ DOOR_RETURNS = 3
 # are not ambiguous in practice: this map is only consulted for the paths
 # that are unique to a task.
 _TASK_OF_PATH = {
-    **dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS, Task.TEXT_GENERATION),
+    **dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS + TOKENIZE_PATHS, Task.TEXT_GENERATION),
     "/v1/audio/transcriptions": Task.TRANSCRIPTION,
     **dict.fromkeys(VAD_PATHS, Task.VAD),
     **dict.fromkeys(DIARIZATION_PATHS, Task.DIARIZATION),
@@ -321,6 +322,8 @@ def _forward(gateway: Gateway, lease, path: str, payload, wanted: str):
              if streaming else None)
     first_byte_s, between_bytes_s = gateway.timeouts_for(
         _TASK_OF_PATH.get(path, Task.TEXT_GENERATION))
+    # A text too long for the model comes back with the limit and its size as
+    # numbers next to the engine's sentence (`context_limit`).
     return forward(f"http://{LOOPBACK}:{lease.port}{path}", outgoing,
                    Waits(first_byte_s, between_bytes_s),
                    Hooks(on_close=lease.release, on_first_chunk=timed),

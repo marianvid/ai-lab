@@ -21,6 +21,7 @@ from ai_lab.api.server import Handler, build_router, status_for
 from ai_lab.events import EventBus
 from ai_lab.gateway.core import CardBusyError, NotConfiguredError
 from ai_lab.multipart import MultipartBody
+from ai_lab.api.passthrough import Passthrough
 
 
 class FakeOperations:
@@ -342,6 +343,10 @@ class BusyCardTests(LiveServer):
                          "looking at the page must not be guarded")
 
 
+# What a fake engine answers: an ordinary success, as `forward` returns it.
+ANSWERED = Passthrough(200, "application/json", iter([b"{}"]), {})
+
+
 class SettingsFieldTests(unittest.TestCase):
     """The field carrying startup settings must not reach the engine.
 
@@ -392,6 +397,7 @@ class SettingsFieldTests(unittest.TestCase):
         def fake_forward(url, payload, _waits, hooks, **_):
             forwarded.update(payload)
             hooks.closed()
+            return ANSWERED
 
         with mock.patch.object(gateway_routes, "forward", fake_forward):
             handle = _forwarder(cast(Any, gateway), "/v1/chat/completions")
@@ -416,6 +422,7 @@ class SettingsFieldTests(unittest.TestCase):
         def fake_forward(url, payload, _waits, hooks, **_):
             forwarded.update(payload)
             hooks.closed()
+            return ANSWERED
 
         with mock.patch.object(gateway_routes, "forward", fake_forward):
             handle = _forwarder(cast(Any, gateway), "/v1/chat/completions")
@@ -453,6 +460,7 @@ class SettingsFieldTests(unittest.TestCase):
         def fake_forward(url, payload, _waits, hooks, **kwargs):
             forwarded.update(url=url, payload=payload, kwargs=kwargs)
             hooks.closed()
+            return ANSWERED
 
         with mock.patch.object(gateway_routes, "forward", fake_forward):
             _forwarder(cast(Any, self.Gateway()), "/v1/audio/transcriptions")(body=body)
@@ -490,6 +498,7 @@ class SettingsFieldTests(unittest.TestCase):
 
         def fake_forward(url, payload, _waits, hooks, **_):
             hooks.closed()
+            return ANSWERED
 
         with mock.patch.object(gateway_routes, "forward", fake_forward):
             _forwarder(cast(Any, gateway), "/v1/images/ocr")(body=self._ocr_upload(png))
