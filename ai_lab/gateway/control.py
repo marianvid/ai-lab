@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .errors import CardBusyError
+from .errors import CardBusyError, ModelNotLoadedError
 
 
 class GatewayControl:
@@ -34,6 +34,20 @@ class GatewayControl:
             "waiting": len(state["waiting"]),
             "switching": state["switching"],
         }
+
+    def where_loaded(self, catalogue, entries: list[dict], wanted: str,
+                     shape: str) -> tuple[int, str]:
+        """The port and engine's name of a loaded model, without taking a place.
+
+        For questions the engine answers without the card (`/tokenize`): no
+        queue, no load. `ModelNotLoadedError` when the model is not on the card.
+        """
+        instance = catalogue.resolve(wanted, entries)
+        catalogue.refuse_wrong_shape(instance, shape, entries)
+        loaded = [item["shape"].instance_id for item in self.scheduler.state()["loaded"]]
+        if instance["id"] not in loaded:
+            raise ModelNotLoadedError(instance["id"], loaded)
+        return instance["port"], catalogue.engine_name(instance)
 
     def guard(self, action: str, instance_id: str) -> None:
         """Refuse an action that would interrupt work in progress.

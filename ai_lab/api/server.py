@@ -21,7 +21,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
 from ..events import EventBus
-from ..gateway.core import CardBusyError
+from ..gateway.core import CardBusyError, ModelNotLoadedError
 from ..multipart import MultipartBody
 from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
@@ -41,6 +41,8 @@ STATUS = {
     NotImplementedError: HTTPStatus.NOT_IMPLEMENTED,
     # Not a bad request: the same request will succeed once the card is free.
     CardBusyError: HTTPStatus.CONFLICT,
+    # Counting tokens needs the model running; it is never loaded for that.
+    ModelNotLoadedError: HTTPStatus.CONFLICT,
     # A subscription's allowance is spent: the caller may retry later.
     ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
     # The vendor's CLI could not answer: the caller's fallback should take over.

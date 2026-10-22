@@ -488,6 +488,36 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertEqual(watch.idle_for(), 3.0)
         self.assertEqual((watch.stall_s, watch.safety_s), (75.0, 900.0))
 
+    def test_counting_tokens_takes_no_place_and_waits_for_no_reservation(self):
+        from ai_lab.api.routes.gateway import _forwarder
+        gateway = self.Gateway()
+        cast(Any, gateway).where_loaded = lambda wanted, shape: (8141, "qwen-real")
+        sent: dict = {}
+
+        def fake_forward(url, payload, waits, hooks, **_):
+            sent.update(url=url, payload=dict(payload))
+            return ANSWERED
+
+        class Reserved:
+            def admit(self, *args):
+                raise AssertionError("a count must not wait at the reservation door")
+
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            _forwarder(cast(Any, gateway), "/tokenize", book=cast(Any, Reserved()))(
+                body={"model": "qwen", "prompt": "hello", "ai_lab": {"context_size": 1}})
+        self.assertEqual(gateway.asked, [], "a count must never take a place on the card")
+        self.assertEqual(sent["url"], "http://127.0.0.1:8141/tokenize")
+        self.assertEqual(sent["payload"], {"model": "qwen-real", "prompt": "hello"})
+
+    def test_a_count_for_a_model_not_loaded_says_so_with_a_reason(self):
+        from ai_lab.gateway.core import ModelNotLoadedError
+        error = ModelNotLoadedError("qwen36-nvfp4", ["qwen38-nvfp4"])
+        self.assertEqual(status_for(error), HTTPStatus.CONFLICT)
+        self.assertEqual(error.detail["ai_lab"], {"reason": "model_not_loaded",
+                                                  "model": "qwen36-nvfp4",
+                                                  "loaded": ["qwen38-nvfp4"]})
+        self.assertIn("not loaded", str(error))
+
     def test_an_answer_whose_headers_cannot_be_written_still_gives_back(self):
         # The fault of 22 October 2026: the client left, writing the headers
         # failed, the body was never started and its place was never returned.

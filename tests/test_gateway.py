@@ -1444,6 +1444,19 @@ class LiveSettingsTests(unittest.TestCase):
         self.assertEqual((stats["stall_s"], stats["safety_s"], stats["default_max_tokens"]),
                          (90, 1800.0, 2048))
 
+    def test_a_loaded_model_is_found_without_taking_a_place(self):
+        from ai_lab.gateway.core import ModelNotLoadedError
+        gateway = quick(two_models())
+        lease = gateway.acquire("coder")
+        lease.release()
+        in_flight = gateway.stats()["in_flight"]
+        port, _ = gateway.where_loaded("coder", "/v1/chat/completions")
+        self.assertEqual(port, 8080)
+        self.assertEqual(gateway.stats()["in_flight"], in_flight, "no place may be taken")
+        with self.assertRaises(ModelNotLoadedError) as caught:
+            gateway.where_loaded("reviewer", "/v1/chat/completions")
+        self.assertEqual(caught.exception.detail["ai_lab"]["loaded"], ["coder"])
+
     def test_a_lease_says_whether_it_writes_text_and_how_to_watch_its_engine(self):
         gateway = quick(two_models())
         lease = gateway.acquire("coder")

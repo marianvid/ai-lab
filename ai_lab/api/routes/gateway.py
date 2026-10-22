@@ -168,6 +168,8 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
     def handle(body=None, alive=None, headers=None, **_):
         payload = body or {}
         wanted = _model_name(payload)
+        if path in TOKENIZE_PATHS:
+            return _count_tokens(gateway, path, payload, wanted)
         # The card's reservations come first (ADR 0005): a call reaches a model
         # on this machine — the card's or an embeddings model — only under the
         # holder's reservation, or when the card is not reserved. Subscription
@@ -189,6 +191,24 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
             lease.release()
             raise
     return handle
+
+
+def _count_tokens(gateway: Gateway, path: str, payload, wanted: str):
+    """Count a text's tokens with a loaded model's tokenizer: no card place, no queue, no load.
+
+    The engine counts on the processor, not the card, so a count neither waits
+    for places nor for a reservation, and takes none from anybody. A model that
+    is not loaded cannot count, and is not loaded for it: the answer is a 409
+    with `ai_lab.reason` `model_not_loaded` (owner's decision, 22 October 2026).
+    """
+    if isinstance(payload, MultipartBody):
+        raise ValueError("counting tokens takes a JSON request")
+    port, name = gateway.where_loaded(wanted, path)
+    request = {key: value for key, value in payload.items() if key != SETTINGS_FIELD}
+    request["model"] = name
+    first_byte_s, between_bytes_s = gateway.timeouts_for(Task.TEXT_GENERATION)
+    return forward(f"http://{LOOPBACK}:{port}{path}", request,
+                   Waits(first_byte_s, between_bytes_s), Hooks())
 
 
 class _Admission:

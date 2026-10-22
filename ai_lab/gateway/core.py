@@ -14,7 +14,13 @@ from dataclasses import replace
 
 from .catalogue import Catalogue
 from .control import GatewayControl
-from .errors import CardBusyError, CouldNotLoadError, NotConfiguredError, ShapeNotServedError
+from .errors import (
+    CardBusyError,
+    CouldNotLoadError,
+    ModelNotLoadedError,
+    NotConfiguredError,
+    ShapeNotServedError,
+)
 from .limits import GatewayLimits
 from .loading import CardLoader, CardMemory
 from .progress import EngineWatches
@@ -26,8 +32,8 @@ from .scheduler import AbandonedError, Scheduler, StillWanted, WillNotFitError
 from ..types import Task
 
 # The gateway's errors are part of its interface: callers import them from here.
-__all__ = ["CardBusyError", "CouldNotLoadError", "Gateway", "GatewayLimits", "NotConfiguredError",
-           "ShapeNotServedError"]
+__all__ = ["CardBusyError", "CouldNotLoadError", "Gateway", "GatewayLimits",
+           "ModelNotLoadedError", "NotConfiguredError", "ShapeNotServedError"]
 
 
 class Gateway:
@@ -60,8 +66,7 @@ class Gateway:
         self.max_upload_bytes = limits.max_upload_bytes
         self.max_upload_pixels = limits.max_upload_pixels
         self.max_upload_dimension = limits.max_upload_dimension
-        # For engines that report their progress: the stall and safety limits
-        # and the default answer cap (`limits.Patience`).
+        # Stall and safety limits and the default answer cap (`limits.Patience`).
         self.patience = limits.patience
         self._watches = EngineWatches(self._restart_stalled)
         self._memory: CardMemory = memory or GatewayResources(
@@ -133,6 +138,12 @@ class Gateway:
             # loses a place with nobody using it.
             self._scheduler.leave()
             raise
+
+    def where_loaded(self, wanted: str, shape: str) -> tuple[int, str]:
+        """Port and engine's name of a loaded model, taking no place (`GatewayControl.where_loaded`)."""
+        self.adopt_what_is_there()
+        return self._control.where_loaded(self._catalogue, self._operations.configured(),
+                                          wanted, shape)
 
     def _lease(self, instance: dict, asked_for: dict) -> Lease:
         """The place handed to the caller, with what forwarding must know."""

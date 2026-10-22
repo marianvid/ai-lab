@@ -30,6 +30,23 @@ class ShapeNotServedError(ValueError):
     """
 
 
+class ModelNotLoadedError(RuntimeError):
+    """A question only a loaded model can answer, asked of one that is not on the card.
+
+    Counting tokens (`/tokenize`) takes no place on the card and never loads a
+    model: the count comes from the running engine's tokenizer, so a model
+    that is not running cannot count (owner's decision, 22 October 2026). The
+    answer says so with a reason a program can read, and what is loaded.
+    """
+
+    kind = "model_not_loaded"
+
+    def __init__(self, model: str, loaded: list[str]) -> None:
+        super().__init__(f"{model} is not loaded, so it cannot count tokens now; "
+                         "loaded: " + (", ".join(loaded) or "nothing"))
+        self.detail = {"ai_lab": {"reason": self.kind, "model": model, "loaded": loaded}}
+
+
 class CardBusyError(RuntimeError):
     """The card is serving a request, and the action asked for would cut it off.
 
