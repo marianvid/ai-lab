@@ -48,6 +48,10 @@ class GatewayPolicy:
     max_upload_bytes: int = 0
     max_upload_pixels: int = 0
     max_upload_dimension: int = 0
+    # For engines that report their progress (vLLM): see `gateway.limits.Patience`.
+    stall_s: float = 60.0
+    safety_s: float = 1800.0
+    default_max_tokens: int = 4096
 
     @classmethod
     def from_mapping(cls, raw: Mapping | None) -> GatewayPolicy:
@@ -83,6 +87,10 @@ class GatewayPolicy:
                                        section="Gateway"),
             max_upload_dimension=_integer(raw, "max_upload_dimension", 0,
                                           bounds=(0, 100000), section="Gateway"),
+            stall_s=_number(raw, "stall_s", 60, minimum=5, maximum=3600),
+            safety_s=_number(raw, "safety_s", 1800, minimum=60, maximum=86400),
+            default_max_tokens=_integer(raw, "default_max_tokens", 4096,
+                                        bounds=(0, 1_000_000), section="Gateway"),
         )
 
     def timeout_mapping(self) -> dict[str, dict[str, float]]:

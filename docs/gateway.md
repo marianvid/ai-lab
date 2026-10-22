@@ -97,6 +97,14 @@ under about 80 % of the pool. Measured on 20 October 2026, `qwen38-nvfp4` held
 16 places and a pool of 130,389 tokens. When clusters of long Chinese batches
 filled 92–98 % of the pool, vLLM ran only 4–5 requests and parked 10–12. The
 parked ones kept their 120 s running, and two of them timed out with 504.
+Since 22 October 2026 a parked request is no longer cut for waiting; only an
+engine that does no work at all is (see
+[Gateway behavior](gateway-behavior.md#an-engine-that-reports-its-progress-vllm)).
+Keeping under the pool still matters: a parked request waits, and the work is
+done no sooner.
+
+`live` also carries `tokens_processed`, every token vLLM has processed since it
+started. The gateway reads it to tell a parked request from a stuck engine.
 
 ### OCR and image workflows
 
@@ -190,12 +198,16 @@ loaded model with what it is answering and what is queued for it; **Waiting**,
 the total queued for models already there; **Next change**, the model that has
 to be loaded next; and **Remaining**, everything held up behind that change.
 
-**Limits** are the three numbers the page lets you change, and they take
+**Limits** are the numbers the page lets you change, and they take
 effect at once, without a restart: **Max TTFT** (time to first token — how long
 to wait for an engine to start answering, default 120 s), **Max idle time**
 (how long a silence in the middle of an answer may last, default 30 s) and
-**Max queue size** (how many requests may wait at once, default 150). What the
-two waits are for is in [Gateway behavior](gateway-behavior.md#how-long-to-wait-for-an-engine).
+**Max queue size** (how many requests may wait at once, default 150). The two
+waits apply to engines that do not report their progress. For vLLM, which
+does, **Max engine stall** (default 60 s) and **Max request time** (default
+30 min) apply instead. **Default answer cap** (default 4,096 tokens) is added
+to a text request that names no `max_tokens`. What each is for is in
+[Gateway behavior](gateway-behavior.md#how-long-to-wait-for-an-engine).
 
 ### How loading and unloading is decided
 

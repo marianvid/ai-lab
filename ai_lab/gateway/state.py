@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .core import Gateway
+    from .progress import EngineProgress
 
 
 @dataclass(slots=True)
@@ -37,6 +38,11 @@ class Lease:
     # Request fields the engine refuses with the settings it runs with
     # (`refused` in engines/base.py); left out when forwarding.
     drop: frozenset[str] = frozenset()
+    # Whether the entry generates text: only those get a default answer cap.
+    text: bool = False
+    # The engine's shared progress watch (`progress.EngineProgress`), or None
+    # for an engine that keeps no work counters: then the two plain waits apply.
+    progress: EngineProgress | None = None
     # When the place was taken, so giving it back can say how long it was held.
     started: float = 0.0
     _given_back: bool = False

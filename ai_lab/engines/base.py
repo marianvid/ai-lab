@@ -9,6 +9,7 @@ neither the configuration schema nor the front end.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -254,6 +255,26 @@ def live_state(engine, port: int) -> dict:
         return dict(ask(port))
     except Exception:
         return {}
+
+
+def progress_reader(engine, port: int) -> Callable[[], dict] | None:
+    """How to read a loaded engine's work counters, or None when it has none.
+
+    Optional (`progress(port)`): vLLM counts every token it processes, which
+    lets the gateway tell a request parked inside the engine from an engine
+    that is stuck (`gateway/progress.py`). The reader never raises: a failed
+    reading is an empty report.
+    """
+    ask = getattr(engine, "progress", None)
+    if ask is None:
+        return None
+
+    def read() -> dict:
+        try:
+            return dict(ask(port))
+        except Exception:
+            return {}
+    return read
 
 
 def refused(engine, params: dict | None) -> frozenset[str]:

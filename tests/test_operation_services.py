@@ -71,6 +71,15 @@ class SettingsChangesTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.changes.update_gateway(bad)
 
+    def test_the_patience_settings_are_checked_then_saved(self):
+        saved = self.changes.update_gateway({"stall_s": 90, "safety_s": 3600,
+                                             "default_max_tokens": 0})
+        self.assertEqual((saved["stall_s"], saved["safety_s"], saved["default_max_tokens"]),
+                         (90.0, 3600.0, 0))
+        for bad in ({"stall_s": 1}, {"safety_s": 10}, {"default_max_tokens": -1}):
+            with self.assertRaises(ValueError):
+                self.changes.update_gateway(bad)
+
     def test_an_engine_program_must_exist_and_run(self):
         with self.assertRaises(KeyError):
             self.changes.update_engine_binary("nope", "/bin/sh")

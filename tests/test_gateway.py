@@ -421,6 +421,24 @@ class DescribingTests(unittest.TestCase):
                          {"chat_template_kwargs"})
         self.assertEqual(catalogue.refused_fields({"engine": "gone"}, {}), frozenset())
 
+    def test_the_catalogue_knows_how_to_watch_an_entrys_engine(self):
+        from ai_lab.engines.text.llamacpp import LlamaCppEngine
+        from ai_lab.engines.text.vllm import VllmEngine
+        from ai_lab.gateway.catalogue import Catalogue
+
+        class Operations:
+            def engine(self, engine_id):
+                engines = {"vllm": VllmEngine(binary="vllm"),
+                           "llamacpp": LlamaCppEngine(binary="llama-server")}
+                return engines[engine_id]
+
+        catalogue = Catalogue(cast(Any, Operations()))
+        self.assertIsNotNone(catalogue.progress_reader({"engine": "vllm", "port": 9}))
+        self.assertIsNone(catalogue.progress_reader({"engine": "llamacpp", "port": 9}))
+        self.assertIsNone(catalogue.progress_reader({"engine": "gone", "port": 9}))
+        self.assertTrue(Catalogue.writes_text({}))
+        self.assertFalse(Catalogue.writes_text({"task": "speech-synthesis"}))
+
     def test_live_state_is_asked_of_the_engine_and_never_raises(self):
         from ai_lab.engines.base import live_state
 
@@ -1415,6 +1433,26 @@ class LiveSettingsTests(unittest.TestCase):
         before = gateway.between_bytes_s
         gateway.apply_settings({"first_byte_s": 200})
         self.assertEqual(gateway.between_bytes_s, before)
+
+    def test_the_patience_for_engines_that_report_progress_changes_too(self):
+        gateway = quick(two_models())
+        gateway.apply_settings({"stall_s": 90, "default_max_tokens": 2048})
+        self.assertEqual(gateway.patience.stall_s, 90)
+        self.assertEqual(gateway.patience.default_max_tokens, 2048)
+        self.assertEqual(gateway.patience.safety_s, 1800.0, "left out, left alone")
+        stats = gateway.stats()
+        self.assertEqual((stats["stall_s"], stats["safety_s"], stats["default_max_tokens"]),
+                         (90, 1800.0, 2048))
+
+    def test_a_lease_says_whether_it_writes_text_and_how_to_watch_its_engine(self):
+        gateway = quick(two_models())
+        lease = gateway.acquire("coder")
+        try:
+            self.assertTrue(lease.text)
+            # The fake engines keep no work counters: the plain waits apply.
+            self.assertIsNone(lease.progress)
+        finally:
+            lease.release()
 
 
 class ShapesOfferedTests(unittest.TestCase):

@@ -258,6 +258,8 @@ vllm:num_requests_running{engine="0",model_name="qwen3.8-27b"} 5.0
 vllm:num_requests_waiting{engine="0",model_name="qwen3.8-27b"} 11.0
 vllm:kv_cache_usage_perc{engine="0",model_name="qwen3.8-27b"} 0.95812
 vllm:cache_config_info{block_size="1056",kv_cache_size_tokens="130389",num_gpu_blocks="None"} 1.0
+vllm:iteration_tokens_total_count{engine="0",model_name="qwen3.8-27b"} 4388.0
+vllm:iteration_tokens_total_sum{engine="0",model_name="qwen3.8-27b"} 176302.0
 """
 
 
@@ -269,7 +271,8 @@ class LiveStateTests(unittest.TestCase):
         self.assertEqual(pool_state(METRICS), {"kv_cache_tokens": 130389,
                                                "kv_cache_used": 0.9581,
                                                "requests_running": 5,
-                                               "requests_waiting": 11})
+                                               "requests_waiting": 11,
+                                               "tokens_processed": 176302})
 
     def test_nothing_answered_is_nothing_known(self):
         from ai_lab.engines.text.vllm import pool_state
@@ -289,6 +292,21 @@ class LiveStateTests(unittest.TestCase):
             state = VllmEngine(binary="vllm").live(8141)
         self.assertEqual(asked, [(8141, "/metrics")])
         self.assertEqual(state["kv_cache_tokens"], 130389)
+
+    def test_the_stall_watch_reads_with_more_patience(self):
+        from unittest import mock
+
+        import ai_lab.engines.text.vllm as module
+        asked = []
+
+        def answer(port, path, timeout=1.0):
+            asked.append((port, path, timeout))
+            return METRICS
+
+        with mock.patch.object(module, "http_text", answer):
+            state = VllmEngine(binary="vllm").progress(8141)
+        self.assertEqual(asked, [(8141, "/metrics", module.PROGRESS_READ_S)])
+        self.assertEqual(state["tokens_processed"], 176302)
 
 
 class MemorySettingsTests(unittest.TestCase):

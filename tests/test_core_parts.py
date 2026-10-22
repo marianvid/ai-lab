@@ -36,6 +36,15 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.timeout_mapping(),
                          {"ocr": {"first_byte_s": 60.0, "between_bytes_s": 30.0}})
 
+    def test_the_patience_for_engines_that_report_progress(self):
+        policy = GatewayPolicy.from_mapping({})
+        self.assertEqual((policy.stall_s, policy.safety_s, policy.default_max_tokens),
+                         (60.0, 1800.0, 4096))
+        policy = GatewayPolicy.from_mapping({"stall_s": 120, "default_max_tokens": 0})
+        self.assertEqual((policy.stall_s, policy.default_max_tokens), (120.0, 0))
+        with self.assertRaisesRegex(ValueError, "Gateway safety_s"):
+            GatewayPolicy.from_mapping({"safety_s": 5})
+
     def test_out_of_range_integers_name_their_section(self):
         with self.assertRaisesRegex(ValueError, "Gateway max_waiting must be between 1 and 10000"):
             GatewayPolicy.from_mapping({"max_waiting": 0})

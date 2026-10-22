@@ -20,6 +20,7 @@ from ai_lab.api.routes import RouteParts
 from ai_lab.api.server import Handler, build_router, status_for
 from ai_lab.events import EventBus
 from ai_lab.gateway.core import CardBusyError, NotConfiguredError
+from ai_lab.gateway.limits import Patience
 from ai_lab.multipart import MultipartBody
 from ai_lab.api.passthrough import Passthrough
 
@@ -364,6 +365,7 @@ class SettingsFieldTests(unittest.TestCase):
         max_upload_bytes = 0
         max_upload_pixels = 0
         max_upload_dimension = 0
+        patience = Patience(default_max_tokens=0)
 
         def acquire(self, wanted, shape=None, settings=None, still_wanted=None):
             self.asked.append((wanted, shape, settings, still_wanted))
@@ -385,9 +387,12 @@ class SettingsFieldTests(unittest.TestCase):
             self.port = 9
             self.model_name = "qwen-real"
             self.drop = gateway.drop
+            self.text = True
+            self.progress = None
+            self.released = 0
 
         def release(self):
-            pass
+            self.released += 1
 
     def test_the_field_is_read_and_removed(self):
         from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder
@@ -433,6 +438,73 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertNotIn("chat_template_kwargs", forwarded)
         self.assertEqual(forwarded["response_format"], {"type": "json_object"},
                          "only the refused field may be left out")
+
+    def test_a_text_request_without_a_limit_gets_the_default_cap(self):
+        from ai_lab.api.answer_cap import HEADER
+        from ai_lab.api.routes.gateway import _forwarder
+        gateway = self.Gateway()
+        gateway.patience = Patience(default_max_tokens=4096)
+        forwarded: dict = {}
+
+        def fake_forward(url, payload, waits, hooks, **_):
+            forwarded.update(payload=dict(payload), waits=waits)
+            return Passthrough(200, "application/json", iter([b"{}"]), {}, hooks.closed)
+
+        def here():
+            return True
+
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            handle = _forwarder(cast(Any, gateway), "/v1/chat/completions")
+            answer = handle(body={"model": "qwen", "messages": []}, alive=here)
+        self.assertEqual(forwarded["payload"]["max_tokens"], 4096)
+        self.assertEqual(answer.headers[HEADER], "4096")
+        self.assertIs(forwarded["waits"].client_here, here,
+                      "the client must be watched while the engine works")
+        self.assertIsNone(forwarded["waits"].idle_for,
+                          "an engine without counters keeps the plain waits")
+
+    def test_an_engine_with_counters_is_judged_by_them(self):
+        from ai_lab.api.routes.gateway import _forwarder
+
+        class Progress:
+            def idle_for(self):
+                return 3.0
+
+        gateway = self.Gateway()
+        gateway.patience = Patience(stall_s=75.0, safety_s=900.0, default_max_tokens=0)
+        lease = self.Lease(gateway)
+        lease.progress = Progress()
+        cast(Any, gateway).acquire = lambda *args, **kwargs: lease
+        watches = []
+
+        def fake_forward(url, payload, waits, hooks, **_):
+            watches.append(waits)
+            return ANSWERED
+
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            _forwarder(cast(Any, gateway), "/v1/chat/completions")(
+                body={"model": "qwen", "messages": []})
+        watch = watches[0]
+        self.assertEqual(watch.idle_for(), 3.0)
+        self.assertEqual((watch.stall_s, watch.safety_s), (75.0, 900.0))
+
+    def test_an_answer_whose_headers_cannot_be_written_still_gives_back(self):
+        # The fault of 22 October 2026: the client left, writing the headers
+        # failed, the body was never started and its place was never returned.
+        closed = []
+        answer = Passthrough(200, "application/json", iter([b"{}"]), {},
+                             lambda: closed.append(True))
+
+        class Gone:
+            close_connection = False
+
+            def send_response(self, status):
+                raise BrokenPipeError
+
+        gone = Gone()
+        Handler._passthrough(cast(Any, gone), answer)
+        self.assertEqual(closed, [True])
+        self.assertTrue(gone.close_connection)
 
     def test_a_field_that_is_not_an_object_is_refused(self):
         from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder

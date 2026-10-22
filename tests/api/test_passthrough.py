@@ -4,12 +4,20 @@ Each fake engine sends its headers at once, like llama.cpp and mlx-lm do for a
 streamed answer, and then behaves in one particular way.
 """
 
+import select
+import socket
 import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from ai_lab.api.passthrough import Hooks, Waits, forward
+from ai_lab.api.passthrough import (
+    ClientGoneError,
+    EngineStalledError,
+    Hooks,
+    Waits,
+    forward,
+)
 
 # Scaled-down limits: the idle limit is shorter than the prompt-reading pause,
 # the first-byte limit is longer.
@@ -125,6 +133,123 @@ class ForwardTests(unittest.TestCase):
         self.assertEqual(first, b"data: one\n\n")
         self.assertLess(waited, BETWEEN_BYTES_S * 0.5)
         self.assertEqual(b"".join(chunks), b"data: two\n\n")
+
+
+class SlowEngine(BaseHTTPRequestHandler):
+    """An engine that answers without streaming: nothing until it has finished.
+
+    While it "writes", it watches its connection, the way vLLM does, and
+    notes when its client has gone (`left`).
+    """
+
+    protocol_version = "HTTP/1.1"
+    writing_s = 1.0
+    status = 200
+    left: threading.Event
+
+    def log_message(self, *_):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        until = time.perf_counter() + self.writing_s
+        while time.perf_counter() < until:
+            readable, _, _ = select.select([self.connection], [], [], 0.02)
+            if readable and not self.connection.recv(1, socket.MSG_PEEK):
+                self.left.set()
+                self.close_connection = True
+                return
+        body = b'{"answer": "done"}'
+        self.send_response(self.status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class WatchTests(unittest.TestCase):
+    """What the gateway does while it waits: the client, and the engine's progress."""
+
+    def serve(self, writing_s=1.0, status=200):
+        left = threading.Event()
+        handler = type("Handler", (SlowEngine,),
+                       {"writing_s": writing_s, "status": status, "left": left})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}/v1/chat/completions", left
+
+    def forward(self, url, waits, closed=None):
+        return forward(url, {"stream": False}, waits, Hooks(on_close=closed))
+
+    def test_a_client_that_leaves_stops_its_request_in_the_engine(self):
+        url, left = self.serve(writing_s=5.0)
+        here_until = time.perf_counter() + 0.3
+        closed = []
+        waits = Waits(0.3, 0.2, client_here=lambda: time.perf_counter() < here_until,
+                      idle_for=lambda: 0.0, tick_s=0.05)
+        with self.assertRaises(ClientGoneError):
+            self.forward(url, waits, closed=lambda: closed.append(True))
+        self.assertTrue(left.wait(2.0), "the engine never saw its client leave")
+        self.assertEqual(closed, [True], "the place must be given back once")
+
+    def test_an_engine_that_does_no_work_is_cut_with_its_reason(self):
+        url, left = self.serve(writing_s=5.0)
+        waits = Waits(0.3, 0.2, idle_for=lambda: 99.0, stall_s=60.0, tick_s=0.05)
+        with self.assertRaises(EngineStalledError) as caught:
+            self.forward(url, waits)
+        self.assertIn("engine stalled", caught.exception.explanation)
+        self.assertTrue(left.wait(2.0))
+
+    def test_waiting_while_the_engine_works_is_never_cut(self):
+        # Longer than both plain waits (0.3 s and 0.2 s): with progress reported
+        # they do not apply.
+        url, _ = self.serve(writing_s=1.0)
+        waits = Waits(0.3, 0.2, idle_for=lambda: 0.0, tick_s=0.05)
+        answer = self.forward(url, waits)
+        self.assertEqual(b"".join(answer.chunks), b'{"answer": "done"}')
+
+    def test_without_progress_reports_the_plain_wait_still_applies(self):
+        url, left = self.serve(writing_s=5.0)
+        with self.assertRaises(TimeoutError):
+            self.forward(url, Waits(0.3, 0.2, tick_s=0.05))
+        self.assertTrue(left.wait(2.0))
+
+    def test_the_safety_limit_ends_even_a_working_engine(self):
+        url, _ = self.serve(writing_s=5.0)
+        waits = Waits(0.3, 0.2, idle_for=lambda: 0.0, safety_s=0.4, tick_s=0.05)
+        started = time.perf_counter()
+        with self.assertRaises(TimeoutError):
+            self.forward(url, waits)
+        self.assertLess(time.perf_counter() - started, 2.0)
+
+    def test_a_refusal_comes_back_with_the_engines_own_words(self):
+        url, _ = self.serve(writing_s=0.0, status=400)
+        closed = []
+        answer = self.forward(url, Waits(0.3, 0.2, tick_s=0.05),
+                              closed=lambda: closed.append(True))
+        self.assertEqual(answer.status, 400)
+        self.assertEqual(b"".join(answer.chunks), b'{"answer": "done"}')
+        answer.close()
+        self.assertEqual(closed, [True], "closing twice must tell the caller once")
+
+    def test_closing_an_answer_never_read_gives_its_place_back(self):
+        # The fault of 22 October 2026: the client was gone before the first
+        # byte, the body was never started, and the place stayed taken.
+        url, _ = self.serve(writing_s=0.0)
+        closed = []
+        answer = self.forward(url, Waits(0.3, 0.2, tick_s=0.05),
+                              closed=lambda: closed.append(True))
+        answer.close()
+        self.assertEqual(closed, [True])
+
+    def test_an_engine_that_is_not_listening_fails_at_once_and_gives_back(self):
+        closed = []
+        with self.assertRaises(OSError):
+            forward("http://127.0.0.1:9/v1/chat/completions", {}, Waits(0.3, 0.2),
+                    Hooks(on_close=lambda: closed.append(True)))
+        self.assertEqual(closed, [True])
 
 
 if __name__ == "__main__":

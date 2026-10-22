@@ -84,6 +84,47 @@ separate card memory, so there is nothing to wait for.
 
 ## How long to wait for an engine
 
+### An engine that reports its progress (vLLM)
+
+Waiting is not a fault. vLLM parks requests when its context pool is full and
+serves them as others finish; a parked request and a stuck one look the same
+from outside — no answer yet. The 120-second limit below cut parked requests
+(ingest's long Chinese texts, 20 October 2026; 14 of news' 40, 22 October), so
+for vLLM it no longer applies (the owner's decision, 22 October 2026: what must
+not happen is a stuck request blocking the queue, not a long wait).
+
+Instead the gateway watches the engine's own counters
+(`vllm:iteration_tokens_total`, every token processed, prompt and answer; read
+at most every 2 s, shared by all requests — `gateway/progress.py`):
+
+- **No limit on waiting.** While the engine processes tokens for anybody, every
+  request in it will get its turn, and none is cut.
+- **Engine stalled.** An engine that has requests and processes nothing at all
+  for `stall_s` (60 s) is stuck: its requests are cut with a 504 whose message
+  starts "engine stalled". A counter that cannot be read counts as no progress.
+- **Safety.** No request is kept longer than `safety_s` (30 min), whatever the
+  engine says.
+- **A client that leaves stops its request,** streaming or not: the gateway
+  looks at the client's connection every second while it waits, and closes its
+  own connection to the engine; vLLM then stops the request within a second
+  (measured 22 October 2026, both shapes). The card place is given back however
+  the answer ends — including when the client was gone before the first byte,
+  which used to lose the place for good.
+
+The gateway waits on a thread of its own for each answer (`api/upstream.py`),
+so it can look around between waits.
+
+**Default answer cap.** A text request (`/v1/chat/completions`,
+`/v1/completions`) that names neither `max_tokens` nor `max_completion_tokens`
+gets `max_tokens` = `default_max_tokens` (4,096), and the answer carries the
+header `X-AI-Lab-Default-Max-Tokens`. Without it an answer may run to the end
+of the context, holding a place all the while. If vLLM refuses because prompt
+plus cap exceeds the context, the request is sent once more without the cap,
+under the same place: the cap never turns an answerable request into a refusal.
+0 adds no cap. Applies to every engine, not only vLLM.
+
+### An engine that does not report its progress
+
 Two limits, and they are limits of safety rather than of patience: in normal
 work nothing comes near them.
 
@@ -121,8 +162,12 @@ Where they are set:
 | `first_byte_s` | Max TTFT (time to first token) | 120 s |
 | `between_bytes_s` | Max idle time | 30 s |
 | `max_waiting` | Max queue size | 150 requests |
+| `stall_s` | Max engine stall (vLLM) | 60 s |
+| `safety_s` | Max request time (vLLM) | 1,800 s |
+| `default_max_tokens` | Default answer cap | 4,096 tokens (0: none) |
 
-The page accepts 1 to 3,600 seconds and saves at once. The same names can go in
+The page accepts 1 to 3,600 seconds for the two waits and saves at once;
+`stall_s` 5 to 3,600, `safety_s` 60 to 86,400. The same names can go in
 the `gateway` section of the configuration file, where the waits may be up to a
 day.
 

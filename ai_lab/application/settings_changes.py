@@ -23,6 +23,10 @@ GATEWAY_SETTINGS: dict[str, tuple[float, float]] = {
     "first_byte_s": (1.0, 3600.0),
     "between_bytes_s": (1.0, 3600.0),
     "max_waiting": (1, 10000),
+    # For engines that report their progress (vLLM): `gateway.limits.Patience`.
+    "stall_s": (5.0, 3600.0),
+    "safety_s": (60.0, 86400.0),
+    "default_max_tokens": (0, 1_000_000),
 }
 # The most that may be held back for the machine itself: 1 TB, in MB.
 MAX_RESERVE_MB = 1024 * 1024

@@ -79,10 +79,11 @@ def explained(answer: Passthrough) -> Passthrough:
     except ValueError:
         detail = None
     if detail is None:
-        return Passthrough(answer.status, answer.content_type, iter([body]), answer.headers)
+        return Passthrough(answer.status, answer.content_type, iter([body]), answer.headers,
+                           answer.close)
     parsed["ai_lab"] = detail
     return Passthrough(answer.status, answer.content_type,
-                       iter([json.dumps(parsed).encode()]), answer.headers)
+                       iter([json.dumps(parsed).encode()]), answer.headers, answer.close)
 
 
 def forward(url: str, payload: dict | bytes, waits: Waits, hooks: Hooks,

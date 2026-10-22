@@ -207,7 +207,16 @@ _GAUGES = {
     "kv_cache_used": re.compile(r"^vllm:kv_cache_usage_perc\{[^}]*\}\s+([0-9.eE+-]+)", re.M),
     "requests_running": re.compile(r"^vllm:num_requests_running\{[^}]*\}\s+([0-9.eE+-]+)", re.M),
     "requests_waiting": re.compile(r"^vllm:num_requests_waiting\{[^}]*\}\s+([0-9.eE+-]+)", re.M),
+    # Every token the engine has processed, prompt and answer, summed over its
+    # steps: it grows while the engine works for anybody, so the gateway can
+    # tell a parked request from a stuck engine (`gateway/progress.py`).
+    "tokens_processed": re.compile(
+        r"^vllm:iteration_tokens_total_sum\{[^}]*\}\s+([0-9.eE+-]+)", re.M),
 }
+
+
+# How long the gateway's stall watch waits for the counters (see `progress`).
+PROGRESS_READ_S = 5.0
 
 
 def pool_state(metrics: str) -> dict:
@@ -283,6 +292,14 @@ class VllmEngine:
         time, because the pool's size changes with every reload.
         """
         return pool_state(http_text(port, "/metrics"))
+
+    def progress(self, port: int) -> dict:
+        """The same report, read with more patience, for the gateway's stall watch.
+
+        A busy server may take more than the page's one second to print its
+        counters; a missed reading would count as no progress.
+        """
+        return pool_state(http_text(port, "/metrics", timeout=PROGRESS_READ_S))
 
     def refuses(self, params: dict) -> frozenset[str]:
         """Mistral's own tokenizer takes no chat-template arguments.

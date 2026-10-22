@@ -40,7 +40,7 @@ from ...reservations import CardReservedError, ReservationBook, ReservationConfl
 from ...gateway.scheduler_parts import AdmissionWithdrawnError, StillWanted
 from ...types import Task
 from ..multipart import MultipartBody
-from ..context_limit import Hooks, Waits, forward
+from ..answer_cap import Hooks, PlaceKeeper, Waits, forward, send_capped
 from ..uploads import UploadRejectedError, validate_image
 
 # Every shape any engine here can answer. Registered as routes whatever is
@@ -184,7 +184,7 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
         # Everything from here gives the place back if it fails: a leaked place
         # breaks nothing visibly, the card simply has one fewer place for ever.
         try:
-            return _forward(gateway, lease, path, payload, wanted)
+            return _forward(gateway, lease, path, payload, admission)
         except BaseException:
             lease.release()
             raise
@@ -305,33 +305,53 @@ def _start_settings(payload) -> dict | None:
     return settings
 
 
-def _forward(gateway: Gateway, lease, path: str, payload, wanted: str):
-    """Send the request to the leased engine, by the name that engine knows."""
+def _outgoing(lease, payload, wanted: str) -> tuple[bytes | dict, str, bool]:
+    """The body for the engine, its content type, and whether streaming was asked for."""
     # The engine knows its own model by a different name than the entry does,
     # and rejects a name it does not recognise. The lease carries it.
     name = lease.model_name or wanted
     if isinstance(payload, MultipartBody):
-        outgoing: bytes | dict = payload.replace("model", name)
-        content_type = payload.content_type
-        streaming = False
-    else:
-        # Fields the engine refuses with its settings are left out rather than
-        # turned into an error every caller would have to learn to avoid.
-        request = {key: value for key, value in payload.items()
-                   if key != SETTINGS_FIELD and key not in lease.drop}
-        request["model"] = name
-        outgoing = request
-        content_type = "application/json"
-        streaming = bool(payload.get("stream"))
+        return payload.replace("model", name), payload.content_type, False
+    # Fields the engine refuses with its settings are left out rather than
+    # turned into an error every caller would have to learn to avoid.
+    request = {key: value for key, value in payload.items()
+               if key != SETTINGS_FIELD and key not in lease.drop}
+    request["model"] = name
+    return request, "application/json", bool(payload.get("stream"))
+
+
+def _forward(gateway: Gateway, lease, path: str, payload, admission: _Admission):
+    """Send the request to the leased engine, by the name that engine knows."""
+    outgoing, content_type, streaming = _outgoing(lease, payload, admission.model)
     # Time to the first token only when streaming was asked for: otherwise the
     # first byte is the whole generation and the average measures neither.
     timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
              if streaming else None)
-    first_byte_s, between_bytes_s = gateway.timeouts_for(
-        _TASK_OF_PATH.get(path, Task.TEXT_GENERATION))
+    keeper = PlaceKeeper(lease.release)
+    hooks = Hooks(on_close=keeper, on_first_chunk=timed)
+    waits = _waits(gateway, lease, path, admission.alive)
+
     # A text too long for the model comes back with the limit and its size as
     # numbers next to the engine's sentence (`context_limit`).
-    return forward(f"http://{LOOPBACK}:{lease.port}{path}", outgoing,
-                   Waits(first_byte_s, between_bytes_s),
-                   Hooks(on_close=lease.release, on_first_chunk=timed),
-                   content_type=content_type)
+    def send(body):
+        return forward(f"http://{LOOPBACK}:{lease.port}{path}", body, waits, hooks,
+                       content_type=content_type)
+    if not isinstance(outgoing, dict) or not lease.text:
+        return send(outgoing)
+    return send_capped(send, outgoing, path, gateway.patience.default_max_tokens, keeper)
+
+
+def _waits(gateway: Gateway, lease, path: str, alive) -> Waits:
+    """How long to wait, and what to keep looking at: the client, and the engine's progress.
+
+    An engine that keeps work counters (vLLM) is judged by them: no limit on
+    waiting, a cut only when it does no work at all (`gateway.patience`). Any
+    other keeps the two plain waits of its kind of request.
+    """
+    first_byte_s, between_bytes_s = gateway.timeouts_for(
+        _TASK_OF_PATH.get(path, Task.TEXT_GENERATION))
+    patience = gateway.patience
+    progress = lease.progress
+    return Waits(first_byte_s, between_bytes_s, client_here=alive,
+                 idle_for=progress.idle_for if progress is not None else None,
+                 stall_s=patience.stall_s, safety_s=patience.safety_s)

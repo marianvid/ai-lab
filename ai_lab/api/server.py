@@ -27,7 +27,7 @@ from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
 from ..reservations import ReservationConflictError, ReservationRequiredError
 from . import sse
-from .passthrough import Passthrough
+from .passthrough import ClientGoneError, Passthrough
 from .router import Router
 from .routes import RouteParts, register_all
 
@@ -50,6 +50,8 @@ STATUS = {
     ReservationRequiredError: HTTPStatus.PRECONDITION_REQUIRED,
 }
 TIMEOUT_MESSAGE = "the engine did not answer within the gateway's time limit"
+# A client that is no longer there: nothing can be written to it.
+CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 def _timed_out(error: Exception) -> bool:
@@ -78,7 +80,8 @@ def _message(error: Exception) -> str:
             and isinstance(error.args[0], str):
         return error.args[0]
     if _timed_out(error):
-        return TIMEOUT_MESSAGE
+        # A timeout that knows why ("engine stalled: ...") says so.
+        return getattr(error, "explanation", TIMEOUT_MESSAGE)
     return str(error) or error.__class__.__name__
 
 
@@ -151,8 +154,18 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(result if result is not None else {"ok": True})
         except Exception as error:
-            self._error(error)
+            self._answer_error(error)
         return True
+
+    def _answer_error(self, error: Exception) -> None:
+        """Say what went wrong, unless the client is no longer there to hear it."""
+        if isinstance(error, ClientGoneError):
+            self.close_connection = True
+            return
+        try:
+            self._error(error)
+        except CLIENT_GONE:
+            self.close_connection = True
 
     def _client_alive(self) -> bool:
         """Whether the other end is still there, without reading anything.
@@ -251,23 +264,29 @@ class Handler(BaseHTTPRequestHandler):
         while it is being produced, which is the whole reason a client asks for
         one.
         """
-        self.send_response(response.status)
-        self.send_header("Content-Type", response.content_type)
-        for name, value in response.headers.items():
-            if name.lower() != "content-type":
-                self.send_header(name, value)
-        self.send_header("Transfer-Encoding", "chunked")
-        self.end_headers()
         try:
+            self.send_response(response.status)
+            self.send_header("Content-Type", response.content_type)
+            for name, value in response.headers.items():
+                if name.lower() != "content-type":
+                    self.send_header(name, value)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
             for chunk in response.chunks:
                 self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
                 self.wfile.flush()
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            # The client hung up mid-answer. The generator's cleanup still runs
-            # and still releases the lease, which is what matters.
-            pass
+        except CLIENT_GONE:
+            # The client hung up, perhaps before the first byte. Nothing more
+            # can be said to it.
+            self.close_connection = True
+        finally:
+            # However writing ended, the answer gives back what it holds: the
+            # engine's connection and the card place. Leaving this to the
+            # body's own cleanup lost a place for good when the headers failed
+            # (22 October 2026): a body never started never cleans up.
+            response.close()
 
     def _write_chunk(self, data: bytes):
         self.wfile.write(data)

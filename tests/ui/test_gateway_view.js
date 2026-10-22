@@ -25,6 +25,9 @@ const STATS = {
   max_waiting: 150,
   first_byte_s: 120.0,
   between_bytes_s: 30.0,
+  stall_s: 60.0,
+  safety_s: 1800.0,
+  default_max_tokens: 4096,
   requests_per_minute: 12,
   switches: 2,
   average_wait_s: 1.4,
@@ -284,6 +287,16 @@ describe('the limits, on the page that shows what they cost', () => {
     assert.equal(field(view, 'Max TTFT').querySelector('input').value, '120');
     assert.equal(field(view, 'Max idle time').querySelector('input').value, '30');
     assert.equal(field(view, 'Max queue size').querySelector('input').value, '150');
+    assert.equal(field(view, 'Max engine stall').querySelector('input').value, '60');
+    assert.equal(field(view, 'Max request time').querySelector('input').value, '1800');
+    assert.equal(field(view, 'Default answer cap').querySelector('input').value, '4096');
+  });
+
+  it('lets the answer cap be switched off with 0, and no other limit', async () => {
+    const { view } = await renderPage();
+    assert.equal(field(view, 'Default answer cap').querySelector('input').min, '0');
+    assert.equal(field(view, 'Max engine stall').querySelector('input').min, '5');
+    assert.equal(field(view, 'Max queue size').querySelector('input').min, '1');
   });
 
   it('explains each one where hovering finds it', async () => {
@@ -293,6 +306,9 @@ describe('the limits, on the page that shows what they cost', () => {
     assert.match(field(view, 'Max TTFT').getAttribute('title'), /streaming/);
     assert.match(field(view, 'Max idle time').getAttribute('title'), /17 tokens/);
     assert.match(field(view, 'Max queue size').getAttribute('title'), /thread/);
+    assert.match(field(view, 'Max engine stall').getAttribute('title'), /never cut/);
+    assert.match(field(view, 'Default answer cap').getAttribute('title'),
+                 /X-AI-Lab-Default-Max-Tokens/);
   });
 
   it('sends every limit when one is saved', async () => {
@@ -311,7 +327,8 @@ describe('the limits, on the page that shows what they cost', () => {
     const sent = context.calls.find((call) => call.method === 'PATCH');
     assert.ok(sent, 'nothing was saved');
     assert.deepEqual(JSON.parse(sent.body),
-                     { first_byte_s: 120, between_bytes_s: 45, max_waiting: 150 });
+                     { first_byte_s: 120, between_bytes_s: 45, max_waiting: 150,
+                       stall_s: 60, safety_s: 1800, default_max_tokens: 4096 });
   });
 
   it('says so when the server refuses a number', async () => {

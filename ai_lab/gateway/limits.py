@@ -9,7 +9,7 @@ tokens a second.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 # How quiet the card has to be before a new model is loaded, and how long to
 # wait for that. The threshold is not zero because a driver keeps a small
@@ -22,6 +22,36 @@ QUIET_POLL_S = 0.5
 FIRST_BYTE_S = 120.0
 BETWEEN_BYTES_S = 30.0
 MAX_WAITING = 150
+
+# For an engine that reports its own progress (vLLM): a request is cut only
+# when the engine as a whole has done no work for `STALL_S` while it had some,
+# and never kept longer than `SAFETY_S`. Waiting is not a fault (the owner's
+# decision, 22 October 2026: the 120 s limit goes; what must not happen is a
+# stuck request blocking the queue).
+STALL_S = 60.0
+SAFETY_S = 1800.0
+# The answer cap the gateway adds to a text request that names none.
+DEFAULT_MAX_TOKENS = 4096
+
+
+@dataclass(frozen=True)
+class Patience:
+    """How long the gateway lets an engine that reports its progress keep working.
+
+    `stall_s`: no progress at all for this long while the engine has work
+    means the engine is stuck; its requests are cut with "engine stalled".
+    `safety_s`: no request is kept longer than this, whatever the engine says.
+    `default_max_tokens`: the answer cap added to a text request that has
+    none (0: none added).
+    """
+
+    stall_s: float = STALL_S
+    safety_s: float = SAFETY_S
+    default_max_tokens: int = DEFAULT_MAX_TOKENS
+
+    def as_dict(self) -> dict:
+        """The three numbers, as the Gateway page and `GET /api/gateway` show them."""
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -43,3 +73,4 @@ class GatewayLimits:
     max_upload_bytes: int = 0
     max_upload_pixels: int = 0
     max_upload_dimension: int = 0
+    patience: Patience = field(default_factory=Patience)

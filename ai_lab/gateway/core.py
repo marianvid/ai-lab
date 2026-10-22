@@ -10,12 +10,14 @@ See docs/gateway-behavior.md for the operating contract.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 from .catalogue import Catalogue
 from .control import GatewayControl
 from .errors import CardBusyError, CouldNotLoadError, NotConfiguredError, ShapeNotServedError
 from .limits import GatewayLimits
 from .loading import CardLoader, CardMemory
+from .progress import EngineProgress, ProgressBook
 from .resources import GatewayResources, ask_engine
 from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats, StatsSources
@@ -58,6 +60,10 @@ class Gateway:
         self.max_upload_bytes = limits.max_upload_bytes
         self.max_upload_pixels = limits.max_upload_pixels
         self.max_upload_dimension = limits.max_upload_dimension
+        # For engines that report their progress: the stall and safety limits
+        # and the default answer cap (`limits.Patience`).
+        self.patience = limits.patience
+        self._progress = ProgressBook()
         self._memory: CardMemory = memory or GatewayResources(
             operations, limits.quiet_mb, limits.quiet_timeout_s, limits.poll_s)
         self._counters = GatewayCounters()
@@ -132,7 +138,16 @@ class Gateway:
         """The place handed to the caller, with what forwarding must know."""
         return Lease(self, instance["id"], instance["port"], Catalogue.engine_name(instance),
                      drop=self._catalogue.refused_fields(instance, asked_for),
+                     text=Catalogue.writes_text(instance),
+                     progress=self._progress_of(instance),
                      started=time.perf_counter())
+
+    def _progress_of(self, instance: dict) -> EngineProgress | None:
+        """The shared watch on this entry's engine, when it keeps work counters."""
+        read = self._catalogue.progress_reader(instance)
+        if read is None:
+            return None
+        return self._progress.of(instance["id"], instance["port"], read)
 
     def _what_is_asked(self, wanted: str, shape: str | None,
                        settings: dict | None) -> tuple[dict, dict]:
@@ -259,6 +274,9 @@ class Gateway:
             self._scheduler.max_waiting = int(settings["max_waiting"])
         if "task_timeouts" in settings:
             self.task_timeouts = dict(settings["task_timeouts"])
+        patience = {key: settings[key] for key in self.patience.as_dict() if key in settings}
+        if patience:
+            self.patience = replace(self.patience, **patience)
 
     def card_changed(self) -> None:
         """Something outside loaded or unloaded a model.
@@ -294,7 +312,8 @@ class Gateway:
 
     def stats(self) -> dict:
         """Everything the Gateway page shows, read now."""
-        return GatewayStats(StatsSources(
+        snapshot = GatewayStats(StatsSources(
             operations=self._operations, scheduler=self._scheduler, counters=self._counters,
             waits=(self.first_byte_s, self.between_bytes_s), adopt=self.adopt_what_is_there,
             holder=self.busy, engine_name_of=self.engine_name_of)).snapshot()
+        return {**snapshot, **self.patience.as_dict()}

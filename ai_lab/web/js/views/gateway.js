@@ -190,20 +190,22 @@ function activity(stats) {
   ].filter(Boolean));
 }
 
-// The three numbers that decide how patient the front door is, and how much it
-// will hold. Editable here rather than on the Settings page: they are about
+// The numbers that decide how patient the front door is, how much it will
+// hold, and the answer cap it adds. Editable here rather than on the Settings page: they are about
 // the gateway, and they sit beside the figures you would read before deciding
 // to change them.
 function limits(stats, redraw) {
   const fields = [
     ['first_byte_s', 'Max TTFT', stats.first_byte_s, 's',
-     'How long to wait for an engine to start answering. It covers reading the '
+     'For an engine that does not report its progress (vLLM does; the others '
+     + 'do not): how long to wait for it to start answering. It covers reading the '
      + 'prompt — and the whole answer for a request that did not ask for '
      + 'streaming, since such an engine sends nothing at all until it has '
      + 'finished writing. A large prompt on a slow machine is the case to size '
      + 'this for.'],
     ['between_bytes_s', 'Max idle time', stats.between_bytes_s, 's',
-     'How long a silence in the middle of an answer means the engine has '
+     'For an engine that does not report its progress: how long a silence in '
+     + 'the middle of an answer means the engine has '
      + 'stopped rather than slowed. At the slowest generation measured here, '
      + '17 tokens a second, the gap between them is 59 milliseconds. It only '
      + 'applies to a request that asked for streaming: without it the answer '
@@ -213,12 +215,25 @@ function limits(stats, redraw) {
      + 'rather than queued, because each one waiting occupies a thread. A '
      + 'workflow that hits this is asking for more at once than one card can '
      + 'answer.'],
+    ['stall_s', 'Max engine stall', stats.stall_s, 's',
+     'For an engine that reports its progress (vLLM), instead of the two '
+     + 'waits above: a request is cut only when the engine has had work and '
+     + 'done none of it for this long. A request that waits while the engine '
+     + 'works for others is never cut.', '5'],
+    ['safety_s', 'Max request time', stats.safety_s, 's',
+     'For an engine that reports its progress: no request is kept longer '
+     + 'than this, whatever the engine says. A last resort, far above any '
+     + 'real answer.', '60'],
+    ['default_max_tokens', 'Default answer cap', stats.default_max_tokens, 'tokens',
+     'Added to a text request that names no max_tokens, so an answer cannot '
+     + 'run to the end of the context. The answer then carries the header '
+     + 'X-AI-Lab-Default-Max-Tokens. 0 adds none.', '0'],
   ];
 
   const inputs = new Map();
-  const rows = fields.map(([key, label, value, unit, help]) => {
+  const rows = fields.map(([key, label, value, unit, help, min = '1']) => {
     const input = element('input', {
-      type: 'number', value: String(value), min: '1', size: 8,
+      type: 'number', value: String(value), min, size: 8,
     });
     inputs.set(key, input);
     return element('label', { class: 'field explained', title: help }, [

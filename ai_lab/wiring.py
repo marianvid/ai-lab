@@ -25,7 +25,7 @@ from .engines.registry import Registry
 from .events import EventBus
 from .gateway.card_sharing import guard_loads
 from .gateway.core import Gateway
-from .gateway.limits import GatewayLimits
+from .gateway.limits import GatewayLimits, Patience
 from .gateway.resources import GatewayResources
 from .hosts import current_host
 from .hosts.base import Host
@@ -174,7 +174,9 @@ def gateway_limits(config: Config) -> GatewayLimits:
         task_timeouts=front_door.timeout_mapping(),
         max_upload_bytes=front_door.max_upload_bytes,
         max_upload_pixels=front_door.max_upload_pixels,
-        max_upload_dimension=front_door.max_upload_dimension)
+        max_upload_dimension=front_door.max_upload_dimension,
+        patience=Patience(stall_s=front_door.stall_s, safety_s=front_door.safety_s,
+                          default_max_tokens=front_door.default_max_tokens))
 
 
 def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry,

@@ -8,7 +8,9 @@ touches the card or the queue, and it keeps no state of its own.
 
 from __future__ import annotations
 
-from ..engines.base import live_state, refused, withheld
+from collections.abc import Callable
+
+from ..engines.base import live_state, progress_reader, refused, withheld
 from .errors import NotConfiguredError, ShapeNotServedError
 from .card_operations import CardOperations
 from ..types import Task
@@ -103,6 +105,19 @@ class Catalogue:
         except KeyError:
             return frozenset()
         return refused(engine, params)
+
+    def progress_reader(self, instance: dict) -> Callable[[], dict] | None:
+        """How to read this entry's engine's work counters; None when it keeps none."""
+        try:
+            engine = self.operations.engine(instance["engine"])
+        except KeyError:
+            return None
+        return progress_reader(engine, instance["port"])
+
+    @staticmethod
+    def writes_text(instance: dict) -> bool:
+        """Whether this entry generates text (the only kind given a default answer cap)."""
+        return instance.get("task", Task.TEXT_GENERATION.value) == Task.TEXT_GENERATION.value
 
     def _shapes(self, instance: dict) -> list[str]:
         try:
