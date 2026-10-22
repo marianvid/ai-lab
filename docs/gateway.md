@@ -73,11 +73,12 @@ no queue and at no reservation, and never loads a model. A model that is not
 on the card cannot count; the answer is then **409** with:
 
 ```json
-{"error": {"message": "qwen36-nvfp4 is not loaded, so it cannot count tokens now; loaded: qwen38-nvfp4",
-           "type": "model_not_loaded", "code": null},
+{"error": "qwen36-nvfp4 is not loaded, so it cannot count tokens now; loaded: qwen38-nvfp4",
  "ai_lab": {"reason": "model_not_loaded", "model": "qwen36-nvfp4", "loaded": ["qwen38-nvfp4"]}}
 ```
 
+`error` is a sentence here, not the OpenAI-style object the `/v1/` paths
+answer with, because `/tokenize` is not an OpenAI path; read `ai_lab.reason`.
 A client that gets it either sends its first real request without counting
 (that request loads the model through the queue) and counts from then on, or
 waits until the model is loaded.
