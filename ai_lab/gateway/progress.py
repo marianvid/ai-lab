@@ -21,6 +21,8 @@ import threading
 import time
 from collections.abc import Callable
 
+from .restart import StalledEngines
+
 # How often the engine's report is read, at most, whatever the number of
 # requests watching it. Small against the stall limit (60 s by default).
 READ_EVERY_S = 2.0
@@ -87,3 +89,28 @@ class ProgressBook:
             if key not in self._engines:
                 self._engines[key] = EngineProgress(read, self._clock)
             return self._engines[key]
+
+    def forget(self, instance_id: str) -> None:
+        """Drop the watches on this instance: it was restarted, and its counters start again."""
+        with self._lock:
+            for key in [key for key in self._engines if key[0] == instance_id]:
+                del self._engines[key]
+
+
+class EngineWatches:
+    """What the gateway keeps on its engines' health: their progress, and the restarts of stalled ones.
+
+    `restart(instance_id, reason)` is the gateway's own way of stopping an engine
+    (`Gateway._restart_stalled`); it runs once per stall (`restart.StalledEngines`).
+    """
+
+    def __init__(self, restart: Callable[[str, str], None],
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.book = ProgressBook(clock)
+        self.stalls = StalledEngines(restart)
+
+    def of(self, instance: dict, read: Callable[[], dict] | None) -> EngineProgress | None:
+        """The shared watch on this entry's engine; None when it keeps no work counters."""
+        if read is None:
+            return None
+        return self.book.of(instance["id"], instance["port"], read)

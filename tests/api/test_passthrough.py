@@ -197,10 +197,13 @@ class WatchTests(unittest.TestCase):
     def test_an_engine_that_does_no_work_is_cut_with_its_reason(self):
         url, left = self.serve(writing_s=5.0)
         waits = Waits(0.3, 0.2, idle_for=lambda: 99.0, stall_s=60.0, tick_s=0.05)
+        told: list[str] = []
         with self.assertRaises(EngineStalledError) as caught:
-            self.forward(url, waits)
+            forward(url, {"stream": False}, waits, Hooks(on_stall=told.append))
         self.assertIn("engine stalled", caught.exception.explanation)
         self.assertTrue(left.wait(2.0))
+        self.assertEqual(len(told), 1, "the gateway must be told, to restart the engine")
+        self.assertIn("engine stalled", told[0])
 
     def test_waiting_while_the_engine_works_is_never_cut(self):
         # Longer than both plain waits (0.3 s and 0.2 s): with progress reported

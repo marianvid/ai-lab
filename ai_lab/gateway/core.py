@@ -17,7 +17,7 @@ from .control import GatewayControl
 from .errors import CardBusyError, CouldNotLoadError, NotConfiguredError, ShapeNotServedError
 from .limits import GatewayLimits
 from .loading import CardLoader, CardMemory
-from .progress import EngineProgress, ProgressBook
+from .progress import EngineWatches
 from .resources import GatewayResources, ask_engine
 from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats, StatsSources
@@ -63,7 +63,7 @@ class Gateway:
         # For engines that report their progress: the stall and safety limits
         # and the default answer cap (`limits.Patience`).
         self.patience = limits.patience
-        self._progress = ProgressBook()
+        self._watches = EngineWatches(self._restart_stalled)
         self._memory: CardMemory = memory or GatewayResources(
             operations, limits.quiet_mb, limits.quiet_timeout_s, limits.poll_s)
         self._counters = GatewayCounters()
@@ -139,15 +139,8 @@ class Gateway:
         return Lease(self, instance["id"], instance["port"], Catalogue.engine_name(instance),
                      drop=self._catalogue.refused_fields(instance, asked_for),
                      text=Catalogue.writes_text(instance),
-                     progress=self._progress_of(instance),
+                     progress=self._watches.of(instance, self._catalogue.progress_reader(instance)),
                      started=time.perf_counter())
-
-    def _progress_of(self, instance: dict) -> EngineProgress | None:
-        """The shared watch on this entry's engine, when it keeps work counters."""
-        read = self._catalogue.progress_reader(instance)
-        if read is None:
-            return None
-        return self._progress.of(instance["id"], instance["port"], read)
 
     def _what_is_asked(self, wanted: str, shape: str | None,
                        settings: dict | None) -> tuple[dict, dict]:
@@ -277,6 +270,21 @@ class Gateway:
         patience = {key: settings[key] for key in self.patience.as_dict() if key in settings}
         if patience:
             self.patience = replace(self.patience, **patience)
+
+    def engine_stalled(self, instance_id: str, reason: str) -> bool:
+        """An engine had requests and did no work: restart it, once (`restart.py`)."""
+        return self._watches.stalls.report(instance_id, reason)
+
+    def _restart_stalled(self, instance_id: str, reason: str) -> None:
+        """Stop the stalled engine and turn away whoever waits for it; the next request loads it."""
+        try:
+            self._operations.unload(instance_id)
+        except Exception as error:
+            self._counters.last_error = f"{reason}; stopping {instance_id} failed: {error}"
+        else:
+            self._counters.last_error = f"{instance_id} restarted: {reason}"
+        self.reset(f"{instance_id} was restarted: {reason}")
+        self._watches.book.forget(instance_id)
 
     def card_changed(self) -> None:
         """Something outside loaded or unloaded a model.

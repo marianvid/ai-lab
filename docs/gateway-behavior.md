@@ -102,6 +102,12 @@ at most every 2 s, shared by all requests — `gateway/progress.py`):
 - **Engine stalled.** An engine that has requests and processes nothing at all
   for `stall_s` (60 s) is stuck: its requests are cut with a 504 whose message
   starts "engine stalled". A counter that cannot be read counts as no progress.
+  The engine is then restarted, once however many requests noticed
+  (`gateway/restart.py`, approved by the owner on 22 October 2026): it is
+  stopped, every request still waiting for the card is turned away with the
+  reason, and the next request loads the model again through the ordinary
+  queue. The Gateway page's "Last error" says "<model> restarted: engine
+  stalled ...".
 - **Safety.** No request is kept longer than `safety_s` (30 min), whatever the
   engine says.
 - **A client that leaves stops its request,** streaming or not: the gateway

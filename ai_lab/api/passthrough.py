@@ -120,6 +120,9 @@ class Hooks:
 
     on_close: Callable[[], None] | None = None
     on_first_chunk: Callable[[float], None] | None = None
+    # Told why, when the answer is cut because the engine stalled: the
+    # gateway then restarts that engine (`Gateway.engine_stalled`).
+    on_stall: Callable[[str], object] | None = None
 
     def closed(self) -> None:
         """Tell the caller the answer is over, if it asked."""
@@ -248,6 +251,8 @@ class _Answer:
             reason = self._reason_to_stop(time.perf_counter())
             if reason is not None:
                 self.close()
+                if isinstance(reason, EngineStalledError) and self.hooks.on_stall:
+                    self.hooks.on_stall(str(reason))
                 raise reason
 
     def _wait_s(self) -> float:

@@ -328,7 +328,9 @@ def _forward(gateway: Gateway, lease, path: str, payload, admission: _Admission)
     timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
              if streaming else None)
     keeper = PlaceKeeper(lease.release)
-    hooks = Hooks(on_close=keeper, on_first_chunk=timed)
+    # A stalled engine is restarted, once, so the next requests do not stall too.
+    hooks = Hooks(on_close=keeper, on_first_chunk=timed,
+                  on_stall=lambda reason: gateway.engine_stalled(lease.instance_id, reason))
     waits = _waits(gateway, lease, path, admission.alive)
 
     # A text too long for the model comes back with the limit and its size as
