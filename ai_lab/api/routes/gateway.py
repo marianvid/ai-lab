@@ -85,13 +85,13 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES,
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, lanes))
     router.add("GET", "/v1/models/{model}",
                lambda model, **_: _describe(gateway, lanes, model))
-    router.add("GET", "/api/gateway", lambda **_: _stats(gateway, lanes))
+    router.add("GET", "/api/gateway", lambda **_: _stats(gateway, lanes, book))
 
     def settings(body=None, **_):
         """Change the front door's own limits, and use them at once."""
         saved = operations.update_gateway(body or {})
         gateway.apply_settings(saved)
-        return _stats(gateway, lanes)
+        return _stats(gateway, lanes, book)
 
     router.add("PATCH", "/api/gateway", settings)
     for path in FORWARDED:
@@ -104,9 +104,13 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES,
                    lambda name, **_: cpu.stop(name))
 
 
-def _stats(gateway: Gateway, lanes: SideLanes) -> dict:
+def _stats(gateway: Gateway, lanes: SideLanes, book: ReservationBook | None = None) -> dict:
     """The card's queue, each subscription vendor's, and each processor model's."""
     stats = gateway.stats()
+    if book is not None:
+        # Calls without a reservation held at the door while the card is
+        # reserved: not yet in the card's queue, so `waiting` does not count them.
+        stats["at_the_door"] = book.door.view()
     if lanes.providers is not None:
         stats["providers"] = lanes.providers.stats()
     if lanes.cpu is not None:
@@ -169,7 +173,8 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
         # holder's reservation, or when the card is not reserved. Subscription
         # models run in the cloud and are never held back.
         guarded = book if book is not None and not _in_the_cloud(lanes, wanted) else None
-        admission = _Admission(guarded, (headers or {}).get(RESERVATION_HEADER), alive)
+        admission = _Admission(guarded, (headers or {}).get(RESERVATION_HEADER), alive,
+                               wanted)
         admission.at_the_door()
         side = _side_lane(lanes, path, payload, wanted)
         if side is not None:
@@ -199,15 +204,16 @@ class _Admission:
     """
 
     def __init__(self, book: ReservationBook | None, reservation_id: str | None,
-                 alive: StillWanted | None) -> None:
+                 alive: StillWanted | None, model: str = "") -> None:
         self.book = book
         self.reservation_id = reservation_id
         self.alive = alive
+        self.model = model
 
     def at_the_door(self) -> None:
         """Let the call in, wait while the card is held, or refuse it (ADR 0005)."""
         if self.book is not None:
-            self.book.admit(self.reservation_id, self.alive)
+            self.book.admit(self.reservation_id, self.alive, self.model)
 
     def still_wanted(self) -> bool:
         """True while the client is there and the card is still its to use."""

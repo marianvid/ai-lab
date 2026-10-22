@@ -93,11 +93,26 @@ function holderSection(holder, redraw) {
   ].filter(Boolean));
 }
 
-function queueSection(queue, redraw) {
-  if (!queue.length) {
+// Calls sent without a reservation wait at the door while the card is held.
+// They are not reservations, so they are counted here rather than listed.
+function doorRow(door) {
+  if (!door || !door.calls) return null;
+  const models = Object.entries(door.models || {})
+    .map(([model, count]) => `${model || 'unnamed'} ×${count}`).join(', ');
+  return element('div', { class: 'row', title:
+    'Calls sent without a reservation. They go in when the card is free, '
+    + 'or are refused after the waiting limit in Settings.' }, [
+    element('span', { text: `${door.calls} call${door.calls === 1 ? '' : 's'} without a reservation` }),
+    element('span', { class: 'muted', text: `${models} · since ${since(door.oldest_since)}` }),
+  ]);
+}
+
+function queueSection(queue, redraw, door) {
+  const atTheDoor = doorRow(door);
+  if (!queue.length && !atTheDoor) {
     return section('Waiting', [element('p', { class: 'muted', text: 'Nobody is waiting.' })]);
   }
-  return section('Waiting', queue.map((item) => element('div', { class: 'row' }, [
+  return section('Waiting', [...queue.map((item) => element('div', { class: 'row' }, [
     element('span', { text: `${item.position}. ${who(item)}` }),
     element('span', { class: 'inline' }, [
       element('span', { class: 'muted', text:
@@ -105,7 +120,7 @@ function queueSection(queue, redraw) {
           ? ` → ${item.effective_priority}` : ''} · since ${since(item.requested_at)}` }),
       cancelButton(item, redraw),
     ]),
-  ])));
+  ])), atTheDoor].filter(Boolean));
 }
 
 function historySection(history) {
@@ -162,7 +177,7 @@ export async function render(container) {
       + 'this machine’s models; the others wait, highest priority first. Load and Unload '
       + 'on the Models page wait too — cancel the reservation here first.' }),
     holderSection(book.holder, redraw),
-    queueSection(book.queue || [], redraw),
+    queueSection(book.queue || [], redraw, book.at_the_door),
     historySection(book.history || []),
     settingsSection(book.settings || {}, redraw),
   ]));

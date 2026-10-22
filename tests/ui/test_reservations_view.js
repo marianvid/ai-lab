@@ -56,6 +56,15 @@ describe('the Reservations page', () => {
     assert.match(view.textContent, /Nobody is waiting/);
   });
 
+  it('counts the calls without a reservation that wait at the door', async () => {
+    const { view } = await renderPage({ '/api/reservations': { ...BOOK, queue: [],
+      at_the_door: { calls: 11, models: { 'qwen38-nvfp4': 11 }, oldest_since: 1760700060 } } });
+    const text = view.textContent;
+    assert.match(text, /11 calls without a reservation/);
+    assert.match(text, /qwen38-nvfp4 ×11/);
+    assert.doesNotMatch(text, /Nobody is waiting/);
+  });
+
   it('cancels a reservation by hand', async () => {
     const context = await renderPage({ '/api/reservations': BOOK });
     button(context.view, 'Cancel').click();

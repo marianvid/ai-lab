@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from .door import DoorWaiters
 from .errors import (
     CardReservedError,
     ReservationEndedError,
@@ -51,6 +52,7 @@ class ReservationBook:
         self._file = ReservationFile(path)
         self._changed = threading.Condition()
         self._items: list[Reservation] = self._restored(self._file.load())
+        self.door = DoorWaiters(clock)
 
     # -- what a team does -----------------------------------------------------
 
@@ -104,7 +106,8 @@ class ReservationBook:
 
     # -- what the front door asks ---------------------------------------------
 
-    def admit(self, reservation_id: str | None, still_wanted: StillWanted | None = None) -> None:
+    def admit(self, reservation_id: str | None, still_wanted: StillWanted | None = None,
+              model: str = "") -> None:
         """Let a model call through, wait, or refuse it with the reason."""
         if reservation_id:
             self._admit_holder(reservation_id)
@@ -112,7 +115,7 @@ class ReservationBook:
             raise ReservationRequiredError(
                 "this AI-Lab requires a card reservation: send X-AI-Lab-Reservation")
         else:
-            self._wait_until_free(still_wanted)
+            self._wait_until_free(still_wanted, model)
 
     def permits(self, reservation_id: str | None) -> None:
         """Raise unless this call may reach the card now; asked again at the head of its queue.
@@ -152,6 +155,7 @@ class ReservationBook:
             ended = [item for item in self._items if not item.active]
             return {"holder": None if held is None else self._view(held),
                     "queue": [self._view(item) for item in self._queue()],
+                    "at_the_door": self.door.view(),
                     "history": [self._view(item) for item in reversed(ended)],
                     "settings": self.policy.json()}
 
@@ -205,17 +209,26 @@ class ReservationBook:
                                    {"reservation": self._view(found)})
         return found
 
-    def _wait_until_free(self, still_wanted: StillWanted | None) -> None:
+    def _wait_until_free(self, still_wanted: StillWanted | None, model: str = "") -> None:
         deadline = self._clock() + self.policy.unreserved_wait_s
-        with self._changed:
-            while True:
-                self._settle_locked()
-                held = self._granted()
-                if held is None:
-                    return
-                if self._clock() >= deadline or (still_wanted and not still_wanted()):
-                    raise CardReservedError(_reserved_message(held), {"holder": self._view(held)})
-                self._changed.wait(min(WAIT_STEP_S, max(0.0, deadline - self._clock())))
+        waiting: int | None = None
+        try:
+            with self._changed:
+                while True:
+                    self._settle_locked()
+                    held = self._granted()
+                    if held is None:
+                        return
+                    if self._clock() >= deadline or (still_wanted and not still_wanted()):
+                        raise CardReservedError(_reserved_message(held),
+                                                {"holder": self._view(held)})
+                    if waiting is None:
+                        # Counted only once it really waits: a free card lets it straight in.
+                        waiting = self.door.arrive(model)
+                    self._changed.wait(min(WAIT_STEP_S, max(0.0, deadline - self._clock())))
+        finally:
+            if waiting is not None:
+                self.door.leave(waiting)
 
     def _end(self, reservation_id: str, reason: str) -> dict:
         with self._changed:
