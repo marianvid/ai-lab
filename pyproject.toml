@@ -8,6 +8,7 @@ license = { text = "MIT" }
 [project.scripts]
 ai-lab = "ai_lab.main:main"
 ai-lab-run = "ai_lab.hosts.launch:main"
+ai-lab-gpu-health = "ai_lab.gpu_health.output.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

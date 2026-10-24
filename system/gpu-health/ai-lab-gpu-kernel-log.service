@@ -1,0 +1,36 @@
+# On the Proxmox host (not in the container): follows the kernel log for the
+# NVIDIA card's Xid and PCIe AER errors, for AI-Lab's GPU health monitor.
+# Installed by hand; see docs/gpu-health.md, "The host helper".
+#
+# Least privilege: not root. systemd gives it a throw-away user (DynamicUser)
+# that may read the journal (group systemd-journal) and write only its own
+# folder, /var/lib/ai-lab-gpu-helper (really /var/lib/private/ai-lab-gpu-helper,
+# which is the path to bind-mount into the container). No network.
+[Unit]
+Description=AI-Lab GPU health: kernel log helper (Xid, PCIe AER)
+After=systemd-journald.service
+
+[Service]
+# The script is a copy of ai_lab/gpu_health/kernel/host_helper.py; its argument
+# is the folder it writes into.
+ExecStart=/usr/bin/python3 /usr/local/lib/ai-lab/host_helper.py /var/lib/ai-lab-gpu-helper
+Restart=always
+RestartSec=10
+DynamicUser=yes
+SupplementaryGroups=systemd-journal
+StateDirectory=ai-lab-gpu-helper
+StateDirectoryMode=0755
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

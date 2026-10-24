@@ -82,6 +82,11 @@ export const api = {
     request('POST', `/api/reservations/${encodeURIComponent(id)}/cancel`),
   updateReservationSettings: (changes) =>
     request('PATCH', '/api/reservations/settings', changes),
+  // The card's long-term health (docs/gpu-health.md).
+  gpuHealth: () => request('GET', '/api/gpu-health'),
+  gpuHealthHistory: (hours) => request('GET', `/api/gpu-health/history?hours=${hours}`),
+  resetGpuBaseline: (note) => request('POST', '/api/gpu-health/baseline/reset', { note }),
+  gpuTestAlarm: () => request('POST', '/api/gpu-health/test-alarm'),
   logs: (id) => request('GET', `/api/instances/${encodeURIComponent(id)}/logs`),
   update: (id, changes) =>
     request('PATCH', `/api/instances/${encodeURIComponent(id)}`, changes),

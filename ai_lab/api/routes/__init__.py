@@ -19,6 +19,7 @@ from ...lanes import SideLanes
 from . import catalog
 from . import downloads
 from . import gateway
+from . import gpu_health
 from . import huggingface
 from . import images
 from . import media
@@ -40,7 +41,8 @@ class RouteParts:
     door asks it before any model call, the Load buttons refuse while the card
     is reserved, and its own routes manage it, saving their settings in
     `store` (the configuration store); `image_jobs` and `media_jobs`
-    are the two job queues. A router built for a test leaves out what it does
+    are the two job queues; `gpu_health` is the card's health monitor (or
+    the reason there is none). A router built for a test leaves out what it does
     not need, and those routes are simply not there.
     """
 
@@ -50,6 +52,7 @@ class RouteParts:
     store: Any = None
     image_jobs: Any = None
     media_jobs: Any = None
+    gpu_health: Any = None
 
 
 def register_all(router, operations, parts: RouteParts | None = None) -> None:
@@ -66,3 +69,5 @@ def register_all(router, operations, parts: RouteParts | None = None) -> None:
         images.register(router, parts.image_jobs)
     if parts.media_jobs is not None:
         media.register(router, parts.media_jobs)
+    if parts.gpu_health is not None:
+        gpu_health.register(router, parts.gpu_health)

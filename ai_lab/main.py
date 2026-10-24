@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .api.routes import RouteParts
 from .api.server import build_router, serve
+from .gpu_health.service import GpuHealth
 from .lanes import SideLanes
 from .reservations import ReservationBook, ReservationPolicy
 from .wiring import build
@@ -45,6 +46,10 @@ def main() -> None:
                            state_dir / "reservations.json")
     book.start_reaper()
 
+    # The card's long-term health (docs/gpu-health.md): read-only, in its own
+    # thread; where there is no NVIDIA driver it only says so.
+    health = GpuHealth.start(config.gpu_health, state_dir, manager.gateway.control.activity)
+
     _install_shutdown(manager.host, lanes)
 
     operations.recover_moves()
@@ -54,9 +59,10 @@ def main() -> None:
     try:
         parts = RouteParts(gateway=manager.gateway, lanes=lanes, book=book,
                            store=manager.store, image_jobs=manager.image_jobs,
-                           media_jobs=manager.media_jobs)
+                           media_jobs=manager.media_jobs, gpu_health=health)
         serve(build_router(operations, parts), manager.bus, (host, port))
     finally:
+        health.stop()
         lanes.stop_all()
         manager.host.stop_all()
 

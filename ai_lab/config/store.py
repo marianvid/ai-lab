@@ -163,6 +163,9 @@ class Config:
     # Card reservations (ADR 0005): heartbeat, durations, aging, whether they
     # are required. Read and checked by `reservations/settings.py`.
     reservations: dict = field(default_factory=dict)
+    # The card's long-term health monitor: intervals and alarm thresholds.
+    # Read and checked by `gpu_health/settings.py`.
+    gpu_health: dict = field(default_factory=dict)
     # The one directory every model lives under. Each repository is a
     # folder in it, named after the format.
     models_root: str = ""
@@ -272,6 +275,7 @@ class ConfigStore:
             providers=raw.get("providers", {}),
             cpu_models=raw.get("cpu_models", {}),
             reservations=raw.get("reservations", {}),
+            gpu_health=raw.get("gpu_health", {}),
             model_roots=roots,
             download_root=raw.get("download_root", "core"),
             extra_fields={key: value for key, value in raw.items()

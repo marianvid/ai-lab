@@ -40,9 +40,11 @@ class GatewayLimitsTests(unittest.TestCase):
 
 class SectionsTests(unittest.TestCase):
     def test_the_sections_other_packages_own_are_checked_by_their_parsers(self):
-        self.assertEqual(sorted(CONFIG_SECTIONS), ["cpu_models", "providers", "reservations"])
-        with self.assertRaisesRegex(ValueError, "Unknown"):
-            CONFIG_SECTIONS["reservations"].parse({"nope": 1})
+        self.assertEqual(sorted(CONFIG_SECTIONS),
+                         ["cpu_models", "gpu_health", "providers", "reservations"])
+        for name in ("reservations", "gpu_health"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Unknown"):
+                CONFIG_SECTIONS[name].parse({"nope": 1})
 
     def test_an_embeddings_model_claims_its_ports(self):
         section = CONFIG_SECTIONS["cpu_models"]

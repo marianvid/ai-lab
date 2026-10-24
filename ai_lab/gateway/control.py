@@ -35,6 +35,12 @@ class GatewayControl:
             "switching": state["switching"],
         }
 
+    def activity(self) -> tuple[str, bool]:
+        """The model the gateway has on the card (the busiest, if several), and whether it answers."""
+        state = self.scheduler.state()
+        busiest = max(state["loaded"], key=lambda item: item["in_flight"], default=None)
+        return (busiest["shape"].instance_id if busiest else "", bool(state["in_flight"]))
+
     def where_loaded(self, catalogue, entries: list[dict], wanted: str,
                      shape: str) -> tuple[int, str]:
         """The port and engine's name of a loaded model, without taking a place.

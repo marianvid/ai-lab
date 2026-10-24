@@ -27,6 +27,7 @@ from .gateway.card_sharing import guard_loads
 from .gateway.core import Gateway
 from .gateway.limits import GatewayLimits, Patience
 from .gateway.resources import GatewayResources
+from .gpu_health.settings import GpuHealthSettings
 from .hosts import current_host
 from .hosts.base import Host
 from .lanes import SideLanes
@@ -59,6 +60,7 @@ CONFIG_SECTIONS: dict[str, Section] = {
     "providers": Section(ProvidersConfig.from_mapping),
     "cpu_models": Section(CpuModelsConfig.from_mapping, ports=_cpu_model_ports),
     "reservations": Section(ReservationPolicy.from_mapping),
+    "gpu_health": Section(GpuHealthSettings.from_mapping),
 }
 
 

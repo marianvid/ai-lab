@@ -19,6 +19,8 @@ import { render as renderLanes,
 import { render as renderReservations,
          stopRefreshing as stopReservationsRefreshing } from './views/reservations.js';
 import { render as renderStorage } from './views/storage.js';
+import { render as renderGpuHealth,
+         stopRefreshing as stopGpuHealthRefreshing } from './views/gpu_health.js';
 
 // "Models" is the list you run; "Library" is what is on disk. They were both
 // called models before, which was the same confusion as calling a row a slot.
@@ -47,6 +49,10 @@ const VIEWS = [
   // Who holds the card for a whole run, who waits, and the settings (ADR 0005).
   { id: 'reservations', label: 'Reservations', render: renderReservations,
     leave: stopReservationsRefreshing, topics: [] },
+  // The card's long-term health: readings, alarms, references, trend. Its
+  // readings arrive without events, so it refreshes on a timer of its own.
+  { id: 'gpu-health', label: 'GPU health', render: renderGpuHealth,
+    leave: stopGpuHealthRefreshing, topics: [] },
   { id: 'storage', label: 'Storage', render: renderStorage,
     topics: ['storage', 'engines'] },
   { id: 'settings', label: 'Settings', render: renderSettings,

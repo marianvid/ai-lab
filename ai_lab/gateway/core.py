@@ -77,7 +77,7 @@ class Gateway:
                                    max_waiting=limits.max_waiting)
         self._loader = CardLoader(operations, self._memory, self._counters,
                                   self._scheduler.state, self._catalogue.engine_name_of)
-        self._control = GatewayControl(self._scheduler)
+        self.control = GatewayControl(self._scheduler)
 
     # -- what a client can ask for -----------------------------------------
 
@@ -142,7 +142,7 @@ class Gateway:
     def where_loaded(self, wanted: str, shape: str) -> tuple[int, str]:
         """Port and engine's name of a loaded model, taking no place (`GatewayControl.where_loaded`)."""
         self.adopt_what_is_there()
-        return self._control.where_loaded(self._catalogue, self._operations.configured(),
+        return self.control.where_loaded(self._catalogue, self._operations.configured(),
                                           wanted, shape)
 
     def _lease(self, instance: dict, asked_for: dict) -> Lease:
@@ -321,11 +321,11 @@ class Gateway:
 
     def busy(self) -> dict | None:
         """Who holds the card now, for the Load and Unload buttons; None when idle."""
-        return self._control.busy()
+        return self.control.busy()
 
     def guard(self, action: str, instance_id: str) -> None:
         """Refuse a button that would interrupt an answer in progress."""
-        self._control.guard(action, instance_id)
+        self.control.guard(action, instance_id)
 
     # -- what the interface shows ------------------------------------------
 
