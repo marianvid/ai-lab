@@ -37,7 +37,7 @@ from ...lanes import SideLanes
 from ...network import LOOPBACK
 from ...gateway.state import Lease
 from ...reservations import CardReservedError, ReservationBook, ReservationConflictError
-from ...gateway.scheduler_parts import AdmissionWithdrawnError, StillWanted
+from ...gateway.admission.parts import AdmissionWithdrawnError, StillWanted
 from ...types import Task
 from ..multipart import MultipartBody
 from ..answer_cap import Hooks, PlaceKeeper, Waits, forward, send_capped

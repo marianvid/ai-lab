@@ -28,7 +28,7 @@ from .resources import GatewayResources, ask_engine
 from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats, StatsSources
 from .card_operations import CardOperations
-from .scheduler import AbandonedError, Scheduler, StillWanted, WillNotFitError
+from .admission.scheduler import AbandonedError, Scheduler, StillWanted, WillNotFitError
 from ..types import Task
 
 # The gateway's errors are part of its interface: callers import them from here.

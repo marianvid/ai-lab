@@ -1,7 +1,7 @@
 """What the scheduler hands out and keeps: its errors, and one waiting request.
 
 Kept apart from `scheduler.py` so the queue's rules (there) and the way a run
-is chosen and published (`scheduler_planning.py`) can share them without
+is chosen and published (`planning.py`) can share them without
 importing each other.
 """
 

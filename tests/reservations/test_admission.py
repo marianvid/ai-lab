@@ -12,7 +12,7 @@ from ai_lab.reservations.errors import (
     ReservationNotGrantedError,
 )
 from ai_lab.reservations.settings import ReservationPolicy
-from ai_lab.gateway.scheduler import AdmissionWithdrawnError, Scheduler
+from ai_lab.gateway.admission.scheduler import AdmissionWithdrawnError, Scheduler
 
 
 class Card:

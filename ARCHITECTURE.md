@@ -129,7 +129,7 @@ there is exactly one place to look.
 | `operations.py`, `operations_services.py` | The single object the routes and the gateway talk to: a façade handing each action to an `application/` service. The services are built in `wiring.py` and handed to it (`OperationsParts`, `OperationsServices`) | Building its own services; anything a single service could do alone |
 | `gateway/core.py`, `gateway/catalogue.py`, `gateway/loading.py`, `gateway/limits.py` | One address for an agent. `Gateway` holds its collaborators: the `Catalogue` (which entry serves a name, the listing, request shapes; no state), the `CardLoader` (making room and loading; it owns the memory reading and the sweep flag, and reads memory through the `CardMemory` interface, `GatewayResources` by default) and the `Scheduler`; plus the limits it runs with | HTTP of any kind — forwarding is the web layer's job |
 | `gateway/state.py`, `gateway/control.py`, `gateway/resources.py`, `gateway/stats.py`, `gateway/errors.py` | The gateway's parts: a held place and a model-plus-settings shape; the guard for the page's buttons; memory readings and waiting for the card to empty; the read-only report the Gateway page shows; the refusals the web layer turns into HTTP answers | HTTP |
-| `gateway/scheduler.py`, `gateway/scheduler_planning.py`, `gateway/scheduler_parts.py` | Who gets the card next: the queue and its rules (`Scheduler`, the one owner of the lock and of the `QueueState` it guards), the decisions taken on that state (`Planner`: which run a switch is for, who is let in after a load — called only under the scheduler's lock, holding none itself), its errors and one waiting request. A waiting request is asked `still_wanted` at the head of the queue, before anything is unloaded; it may withdraw itself with a reason (`AdmissionWithdrawnError`), which is how a card reservation is checked again (ADR 0005) | Anything about models, engines or ports — a shape is an opaque key |
+| `gateway/admission/`: `scheduler.py`, `planning.py`, `parts.py` | Who gets the card next: the queue and its rules (`Scheduler`, the one owner of the lock and of the `QueueState` it guards), the decisions taken on that state (`Planner`: which run a switch is for, who is let in after a load — called only under the scheduler's lock, holding none itself), its errors and one waiting request. A waiting request is asked `still_wanted` at the head of the queue, before anything is unloaded; it may withdraw itself with a reason (`AdmissionWithdrawnError`), which is how a card reservation is checked again (ADR 0005) | Anything about models, engines or ports — a shape is an opaque key |
 | `providers/` | Subscription models answered through their vendors' CLIs: one queue per vendor, errors read from the CLI's words, usage per day | The card, its leases or its scheduler |
 | `cpu_models/` | Embeddings models: their `llama-server` processes (processor, or the card while it has room), started on demand and stopped when idle, and one queue per model | The card's leases or its scheduler |
 | `reservations/` | Card reservations (ADR 0005): who holds the card for a run, the queue by priority with aging, heartbeats, expiry, the saved book; `admit` is asked before every call to this machine's models, and `permits` again when the call reaches the head of the card's queue | Who the clients are |
@@ -222,7 +222,7 @@ fanned out over one model, which is the commonest shape there is. The premise
 changed; the conclusion had to.
 
 **Which model comes off, when one has to, is decided in `gateway/eviction.py` and
-never in `gateway/scheduler.py`.** The gateway hands the scheduler a function that asks
+never in `gateway/admission/scheduler.py`.** The gateway hands the scheduler a function that asks
 `EvictionPlanner`, because a shape there is an opaque key and the scheduler
 knows nothing about megabytes. The planner reads nothing itself: it works from
 the gateway's last memory reading, since it runs while the scheduler's lock is
@@ -235,7 +235,7 @@ the card does not have. A model bigger than the whole card is refused.
 Nothing is protected from being unloaded, and nothing is unloaded until
 something needs the room.
 
-**Requests for a different model queue, and the rules are in `gateway/scheduler.py`.**
+**Requests for a different model queue, and the rules are in `gateway/admission/scheduler.py`.**
 Two of them are easy to get wrong and impossible to notice afterwards:
 
 - The moment anybody waits for another model, the door closes for the model on

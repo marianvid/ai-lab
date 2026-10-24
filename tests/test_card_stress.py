@@ -20,7 +20,7 @@ import time
 import unittest
 
 from ai_lab.api.routes.gateway import _Admission, _take_place
-from ai_lab.gateway.scheduler import AbandonedError, Scheduler
+from ai_lab.gateway.admission.scheduler import AbandonedError, Scheduler
 from ai_lab.reservations.book import ReservationBook
 from ai_lab.reservations.errors import CardReservedError
 from ai_lab.reservations.settings import ReservationPolicy

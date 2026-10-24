@@ -19,7 +19,7 @@ from ai_lab.engines.base import (ANTHROPIC_PATHS, OPENAI_PATHS, ParamSpec,
 from ai_lab.gateway.core import (CardBusyError, CouldNotLoadError, Gateway, GatewayLimits, NotConfiguredError,
                             ShapeNotServedError)
 from ai_lab.gateway.resources import GatewayResources
-from ai_lab.gateway.scheduler import WillNotFitError
+from ai_lab.gateway.admission.scheduler import WillNotFitError
 from ai_lab.gateway.stats import shapes_offered
 from ai_lab.runtime.core import Operation
 from ai_lab.types import AcceleratorSnapshot, Task

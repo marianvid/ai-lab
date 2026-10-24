@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .scheduler_parts import AbandonedError, AdmissionWithdrawnError, Waiting, WillNotFitError
+from .parts import AbandonedError, AdmissionWithdrawnError, Waiting, WillNotFitError
 
 # A switch to perform once the lock is dropped: the shape to load, what to take
 # off for it, the requests it is for, and the reset epoch it was decided in.

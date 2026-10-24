@@ -10,13 +10,13 @@ from ai_lab.gateway.loading import CardLoader
 from ai_lab.gateway.state import Shape
 from ai_lab.gateway.stats import GatewayCounters
 from ai_lab.runtime.core import Operation
-from ai_lab.gateway.scheduler_parts import (
+from ai_lab.gateway.admission.parts import (
     AbandonedError,
     AdmissionWithdrawnError,
     Waiting,
     release,
 )
-from ai_lab.gateway.scheduler_planning import Planner, QueueState
+from ai_lab.gateway.admission.planning import Planner, QueueState
 
 
 class Entries:

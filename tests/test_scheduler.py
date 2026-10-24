@@ -11,7 +11,7 @@ import threading
 import time
 import unittest
 
-from ai_lab.gateway.scheduler import AbandonedError, QueueFullError, Scheduler, WillNotFitError
+from ai_lab.gateway.admission.scheduler import AbandonedError, QueueFullError, Scheduler, WillNotFitError
 
 
 class Card:

@@ -83,7 +83,7 @@ from __future__ import annotations
 import itertools
 import threading
 import time
-from .scheduler_parts import (
+from .parts import (
     AbandonedError,
     AdmissionWithdrawnError,
     QueueFullError,
@@ -92,7 +92,7 @@ from .scheduler_parts import (
     WillNotFitError,
     release,
 )
-from .scheduler_planning import Planner, QueueState
+from .planning import Planner, QueueState
 
 # Re-exported: callers import the scheduler's errors from here.
 __all__ = ["AbandonedError", "AdmissionWithdrawnError", "QueueFullError", "Scheduler",
