@@ -33,6 +33,10 @@ class Reservation:
     ended_at: float | None = None
     reason: str = ""
     restored: bool = False
+    # How long it may stay granted without a model call; None: the policy's
+    # `unused_s`. A task whose second card is first used in a later step
+    # asks for more than the policy's 10 minutes.
+    unused_s: float | None = None
 
     @property
     def active(self) -> bool:
@@ -66,6 +70,21 @@ class Reservation:
         """Back from disk; unknown keys are ignored."""
         known = {item.name for item in fields(cls)}
         return cls(**{key: value for key, value in raw.items() if key in known})
+
+
+# The shortest unused time a reservation may ask for.
+MIN_UNUSED_S = 60
+
+
+def checked_unused(value, max_s: float) -> float | None:
+    """An unused time from `MIN_UNUSED_S` to the reservation's own `max_s`, or None."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) \
+            or not MIN_UNUSED_S <= value <= max_s:
+        raise ValueError(f"unused_s must be a number of seconds from {MIN_UNUSED_S} "
+                         f"to this reservation's max_s ({max_s:g})")
+    return float(value)
 
 
 def checked_priority(value) -> int:

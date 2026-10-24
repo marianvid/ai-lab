@@ -30,7 +30,14 @@ from .errors import (
     ReservationNotGrantedError,
     ReservationRequiredError,
 )
-from .reservation import GRANTED, QUEUED, Reservation, checked_priority, checked_text
+from .reservation import (
+    GRANTED,
+    QUEUED,
+    Reservation,
+    checked_priority,
+    checked_text,
+    checked_unused,
+)
 from .settings import ReservationPolicy
 from .store import ReservationFile
 
@@ -59,13 +66,14 @@ class ReservationBook:
     def request(self, body: dict) -> dict:
         """A new reservation: granted at once if the card is free, else queued."""
         now = self._clock()
-        max_s = body.get("max_s", self.policy.default_max_s)
+        max_s = self._duration(body.get("max_s", self.policy.default_max_s))
         reservation = Reservation(
             id=uuid.uuid4().hex[:12], team=checked_text(body, "team", required=True),
             instance=checked_text(body, "instance"), purpose=checked_text(body, "purpose"),
             run_id=checked_text(body, "run_id"),
             priority=checked_priority(body.get("priority", 3)),
-            max_s=self._duration(max_s), requested_at=now, last_beat=now)
+            max_s=max_s, unused_s=checked_unused(body.get("unused_s"), max_s),
+            requested_at=now, last_beat=now)
         with self._changed:
             self._items.append(reservation)
             self._settle_locked()
@@ -262,8 +270,9 @@ class ReservationBook:
             return f"no heartbeat for {policy.heartbeat_timeout_s} s"
         if reservation.state != GRANTED or reservation.granted_at is None:
             return ""
-        if reservation.first_call_at is None and now - reservation.granted_at > policy.unused_s:
-            return f"granted but unused for {policy.unused_s} s"
+        unused_s = reservation.unused_s or policy.unused_s
+        if reservation.first_call_at is None and now - reservation.granted_at > unused_s:
+            return f"granted but unused for {unused_s:g} s"
         if now >= reservation.granted_at + reservation.max_s:
             return "reached its maximum duration"
         return ""

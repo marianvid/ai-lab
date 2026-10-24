@@ -16,7 +16,7 @@ Ingest's hourly collect on CT 109 (measured 2026-10-17, about 4.5 minutes): tria
 4. **Order of the queue:** priority, then arrival. **No preemption:** a running reservation is never interrupted; priority only decides who gets the card next.
 5. **Aging.** A waiting reservation rises one priority level every `aging_s` (default 10 minutes, 0 = never), up to 5, so nothing waits forever.
 6. **Proof of life.** The holder, and every waiting team, sends a heartbeat. No heartbeat for `heartbeat_timeout_s` (default 3 minutes) ends the reservation. AI-Lab cannot call the teams; the heartbeat is the health check.
-7. **Unused.** A granted reservation that makes no call within `unused_s` (default 10 minutes) ends. After its first call only the heartbeat counts, so a long gap between steps keeps the card.
+7. **Unused.** A granted reservation that makes no call within `unused_s` (default 10 minutes) ends. After its first call only the heartbeat counts, so a long gap between steps keeps the card. A reservation may ask for its own `unused_s` when it is made, from 60 s to its own `max_s` (added 24 October 2026, approved by the owner): a task whose second card is first called in a later step, or that waits for its other card, says so instead of being ended.
 8. **Duration.** `max_s` defaults to `default_max_s` (30 minutes). The holder may extend it up to `ceiling_s` (4 hours). Past `max_s` the reservation ends and the card goes to the next in line.
 9. **A call under a reservation that is not the holder's** gets 409 with the reason: ended (released, expired, cancelled, unknown) or not granted yet (with its position). It is never served as a call without a reservation.
 10. **Calls without a reservation** work as before while the card is not reserved; while it is, they wait up to `unreserved_wait_s` (30 minutes), then get 409 naming the holder. With `required` on, they are refused at once with 428.
@@ -30,7 +30,7 @@ Ingest's hourly collect on CT 109 (measured 2026-10-17, about 4.5 minutes): tria
 
 ## API
 
-- `POST /api/reservations` `{team, instance, purpose, run_id, priority, max_s}` → the reservation, `state` `granted` or `queued`, `position`
+- `POST /api/reservations` `{team, instance, purpose, run_id, priority, max_s, unused_s}` (`unused_s` optional) → the reservation, `state` `granted` or `queued`, `position`
 - `GET /api/reservations/{id}` → `state` (`queued`, `granted`, `ended`), `reason`, `position`, `time_left_s`, `effective_priority`, `restored`
 - `POST /api/reservations/{id}/heartbeat`
 - `POST /api/reservations/{id}/extend` `{seconds}`

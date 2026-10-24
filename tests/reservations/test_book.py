@@ -106,6 +106,33 @@ class BookTests(unittest.TestCase):
             self.book.heartbeat(used["id"])
         self.assertEqual(self.book.get(used["id"])["state"], "granted")
 
+    def test_a_reservation_may_ask_to_stay_unused_longer(self):
+        # A task whose second card is first called in a later step (M2 of the
+        # scheduler audit, 24 October 2026).
+        patient = self.ask(max_s=3600, unused_s=2400)
+        self.assertEqual(patient["unused_s"], 2400)
+        for _ in range(12):              # 2,040 s granted, never called, still beating
+            self.later(170)
+            self.book.heartbeat(patient["id"])
+        self.assertEqual(self.book.get(patient["id"])["state"], "granted")
+        self.later(170)                  # 2,210 s
+        self.book.heartbeat(patient["id"])
+        self.later(170)                  # 2,380 s: still within it
+        self.book.heartbeat(patient["id"])
+        self.later(30)                   # 2,410 s granted, never called
+        ended = self.book.get(patient["id"])
+        self.assertEqual(ended["state"], "ended")
+        self.assertIn("unused for 2400 s", ended["reason"])
+
+    def test_without_unused_s_the_policy_decides(self):
+        self.assertIsNone(self.ask()["unused_s"])
+
+    def test_unused_s_is_bounded_by_a_minute_and_the_reservation_itself(self):
+        for bad in (30, 3601, "long", True):
+            with self.assertRaises(ValueError):
+                self.ask(max_s=3600, unused_s=bad)
+        self.assertEqual(self.ask(max_s=3600, unused_s=3600)["unused_s"], 3600)
+
     def test_maximum_duration_and_extending_up_to_the_ceiling(self):
         held = self.ask(max_s=300)
         self.book.admit(held["id"])
