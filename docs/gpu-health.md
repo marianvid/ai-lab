@@ -127,16 +127,68 @@ the folded rows add about 30 MB a year.
   | Address | What |
   |---|---|
   | `GET /api/gpu-health` | Everything the page shows |
+  | `GET /api/gpu-health/summary` | The state in short, for other programs (below) |
+  | `GET /api/gpu-health/alerts?after=0` | The messages sent, after a given one (below) |
   | `GET /api/gpu-health/history?hours=24` | Up to 360 averaged points for the charts |
   | `GET /api/gpu-health/report?days=7` | The report of the last days |
   | `POST /api/gpu-health/baseline/reset` with `{"note": "..."}` | Reset the reference |
   | `POST /api/gpu-health/test-alarm` | Send one test alarm |
 
+- The command also has `summary` and `alerts --after N`.
 - The command, in the container: `/opt/ai-lab/.venv/bin/ai-lab-gpu-health`
   (status) or `... ai-lab-gpu-health report --days 30`. It asks the running manager on
   this machine on port 8090 (`--url` for another); `--json` prints the raw answer.
 - The weekly report is made every 7 days, written to the events and sent
   through the channel.
+
+## For other programs: passing the alarms on
+
+A program that wants to pass the monitor's messages on (a relay to Telegram,
+later; a dashboard; a script) needs two addresses. Nothing in it has to
+understand the rules: AI-Lab has already decided what is worth sending.
+
+**`GET /api/gpu-health/summary`** — the state in a few fields, cheap enough to
+ask every minute:
+
+| Field | What |
+|---|---|
+| `health` | `ok`, `warning`, `alarm` or `critical`: the worst alarm in force now ("info" does not count). If the monitor's thread stopped, or it has not read the card for more than 5 minutes, it is at least `alarm`: then nobody is watching the card. `unknown` where there is no monitor (the Mac). |
+| `monitor` | `running` or `stopped` |
+| `last_reading`, `reading_age_s`, `stale` | When the card was last read, how long ago, and whether that is too long |
+| `alarms` | The alarms in force: `key`, `level`, `message`, `since` |
+| `failures` | How many times each step failed |
+| `last_alert_id` | The number of the newest message sent |
+
+**`GET /api/gpu-health/alerts?after=N`** — the messages, oldest first: exactly
+the lines the `log` channel writes, with the repeats already limited (the 6 h
+rule, "Resolved", critical always). Each message has an `id`: a number that
+only grows, because messages are never deleted. The answer has `last_id`
+(the id of the last message in it, or `N` when there is none) and `more`
+(true when there are more than fit in one answer).
+
+How a client works, step by step:
+
+1. The first time, ask `summary` and keep its `last_alert_id` (start from
+   there, so old messages are not sent again), or start from `after=0` to
+   get everything there ever was.
+2. Every minute (or so): `alerts?after=<the kept id>`. Send each message on.
+   Keep the answer's `last_id`. If `more` is true, ask again at once.
+3. Also ask `summary`. If AI-Lab does not answer at all, or `monitor` is
+   `stopped`, that is worth a message of its own: the monitor cannot report
+   its own death.
+
+Because the client keeps the id, nothing is lost while it is stopped, and
+nothing is sent twice. Options: `limit` (1–500, default 100); `all=1` adds the
+messages that were only recorded (held back by the repeat rule, "info", the
+forming of a reference).
+
+Each message: `id`, `ts` (Unix time, seconds), `kind` (`alarm`, `resolved`,
+`event`, `report`), `level`, `key` (what it is about, stable: `temp_gpu`,
+`xid:79`, `r_rise:global`, ...), `message` (one sentence, ready to send),
+`detail` (the numbers behind it).
+
+Like the rest of AI-Lab's API, these answer without a password, to whoever
+can reach AI-Lab on the home network.
 
 ## Settings
 

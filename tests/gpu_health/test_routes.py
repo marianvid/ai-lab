@@ -40,8 +40,13 @@ class Routes(unittest.TestCase):
         call(self.router, "GET", "/api/gpu-health/report")
         call(self.router, "POST", "/api/gpu-health/baseline/reset", body={"note": "paste"})
         call(self.router, "POST", "/api/gpu-health/test-alarm")
+        call(self.router, "GET", "/api/gpu-health/summary")
+        call(self.router, "GET", "/api/gpu-health/alerts", {"after": "12", "all": "true"})
+        call(self.router, "GET", "/api/gpu-health/alerts")
         self.assertEqual(self.health.calls, [("status",), ("history", 48.0), ("report", 7),
-                                             ("reset_baseline", "paste"), ("test_alarm",)])
+                                             ("reset_baseline", "paste"), ("test_alarm",),
+                                             ("summary",), ("alerts", 12, 100, True),
+                                             ("alerts", 0, 100, False)])
 
     def test_a_bad_number_is_a_bad_request(self):
         with self.assertRaises(ValueError):

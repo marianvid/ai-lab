@@ -44,6 +44,7 @@ class Schedule(unittest.TestCase):
         reports = [event for event in self.sent if event["kind"] == "report"]
         self.assertEqual(len(reports), 1)
         self.assertIn("GPU health, last 7 days", reports[0]["message"])
+        self.assertEqual(self.store.events_after(0, 10)[-1]["kind"], "report")
 
     def test_a_failing_database_in_the_daily_step_is_counted(self):
         with mock.patch.object(self.store, "set_state", side_effect=OSError("disk full")):

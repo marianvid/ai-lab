@@ -1,8 +1,8 @@
-"""The status command: `python -m ai_lab.gpu_health status` (or `report`).
+"""The status command: `ai-lab-gpu-health status` (or `summary`, `alerts`, `report`).
 
 It asks the running AI-Lab (on this machine, at the default port 8090, unless
-`--url` says otherwise) rather than opening the database itself, so it never touches the
-file the monitor writes and works the same as the page.
+`--url` says otherwise) rather than opening the database itself, so it never
+touches the file the monitor writes and shows the same as the API.
 """
 
 from __future__ import annotations
@@ -75,13 +75,15 @@ def main(argv: list[str] | None = None) -> int:
     """`status` or `report [--days N]`; 0 when the answer came, 1 when it did not."""
     parser = argparse.ArgumentParser(prog="python -m ai_lab.gpu_health",
                                      description="The GPU health monitor's status")
-    parser.add_argument("what", choices=("status", "report"), nargs="?", default="status")
+    parser.add_argument("what", choices=("status", "summary", "alerts", "report"), nargs="?",
+                        default="status")
     parser.add_argument("--url", default=DEFAULT_URL, help="where AI-Lab answers")
     parser.add_argument("--days", type=int, default=7, help="the report's period")
+    parser.add_argument("--after", type=int, default=0,
+                        help="alerts: only those after this id")
     parser.add_argument("--json", action="store_true", help="print the raw answer")
     arguments = parser.parse_args(argv)
-    path = "/api/gpu-health" if arguments.what == "status" \
-        else f"/api/gpu-health/report?days={arguments.days}"
+    path = PATHS[arguments.what].format(days=arguments.days, after=arguments.after)
     try:
         answer = fetch(arguments.url.rstrip("/") + path)
     except OSError as error:
@@ -89,8 +91,33 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if arguments.json:
         print(json.dumps(answer, indent=2))
-    elif arguments.what == "status":
-        print(describe(answer))
     else:
-        print(answer.get("text", ""))
+        print(SHOW[arguments.what](answer))
     return 0
+
+
+def describe_summary(answer: dict) -> str:
+    """The short state as one line per alarm."""
+    if not answer.get("available"):
+        return "GPU health: not available here. " + answer.get("reason", "")
+    lines = [f"GPU health: {answer['health'].upper()} · monitor {answer['monitor']} · "
+             f"last reading {when(answer.get('last_reading'))} · last alert id "
+             f"{answer['last_alert_id']}"]
+    lines += [f"  {item['level'].upper()}: {item['message']}" for item in answer["alarms"]]
+    return "\n".join(lines)
+
+
+def describe_alerts(answer: dict) -> str:
+    """The messages, one per line, oldest first, with their id."""
+    lines = [f"{item['id']} {when(item['ts'])} {item['level'].upper()} [{item['kind']}] "
+             f"{item['message']}" for item in answer["alerts"]]
+    lines.append(f"last id {answer['last_id']}" + (" (more: ask again with --after)"
+                                                   if answer["more"] else ""))
+    return "\n".join(lines)
+
+
+PATHS = {"status": "/api/gpu-health", "summary": "/api/gpu-health/summary",
+         "alerts": "/api/gpu-health/alerts?after={after}",
+         "report": "/api/gpu-health/report?days={days}"}
+SHOW = {"status": describe, "summary": describe_summary, "alerts": describe_alerts,
+        "report": lambda answer: answer.get("text", "")}

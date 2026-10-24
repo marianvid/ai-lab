@@ -48,6 +48,20 @@ class Store(unittest.TestCase):
         self.assertEqual(events[1]["detail"], {"x": 1})
         self.assertIsNone(events[0]["detail"])
 
+    def test_events_after_an_id_sent_only_or_all(self):
+        self.assertEqual(self.store.last_event_id(), 0)
+        for index, was_sent in enumerate((True, False, True)):
+            self.store.add_event({"ts": 10 - index, "kind": "alarm", "message": str(index),
+                                  "detail": {"sent": was_sent}})
+        self.store.add_event({"ts": 0, "kind": "baseline", "message": "no detail"})
+        sent = self.store.events_after(0, 10)
+        self.assertEqual([(row["id"], row["message"]) for row in sent], [(1, "0"), (3, "2")])
+        self.assertEqual([row["id"] for row in self.store.events_after(1, 10, sent_only=False)],
+                         [2, 3, 4])
+        self.assertEqual(len(self.store.events_after(0, 1)), 1)
+        self.assertEqual((self.store.last_event_id(), self.store.last_event_id(False)), (3, 4))
+        self.assertEqual(self.store.events(limit=1)[0]["id"], 1)
+
     def test_baselines_slow_readings_and_state(self):
         self.store.save_baseline({"scope": "global", "r": 0.2, "fan_bands": {"150": 40},
                                   "windows": 12, "period_start": "a", "period_end": "b",

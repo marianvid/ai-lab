@@ -116,7 +116,7 @@ class GpuHealthMonitor:
     def _report(self, now: float) -> None:
         report = weekly(self.steps.store, self.steps.analysis, now)
         event = {"ts": now, "kind": "report", "level": "info", "key": "weekly",
-                 "message": report["text"], "detail": report}
+                 "message": report["text"], "detail": {**report, "sent": True}}
         self.steps.store.add_event(event)
         self.steps.store.set_state("last_report", now)
         self._send(event)

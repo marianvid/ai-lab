@@ -24,6 +24,7 @@ class Service(unittest.TestCase):
     def test_without_a_driver_it_only_says_so(self):
         health = GpuHealth.start({}, self.folder, lambda: ("", False), load=no_driver)
         self.assertEqual(health.status(), {"available": False, "reason": health.reason})
+        self.assertEqual(health.summary()["health"], "unknown")
         self.assertIn("No NVIDIA driver", health.reason)
         with self.assertRaises(ValueError):
             health.report(7)
@@ -44,6 +45,8 @@ class Service(unittest.TestCase):
         self.assertTrue(health.status()["available"])
         self.assertIn("points", health.history(1))
         self.assertIn("text", health.report(7))
+        self.assertEqual(health.summary()["monitor"], "running")
+        self.assertEqual(health.alerts(0)["alerts"], [])
         self.assertEqual(health.test_alarm()["events"][0]["message"],
                          "Test alarm from the GPU health page")
         with self.assertRaises(ValueError):

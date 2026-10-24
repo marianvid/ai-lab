@@ -17,7 +17,7 @@ from .monitor import GpuHealthMonitor
 from .nvml import LIBRARY, Nvml
 from .output.report import weekly
 from .settings import GpuHealthSettings
-from .output.status import history, status
+from .output.status import alerts, history, status, summary
 from .steps import Activity, Steps
 from .store import Store
 
@@ -61,6 +61,16 @@ class GpuHealth:
         if self.monitor is None:
             return {"available": False, "reason": self.reason}
         return status(self.monitor, time.time(), self.path)
+
+    def summary(self) -> dict:
+        """The state in a few fields (health, monitor, alarms in force), for other programs."""
+        if self.monitor is None:
+            return {"available": False, "health": "unknown", "reason": self.reason}
+        return summary(self.monitor, time.time())
+
+    def alerts(self, after: int, limit: int = 100, everything: bool = False) -> dict:
+        """The messages after the one numbered `after` (see `output/status.alerts`)."""
+        return alerts(self._monitor().steps.store, after, limit, everything)
 
     def history(self, hours: float) -> dict:
         """Temperature, power, fan and use over the last `hours`, for the chart."""

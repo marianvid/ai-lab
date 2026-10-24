@@ -170,12 +170,27 @@ class Store:
         return self._all("SELECT * FROM idle_windows WHERE day >= ? ORDER BY start", [since_day])
 
     def events(self, limit: int = 50, since: float = 0.0) -> list[dict]:
-        """The newest events first."""
-        rows = self._all("SELECT * FROM events WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
-                         [since, limit])
-        for row in rows:
-            row["detail"] = json.loads(row["detail"]) if row["detail"] else None
-        return rows
+        """The newest events first, each with its `id` (the order it was written in)."""
+        rows = self._all("SELECT rowid AS id, * FROM events WHERE ts >= ? "
+                         "ORDER BY ts DESC, rowid DESC LIMIT ?", [since, limit])
+        return _with_detail(rows)
+
+    def events_after(self, after: int, limit: int, sent_only: bool = True) -> list[dict]:
+        """Events written after the one numbered `after`, oldest first.
+
+        `sent_only`: only those the channel sent (the anti-spam applied), which
+        is what a program passing the alarms on wants.
+        """
+        sent = " AND json_extract(detail, '$.sent') = 1" if sent_only else ""
+        rows = self._all(f"SELECT rowid AS id, * FROM events WHERE rowid > ?{sent} "
+                         "ORDER BY rowid LIMIT ?", [after, limit])
+        return _with_detail(rows)
+
+    def last_event_id(self, sent_only: bool = True) -> int:
+        """The number of the newest event (0: none yet)."""
+        sent = " WHERE json_extract(detail, '$.sent') = 1" if sent_only else ""
+        row = self._one(f"SELECT MAX(rowid) AS id FROM events{sent}", [])
+        return int(row["id"]) if row and row["id"] is not None else 0
 
     def baselines(self) -> dict[str, dict]:
         """Every reference, by scope."""
@@ -218,3 +233,10 @@ class Store:
         with self._lock:
             row = self._db.execute(sql, values).fetchone()
             return None if row is None else dict(row)
+
+
+def _with_detail(rows: list[dict]) -> list[dict]:
+    """Events with their `detail` read back from JSON."""
+    for row in rows:
+        row["detail"] = json.loads(row["detail"]) if row["detail"] else None
+    return rows

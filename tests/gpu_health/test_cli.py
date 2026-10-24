@@ -54,6 +54,21 @@ class Command(unittest.TestCase):
         self.assertEqual(out.strip(), "GPU health, last 30 days")
         self.assertEqual(json.loads(run("--json", answer={"a": 1})[1]), {"a": 1})
 
+    def test_summary_and_alerts(self):
+        short = {"available": True, "health": "alarm", "monitor": "running", "last_reading": None,
+                 "last_alert_id": 7, "alarms": [{"level": "alarm", "message": "Chip hot"}]}
+        code, out, _, fetch = run("summary", answer=short)
+        fetch.assert_called_once_with(cli.DEFAULT_URL + "/api/gpu-health/summary")
+        self.assertIn("ALARM · monitor running", out)
+        self.assertIn("last alert id 7", out)
+        self.assertIn("not available here", run("summary", answer={"available": False})[1])
+        listed = {"alerts": [{"id": 8, "ts": None, "level": "critical", "kind": "event",
+                              "message": "Xid 79"}], "last_id": 8, "more": True}
+        code, out, _, fetch = run("alerts", "--after", "7", answer=listed)
+        fetch.assert_called_once_with(cli.DEFAULT_URL + "/api/gpu-health/alerts?after=7")
+        self.assertIn("8 never CRITICAL [event] Xid 79", out)
+        self.assertIn("last id 8 (more", out)
+
     def test_no_answer(self):
         code, _, err, _ = run(error=OSError("refused"))
         self.assertEqual(code, 1)
