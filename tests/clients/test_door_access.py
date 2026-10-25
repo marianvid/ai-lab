@@ -35,6 +35,10 @@ class DoorTest(unittest.TestCase):
         self.door.admit("GET", "/v1/models", {"Authorization": "Bearer wrong"})
         self.assertEqual(len(self.lines), 2)
         self.assertIn("/v1/models", self.lines[0])
+        self.door.admit("GET", "/v1/models", {}, "192.168.50.143")
+        self.door.admit("GET", "/v1/models", {}, "192.168.50.143")
+        self.assertEqual(len(self.lines), 3, "a new address is a new line, once")
+        self.assertIn("from 192.168.50.143", self.lines[2])
 
     def test_require_mode_refuses_with_the_code(self):
         self.access.update_security({"require_token": True})

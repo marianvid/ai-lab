@@ -2,7 +2,8 @@
 
 Two modes, switched in Settings → Security (`require_token`):
 - off (the switch-over, step 1 of the approved order): a call without a valid
-  token is still served, and the door logs it once per caller and route;
+  token is still served, and the door logs it once per kind, route and address,
+  so the clients still to be given a token can be found;
 - on (step 4): such a call is refused with 401 and its code.
 
 A token that belongs to nobody is the same in both modes as a missing one: it
@@ -63,41 +64,42 @@ class Door:
         self.sessions = keys.sessions
         self.log = log
         self.power = power
-        self._logged: set[tuple[str, str]] = set()
+        self._logged: set[tuple[str, str, str]] = set()
 
-    def admit(self, method: str, path: str, headers) -> str:
+    def admit(self, method: str, path: str, headers, peer: str = "") -> str:
         """The caller's name, `web`, or `anonymous`; raises when refusing."""
         if (method.upper(), path) in OPEN:
             return ANONYMOUS
-        caller = self._who(path, headers)
+        caller = self._who(path, headers, peer)
         if self.power is not None and not self.power.on and uses_a_model(method, path):
             raise AiLabOffError("AI-Lab is switched Off: it serves no model until it is "
                                 "switched On", since=self.power.view()["since"])
         return caller
 
-    def _who(self, path: str, headers) -> str:
+    def _who(self, path: str, headers, peer: str) -> str:
         token = bearer(headers)
         if token is not None:
             name = self.registry.identify(token)
             if name is not None:
                 self.presence.seen(name)
                 return name
-            return self._without(TokenInvalidError, "a token that is not registered", path)
+            return self._without(TokenInvalidError, "a token that is not registered", path, peer)
         if self.sessions.valid(session_of(headers)):
             return WEB
-        return self._without(TokenMissingError, "no token", path)
+        return self._without(TokenMissingError, "no token", path, peer)
 
     def caller(self, headers) -> str | None:
         """The registered client behind a request's token, if any."""
         token = bearer(headers)
         return self.registry.identify(token) if token else None
 
-    def _without(self, error: type, what: str, path: str) -> str:
+    def _without(self, error: type, what: str, path: str, peer: str) -> str:
         if self.security.require_token:
             raise error(f"AI-Lab refused the call: {what}. "
                         "Send 'Authorization: Bearer <token>'.")
-        key = (what, route_key(path))
+        key = (what, route_key(path), peer)
         if key not in self._logged:
             self._logged.add(key)
-            self.log(f"[clients] call with {what} on {key[1]} (served: tokens not required yet)")
+            self.log(f"[clients] call with {what} on {key[1]} from {peer or '?'} "
+                     "(served: tokens not required yet)")
         return ANONYMOUS

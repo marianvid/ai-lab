@@ -140,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.access is None:
             return True
         try:
-            self.access.door.admit(method, path, self.headers)
+            self.access.door.admit(method, path, self.headers, self.client_address[0])
         except Exception as error:
             # The body was never read: this connection cannot carry another request.
             self.close_connection = True
