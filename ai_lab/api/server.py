@@ -20,6 +20,8 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
+from ..clients.errors import (AiLabOffError, ModelReplacedError, TokenInvalidError,
+                              TokenMissingError)
 from ..events import EventBus
 from ..gateway.core import CardBusyError, ModelNotLoadedError
 from ..multipart import MultipartBody
@@ -28,7 +30,7 @@ from ..providers import ProviderRateLimitError, ProviderUnavailableError
 from ..reservations import ReservationConflictError, ReservationRequiredError
 from . import sse
 from .passthrough import ClientGoneError, Passthrough
-from .router import Router
+from .router import Reply, Router
 from .routes import RouteParts, register_all
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
@@ -36,6 +38,13 @@ WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 # Which exception means which status. Everything else is a bad request, since
 # the alternative — a 500 with a stack trace — tells the user nothing.
 STATUS = {
+    # Who may call (the approved list, A7).
+    TokenMissingError: HTTPStatus.UNAUTHORIZED,
+    TokenInvalidError: HTTPStatus.UNAUTHORIZED,
+    AiLabOffError: HTTPStatus.SERVICE_UNAVAILABLE,
+    ModelReplacedError: HTTPStatus.CONFLICT,
+    # A wrong password, or a heartbeat without a client's token.
+    PermissionError: HTTPStatus.FORBIDDEN,
     KeyError: HTTPStatus.NOT_FOUND,
     FileNotFoundError: HTTPStatus.NOT_FOUND,
     NotImplementedError: HTTPStatus.NOT_IMPLEMENTED,
@@ -116,15 +125,31 @@ class Handler(BaseHTTPRequestHandler):
 
     router: Router
     bus: EventBus
+    # Who may call (`clients.access.Access`); None lets everyone in (a test).
+    access = None
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
         """The event stream, an API route, or a file of the page, in that order."""
         parsed = urlparse(self.path)
         if parsed.path == "/api/events":
-            self._events()
+            if self._admitted("GET", parsed.path):
+                self._events()
         elif not self._dispatch("GET", parsed):
             self._static(parsed.path)
+
+    def _admitted(self, method: str, path: str) -> bool:
+        """Whether the door lets this call in; a refusal is answered here."""
+        if self.access is None:
+            return True
+        try:
+            self.access.door.admit(method, path, self.headers)
+        except Exception as error:
+            # The body was never read: this connection cannot carry another request.
+            self.close_connection = True
+            self._answer_error(error)
+            return False
+        return True
 
     def do_POST(self) -> None:
         """An API route; anything else is not found."""
@@ -147,12 +172,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(FileNotFoundError(parsed.path))
             return False
         handler, captured = matched
+        if not self._admitted(method, parsed.path):
+            return True
         try:
             query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
             result = handler(query=query, body=self._body(), headers=self.headers,
                              alive=self._client_alive, **captured)
             if isinstance(result, Passthrough):
                 self._passthrough(result)
+            elif isinstance(result, Reply):
+                self._json(result.payload, headers=result.headers)
             else:
                 self._json(result if result is not None else {"ok": True})
         except Exception as error:
@@ -207,9 +236,9 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- responses ---------------------------------------------------------
 
-    def _json(self, payload, status=HTTPStatus.OK):
+    def _json(self, payload, status=HTTPStatus.OK, headers: dict | None = None):
         data = json.dumps(payload).encode()
-        self._head(status, "application/json", len(data))
+        self._head(status, "application/json", len(data), headers=headers)
         self.wfile.write(data)
 
     def _error(self, error: Exception):
@@ -239,10 +268,13 @@ class Handler(BaseHTTPRequestHandler):
             }
         self._json(payload, status)
 
-    def _head(self, status, content_type: str, length: int, cache: bool = False):
+    def _head(self, status, content_type: str, length: int, cache: bool = False,
+              headers: dict | None = None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         if not cache:
             # Nothing here is worth caching, and caching it is actively
             # harmful: with no headers at all a browser caches by its own
@@ -304,8 +336,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         data = target.read_bytes()
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        self._head(HTTPStatus.OK, content_type, len(data))
+        self._head(HTTPStatus.OK, content_type, len(data), headers=self._page_cookie(relative))
         self.wfile.write(data)
+
+    def _page_cookie(self, relative: str) -> dict | None:
+        """With login off, opening the page starts its session (A1, "no logon")."""
+        if self.access is None or relative != "index.html":
+            return None
+        cookie = self.access.page_cookie(self.headers)
+        return {"Set-Cookie": cookie} if cookie else None
 
     def log_message(self, _format, *_args):
         """Silent: one line per request would bury the log that matters."""
@@ -332,7 +371,11 @@ class GatewayServer(ThreadingHTTPServer):
     request_queue_size = 1024
 
 
-def serve(router: Router, bus: EventBus, address: tuple[str, int]) -> None:
-    """Listen on `address` (host, port) with `router`'s routes until the process stops."""
-    handler = type("ConfiguredHandler", (Handler,), {"router": router, "bus": bus})
+def serve(router: Router, bus: EventBus, address: tuple[str, int], access=None) -> None:
+    """Listen on `address` (host, port) with `router`'s routes until the process stops.
+
+    `access` is the door every call passes (`clients.access.Access`).
+    """
+    handler = type("ConfiguredHandler", (Handler,),
+                   {"router": router, "bus": bus, "access": access})
     GatewayServer(address, handler).serve_forever()

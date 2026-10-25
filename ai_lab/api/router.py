@@ -9,8 +9,16 @@ a nested directory — the browser sends it encoded.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import unquote
+
+
+@dataclass(frozen=True, slots=True)
+class Reply:
+    """A JSON answer that also sets headers, such as the login cookie."""
+
+    payload: dict
+    headers: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

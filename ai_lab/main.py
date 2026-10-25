@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .api.routes import RouteParts
 from .api.server import build_router, serve
+from .clients.access import Access
 from .gpu_health.service import GpuHealth
 from .lanes import SideLanes
 from .reservations import ReservationBook, ReservationPolicy
@@ -55,16 +56,29 @@ def main() -> None:
     operations.recover_moves()
     _restore_last_model(operations)
 
+    # Who may call (A1–A2): tokens and the web session, kept with the host's state.
+    access = Access.in_folder(state_dir, log=_log)
+
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
-        parts = RouteParts(gateway=manager.gateway, lanes=lanes, book=book,
-                           store=manager.store, image_jobs=manager.image_jobs,
-                           media_jobs=manager.media_jobs, gpu_health=health)
-        serve(build_router(operations, parts), manager.bus, (host, port))
+        parts = _parts(manager, book, health, access)
+        serve(build_router(operations, parts), manager.bus, (host, port), access)
     finally:
         health.stop()
         lanes.stop_all()
         manager.host.stop_all()
+
+
+def _parts(manager, book, health, access) -> RouteParts:
+    """What the routes are bound to besides the operations."""
+    return RouteParts(gateway=manager.gateway, lanes=manager.lanes, book=book,
+                      store=manager.store, image_jobs=manager.image_jobs,
+                      media_jobs=manager.media_jobs, gpu_health=health, access=access)
+
+
+def _log(line: str) -> None:
+    """One line in the manager's journal, written at once."""
+    print(line, flush=True)
 
 
 def _restore_last_model(operations) -> None:

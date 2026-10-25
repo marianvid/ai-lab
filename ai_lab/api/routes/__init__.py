@@ -15,8 +15,8 @@ nothing is guarded because nothing is being served.
 from dataclasses import dataclass
 from typing import Any
 
-from ...lanes import SideLanes
 from . import catalog
+from . import clients
 from . import downloads
 from . import gateway
 from . import gpu_health
@@ -42,12 +42,14 @@ class RouteParts:
     is reserved, and its own routes manage it, saving their settings in
     `store` (the configuration store); `image_jobs` and `media_jobs`
     are the two job queues; `gpu_health` is the card's health monitor (or
-    the reason there is none). A router built for a test leaves out what it does
-    not need, and those routes are simply not there.
+    the reason there is none); `access` is who may call (tokens, login,
+    Security). A router built for a test leaves out what it does not need, and
+    those routes are simply not there.
     """
 
     gateway: Any = None
-    lanes: SideLanes = NO_LANES
+    access: Any = None
+    lanes: Any = NO_LANES
     book: Any = None
     store: Any = None
     image_jobs: Any = None
@@ -71,3 +73,5 @@ def register_all(router, operations, parts: RouteParts | None = None) -> None:
         media.register(router, parts.media_jobs)
     if parts.gpu_health is not None:
         gpu_health.register(router, parts.gpu_health)
+    if parts.access is not None:
+        clients.register(router, parts.access)
