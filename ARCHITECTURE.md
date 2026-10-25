@@ -34,9 +34,10 @@ Three kinds of file sit outside the line:
   files, `catalog/naming.py`, `events.py`, `budget.py`, `gateway/eviction.py`, `multipart.py`
   and `uploads.py`. They hold
   data shapes, rules or arithmetic, and decide nothing about what to do.
-- **The job queues** `media/image_jobs.py` and `media/jobs.py`. They are handed the
-  gateway when the application is built, so they sit beside `api/`, above the
-  gateway, and send their work through it like any other client.
+- **The image calls** `media/images.py`. They are handed the gateway when the
+  application is built, so they sit beside `api/`, above the gateway, and send
+  their work through it like any other client. An image or music request is an
+  ordinary call: there are no job queues (since 2026-10-25).
 - **The isolated runtime adapters** — `audio/`, `speech/`, `music/`, `text/`,
   `images/` and the host they share, `engine_host/`. The manager never imports
   them. An engine starts one as a separate program, with the engine's own
@@ -71,9 +72,9 @@ engine's process.
 | `text.mlxlm_server`, `text.mlxvlm_server` (scripts) | — |
 | `network`, `multipart`, `comfyui_templates` (shared with the manager) | — |
 
-No import breaks the rule today. The last one did: `media/image_jobs.py` borrowed
+No import breaks the rule today. The last one did: the image calls borrowed
 the multipart reader and the uploaded-image check from `api/`. Both moved to
-the shared level (`multipart.py`, `uploads.py`), so the job queue and the web
+the shared level (`multipart.py`, `uploads.py`), so the image calls and the web
 layer now import them from below. `api/multipart.py` and `api/uploads.py`
 remain only as pass-throughs so older imports keep working.
 
@@ -103,7 +104,7 @@ there is exactly one place to look.
 | `speech/` | Isolated adapters for speech synthesis: one HTTP host (`server.py`, and `higgs_server.py` for the Higgs worker), one backend file per engine (`kokoro_backend.py`, `voxcpm_backend.py`, `qwen.py`, `higgs_backend.py`, `higgs_local_backend.py`), the shared request check and WAV answer (`contract.py`), grouping requests that arrive together into one model pass (`batching.py`), and `higgs_playground.py`, which serves the upstream Higgs playground page from the in-process `higgs_local` model | Anything the manager imports |
 | `music/` | Isolated adapters for music: for each engine a host in `music/servers/` (`acestep_server.py` for ACE-Step, `<engine>_server.py` for the others) and, except ACE-Step, a `music/backends/<engine>_backend.py` that does the work (Khala, HeartMuLa, YuE2, MuLaCover, LeVo 2, Stable Audio 3, ComfyUI). `yue2_web_backend.py` drives YuE2 through its own resident web worker. Shared by them: `request_fields.py` (the request checks and the WAV answer), `bundles.py` (checkpoint and sampling settings), `hosting.py` (command line, stopping, readiness) | Anything the manager imports |
 | `images/` | Isolated adapters only: `server.py` for PaddleOCR, `comfyui_server.py`, the bridge to a private ComfyUI | Arbitrary workflow graphs from clients; anything the manager imports |
-| `media/` | The manager's media job queues: `jobs.py` (music and speech) and `image_jobs.py` (named image workflows), their store `job_store.py`, and `image_workflows.py` (filling a workflow and reading a job request). Jobs can be cancelled and survive a restart | Choosing a model — the gateway does that |
+| `media/` | Image calls by named profile: `images.py` (one call through the gateway, answered with the images) and `image_workflows.py` (filling a profile's workflow and reading the request) | Choosing a model — the gateway does that |
 | `engine_host/` | `http_host.py`: the small HTTP hosts every isolated adapter is built on — JSON in and out (`GenerationHost`), or an upload in and JSON out (`UploadHost`), the handler bound to its backend when the server starts. Process side only | Anything of the manager's |
 | `comfyui_templates/`, `comfyui_custom_nodes/` | Workflow files for ComfyUI's own editor, one per model, and the ComfyUI extension that loads the entry's workflow into it | Python logic beyond finding the right file |
 | `vendor/` | Upstream editors (Kokoro, VoxCPM, SGLang-Omni's Higgs page) copied in with their licences, started by the isolated adapters on the engine's port plus 10000. The Higgs page is used by both Higgs engines | AI-Lab rules — it is vendored code |
@@ -129,10 +130,11 @@ there is exactly one place to look.
 | `operations.py`, `operations_services.py` | The single object the routes and the gateway talk to: a façade handing each action to an `application/` service. The services are built in `wiring.py` and handed to it (`OperationsParts`, `OperationsServices`) | Building its own services; anything a single service could do alone |
 | `gateway/core.py`, `gateway/catalogue.py`, `gateway/loading.py`, `gateway/limits.py` | One address for an agent. `Gateway` holds its collaborators: the `Catalogue` (which entry serves a name, the listing, request shapes; no state), the `CardLoader` (making room and loading; it owns the memory reading and the sweep flag, and reads memory through the `CardMemory` interface, `GatewayResources` by default) and the `Scheduler`; plus the limits it runs with | HTTP of any kind — forwarding is the web layer's job |
 | `gateway/state.py`, `gateway/control.py`, `gateway/resources.py`, `gateway/stats.py`, `gateway/errors.py` | The gateway's parts: a held place and a model-plus-settings shape; the guard for the page's buttons; memory readings and waiting for the card to empty; the read-only report the Gateway page shows; the refusals the web layer turns into HTTP answers | HTTP |
-| `gateway/admission/`: `scheduler.py`, `planning.py`, `parts.py` | Who gets the card next: the queue and its rules (`Scheduler`, the one owner of the lock and of the `QueueState` it guards), the decisions taken on that state (`Planner`: which run a switch is for, who is let in after a load — called only under the scheduler's lock, holding none itself), its errors and one waiting request. A waiting request is asked `still_wanted` at the head of the queue, before anything is unloaded; it may withdraw itself with a reason (`AdmissionWithdrawnError`), which is how a card reservation is checked again (ADR 0005) | Anything about models, engines or ports — a shape is an opaque key |
+| `gateway/admission/`: `scheduler.py`, `planning.py`, `parts.py`, `replaced.py` | Who gets the card next: the queue and its rules (`Scheduler`, the one owner of the lock and of the `QueueState` it guards), the decisions taken on that state (`Planner`: which run a switch is for, who is let in after a load — called only under the scheduler's lock, holding none itself), its errors and one waiting request. A waiting request is asked `still_wanted` at the head of the queue, before anything is unloaded. `replaced.py` remembers which model was taken off for which, so a call cut that way ends with `409 model_replaced` | Anything about models, engines or ports — a shape is an opaque key |
+| `clients/` | Who may call (docs/access.md): the registered clients and their tokens, the door every call passes, the schedulers' heartbeat and maps, web sessions and login, Settings → Security, and the On/Off switch | Who may use the card when — the schedulers decide that |
+| `runtime/journal.py` | The operation log: the newest lines for the page, every line in a rotating file | What happens; it only writes it down |
 | `providers/` | Subscription models answered through their vendors' CLIs: one queue per vendor, errors read from the CLI's words, usage per day | The card, its leases or its scheduler |
 | `cpu_models/` | Embeddings models: their `llama-server` processes (processor, or the card while it has room), started on demand and stopped when idle, and one queue per model | The card's leases or its scheduler |
-| `reservations/` | Card reservations (ADR 0005): who holds the card for a run, the queue by priority with aging, heartbeats, expiry, the saved book; `admit` is asked before every call to this machine's models, and `permits` again when the call reaches the head of the card's queue | Who the clients are |
 | `gateway/card_sharing.py` | `CardNeighbours`: what a card load asks of whoever borrows the card (step aside, it is over, how much you hold) | Who the neighbour is |
 | `lanes.py` | `SideLanes`: the two lanes beside the card, bundled so the front door is handed one object | Decisions — it only holds and lists them |
 | `runtime/lastloaded.py` | One record on disk: which models were loaded, in order, and how each was started | Deciding anything — it remembers and is read |

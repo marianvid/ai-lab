@@ -18,7 +18,9 @@ import ai_lab.api.routes.gateway as gateway_routes
 from ai_lab.api.router import Router
 from ai_lab.api.routes import RouteParts
 from ai_lab.api.server import Handler, build_router, status_for
+from ai_lab.clients.errors import AiLabOffError, ModelReplacedError
 from ai_lab.events import EventBus
+from ai_lab.gateway.admission.replaced import Replacements
 from ai_lab.gateway.core import CardBusyError, NotConfiguredError
 from ai_lab.gateway.limits import Patience
 from ai_lab.multipart import MultipartBody
@@ -359,6 +361,7 @@ class SettingsFieldTests(unittest.TestCase):
         def __init__(self, drop=frozenset()):
             self.asked = []
             self.drop = drop
+            self.replacements = Replacements()
 
         first_byte_s = 5.0
         between_bytes_s = 1.0
@@ -416,6 +419,42 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertEqual(forwarded["temperature"], 0.5,
                          "the rest of the body must go through untouched")
         self.assertEqual(forwarded["model"], "qwen-real")
+
+    def test_a_call_whose_model_is_taken_off_ends_with_model_replaced(self):
+        from ai_lab.api.routes.gateway import _forwarder
+        gateway = self.Gateway()
+        seen: dict = {}
+
+        def fake_forward(url, payload, waits, hooks, **_):
+            seen["cut"] = waits.cut
+            return ANSWERED
+
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            _forwarder(cast(Any, gateway), "/v1/chat/completions")(
+                body={"model": "qwen", "messages": []})
+        self.assertIsNone(seen["cut"]())
+        gateway.replacements.switched("coder", ["qwen"])
+        replaced = seen["cut"]()
+        self.assertIsInstance(replaced, ModelReplacedError)
+        self.assertEqual(status_for(replaced), HTTPStatus.CONFLICT)
+        self.assertEqual(replaced.detail["ai_lab"], {"reason": "model_replaced",
+                                                     "model": "qwen", "replaced_by": "coder"})
+
+    def test_off_comes_before_the_replacement(self):
+        from ai_lab.api.routes.gateway import _forwarder
+        gateway = self.Gateway()
+        seen: dict = {}
+
+        def fake_forward(url, payload, waits, hooks, **_):
+            seen["cut"] = waits.cut
+            return ANSWERED
+
+        off = AiLabOffError("switched Off")
+        with mock.patch.object(gateway_routes, "forward", fake_forward):
+            _forwarder(cast(Any, gateway), "/v1/chat/completions")(
+                body={"model": "qwen", "messages": []}, cut=lambda: off)
+        gateway.replacements.switched("coder", ["qwen"])
+        self.assertIs(seen["cut"](), off)
 
     def test_fields_the_engine_refuses_are_left_out(self):
         # Mistral's tokenizer answers 400 to chat_template_kwargs; callers send

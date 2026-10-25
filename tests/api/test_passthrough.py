@@ -11,6 +11,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from ai_lab.clients.errors import AiLabOffError, ModelReplacedError
 from ai_lab.api.passthrough import (
     ClientGoneError,
     EngineStalledError,
@@ -121,6 +122,27 @@ class ForwardTests(unittest.TestCase):
         with self.assertRaises(OSError):
             b"".join(answer.chunks)
         self.assertLess(time.perf_counter() - started, FIRST_BYTE_S + 0.9)
+
+    def test_a_cut_ends_the_answer_with_its_own_refusal(self):
+        # A7: AI-Lab Off, or the model replaced, ends the call with that reason.
+        reasons: list[Exception] = []
+        answer = forward(self.serve("stalls-mid-answer"), {"stream": True},
+                         Waits(FIRST_BYTE_S, BETWEEN_BYTES_S * 10, cut=lambda: reasons[0]
+                               if reasons else None), Hooks())
+        chunks = iter(answer.chunks)
+        self.assertEqual(next(chunks), b"data: one\n\n")
+        reasons.append(ModelReplacedError("qwen was taken off the card for coder"))
+        with self.assertRaises(ModelReplacedError):
+            next(chunks)
+
+    def test_a_cut_before_the_first_word_ends_the_answer_with_its_refusal(self):
+        answer = forward(self.serve("never-answers"), {"stream": True},
+                         Waits(FIRST_BYTE_S, BETWEEN_BYTES_S,
+                               cut=lambda: AiLabOffError("switched Off")), Hooks())
+        started = time.perf_counter()
+        with self.assertRaises(AiLabOffError):
+            b"".join(answer.chunks)
+        self.assertLess(time.perf_counter() - started, FIRST_BYTE_S)
 
     def test_each_piece_is_passed_on_as_it_arrives(self):
         # Before, the stream was collected into 8 KB pieces, so a small first

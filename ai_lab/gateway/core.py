@@ -10,7 +10,6 @@ See docs/gateway-behavior.md for the operating contract.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from dataclasses import replace
 
 from .catalogue import Catalogue
@@ -29,16 +28,13 @@ from .resources import GatewayResources, ask_engine
 from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats, StatsSources
 from .card_operations import CardOperations
-from .admission.scheduler import AbandonedError, Scheduler, StillWanted, WillNotFitError
+from .admission.scheduler import (AbandonedError, Replacements, Scheduler, StillWanted,
+                                  WillNotFitError)
 from ..types import Task
 
 # The gateway's errors are part of its interface: callers import them from here.
 __all__ = ["CardBusyError", "CouldNotLoadError", "Gateway", "GatewayLimits",
            "ModelNotLoadedError", "NotConfiguredError", "ShapeNotServedError"]
-
-
-def _silent(_line: str) -> None:
-    """The operation log before the application connects one."""
 
 
 class Gateway:
@@ -83,7 +79,7 @@ class Gateway:
         self._loader = CardLoader(operations, self._memory, self._counters,
                                   self._scheduler.state, self._catalogue.engine_name_of)
         self.control = GatewayControl(self._scheduler)
-        self.note: Callable[[str], None] = _silent    # the operation log (A9)
+        self.replacements = Replacements()    # taken off for another (A5, A7), and the log (A9)
 
     # -- what a client can ask for -----------------------------------------
 
@@ -228,8 +224,7 @@ class Gateway:
 
     def _switch(self, shape: Shape, victims: tuple = ()) -> None:
         """Take those off and put this on: the loader's job, with the lock dropped."""
-        gone = ", ".join(victim.instance_id for victim in victims) or "nothing"
-        self.note(f"gateway: putting {shape.instance_id} on the card, taking off {gone}")
+        self.replacements.switched(shape.instance_id, [victim.instance_id for victim in victims])
         self._loader.put_on_card(shape, victims)
 
     def _make_room(self, shape: Shape, loaded: list[dict]) -> list | None:
@@ -316,7 +311,7 @@ class Gateway:
         state that no longer exists. Returns how many were turned away.
         """
         self._loader.card_changed()
-        self.note(f"gateway: everything stopped and the queue turned away: {reason}")
+        self.replacements.stopped(reason, self._scheduler.state()["loaded"])
         return self._scheduler.reset(reason)
 
     # -- what the buttons on the page have to respect -----------------------

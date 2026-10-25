@@ -9,10 +9,12 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+from ai_lab.api.passthrough import Passthrough
 from ai_lab.api.router import Router
 from ai_lab.api.routes import clients as client_routes
 from ai_lab.api.server import Handler
 from ai_lab.clients.access import Access
+from ai_lab.clients.errors import ModelReplacedError
 from ai_lab.events import EventBus
 
 
@@ -20,6 +22,7 @@ class ClientRoutesTest(unittest.TestCase):
     def setUp(self):
         self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
         router = Router()
+        self.router = router
         client_routes.register(router, self.access)
         router.add("POST", "/v1/echo", lambda body, **_: body)
         handler = type("H", (Handler,), {"router": router, "bus": EventBus(),
@@ -101,6 +104,23 @@ class ClientRoutesTest(unittest.TestCase):
         self.call("POST", "/api/power", {"on": True})
         status, _, _ = self.call("POST", "/v1/echo", {"a": 1})
         self.assertEqual(status, 200)
+
+    def test_a_stream_cut_by_ai_lab_ends_with_an_event_that_says_why(self):
+        def chunks():
+            yield b"data: one\n\n"
+            raise ModelReplacedError("qwen was taken off the card for coder",
+                                     model="qwen", replaced_by="coder")
+
+        self.router.add("POST", "/v1/stream", lambda **_: Passthrough(
+            status=200, content_type="text/event-stream", chunks=chunks(), headers={},
+            close=lambda: None))
+        request = urllib.request.Request(self.base + "/v1/stream", data=b"{}", method="POST")
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = response.read().decode()
+        self.assertTrue(body.startswith("data: one\n\n"))
+        last = json.loads(body.strip().split("\n\n")[-1][len("data: "):])
+        self.assertEqual(last["error"]["code"], "model_replaced")
+        self.assertEqual(last["ai_lab"]["replaced_by"], "coder")
 
     def test_the_page_opens_a_session_when_login_is_off(self):
         with urllib.request.urlopen(self.base + "/", timeout=5) as response:

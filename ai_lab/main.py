@@ -67,7 +67,7 @@ def _journal(state_dir: Path, manager) -> OperationJournal:
     """The operation log (A9): model steps from the bus, card switches from the gateway."""
     journal = OperationJournal(state_dir / "logs")
     PhaseFollower(journal).follow(manager.bus)
-    manager.gateway.note = journal.write
+    manager.gateway.replacements.note = journal.write
     return journal
 
 

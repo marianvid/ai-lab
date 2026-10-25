@@ -1,6 +1,6 @@
 """The On/Off switch (A6).
 
-Off: the calls running now are ended at once, those waiting are turned away,
+Off: the calls running now are ended at once with the reason (503), those waiting are turned away,
 and every new call that would use a model is refused with 503 `ai_lab_off`.
 Reading the page, the settings and the switch itself stays open. The switch
 survives a restart: an AI-Lab switched Off comes back Off.
@@ -17,7 +17,7 @@ from pathlib import Path
 from .registry import write_private
 
 # Calls that would use a model: refused while Off.
-MODEL_PREFIXES = ("/v1/", "/tokenize", "/api/media-jobs", "/api/image-jobs")
+MODEL_PREFIXES = ("/v1/", "/tokenize")
 LOAD_SUFFIX = "/load"
 INSTANCES = "/api/instances/"
 

@@ -101,6 +101,9 @@ class Waits:
     first_byte_s: float = FIRST_BYTE_S
     between_bytes_s: float = BETWEEN_BYTES_S
     client_here: Callable[[], bool] | None = None
+    # Why the call must end now with a refusal of its own (AI-Lab Off, its
+    # model replaced), or None; asked before anything else (A7).
+    cut: Callable[[], Exception | None] | None = None
     idle_for: Callable[[], float] | None = None
     stall_s: float = STALL_S
     safety_s: float = SAFETY_S
@@ -241,11 +244,21 @@ class _Answer:
             if self.hooks.on_first_chunk:
                 self.hooks.on_first_chunk(now - self.sent_at)
 
+    def _cut(self) -> Exception | None:
+        """The refusal this call ends with, if it must end for a reason of AI-Lab's."""
+        return self.waits.cut() if self.waits.cut is not None else None
+
     def _next(self) -> tuple[str, Any]:
-        """The next thing the engine sent, looking around between waits."""
+        """The next thing the engine sent, looking around between waits.
+
+        A connection broken because the engine was stopped for a reason of
+        AI-Lab's (Off, the model replaced) reports that reason, not the break.
+        """
         while True:
             try:
-                return self.upstream.events.get(timeout=self._wait_s())
+                kind, value = self.upstream.events.get(timeout=self._wait_s())
+                reason = self._cut() if kind == FAILED else None
+                return (kind, value) if reason is None else (FAILED, reason)
             except queue.Empty:
                 pass
             reason = self._reason_to_stop(time.perf_counter())
@@ -270,6 +283,9 @@ class _Answer:
 
     def _reason_to_stop(self, now: float) -> Exception | None:
         """Why this answer must end now, or None while it may go on."""
+        reason = self._cut()
+        if reason is not None:
+            return reason
         if self.waits.client_here is not None and not self.waits.client_here():
             return ClientGoneError("the client left before its answer was ready")
         if self.waits.idle_for:

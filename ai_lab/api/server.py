@@ -10,6 +10,7 @@ the rule that keeps everything below it testable without HTTP.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import mimetypes
 import select
@@ -21,7 +22,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
 from ..clients.errors import (AccessDeniedError, AiLabOffError, ModelReplacedError,
-                              TokenInvalidError, TokenMissingError)
+                              RefusalError, TokenInvalidError, TokenMissingError)
 from ..events import EventBus
 from ..gateway.core import CardBusyError, ModelNotLoadedError
 from ..multipart import MultipartBody
@@ -173,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
             result = handler(query=query, body=self._body(), headers=self.headers,
-                             alive=self._wanted, **captured)
+                             alive=self._wanted, cut=self._cut, **captured)
             if isinstance(result, Passthrough):
                 self._passthrough(result)
             elif isinstance(result, Reply):
@@ -193,6 +194,13 @@ class Handler(BaseHTTPRequestHandler):
             self._error(error)
         except CLIENT_GONE:
             self.close_connection = True
+
+    def _cut(self) -> Exception | None:
+        """The refusal a running call ends with when AI-Lab is switched Off (A6)."""
+        if self.access is None or self.access.power.on:
+            return None
+        return AiLabOffError("AI-Lab was switched Off while this call ran",
+                             since=self.access.power.view()["since"])
 
     def _wanted(self) -> bool:
         """Still to be served: the client is there, and AI-Lab was not switched Off."""
@@ -316,12 +324,28 @@ class Handler(BaseHTTPRequestHandler):
             # The client hung up, perhaps before the first byte. Nothing more
             # can be said to it.
             self.close_connection = True
+        except RefusalError as refusal:
+            # Cut by AI-Lab mid-answer (Off, the model replaced): the status is
+            # sent, so a stream ends with one last event that says why (A7).
+            self._closing_event(response, refusal)
         finally:
             # However writing ended, the answer gives back what it holds: the
             # engine's connection and the card place. Leaving this to the
             # body's own cleanup lost a place for good when the headers failed
             # (22 October 2026): a body never started never cleans up.
             response.close()
+
+    def _closing_event(self, response: Passthrough, refusal: Exception) -> None:
+        """One event with the refusal, then the end of the chunked answer; nothing if gone."""
+        self.close_connection = True
+        if not response.content_type.startswith("text/event-stream"):
+            return
+        event = b"data: " + json.dumps({"error": {
+            "message": str(refusal), "type": error_kind(refusal),
+            "code": getattr(refusal, "code", None)}, **getattr(refusal, "detail", {})}).encode() + b"\n\n"
+        with contextlib.suppress(*CLIENT_GONE):
+            self.wfile.write(b"%x\r\n%s\r\n0\r\n\r\n" % (len(event), event))
+            self.wfile.flush()
 
     def _write_chunk(self, data: bytes):
         self.wfile.write(data)

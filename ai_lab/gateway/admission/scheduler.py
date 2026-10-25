@@ -92,9 +92,10 @@ from .parts import (
     release,
 )
 from .planning import Planner, QueueState
+from .replaced import Replacements
 
 # Re-exported: callers import the scheduler's errors from here.
-__all__ = ["AbandonedError", "QueueFullError", "Scheduler", "StillWanted",
+__all__ = ["AbandonedError", "QueueFullError", "Replacements", "Scheduler", "StillWanted",
            "WillNotFitError"]
 
 

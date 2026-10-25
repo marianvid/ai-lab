@@ -29,7 +29,7 @@ class PowerTest(unittest.TestCase):
     def test_what_is_refused_while_off(self):
         self.assertTrue(uses_a_model("POST", "/v1/chat/completions"))
         self.assertTrue(uses_a_model("POST", "/tokenize"))
-        self.assertTrue(uses_a_model("POST", "/api/media-jobs"))
+        self.assertFalse(uses_a_model("POST", "/api/media-jobs"))
         self.assertTrue(uses_a_model("POST", "/api/instances/qwen/load"))
         self.assertFalse(uses_a_model("GET", "/v1/models"))
         self.assertFalse(uses_a_model("POST", "/api/instances/qwen/unload"))

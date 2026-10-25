@@ -19,6 +19,9 @@ goes to `ProviderPool` instead, and a processor model (embeddings) to
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
+
 from ...cpu_models import EMBEDDINGS_PATH
 from ...engines.base import (
     ALIGNMENT_PATHS,
@@ -35,6 +38,7 @@ from ...engines.base import (
 from ...gateway.core import Gateway
 from ...lanes import SideLanes
 from ...network import LOOPBACK
+from ...clients.errors import ModelReplacedError
 from ...gateway.admission.parts import StillWanted
 from ...types import Task
 from ..multipart import MultipartBody
@@ -157,7 +161,7 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
     use the card when is the schedulers' business, not AI-Lab's. A reservation
     header an older client still sends is ignored.
     """
-    def handle(body=None, alive=None, **_):
+    def handle(body=None, alive=None, cut=None, **_):
         payload = body or {}
         wanted = _model_name(payload)
         if path in TOKENIZE_PATHS:
@@ -171,7 +175,7 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
         # Everything from here gives the place back if it fails: a leaked place
         # breaks nothing visibly, the card simply has one fewer place for ever.
         try:
-            return _forward(gateway, lease, path, payload, _Call(wanted, alive))
+            return _forward(gateway, lease, path, payload, _Call(wanted, alive, cut))
         except BaseException:
             lease.release()
             raise
@@ -197,11 +201,25 @@ def _count_tokens(gateway: Gateway, path: str, payload, wanted: str):
 
 
 class _Call:
-    """The model a call named, and how to ask whether its client is still there."""
+    """The model a call named, whether its client is still there, and why AI-Lab may cut it."""
 
-    def __init__(self, model: str, alive: StillWanted | None) -> None:
+    def __init__(self, model: str, alive: StillWanted | None,
+                 cut: Callable[[], Exception | None] | None = None) -> None:
         self.model = model
         self.alive = alive
+        self.cut = cut
+        self.started = time.time()
+
+    def reason_to_cut(self, gateway: Gateway, instance_id: str) -> Exception | None:
+        """AI-Lab switched Off, or this call's model taken off for another (A7)."""
+        reason = self.cut() if self.cut is not None else None
+        if reason is not None:
+            return reason
+        by = gateway.replacements.since(instance_id, self.started)
+        if by is None:
+            return None
+        return ModelReplacedError(f"{instance_id} was taken off the card for {by}",
+                                  model=instance_id, replaced_by=by)
 
 
 def _side_lane(lanes: SideLanes, path: str, payload, wanted: str) -> dict | None:
@@ -277,7 +295,7 @@ def _forward(gateway: Gateway, lease, path: str, payload, call: _Call):
     # A stalled engine is restarted, once, so the next requests do not stall too.
     hooks = Hooks(on_close=keeper, on_first_chunk=timed,
                   on_stall=lambda reason: gateway.engine_stalled(lease.instance_id, reason))
-    waits = _waits(gateway, lease, path, call.alive)
+    waits = _waits(gateway, lease, path, call)
 
     # A text too long for the model comes back with the limit and its size as
     # numbers next to the engine's sentence (`context_limit`).
@@ -289,7 +307,7 @@ def _forward(gateway: Gateway, lease, path: str, payload, call: _Call):
     return send_capped(send, outgoing, path, gateway.patience.default_max_tokens, keeper)
 
 
-def _waits(gateway: Gateway, lease, path: str, alive) -> Waits:
+def _waits(gateway: Gateway, lease, path: str, call: _Call) -> Waits:
     """How long to wait, and what to keep looking at: the client, and the engine's progress.
 
     An engine that keeps work counters (vLLM) is judged by them: no limit on
@@ -300,6 +318,7 @@ def _waits(gateway: Gateway, lease, path: str, alive) -> Waits:
         _TASK_OF_PATH.get(path, Task.TEXT_GENERATION))
     patience = gateway.patience
     progress = lease.progress
-    return Waits(first_byte_s, between_bytes_s, client_here=alive,
+    return Waits(first_byte_s, between_bytes_s, client_here=call.alive,
+                 cut=lambda: call.reason_to_cut(gateway, lease.instance_id),
                  idle_for=progress.idle_for if progress is not None else None,
                  stall_s=patience.stall_s, safety_s=patience.safety_s)
