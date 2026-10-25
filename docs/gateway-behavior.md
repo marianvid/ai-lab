@@ -188,8 +188,8 @@ configuration can also override the two waits per kind of request, under
 }
 ```
 
-A task not named there uses the two defaults. Background media jobs use their
-task's first-byte limit too — see [Media jobs](media-jobs.md).
+A task not named there uses the two defaults. The clock starts when the call
+is sent to the engine, after its wait in the queue and any model load.
 
 There is no HTTP in the gateway module. It decides which entry serves a name and makes
 sure it is the one on the card; forwarding the request is the web layer's job.

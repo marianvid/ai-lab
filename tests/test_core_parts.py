@@ -7,7 +7,7 @@ from ai_lab import uploads
 from ai_lab.api import uploads as api_uploads
 from ai_lab.api.sse import stream
 from ai_lab.config.migrations import SCHEMA_VERSION, migrate
-from ai_lab.config.policy import GatewayPolicy, MediaPolicy
+from ai_lab.config.policy import GatewayPolicy
 from ai_lab.events import EventBus
 from ai_lab.gateway.control import GatewayControl
 from ai_lab.gateway.errors import CardBusyError
@@ -48,12 +48,6 @@ class PolicyTests(unittest.TestCase):
     def test_out_of_range_integers_name_their_section(self):
         with self.assertRaisesRegex(ValueError, "Gateway max_waiting must be between 1 and 10000"):
             GatewayPolicy.from_mapping({"max_waiting": 0})
-        with self.assertRaisesRegex(ValueError, "Media max_queue"):
-            MediaPolicy.from_mapping({"max_queue": 0})
-
-    def test_unknown_media_settings_are_refused(self):
-        with self.assertRaisesRegex(ValueError, "Unknown media settings: nope"):
-            MediaPolicy.from_mapping({"nope": 1})
 
 
 class Scheduler:

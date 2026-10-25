@@ -47,8 +47,9 @@ connection stays open until the song is finished. Except for YuE2, which hands
 the work to its Studio, the adapter deletes its temporary working files
 afterwards. Save the result if it is needed later.
 
-For a job that survives a closed connection, and can be listed and cancelled,
-use [media jobs](media-jobs.md) with task `music-generation`.
+The call is an ordinary call: it waits in the card's queue like any other
+and is answered when the song is made (there are no background jobs since
+2026-10-25). Its first-byte limit is `gateway.task_timeouts.music-generation`.
 
 ## What each engine accepts
 
@@ -85,4 +86,4 @@ takes.
 
 ---
 
-[← all documents](../README.md)  ·  [Media jobs](media-jobs.md)  ·  [Use a model directly](direct-use.md)
+[← all documents](../README.md)  ·  [Use a model directly](direct-use.md)

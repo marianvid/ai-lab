@@ -15,7 +15,7 @@ from ..multipart import MultipartBody
 
 # The fields an image request may carry.
 ALLOWED = frozenset({"profile", "model", "prompt", "negative_prompt", "seed",
-                     "width", "height", "steps", "cfg_scale", "n", "async",
+                     "width", "height", "steps", "cfg_scale", "n",
                      "response_format"})
 # Form fields read as numbers or a flag when the request is multipart.
 WHOLE_NUMBERS = frozenset({"seed", "width", "height", "steps", "n"})
@@ -71,12 +71,10 @@ def read_request(body) -> tuple[dict, bytes | None]:
     return dict(body), None
 
 
-def _typed(key: str, value: str) -> int | float | bool | str:
+def _typed(key: str, value: str) -> int | float | str:
     """A form field as the type the JSON form of the request would carry."""
     if key in WHOLE_NUMBERS:
         return int(value)
     if key == "cfg_scale":
         return float(value)
-    if key == "async":
-        return value.lower() == "true"
     return value

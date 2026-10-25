@@ -69,7 +69,7 @@ larger than the limit.
 
 Counting is not a model call (since 22 October 2026). The engine's tokenizer
 counts on the processor, so `/tokenize` takes no place on the card, waits in
-no queue and at no reservation, and never loads a model. A model that is not
+no queue, and never loads a model. A model that is not
 on the card cannot count; the answer is then **409** with:
 
 ```json
@@ -129,28 +129,25 @@ runtime. Image generation and editing are exposed at
 operator-defined profile; arbitrary ComfyUI graphs are never accepted.
 `GET /api/image-profiles` lists the profiles, with the task and model each one
 uses. A request may carry only `profile`, `model`, `prompt`,
-`negative_prompt`, `seed`, `width`, `height`, `steps`, `cfg_scale`, `n`,
-`async` and `response_format`; any other field is refused.
+`negative_prompt`, `seed`, `width`, `height`, `steps`, `cfg_scale`, `n`
+and `response_format`; any other field is refused.
 
 Uploaded images — for OCR and for edits — are checked against the size limits
 in the `gateway` section of the configuration: `max_upload_bytes`,
 `max_upload_pixels` and `max_upload_dimension`. Zero means no limit.
 
-Without `async`, the call waits for the result, up to `images.client_wait_s`
-(default 1,800 seconds).
-
-Set `async: true` to receive a durable job immediately. Poll
-`GET /api/image-jobs/{id}`, list with `GET /api/image-jobs`, and cancel with
-`DELETE /api/image-jobs/{id}`. Unfinished jobs are explicitly failed after a
-manager restart. Prompts and uploaded image bytes are not written to job
-metadata, and temporary inputs are removed after completion.
+An image call is an ordinary call (since 2026-10-25 there are no image jobs):
+it waits in the card's queue like any other, and is answered with the images
+once they are made. Its first-byte limit is
+`gateway.task_timeouts.image-generation` or `image-edit`. Nothing about the
+request or its images is kept on disk.
 
 ComfyUI runs behind a private adapter and is deliberately single-concurrency:
 its interrupt endpoint affects the current global execution. Workflow files
 must be exported in API format and stored below `images.workflow_root`.
 
-Music and speech have their own background jobs, described in
-[Media jobs](media-jobs.md).
+Music and speech are ordinary calls too: `POST /v1/audio/music/generations`
+and `POST /v1/audio/speech/generations`.
 
 ### Models that never touch the card
 

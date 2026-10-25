@@ -21,18 +21,6 @@ class ConfigurationValidationTests(unittest.TestCase):
     def base(self):
         return _base_config()
 
-    def test_invalid_media_retention_fails_at_startup(self):
-        config = self.base()
-        config.media = {"result_ttl_s": -1}
-        with self.assertRaisesRegex(ValueError, "Media result_ttl_s"):
-            validate_configuration(config, {'comfyui'}, sections={})
-
-    def test_unknown_media_setting_is_refused(self):
-        config = self.base()
-        config.media = {"retention_days": 1}
-        with self.assertRaisesRegex(ValueError, "Unknown media settings"):
-            validate_configuration(config, {'comfyui'}, sections={})
-
     def test_gateway_policy_has_typed_task_waits(self):
         config = self.base()
         config.gateway = {"task_timeouts": {
@@ -46,10 +34,6 @@ class ConfigurationValidationTests(unittest.TestCase):
         config = self.base()
         config.gateway = []
         with self.assertRaisesRegex(ValueError, "Gateway settings must be an object"):
-            validate_configuration(config, {'comfyui'}, sections={})
-        config.gateway = {}
-        config.media = []
-        with self.assertRaisesRegex(ValueError, "Media settings must be an object"):
             validate_configuration(config, {'comfyui'}, sections={})
 
     def test_invalid_gateway_task_wait_fails_at_startup(self):
@@ -114,7 +98,7 @@ def _owned_ports(port: object) -> list[tuple[str, int]]:
     return [("owned thing", cast(int, port))]
 
 
-OWNED = {"reservations": Section(_owned, ports=_owned_ports)}
+OWNED = {"gpu_health": Section(_owned, ports=_owned_ports)}
 
 
 class SectionTests(unittest.TestCase):
@@ -123,19 +107,19 @@ class SectionTests(unittest.TestCase):
 
     def test_a_section_s_own_parser_reports_its_mistake(self):
         config = self.base()
-        config.reservations = {}
+        config.gpu_health = {}
         with self.assertRaisesRegex(ValueError, "owned section must name a port"):
             validate_configuration(config, {'comfyui'}, sections=OWNED)
 
     def test_a_port_a_section_claims_may_not_be_taken(self):
         config = self.base()
-        config.reservations = {"port": 8100}
+        config.gpu_health = {"port": 8100}
         with self.assertRaisesRegex(ValueError, "owned thing: port 8100 is already assigned"):
             validate_configuration(config, {'comfyui'}, sections=OWNED)
 
     def test_an_empty_section_map_checks_only_the_configuration_s_own_parts(self):
         config = self.base()
-        config.reservations = {}
+        config.gpu_health = {}
         validate_configuration(config, {'comfyui'}, sections={})
 
     def test_the_sections_must_be_named(self):

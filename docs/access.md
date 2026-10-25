@@ -39,3 +39,29 @@ Answer: `{"received_at": <unix time>, "on": true|false}`. AI-Lab keeps the last 
 - The password is kept as a salted scrypt hash in the file security.json, never as text.
 - `POST /api/login {"password"}` sets the session cookie (`HttpOnly`, `SameSite=Strict`, 30 days); `POST /api/logout` clears it. Sessions live in memory: a restart asks for the password again.
 - **"No logon"** (`login_required` off): opening the page starts its session by itself.
+
+## On/Off (A6)
+
+`POST /api/power {"on": false}` switches AI-Lab Off (the Access page has the button):
+
+- every call that would use a model (POST `/v1/...`, `/tokenize`, Load) is refused with `503 ai_lab_off` and `since`;
+- whoever waits in the card's queue is turned away;
+- the calls running end within about a second;
+- reading stays open, the model list included. Off survives a restart; `{"on": true}` switches it back.
+
+## The operation log (A9)
+
+What AI-Lab is doing, one line per step: a model starting or stopping, a model put on the card and what was taken off for it, the queue turned away, a call without a valid token, On/Off. The page reads the newest 500 lines (`GET /api/journal?after=<id>`); every line is also written to logs/operations.log in the host's state folder, rotated at 5 MB, five files kept.
+
+## Models and the card (A3, A5)
+
+- Calls are served first come, first served; a loaded model takes as many at once as it has places. Who may use the card when is the schedulers' business: AI-Lab keeps no reservations.
+- A model that does not fit beside the others replaces one: the first, idle before busy and used longest ago first, whose place alone is enough; only when none is enough do several go. A model still answering goes only after its calls end: replacement never cuts a call.
+
+## The Mac's memory ceiling (A12)
+
+`memory.ceiling_mb` (the Machine card, "Ceiling for models"; 0 = none), on unified memory only: a model may take the smaller of what is really free when it loads and what the ceiling leaves above what the models already hold.
+
+## Images and music (A10)
+
+Ordinary calls: `POST /v1/images/generations`, `/v1/images/edits` (by named profile, `GET /api/image-profiles`), `POST /v1/audio/music/generations`. No job list, job id or polling. Each kind has its own first-byte limit in `gateway.task_timeouts`, counted from the moment the call reaches the engine.

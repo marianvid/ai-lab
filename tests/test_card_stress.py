@@ -1,7 +1,6 @@
 """The card under load, judged only from the outside.
 
-Many threads at once, two models, requests that give up, and card reservations
-granted and released during the run. Nothing here looks inside the scheduler or
+Many threads at once, two models, and requests that give up. Nothing here looks inside the scheduler or
 the gateway: these tests say what must stay true whatever the classes look
 like, so they hold the line while the classes are rearranged.
 
@@ -19,11 +18,7 @@ import threading
 import time
 import unittest
 
-from ai_lab.api.routes.gateway import _Admission, _take_place
 from ai_lab.gateway.admission.scheduler import AbandonedError, Scheduler
-from ai_lab.reservations.book import ReservationBook
-from ai_lab.reservations.errors import CardReservedError
-from ai_lab.reservations.settings import ReservationPolicy
 from tests.test_gateway import quick, two_models
 
 THREADS = 24
@@ -132,58 +127,3 @@ class GatewayStressTests(unittest.TestCase):
         self.assertEqual(failures, [])
         stats = gateway.stats()
         self.assertEqual((stats["in_flight"], stats["waiting"]), (0, 0))
-
-
-class ReservationStressTests(unittest.TestCase):
-    """A holder keeps its model on the card while others keep asking for another."""
-
-    def test_no_other_model_is_loaded_while_the_card_is_held(self):
-        operations = two_models()
-        gateway = quick(operations)
-        book = ReservationBook(ReservationPolicy(unreserved_wait_s=5))
-        held = threading.Event()
-        released = threading.Event()
-        window = {}
-        refused = []
-
-        def holder():
-            made = book.request({"team": "ingest", "priority": 4})
-            admission = _Admission(book, made["id"], None)
-            for _ in range(10):
-                admission.at_the_door()
-                lease = _take_place(gateway, "/v1/chat/completions",
-                                    {"model": "coder"}, admission)
-                if not held.is_set():
-                    window["from"] = len(operations.loads)
-                    held.set()
-                time.sleep(0.003)
-                lease.release()
-            window["to"] = len(operations.loads)
-            book.release(made["id"])
-            released.set()
-
-        def other(seed):
-            chance = random.Random(seed)
-
-            def work():
-                held.wait(5)
-                for _ in range(6):
-                    admission = _Admission(book, None, None)
-                    try:
-                        admission.at_the_door()
-                        lease = _take_place(gateway, "/v1/chat/completions",
-                                            {"model": "reviewer"}, admission)
-                    except CardReservedError as error:
-                        refused.append(error)
-                        continue
-                    time.sleep(chance.random() * 0.002)
-                    lease.release()
-            return work
-
-        hung = run_all([holder] + [other(seed) for seed in range(6)])
-        self.assertEqual(hung, [])
-        self.assertTrue(released.is_set())
-        loads_while_held = operations.loads[window["from"]:window["to"]]
-        self.assertNotIn("reviewer", loads_while_held)
-        self.assertIn("reviewer", operations.loads[window["to"]:])
-        self.assertEqual(gateway.stats()["in_flight"], 0)

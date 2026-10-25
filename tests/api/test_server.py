@@ -488,7 +488,7 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertEqual(watch.idle_for(), 3.0)
         self.assertEqual((watch.stall_s, watch.safety_s), (75.0, 900.0))
 
-    def test_counting_tokens_takes_no_place_and_waits_for_no_reservation(self):
+    def test_counting_tokens_takes_no_place(self):
         from ai_lab.api.routes.gateway import _forwarder
         gateway = self.Gateway()
         cast(Any, gateway).where_loaded = lambda wanted, shape: (8141, "qwen-real")
@@ -498,12 +498,8 @@ class SettingsFieldTests(unittest.TestCase):
             sent.update(url=url, payload=dict(payload))
             return ANSWERED
 
-        class Reserved:
-            def admit(self, *args):
-                raise AssertionError("a count must not wait at the reservation door")
-
         with mock.patch.object(gateway_routes, "forward", fake_forward):
-            _forwarder(cast(Any, gateway), "/tokenize", book=cast(Any, Reserved()))(
+            _forwarder(cast(Any, gateway), "/tokenize")(
                 body={"model": "qwen", "prompt": "hello", "ai_lab": {"context_size": 1}})
         self.assertEqual(gateway.asked, [], "a count must never take a place on the card")
         self.assertEqual(sent["url"], "http://127.0.0.1:8141/tokenize")

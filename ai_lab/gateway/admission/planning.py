@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .parts import AbandonedError, AdmissionWithdrawnError, Waiting, WillNotFitError
+from .parts import AbandonedError, Waiting, WillNotFitError
 
 # A switch to perform once the lock is dropped: the shape to load, what to take
 # off for it, the requests it is for, and the reset epoch it was decided in.
@@ -240,17 +240,12 @@ class Planner:
         Asked at the last possible moment, because the expensive part is what
         comes after: a client that walked away should not cost a swap and a
         forty-second load, nor take the card off the model that was working.
-        `still_wanted` may also withdraw the request with a reason of its own
-        (`AdmissionWithdrawnError`, ADR 0005); the request then fails with it.
         """
         if entry.still_wanted is None:
             return False
         try:
             if entry.still_wanted():
                 return False
-        except AdmissionWithdrawnError as withdrawn:
-            entry.fail(withdrawn)
-            return True
         except Exception:
             return False                        # cannot tell: serve it
         entry.fail(AbandonedError("the client closed the connection while waiting"))

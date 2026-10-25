@@ -41,8 +41,8 @@ class GatewayLimitsTests(unittest.TestCase):
 class SectionsTests(unittest.TestCase):
     def test_the_sections_other_packages_own_are_checked_by_their_parsers(self):
         self.assertEqual(sorted(CONFIG_SECTIONS),
-                         ["cpu_models", "gpu_health", "providers", "reservations"])
-        for name in ("reservations", "gpu_health"):
+                         ["cpu_models", "gpu_health", "providers"])
+        for name in ("gpu_health",):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Unknown"):
                 CONFIG_SECTIONS[name].parse({"nope": 1})
 

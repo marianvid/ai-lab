@@ -12,7 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 # Asked before a waiting request is let in: true while it is still wanted.
-# It may also raise `AdmissionWithdrawnError` to refuse it with a reason.
 StillWanted = Callable[[], bool]
 
 
@@ -42,21 +41,6 @@ class WillNotFitError(RuntimeError):
 
 class AbandonedError(RuntimeError):
     """The client went away before its turn came."""
-
-
-class AdmissionWithdrawnError(AbandonedError):
-    """The request may no longer be let in, for a reason of its own.
-
-    Raised by a `StillWanted` callable at the head of the queue — for example
-    when the card was reserved while the request waited (ADR 0005). The
-    scheduler knows nothing of why: it drops the request before anything is
-    unloaded and hands back `reason`, which the caller turns into its answer.
-    An abandonment, not a fault of this machine.
-    """
-
-    def __init__(self, reason: BaseException) -> None:
-        super().__init__(str(reason))
-        self.reason = reason
 
 
 @dataclass(slots=True)

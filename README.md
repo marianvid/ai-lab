@@ -82,7 +82,7 @@ before it says how it works.
 | [Music generation](docs/music.md) | The six music engines (ACE-Step, HeartMuLa, YuE2, MuLaCover, Khala, ComfyUI), what each accepts, direct use and agent API. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
 | [Audio](docs/audio.md) | Speech-to-text, VAD, speaker diarization, transcript alignment and speech synthesis, and their endpoints. |
-| [Media jobs](docs/media-jobs.md) | Music and speech requests that run in the background: submit, poll, cancel. For agents and scripts. |
+| [Who may call](docs/access.md) | Client tokens, the schedulers' heartbeat, login, On/Off, the operation log and the Mac's memory ceiling. |
 
 **How it works inside**
 

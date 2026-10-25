@@ -5,7 +5,7 @@ How it is built (Chain of Responsibility + Strategy):
 - `validate_configuration` runs a fixed chain of section checkers — storage
   roots, repositories, the manager port, each instance, the policies, the
   image profiles. Sections another package owns (subscription providers,
-  processor models, card reservations) are handed in as `Section`s by the
+  processor models) are handed in as `Section`s by the
   composition root, so this package imports nothing above itself. Each checker adds plain-language messages to one shared
   `_Report`, so the person reading the error sees every problem at once.
 - How an engine's per-model options are judged is a table, `ENGINE_RULES`:
@@ -260,7 +260,7 @@ def _check_placement(report: _Report, item) -> None:
 
 
 def _check_policies(report: _Report) -> None:
-    for policy_name in ("gateway_policy", "media_policy"):
+    for policy_name in ("gateway_policy",):
         try:
             getattr(report.config, policy_name)
         except ValueError as error:

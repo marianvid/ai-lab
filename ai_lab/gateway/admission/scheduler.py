@@ -85,7 +85,6 @@ import threading
 import time
 from .parts import (
     AbandonedError,
-    AdmissionWithdrawnError,
     QueueFullError,
     StillWanted,
     Waiting,
@@ -95,8 +94,8 @@ from .parts import (
 from .planning import Planner, QueueState
 
 # Re-exported: callers import the scheduler's errors from here.
-__all__ = ["AbandonedError", "AdmissionWithdrawnError", "QueueFullError", "Scheduler",
-           "StillWanted", "WillNotFitError"]
+__all__ = ["AbandonedError", "QueueFullError", "Scheduler", "StillWanted",
+           "WillNotFitError"]
 
 
 class Scheduler:

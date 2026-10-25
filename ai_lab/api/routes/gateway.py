@@ -35,9 +35,7 @@ from ...engines.base import (
 from ...gateway.core import Gateway
 from ...lanes import SideLanes
 from ...network import LOOPBACK
-from ...gateway.state import Lease
-from ...reservations import CardReservedError, ReservationBook, ReservationConflictError
-from ...gateway.admission.parts import AdmissionWithdrawnError, StillWanted
+from ...gateway.admission.parts import StillWanted
 from ...types import Task
 from ..multipart import MultipartBody
 from ..answer_cap import Hooks, PlaceKeeper, Waits, forward, send_capped
@@ -52,11 +50,6 @@ FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
                                 + SPEECH_PATHS + ALIGNMENT_PATHS
                                 + TOKENIZE_PATHS + (EMBEDDINGS_PATH,)))
 NO_LANES = SideLanes()
-# The header a call under a reservation carries: the reservation's id.
-RESERVATION_HEADER = "X-AI-Lab-Reservation"
-# How many times a call without a reservation, overtaken in the card's queue by
-# a reservation granted meanwhile, goes back to wait at the door (ADR 0005).
-DOOR_RETURNS = 3
 
 # Which task a request path belongs to, for per-task timeouts (see
 # `Gateway.timeouts_for`) and for which uploads get image validation. Paths
@@ -79,23 +72,22 @@ _TASK_OF_PATH = {
 _IMAGE_UPLOAD_PATHS = frozenset(OCR_PATHS)
 
 
-def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES,
-             book: ReservationBook | None = None) -> None:
+def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) -> None:
     """The model routes, the catalogue, and the front door's own settings."""
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, lanes))
     router.add("GET", "/v1/models/{model}",
                lambda model, **_: _describe(gateway, lanes, model))
-    router.add("GET", "/api/gateway", lambda **_: _stats(gateway, lanes, book))
+    router.add("GET", "/api/gateway", lambda **_: _stats(gateway, lanes))
 
     def settings(body=None, **_):
         """Change the front door's own limits, and use them at once."""
         saved = operations.update_gateway(body or {})
         gateway.apply_settings(saved)
-        return _stats(gateway, lanes, book)
+        return _stats(gateway, lanes)
 
     router.add("PATCH", "/api/gateway", settings)
     for path in FORWARDED:
-        router.add("POST", path, _forwarder(gateway, path, lanes, book))
+        router.add("POST", path, _forwarder(gateway, path, lanes))
     if lanes.cpu is not None:
         cpu = lanes.cpu
         router.add("POST", "/api/cpu-models/{name}/start",
@@ -104,13 +96,9 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES,
                    lambda name, **_: cpu.stop(name))
 
 
-def _stats(gateway: Gateway, lanes: SideLanes, book: ReservationBook | None = None) -> dict:
+def _stats(gateway: Gateway, lanes: SideLanes) -> dict:
     """The card's queue, each subscription vendor's, and each processor model's."""
     stats = gateway.stats()
-    if book is not None:
-        # Calls without a reservation held at the door while the card is
-        # reserved: not yet in the card's queue, so `waiting` does not count them.
-        stats["at_the_door"] = book.door.view()
     if lanes.providers is not None:
         stats["providers"] = lanes.providers.stats()
     if lanes.cpu is not None:
@@ -162,31 +150,28 @@ def _one_model(row: dict, detailed: bool = False) -> dict:
 SETTINGS_FIELD = "ai_lab"
 
 
-def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
-               book: ReservationBook | None = None):
-    """The handler for one forwarded path."""
-    def handle(body=None, alive=None, headers=None, **_):
+def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
+    """The handler for one forwarded path.
+
+    Calls are served first come, first served (the approved list, A3): who may
+    use the card when is the schedulers' business, not AI-Lab's. A reservation
+    header an older client still sends is ignored.
+    """
+    def handle(body=None, alive=None, **_):
         payload = body or {}
         wanted = _model_name(payload)
         if path in TOKENIZE_PATHS:
             return _count_tokens(gateway, path, payload, wanted)
-        # The card's reservations come first (ADR 0005): a call reaches a model
-        # on this machine — the card's or an embeddings model — only under the
-        # holder's reservation, or when the card is not reserved. Subscription
-        # models run in the cloud and are never held back.
-        guarded = book if book is not None and not _in_the_cloud(lanes, wanted) else None
-        admission = _Admission(guarded, (headers or {}).get(RESERVATION_HEADER), alive,
-                               wanted)
-        admission.at_the_door()
         side = _side_lane(lanes, path, payload, wanted)
         if side is not None:
             return side
         _check_upload(gateway, path, payload)
-        lease = _take_place(gateway, path, payload, admission)
+        lease = gateway.acquire(wanted, shape=path, settings=_start_settings(payload),
+                                still_wanted=alive)
         # Everything from here gives the place back if it fails: a leaked place
         # breaks nothing visibly, the card simply has one fewer place for ever.
         try:
-            return _forward(gateway, lease, path, payload, admission)
+            return _forward(gateway, lease, path, payload, _Call(wanted, alive))
         except BaseException:
             lease.release()
             raise
@@ -196,10 +181,10 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
 def _count_tokens(gateway: Gateway, path: str, payload, wanted: str):
     """Count a text's tokens with a loaded model's tokenizer: no card place, no queue, no load.
 
-    The engine counts on the processor, not the card, so a count neither waits
-    for places nor for a reservation, and takes none from anybody. A model that
-    is not loaded cannot count, and is not loaded for it: the answer is a 409
-    with `ai_lab.reason` `model_not_loaded` (owner's decision, 22 October 2026).
+    The engine counts on the processor, not the card, so a count never waits
+    for a place and takes none from anybody. A model that is not loaded cannot
+    count, and is not loaded for it: the answer is a 409 with `ai_lab.reason`
+    `model_not_loaded` (owner's decision, 22 October 2026).
     """
     if isinstance(payload, MultipartBody):
         raise ValueError("counting tokens takes a JSON request")
@@ -211,71 +196,12 @@ def _count_tokens(gateway: Gateway, path: str, payload, wanted: str):
                    Waits(first_byte_s, between_bytes_s), Hooks())
 
 
-class _Admission:
-    """Whether one call may reach the card: asked at the door, and again at the head of the queue.
+class _Call:
+    """The model a call named, and how to ask whether its client is still there."""
 
-    The door (`ReservationBook.admit`) lets the call in or makes it wait while
-    the card is reserved. The call may then wait in the card's own queue, and
-    by the time it is served the card may have been reserved by another team,
-    or the call's own reservation may have ended. `still_wanted` is what the
-    scheduler asks at the head of its queue, before anything is unloaded: it
-    says whether the client is still there and, through the book, withdraws a
-    call that may no longer reach the card (`AdmissionWithdrawnError`).
-    """
-
-    def __init__(self, book: ReservationBook | None, reservation_id: str | None,
-                 alive: StillWanted | None, model: str = "") -> None:
-        self.book = book
-        self.reservation_id = reservation_id
-        self.alive = alive
+    def __init__(self, model: str, alive: StillWanted | None) -> None:
         self.model = model
-
-    def at_the_door(self) -> None:
-        """Let the call in, wait while the card is held, or refuse it (ADR 0005)."""
-        if self.book is not None:
-            self.book.admit(self.reservation_id, self.alive, self.model)
-
-    def still_wanted(self) -> bool:
-        """True while the client is there and the card is still its to use."""
-        if self.alive is not None and not self.alive():
-            return False
-        if self.book is not None:
-            try:
-                self.book.permits(self.reservation_id)
-            except ReservationConflictError as refused:
-                raise AdmissionWithdrawnError(refused) from refused
-        return True
-
-    def may_wait_again(self, reason: BaseException) -> bool:
-        """A call without a reservation, overtaken by one: it waits at the door again."""
-        return self.reservation_id is None and isinstance(reason, CardReservedError)
-
-
-def _take_place(gateway: Gateway, path: str, payload, admission: _Admission) -> Lease:
-    """A place on the card for this call, with the model it names on it.
-
-    A call without a reservation that queued while the card was free, and was
-    overtaken by a reservation granted meanwhile, goes back to the door and
-    waits there as if it had just arrived — at most `DOOR_RETURNS` times, then
-    it gets the 409. A call whose own reservation ended while it queued gets
-    the 409 at once, as it would have at the door.
-    """
-    returns = 0
-    while True:
-        try:
-            return gateway.acquire(_model_name(payload), shape=path,
-                                   settings=_start_settings(payload),
-                                   still_wanted=admission.still_wanted)
-        except AdmissionWithdrawnError as withdrawn:
-            if returns >= DOOR_RETURNS or not admission.may_wait_again(withdrawn.reason):
-                raise withdrawn.reason from None
-            returns += 1
-            admission.at_the_door()
-
-
-def _in_the_cloud(lanes: SideLanes, wanted: str) -> bool:
-    """Whether a subscription vendor answers this name (no reservation applies)."""
-    return lanes.providers is not None and lanes.providers.serves(wanted)
+        self.alive = alive
 
 
 def _side_lane(lanes: SideLanes, path: str, payload, wanted: str) -> dict | None:
@@ -340,9 +266,9 @@ def _outgoing(lease, payload, wanted: str) -> tuple[bytes | dict, str, bool]:
     return request, "application/json", bool(payload.get("stream"))
 
 
-def _forward(gateway: Gateway, lease, path: str, payload, admission: _Admission):
+def _forward(gateway: Gateway, lease, path: str, payload, call: _Call):
     """Send the request to the leased engine, by the name that engine knows."""
-    outgoing, content_type, streaming = _outgoing(lease, payload, admission.model)
+    outgoing, content_type, streaming = _outgoing(lease, payload, call.model)
     # Time to the first token only when streaming was asked for: otherwise the
     # first byte is the whole generation and the average measures neither.
     timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
@@ -351,7 +277,7 @@ def _forward(gateway: Gateway, lease, path: str, payload, admission: _Admission)
     # A stalled engine is restarted, once, so the next requests do not stall too.
     hooks = Hooks(on_close=keeper, on_first_chunk=timed,
                   on_stall=lambda reason: gateway.engine_stalled(lease.instance_id, reason))
-    waits = _waits(gateway, lease, path, admission.alive)
+    waits = _waits(gateway, lease, path, call.alive)
 
     # A text too long for the model comes back with the limit and its size as
     # numbers next to the engine's sentence (`context_limit`).

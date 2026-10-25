@@ -42,10 +42,9 @@ class ReadRequestTests(unittest.TestCase):
         boundary = "b"
         raw = "".join(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n'
                       f"{value}\r\n" for key, value in
-                      (("seed", "3"), ("cfg_scale", "1.5"), ("async", "true"),
-                       ("prompt", "dog"))).encode() + f"--{boundary}--\r\n".encode()
+                      (("seed", "3"), ("cfg_scale", "1.5"), ("prompt", "dog"))).encode() + f"--{boundary}--\r\n".encode()
         fields, image = read_request(MultipartBody(f"multipart/form-data; boundary={boundary}", raw))
-        self.assertEqual(fields, {"seed": 3, "cfg_scale": 1.5, "async": True, "prompt": "dog"})
+        self.assertEqual(fields, {"seed": 3, "cfg_scale": 1.5, "prompt": "dog"})
         self.assertIsNone(image)
 
     def test_anything_else_is_refused(self):

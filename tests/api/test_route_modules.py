@@ -3,9 +3,8 @@
 import unittest
 
 from ai_lab.api.router import Router
-from ai_lab.api.routes import (RouteParts, catalog, downloads, huggingface, images, media,
+from ai_lab.api.routes import (RouteParts, catalog, downloads, huggingface, images, runtime,
                                register_all, settings, storage)
-from ai_lab.api.routes.jobs import register_jobs
 from ai_lab.types import Task
 
 
@@ -18,7 +17,7 @@ class Recorder:
         return call
 
 
-class Jobs(Recorder):
+class Images(Recorder):
     pass
 
 
@@ -63,32 +62,78 @@ class RouteModuleTests(unittest.TestCase):
         self.assertEqual(call(self.router, "DELETE", "/api/storage/cache")["args"], ["cache"])
 
 
-class JobRouteTests(unittest.TestCase):
+class Card:
+    """A gateway that records what the buttons asked of it."""
+
+    def __init__(self):
+        self.done = []
+
+    def guard(self, action, instance_id):
+        self.done.append(("guard", action, instance_id))
+
+    def reset(self, reason):
+        self.done.append(("reset", reason))
+
+    def card_changed(self):
+        self.done.append(("changed",))
+
+
+class Started:
+    def __init__(self, called):
+        self.called = called
+
+    def json(self):
+        return {"called": self.called}
+
+
+class Engines(Recorder):
+    """Operations whose Load and Unload answer like a started operation."""
+
+    def load(self, instance_id):
+        return Started("load")
+
+    def unload(self, instance_id):
+        return Started("unload")
+
+
+class RuntimeRouteTests(unittest.TestCase):
     def setUp(self):
         self.router = Router()
-        images.register(self.router, Jobs())
-        media.register(self.router, Jobs())
+        self.card = Card()
+        runtime.register(self.router, Engines(), self.card)
 
-    def test_both_queues_list_read_and_cancel(self):
-        for path in ("/api/image-jobs", "/api/media-jobs"):
-            self.assertEqual(call(self.router, "GET", path)["called"], "list")
-            self.assertEqual(call(self.router, "GET", path + "/j1")["args"], ["j1"])
-            self.assertEqual(call(self.router, "DELETE", path + "/j1")["called"], "cancel")
+    def test_load_is_guarded_and_the_card_is_told(self):
+        loaded = call(self.router, "POST", "/api/instances/qwen/load", body={})
+        self.assertEqual(loaded["called"], "load")
+        self.assertEqual(self.card.done, [("guard", "load", "qwen"), ("changed",)])
 
-    def test_any_queue_gets_the_three_routes(self):
+    def test_force_turns_the_queue_away_and_never_reaches_the_settings(self):
+        applied = call(self.router, "POST", "/api/instances/qwen/apply",
+                       body={"force": True, "context_size": 8192})
+        self.assertEqual(applied["args"], ["qwen", {"context_size": 8192}])
+        self.assertEqual(self.card.done[0], ("reset", "qwen was stopped by hand"))
+
+    def test_without_a_gateway_nothing_is_guarded(self):
         router = Router()
-        register_jobs(router, "/api/other-jobs", Jobs())
-        self.assertEqual(call(router, "DELETE", "/api/other-jobs/j2")["args"], ["j2"])
+        runtime.register(router, Engines())
+        self.assertEqual(call(router, "POST", "/api/instances/qwen/unload")["called"], "unload")
 
-    def test_the_queues_routes_are_there_only_when_their_queue_is(self):
-        bare = Router()
-        register_all(bare, Recorder())
-        self.assertIsNone(bare.match("GET", "/api/media-jobs"))
-        both = Router()
-        register_all(both, Recorder(), RouteParts(image_jobs=Jobs(), media_jobs=Jobs()))
-        self.assertEqual(call(both, "GET", "/api/media-jobs")["called"], "list")
-        self.assertEqual(call(both, "GET", "/api/image-jobs/j1")["args"], ["j1"])
 
-    def test_image_requests_carry_their_task(self):
+class ImageRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.router = Router()
+        images.register(self.router, Images())
+
+    def test_profiles_and_the_two_image_requests(self):
+        self.assertEqual(call(self.router, "GET", "/api/image-profiles")["called"], "profiles")
         made = call(self.router, "POST", "/v1/images/edits", body={"prompt": "x"})
         self.assertEqual(made["args"], [{"prompt": "x"}, Task.IMAGE_EDIT])
+        made = call(self.router, "POST", "/v1/images/generations", body={"prompt": "y"})
+        self.assertEqual(made["args"], [{"prompt": "y"}, Task.IMAGE_GENERATION])
+
+    def test_no_job_routes_remain(self):
+        router = Router()
+        register_all(router, Recorder(), RouteParts(images=Images()))
+        for path in ("/api/image-jobs", "/api/media-jobs", "/api/reservations"):
+            self.assertIsNone(router.match("GET", path), path)
+        self.assertIsNotNone(router.match("GET", "/api/image-profiles"))

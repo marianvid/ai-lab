@@ -156,8 +156,8 @@ decoded alone — the arithmetic of a batch is not bit-identical.
 Music goes to `POST /v1/audio/music/generations`; its fields are in
 [Music generation](music.md).
 
-Both can take minutes. To get a job ID back at once instead of holding the
-connection open, use [Media jobs](media-jobs.md).
+Both can take minutes; the call is answered when the work is done. Each kind
+has its own first-byte limit (`gateway.task_timeouts`).
 
 ### Models that never touch the card
 

@@ -27,7 +27,6 @@ from ..gateway.core import CardBusyError, ModelNotLoadedError
 from ..multipart import MultipartBody
 from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
-from ..reservations import ReservationConflictError, ReservationRequiredError
 from . import sse
 from .passthrough import ClientGoneError, Passthrough
 from .router import Reply, Router
@@ -56,9 +55,6 @@ STATUS = {
     ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
     # The vendor's CLI could not answer: the caller's fallback should take over.
     ProviderUnavailableError: HTTPStatus.BAD_GATEWAY,
-    # The card is reserved, or the reservation named has ended (ADR 0005).
-    ReservationConflictError: HTTPStatus.CONFLICT,
-    ReservationRequiredError: HTTPStatus.PRECONDITION_REQUIRED,
 }
 TIMEOUT_MESSAGE = "the engine did not answer within the gateway's time limit"
 # A client that is no longer there: nothing can be written to it.

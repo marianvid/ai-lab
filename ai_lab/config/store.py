@@ -34,7 +34,7 @@ from pathlib import Path
 from threading import RLock
 
 from .migrations import SCHEMA_VERSION, migrate
-from .policy import GatewayPolicy, MediaPolicy
+from .policy import GatewayPolicy
 from ..network import ALL_INTERFACES
 
 
@@ -138,11 +138,9 @@ class Config:
     # Explicit allow-list of caches and leftovers that may be removed from the
     # Storage page. Models are never listed here; Library owns them.
     storage: dict = field(default_factory=dict)
-    # Named, operator-owned image workflows and their durable job state.
-    # Public callers select a profile; they never submit a ComfyUI graph.
+    # Named, operator-owned image workflows. Public callers select a profile;
+    # they never submit a ComfyUI graph.
     images: dict = field(default_factory=dict)
-    # Durable music and speech jobs: queue, input, output and retention.
-    media: dict = field(default_factory=dict)
     # Settings for fetching models. Today the only one is `bundles`: models
     # assembled from named upstream files rather than downloaded as a whole
     # directory. See `downloads/bundles.py` for why they have to be declared.
@@ -160,9 +158,6 @@ class Config:
     # and each model's file, port and limits. Read and checked by
     # `cpu_models/settings.py`.
     cpu_models: dict = field(default_factory=dict)
-    # Card reservations (ADR 0005): heartbeat, durations, aging, whether they
-    # are required. Read and checked by `reservations/settings.py`.
-    reservations: dict = field(default_factory=dict)
     # The card's long-term health monitor: intervals and alarm thresholds.
     # Read and checked by `gpu_health/settings.py`.
     gpu_health: dict = field(default_factory=dict)
@@ -185,11 +180,6 @@ class Config:
     def gateway_policy(self) -> GatewayPolicy:
         """The front door's limits, checked."""
         return GatewayPolicy.from_mapping(self.gateway)
-
-    @property
-    def media_policy(self) -> MediaPolicy:
-        """The music and speech job settings, checked."""
-        return MediaPolicy.from_mapping(self.media)
 
     def repository(self, repository_id: str) -> Repository:
         """One repository by id; KeyError when there is none."""
@@ -269,12 +259,10 @@ class ConfigStore:
             memory=raw.get("memory", {}),
             storage=raw.get("storage", {}),
             images=raw.get("images", {}),
-            media=raw.get("media", {}),
             downloads=raw.get("downloads", {}),
             model_notes=raw.get("model_notes", {}),
             providers=raw.get("providers", {}),
             cpu_models=raw.get("cpu_models", {}),
-            reservations=raw.get("reservations", {}),
             gpu_health=raw.get("gpu_health", {}),
             model_roots=roots,
             download_root=raw.get("download_root", "core"),

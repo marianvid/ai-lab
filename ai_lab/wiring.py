@@ -31,16 +31,14 @@ from .gpu_health.settings import GpuHealthSettings
 from .hosts import current_host
 from .hosts.base import Host
 from .lanes import SideLanes
-from .media.image_jobs import ImageJobs
+from .media.images import ImageCalls
 from .builds.installs import Installs
 from .runtime.lastloaded import LastLoaded
-from .media.jobs import MediaJobs
 from .operations import Operations
 from .application.instances import InstanceService
 from .operations_services import OperationsParts, build_services
 from .providers import ProviderPool
 from .providers.settings import ProvidersConfig
-from .reservations.settings import ReservationPolicy
 from .runtime.core import Runtime
 from .settings import Settings
 from .storage import Storage
@@ -59,7 +57,6 @@ def _cpu_model_ports(parsed: object) -> list[tuple[str, int]]:
 CONFIG_SECTIONS: dict[str, Section] = {
     "providers": Section(ProvidersConfig.from_mapping),
     "cpu_models": Section(CpuModelsConfig.from_mapping, ports=_cpu_model_ports),
-    "reservations": Section(ReservationPolicy.from_mapping),
     "gpu_health": Section(GpuHealthSettings.from_mapping),
 }
 
@@ -73,8 +70,7 @@ class Manager(NamedTuple):
     store: ConfigStore
     gateway: Gateway
     lanes: SideLanes
-    image_jobs: ImageJobs
-    media_jobs: MediaJobs
+    images: ImageCalls
 
 
 def build(config_path: Path) -> Manager:
@@ -101,9 +97,8 @@ def build(config_path: Path) -> Manager:
     memory = GatewayResources(operations, limits.quiet_mb, limits.quiet_timeout_s,
                               limits.poll_s, neighbours=lanes.cpu)
     model_gateway = Gateway(operations, limits, memory=memory)
-    image_jobs = ImageJobs(model_gateway, store.load().images, host.state_dir(), bus)
-    media_jobs = MediaJobs(model_gateway, host.state_dir(), bus, settings=config.media_policy)
-    return Manager(operations, host, bus, store, model_gateway, lanes, image_jobs, media_jobs)
+    images = ImageCalls(model_gateway, config.images)
+    return Manager(operations, host, bus, store, model_gateway, lanes, images)
 
 
 def side_lanes(config: Config, host: Host, instances: InstanceService) -> SideLanes:

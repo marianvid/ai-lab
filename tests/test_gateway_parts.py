@@ -12,7 +12,6 @@ from ai_lab.gateway.stats import GatewayCounters
 from ai_lab.runtime.core import Operation
 from ai_lab.gateway.admission.parts import (
     AbandonedError,
-    AdmissionWithdrawnError,
     Waiting,
     release,
 )
@@ -175,12 +174,6 @@ class PartsTests(unittest.TestCase):
         release(entries)
         self.assertTrue(all(entry.admitted.is_set() for entry in entries))
 
-    def test_a_withdrawal_carries_its_reason_and_is_an_abandonment(self):
-        reason = ValueError("the card is reserved")
-        withdrawn = AdmissionWithdrawnError(reason)
-        self.assertIs(withdrawn.reason, reason)
-        self.assertIsInstance(withdrawn, AbandonedError)
-
 
 class PlanningTests(unittest.TestCase):
     def setUp(self):
@@ -199,19 +192,6 @@ class PlanningTests(unittest.TestCase):
         shape, victims, photograph, _ = switch
         self.assertEqual((shape, victims, len(photograph)), ("b", ("a",), 2))
         self.assertTrue(self.state.switching)
-
-    def test_a_request_withdrawn_at_the_head_fails_with_its_reason(self):
-        reason = ValueError("reserved")
-
-        def withdrawn():
-            raise AdmissionWithdrawnError(reason)
-        entry = waiting("b", withdrawn)
-        self.state.queue = [entry]
-        _, switch = self.planner.plan(self.state)
-        self.assertIsNone(switch)                       # nothing loaded for it
-        self.assertTrue(entry.admitted.is_set())
-        assert isinstance(entry.failure, AdmissionWithdrawnError)
-        self.assertIs(entry.failure.reason, reason)
 
     def test_a_question_that_cannot_be_answered_serves_the_request(self):
         def broken():

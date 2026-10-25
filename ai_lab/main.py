@@ -14,7 +14,6 @@ from .clients.access import Access
 from .gpu_health.service import GpuHealth
 from .runtime.journal import OperationJournal, PhaseFollower
 from .lanes import SideLanes
-from .reservations import ReservationBook, ReservationPolicy
 from .wiring import build
 
 
@@ -42,12 +41,6 @@ def main() -> None:
     port = arguments.port or config.port
     state_dir = manager.host.state_dir()
 
-    # Card reservations (ADR 0005): kept where the host keeps its state, so a
-    # restart restores who held the card; the reaper frees a silent holder.
-    book = ReservationBook(ReservationPolicy.from_mapping(config.reservations),
-                           state_dir / "reservations.json")
-    book.start_reaper()
-
     # The card's long-term health (docs/gpu-health.md): read-only, in its own
     # thread; where there is no NVIDIA driver it only says so.
     health = GpuHealth.start(config.gpu_health, state_dir, manager.gateway.control.activity)
@@ -62,7 +55,7 @@ def main() -> None:
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
-        parts = _parts(manager, book, health, access, journal)
+        parts = _parts(manager, health, access, journal)
         serve(build_router(operations, parts), manager.bus, (host, port), access)
     finally:
         health.stop()
@@ -93,12 +86,10 @@ def _access(state_dir: Path, gateway, journal: OperationJournal) -> Access:
     return access
 
 
-def _parts(manager, book, health, access, journal) -> RouteParts:
+def _parts(manager, health, access, journal) -> RouteParts:
     """What the routes are bound to besides the operations."""
-    return RouteParts(gateway=manager.gateway, lanes=manager.lanes, book=book,
-                      store=manager.store, image_jobs=manager.image_jobs,
-                      media_jobs=manager.media_jobs, gpu_health=health, access=access,
-                      journal=journal)
+    return RouteParts(gateway=manager.gateway, lanes=manager.lanes, images=manager.images,
+                      gpu_health=health, access=access, journal=journal)
 
 
 def _restore_last_model(operations) -> None:

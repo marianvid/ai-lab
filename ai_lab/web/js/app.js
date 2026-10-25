@@ -16,8 +16,6 @@ import { render as renderGateway,
          stopRefreshing as stopGatewayRefreshing } from './views/gateway.js';
 import { render as renderLanes,
          stopRefreshing as stopLanesRefreshing } from './views/lanes.js';
-import { render as renderReservations,
-         stopRefreshing as stopReservationsRefreshing } from './views/reservations.js';
 import { render as renderStorage } from './views/storage.js';
 import { render as renderGpuHealth,
          stopRefreshing as stopGpuHealthRefreshing } from './views/gpu_health.js';
@@ -48,9 +46,6 @@ const VIEWS = [
   // them. Refreshed on a timer for the same reason as the Gateway page.
   { id: 'lanes', label: 'Cloud & CPU', render: renderLanes,
     leave: stopLanesRefreshing, topics: [] },
-  // Who holds the card for a whole run, who waits, and the settings (ADR 0005).
-  { id: 'reservations', label: 'Reservations', render: renderReservations,
-    leave: stopReservationsRefreshing, topics: [] },
   // The card's long-term health: readings, alarms, references, trend. Its
   // readings arrive without events, so it refreshes on a timer of its own.
   { id: 'gpu-health', label: 'GPU health', render: renderGpuHealth,

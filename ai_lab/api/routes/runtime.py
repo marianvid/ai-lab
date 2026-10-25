@@ -13,13 +13,11 @@ first and sends `force` only if the person says so.
 
 from __future__ import annotations
 
-from ...reservations import CardReservedError
 
-
-def register(router, operations, gateway=None, book=None) -> None:
+def register(router, operations, gateway=None) -> None:
     """The model list's routes; Load, Unload and Apply are guarded."""
     def guard(action: str, instance_id: str, body: dict) -> dict:
-        return _guard(gateway, book, (action, instance_id), body)
+        return _guard(gateway, (action, instance_id), body)
 
     def done(result):
         return _done(gateway, result)
@@ -60,7 +58,7 @@ def _register_list(router, operations) -> None:
                lambda id, **_: operations.delete_instance(id) or {"ok": True})
 
 
-def _guard(gateway, book, target: tuple[str, str], body: dict) -> dict:
+def _guard(gateway, target: tuple[str, str], body: dict) -> dict:
     """Refuse to interrupt work in progress, and strip the override.
 
     `target` is the action and the entry it acts on. `force` is an instruction
@@ -74,7 +72,6 @@ def _guard(gateway, book, target: tuple[str, str], body: dict) -> dict:
     """
     action, instance_id = target
     rest = {key: value for key, value in body.items() if key != "force"}
-    _refuse_while_reserved(book, action, instance_id)
     if gateway is None:
         return rest
     if body.get("force"):
@@ -95,16 +92,3 @@ def _done(gateway, result):
         gateway.card_changed()
     return result
 
-
-def _refuse_while_reserved(book, action: str, instance_id: str) -> None:
-    """A reserved card is its holder's: the buttons wait until it is released or cancelled.
-
-    Not even `force` goes past it (ADR 0005): cancel the reservation on the
-    Reservations page first, so the holder is told why its card changed.
-    """
-    held = None if book is None else book.holder()
-    if held is not None:
-        who = held["team"] + (f" @ {held['instance']}" if held["instance"] else "")
-        raise CardReservedError(f"cannot {action} {instance_id}: the card is reserved by {who}; "
-                           "cancel the reservation on the Reservations page first",
-                           {"holder": held})

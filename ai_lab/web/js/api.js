@@ -76,12 +76,6 @@ export const api = {
     request('POST', `/api/cpu-models/${encodeURIComponent(name)}/start`),
   stopCpuModel: (name) =>
     request('POST', `/api/cpu-models/${encodeURIComponent(name)}/stop`),
-  // Card reservations (ADR 0005): who holds the card, who waits, the settings.
-  reservations: () => request('GET', '/api/reservations'),
-  cancelReservation: (id) =>
-    request('POST', `/api/reservations/${encodeURIComponent(id)}/cancel`),
-  updateReservationSettings: (changes) =>
-    request('PATCH', '/api/reservations/settings', changes),
   // The card's long-term health (docs/gpu-health.md).
   gpuHealth: () => request('GET', '/api/gpu-health'),
   gpuHealthHistory: (hours) => request('GET', `/api/gpu-health/history?hours=${hours}`),
@@ -148,16 +142,8 @@ export const api = {
     });
     return requestForm('POST', path, body);
   },
-  mediaJobs: () => request('GET', '/api/media-jobs'),
-  mediaJob: (id) => request('GET', `/api/media-jobs/${encodeURIComponent(id)}`),
-  createMediaJob: (model, task, input) => request('POST', '/api/media-jobs',
-    { model, task, input }),
-  cancelMediaJob: (id) => request('DELETE', `/api/media-jobs/${encodeURIComponent(id)}`),
-  imageJobs: () => request('GET', '/api/image-jobs'),
-  imageJob: (id) => request('GET', `/api/image-jobs/${encodeURIComponent(id)}`),
   generateImage: (payload) => request('POST', '/v1/images/generations', payload),
   editImage: (payload) => requestForm('POST', '/v1/images/edits', payload),
-  cancelImageJob: (id) => request('DELETE', `/api/image-jobs/${encodeURIComponent(id)}`),
   // Who may call (docs/access.md): the clients, On/Off, the log, login, Security.
   clients: () => request('GET', '/api/clients'),
   registerClient: (name) => request('POST', '/api/clients', { name }),

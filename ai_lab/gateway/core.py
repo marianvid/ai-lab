@@ -122,8 +122,7 @@ class Gateway:
 
         `still_wanted()` says whether the request is still to be served, asked
         at the head of the queue before anything is unloaded: a client that
-        gave up must not cost a swap. It may also withdraw the request with a
-        reason (`AdmissionWithdrawnError`).
+        gave up must not cost a swap.
         """
         started = time.perf_counter()
         instance, asked_for = self._what_is_asked(wanted, shape, settings)
@@ -197,8 +196,7 @@ class Gateway:
             self._counters.last_error = str(error)
             raise
         except Exception as error:
-            # A client that gave up, or a request withdrawn by its reservation,
-            # is not a fault of this machine, so it does not become the error
+            # A client that gave up is not a fault of this machine, so it does not become the error
             # the page shows.
             if not isinstance(error, AbandonedError):
                 self._counters.last_error = str(error)

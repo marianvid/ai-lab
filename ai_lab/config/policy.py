@@ -98,32 +98,3 @@ class GatewayPolicy:
         return {task: {"first_byte_s": value.first_byte_s,
                        "between_bytes_s": value.between_bytes_s}
                 for task, value in self.task_timeouts.items()}
-
-
-@dataclass(frozen=True, slots=True)
-class MediaPolicy:
-    """The `media` section: how long results are kept, and the queue and size limits."""
-
-    result_ttl_s: int = 86400
-    max_queue: int = 32
-    max_input_bytes: int = 40 * 1024 * 1024
-    max_result_bytes: int = 256 * 1024 * 1024
-
-    @classmethod
-    def from_mapping(cls, raw: Mapping | None) -> MediaPolicy:
-        """Read and check the section; unknown keys are refused."""
-        raw = {} if raw is None else raw
-        if not isinstance(raw, Mapping):
-            raise ValueError("Media settings must be an object")
-        unknown = set(raw) - set(cls.__dataclass_fields__)
-        if unknown:
-            raise ValueError("Unknown media settings: " + ", ".join(sorted(unknown)))
-        limits = {
-            "result_ttl_s": (86400, 60, 30 * 86400),
-            "max_queue": (32, 1, 1000),
-            "max_input_bytes": (40 * 1024 * 1024, 1024, 512 * 1024 * 1024),
-            "max_result_bytes": (256 * 1024 * 1024, 1024, 1024 * 1024 * 1024),
-        }
-        return cls(**{name: _integer(raw, name, default, bounds=(minimum, maximum),
-                                     section="Media")
-                      for name, (default, minimum, maximum) in limits.items()})

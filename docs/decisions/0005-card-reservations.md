@@ -1,6 +1,6 @@
 # 0005 — Card reservations: a team holds the card for a whole run
 
-Status: accepted, 2026-10-17 (by the owner). Designed with radio-lab/ingest (request `2026-10-17-card-reservations`).
+Status: **superseded 2026-10-25** by the approved simplification (request `2026-10-25-simplify-ai-lab`): reservations live only in each machine's scheduler; AI-Lab serves first come, first served and keeps no reservation book. Was: accepted, 2026-10-17 (by the owner). Designed with radio-lab/ingest (request `2026-10-17-card-reservations`).
 
 ## Context
 
