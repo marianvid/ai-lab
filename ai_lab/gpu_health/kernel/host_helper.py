@@ -82,11 +82,17 @@ def kernel_entry(raw: str) -> dict | None:
 
 
 def command(folder: Path) -> list[str]:
-    """journalctl following the kernel log from where it stopped last time."""
+    """journalctl following the kernel log from where it stopped last time.
+
+    The first time there is no cursor file yet, so it starts from now:
+    `--lines=0` (no old lines). Not `--since=now`: journalctl refuses
+    `--since` together with `--cursor-file` (systemd 257 on the Proxmox host,
+    "Please specify only one of --since=, --cursor=, --cursor-file=").
+    """
     cursor = folder / "journal.cursor"
     arguments = ["journalctl", "-k", "-f", "-o", "json", f"--cursor-file={cursor}"]
     if not cursor.exists():
-        arguments.append("--since=now")
+        arguments.append("--lines=0")
     return arguments
 
 

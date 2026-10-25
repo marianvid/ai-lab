@@ -50,9 +50,20 @@ class Files(unittest.TestCase):
 
     def test_resumes_from_its_cursor_or_starts_from_now(self):
         self.folder.mkdir()
-        self.assertIn("--since=now", helper.command(self.folder))
+        first = helper.command(self.folder)
+        self.assertIn("--lines=0", first)
         (self.folder / "journal.cursor").write_text("s=1")
-        self.assertNotIn("--since=now", helper.command(self.folder))
+        self.assertNotIn("--lines=0", helper.command(self.folder))
+
+    def test_never_since_together_with_the_cursor_file(self):
+        # journalctl (systemd 257) refuses --since next to --cursor-file and exits 1.
+        self.folder.mkdir()
+        for _ in range(2):
+            arguments = helper.command(self.folder)
+            self.assertTrue(any(item.startswith("--cursor-file=") for item in arguments))
+            self.assertFalse(any(item.startswith(("--since", "--cursor=", "--after-cursor"))
+                                 for item in arguments))
+            (self.folder / "journal.cursor").write_text("s=1")
 
     def test_a_heartbeat_at_once(self):
         output = helper.Output(self.folder)
