@@ -69,9 +69,13 @@ class SettingsChanges:
         """How much of this machine is held back for the machine itself."""
         return self.settings.reserve_mb(self.store.load())
 
+    def ceiling_mb(self) -> float:
+        """The most models may hold on unified memory (A12); 0: no ceiling."""
+        return self.settings.ceiling_mb(self.store.load())
+
     def memory_budget(self) -> dict:
         """What is available for models right now, pool by pool."""
-        return budget.of(self.host, self.reserve_mb()).json()
+        return budget.of(self.host, self.reserve_mb(), ceiling_mb=self.ceiling_mb()).json()
 
     def update_memory(self, changes: dict) -> dict:
         """Change how much of the machine is held back for the machine.
@@ -82,10 +86,9 @@ class SettingsChanges:
         to have would be worse than one that lets them hold back too much and
         see it on the page.
         """
-        _refuse_unknown(changes, {"reserve_mb"})
-        cleaned = {}
-        if "reserve_mb" in changes:
-            cleaned["reserve_mb"] = _reserve(changes["reserve_mb"])
+        _refuse_unknown(changes, {"reserve_mb", "ceiling_mb"})
+        cleaned = {key: _reserve(changes[key], key)
+                   for key in ("reserve_mb", "ceiling_mb") if key in changes}
         with self.store.mutate() as config:
             config.memory = {**config.memory, **cleaned}
         self._changed("settings")
@@ -193,14 +196,14 @@ def _in_range(key: str, value, low: float, high: float) -> float:
     return number
 
 
-def _reserve(value) -> float:
-    """The memory to hold back, in MB: a number from 0 to `MAX_RESERVE_MB`."""
+def _reserve(value, name: str = "reserve_mb") -> float:
+    """A memory figure in MB (the reserve, or the ceiling): from 0 to `MAX_RESERVE_MB`."""
     try:
         number = float(value)
     except (TypeError, ValueError):
-        raise ValueError("reserve_mb must be a number") from None
+        raise ValueError(f"{name} must be a number") from None
     if not 0 <= number <= MAX_RESERVE_MB:
-        raise ValueError(f"reserve_mb must be between 0 and {MAX_RESERVE_MB}")
+        raise ValueError(f"{name} must be between 0 and {MAX_RESERVE_MB}")
     return number
 
 

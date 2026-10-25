@@ -20,7 +20,7 @@ class ClientRoutesTest(unittest.TestCase):
     def setUp(self):
         self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
         router = Router()
-        client_routes.register(router, self.access, is_on=lambda: False)
+        client_routes.register(router, self.access)
         router.add("POST", "/v1/echo", lambda body, **_: body)
         handler = type("H", (Handler,), {"router": router, "bus": EventBus(),
                                          "access": self.access})
@@ -45,6 +45,7 @@ class ClientRoutesTest(unittest.TestCase):
 
     def test_health_is_open_and_says_on_or_off(self):
         self.access.update_security({"require_token": True})
+        self.access.power.switch(False)
         status, body, _ = self.call("GET", "/api/health")
         self.assertEqual((status, body), (200, {"ok": True, "on": False}))
 
@@ -67,7 +68,7 @@ class ClientRoutesTest(unittest.TestCase):
         self.assertEqual((status, echoed), (200, {"a": 1}))
         status, beat, _ = self.call("POST", "/api/clients/heartbeat", {"map": {"cards": []}}, auth)
         self.assertEqual(status, 200)
-        self.assertFalse(beat["on"])
+        self.assertTrue(beat["on"])
         _, listed, _ = self.call("GET", "/api/clients", headers=auth)
         self.assertEqual(listed["clients"][0]["map"], {"cards": []})
         status, _, _ = self.call("DELETE", "/api/clients/scheduler-linux", headers=auth)
@@ -87,6 +88,19 @@ class ClientRoutesTest(unittest.TestCase):
         self.assertEqual((status, view["login_required"]), (200, True))
         status, _, headers = self.call("POST", "/api/logout", headers=cookie)
         self.assertIn("Max-Age=0", headers["Set-Cookie"])
+
+    def test_off_refuses_model_calls_with_the_reason_and_on_serves_again(self):
+        status, power, _ = self.call("POST", "/api/power", {"on": False})
+        self.assertEqual((status, power["on"]), (200, False))
+        status, body, _ = self.call("POST", "/v1/echo", {"a": 1})
+        self.assertEqual(status, 503)
+        self.assertEqual(body["error"]["code"], "ai_lab_off")
+        self.assertIn("since", body["ai_lab"])
+        status, _, _ = self.call("GET", "/api/power")
+        self.assertEqual(status, 200)
+        self.call("POST", "/api/power", {"on": True})
+        status, _, _ = self.call("POST", "/v1/echo", {"a": 1})
+        self.assertEqual(status, 200)
 
     def test_the_page_opens_a_session_when_login_is_off(self):
         with urllib.request.urlopen(self.base + "/", timeout=5) as response:

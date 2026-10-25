@@ -63,7 +63,11 @@ export function machine(settings, refresh) {
     const drawn = pools.map((pool, index) => poolRow(pool, index === 0))
                        .filter(Boolean);
     if (drawn.length) {
-      rows.push(...drawn, reserveRow(memory, refresh));
+      rows.push(...drawn);
+      // The ceiling (A12) exists only where models share the machine's memory.
+      const unified = pools.find((pool) => pool.kind === 'unified');
+      if (unified) rows.push(ceilingRow(unified, refresh));
+      rows.push(reserveRow(memory, refresh));
     }
   }
 
@@ -105,22 +109,41 @@ function poolRow(pool, first) {
 }
 
 
-// The one thing on this card that is set rather than read, so it looks
-// different: a field and a Save, below the figures it comes out of.
+// The figures on this card that are set rather than read look different: a
+// field and a Save, below the figures they come out of.
 function reserveRow(memory, refresh) {
+  return memoryField({
+    key: 'reserve_mb', value: memory.reserve_mb, label: 'Reserved for the system',
+    title: 'Kept for the operating system and everything else you run, so '
+         + 'models are never offered it. Taken out of the figures above.',
+    failed: 'Could not change the reserve',
+  }, refresh);
+}
+
+// The most models may hold here, whatever is free (0: no ceiling). The smaller
+// of this and what is really free when a model loads is what it may take.
+function ceilingRow(pool, refresh) {
+  return memoryField({
+    key: 'ceiling_mb', value: pool.ceiling_mb, label: 'Ceiling for models',
+    title: 'The most the models together may hold. When a model loads, the '
+         + 'smaller of this and what is really free wins. 0 means no ceiling.',
+    failed: 'Could not change the ceiling',
+  }, refresh);
+}
+
+function memoryField({ key, value, label, title, failed }, refresh) {
   const field = element('input', {
     type: 'number', class: 'number small', min: '0', step: '1024',
-    value: String(number(memory.reserve_mb) ?? 0),
+    value: String(number(value) ?? 0),
   });
   const before = field.value;
   const save = element('button', {
     class: 'action', text: 'Save', disabled: 'disabled',
     onclick: () => whileWorking(save, 'Saving…', async () => {
       try {
-        await api.updateMemory({ reserve_mb: Number(field.value) });
+        await api.updateMemory({ [key]: Number(field.value) });
       } catch (error) {
-        await showNotice({ title: 'Could not change the reserve',
-                           body: error.message });
+        await showNotice({ title: failed, body: error.message });
       }
       refresh();
     }),
@@ -128,11 +151,7 @@ function reserveRow(memory, refresh) {
   field.addEventListener('input', () => { save.disabled = field.value === before; });
 
   return element('div', { class: 'row reserve' }, [
-    element('span', {
-      class: 'muted', text: 'Reserved for the system',
-      title: 'Kept for the operating system and everything else you run, so '
-           + 'models are never offered it. Taken out of the figures above.',
-    }),
+    element('span', { class: 'muted', text: label, title }),
     element('span', { class: 'inline' }, [field, save]),
   ]);
 }

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ai_lab.clients.errors import AccessDeniedError
 from ai_lab.clients.presence import Presence
 from ai_lab.clients.security import SecuritySettings
 from ai_lab.clients.sessions import COOKIE, SessionBook, cookie_header, session_of
@@ -103,7 +104,7 @@ class SecurityTest(unittest.TestCase):
     def test_changing_the_password_needs_the_current_one(self):
         security = SecuritySettings(self.path)
         security.set_password("first password")
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(AccessDeniedError):
             security.set_password("second password", "nope")
         security.set_password("second password", "first password")
         self.assertTrue(security.check("second password"))

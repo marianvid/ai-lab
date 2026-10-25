@@ -52,8 +52,8 @@ class Settings:
             # What is actually available for models, pool by pool. The page
             # reads this rather than doing the arithmetic itself, so the number
             # on screen is the same one an admission decision would use.
-            "memory": budget.of(self.host, self.reserve_mb(config),
-                                card=card).json(),
+            "memory": budget.of(self.host, self.reserve_mb(config), card=card,
+                                ceiling_mb=self.ceiling_mb(config)).json(),
             "models_root": config.models_root,
             "model_roots": [self._model_root(item) for item in config.model_roots],
             "download_root": config.download_root,
@@ -69,6 +69,15 @@ class Settings:
                                                     budget.DEFAULT_RESERVE_MB))
         except (TypeError, ValueError):
             return budget.DEFAULT_RESERVE_MB
+        return max(0.0, value)
+
+    @staticmethod
+    def ceiling_mb(config) -> float:
+        """The most models may hold on unified memory (A12); 0: no ceiling."""
+        try:
+            value = float((config.memory or {}).get("ceiling_mb", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
         return max(0.0, value)
 
     @staticmethod

@@ -107,6 +107,22 @@ class UnifiedMemory(unittest.TestCase):
         self.assertEqual(self.budget.available_mb,
                          self.budget.pools[0].available_mb)
 
+    def test_the_ceiling_wins_when_it_is_the_smaller(self):
+        # A12: what models may still take is the smaller of what is free now
+        # and what the ceiling leaves above what they already hold.
+        limited = budget.of(self.host, reserve_mb=16384, ceiling_mb=40000).pools[0]
+        self.assertEqual(limited.available_mb, 40000 - 21000)
+        self.assertEqual(limited.for_models_mb, 40000)
+        self.assertEqual(limited.json()["ceiling_mb"], 40000)
+
+    def test_what_is_free_wins_when_it_is_the_smaller(self):
+        generous = budget.of(self.host, reserve_mb=16384, ceiling_mb=120000).pools[0]
+        self.assertEqual(generous.available_mb, 131072 - 34600 - 16384)
+
+    def test_a_dedicated_card_has_no_ceiling(self):
+        linux = budget.of(FakeHost(card=card(), machine=(1000.0, 65536.0)), ceiling_mb=1000)
+        self.assertEqual(pool_of(linux, budget.CARD).ceiling_mb, 0.0)
+
 
 class WhenTheMachineWillNotAnswer(unittest.TestCase):
     def test_a_host_that_raises_reports_no_pools_rather_than_no_room(self):

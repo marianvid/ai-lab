@@ -5,26 +5,28 @@ One call per route into `clients.access.Access`; nothing is decided here.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from ..router import Reply
 
 
-def always_on() -> bool:
-    """The answer when there is no On/Off switch (a router built for a test)."""
-    return True
+def register(router, access, journal=None) -> None:
+    """The access routes, bound to `access` (`clients.access.Access`).
 
-
-def register(router, access, is_on: Callable[[], bool] = always_on) -> None:
-    """The access routes, bound to `access` and to the On/Off switch."""
-    router.add("GET", "/api/health", lambda **_: {"ok": True, "on": is_on()})
-    _clients(router, access, is_on)
+    `journal` is the operation log (`runtime.journal.OperationJournal`), read
+    by the page.
+    """
+    router.add("GET", "/api/health", lambda **_: {"ok": True, "on": access.power.on})
+    router.add("GET", "/api/power", lambda **_: access.power.view())
+    router.add("POST", "/api/power", lambda body, **_: access.switch(bool(body.get("on"))))
+    if journal is not None:
+        router.add("GET", "/api/journal",
+                   lambda query, **_: journal.since(int(query.get("after") or 0)))
+    _clients(router, access)
     _web(router, access)
 
 
-def _clients(router, access, is_on: Callable[[], bool]) -> None:
+def _clients(router, access) -> None:
     def heartbeat(headers, body, **_):
-        return {"received_at": access.heartbeat(headers, body), "on": is_on()}
+        return {"received_at": access.heartbeat(headers, body), "on": access.power.on}
 
     router.add("GET", "/api/clients", lambda **_: access.clients())
     router.add("POST", "/api/clients",

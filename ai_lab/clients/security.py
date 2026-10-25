@@ -14,6 +14,7 @@ import secrets
 import threading
 from pathlib import Path
 
+from .errors import AccessDeniedError
 from .registry import write_private
 
 SALT_BYTES = 16
@@ -68,7 +69,7 @@ class SecuritySettings:
     def set_password(self, new: str, current: str | None = None) -> None:
         """Set the password; changing an existing one needs the current one."""
         if self.password_set and not self.check(current or ""):
-            raise PermissionError("The current password is wrong")
+            raise AccessDeniedError("The current password is wrong")
         if len(new or "") < MIN_PASSWORD:
             raise ValueError(f"A password has at least {MIN_PASSWORD} characters")
         salt = secrets.token_bytes(SALT_BYTES)

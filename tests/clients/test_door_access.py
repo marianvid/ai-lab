@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ai_lab.clients.access import Access
 from ai_lab.clients.door import ANONYMOUS, WEB, bearer, route_key
-from ai_lab.clients.errors import TokenInvalidError, TokenMissingError
+from ai_lab.clients.errors import AccessDeniedError, TokenInvalidError, TokenMissingError
 from ai_lab.clients.sessions import COOKIE
 
 
@@ -72,14 +72,14 @@ class AccessTest(unittest.TestCase):
         self.access.heartbeat({"Authorization": f"Bearer {token}"}, {"map": {"cards": [1]}})
         row = self.access.clients()["clients"][0]
         self.assertEqual(row["map"], {"cards": [1]})
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(AccessDeniedError):
             self.access.heartbeat({}, {"map": {}})
 
     def test_login_logout_and_the_page_cookie(self):
         self.access.set_password("a long password", None)
         self.access.update_security({"login_required": True})
         self.assertIsNone(self.access.page_cookie({}))
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(AccessDeniedError):
             self.access.login("wrong")
         header = self.access.login("a long password")
         self.assertTrue(self.access.session(cookie(header))["logged_in"])

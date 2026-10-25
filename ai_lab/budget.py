@@ -66,6 +66,9 @@ class Pool:
     used_mb: float
     used_by_models_mb: float
     reserve_mb: float
+    # The most models may hold in this pool, set by hand (A12); 0 = no ceiling.
+    # Only unified memory has one: on a Mac the machine and the models share it.
+    ceiling_mb: float = 0.0
 
     @property
     def free_mb(self) -> float:
@@ -85,7 +88,8 @@ class Pool:
         one below, and two figures under one name is how a page ends up
         disagreeing with itself.
         """
-        return max(0.0, self.total_mb - self.reserve_mb)
+        usable = max(0.0, self.total_mb - self.reserve_mb)
+        return min(usable, self.ceiling_mb) if self.ceiling_mb else usable
 
     @property
     def available_mb(self) -> float:
@@ -99,7 +103,11 @@ class Pool:
         of what is happening. Confusing the two would either refuse a model
         that fits or accept one that does not.
         """
-        return max(0.0, self.free_mb - self.reserve_mb)
+        free = max(0.0, self.free_mb - self.reserve_mb)
+        if not self.ceiling_mb:
+            return free
+        # The smaller wins: what is really free now, or what the ceiling leaves.
+        return min(free, max(0.0, self.ceiling_mb - self.used_by_models_mb))
 
     def json(self) -> dict:
         """The pool for the page, every figure rounded to a megabyte."""
@@ -108,6 +116,7 @@ class Pool:
                 "used_mb": round(self.used_mb),
                 "used_by_models_mb": round(self.used_by_models_mb),
                 "reserve_mb": round(self.reserve_mb),
+                "ceiling_mb": round(self.ceiling_mb),
                 "free_mb": round(self.free_mb),
                 "for_models_mb": round(self.for_models_mb),
                 "available_mb": round(self.available_mb)}
@@ -161,14 +170,16 @@ class Budget:
                 "held_by_models_mb": round(self.held_by_models_mb)}
 
 
-def of(host, reserve_mb: float = DEFAULT_RESERVE_MB, card=None) -> Budget:
+def of(host, reserve_mb: float = DEFAULT_RESERVE_MB, card=None,
+       ceiling_mb: float = 0.0) -> Budget:
     """Read this machine and say what it can offer.
 
     `card` is an accelerator reading already taken. Pass it when the caller has
     one: on Linux each reading is an `nvidia-smi`, 30 ms, and the settings
     screen was asking for three of them to draw one page. Passing it in also
     means the figures on that page cannot disagree with each other, which two
-    readings a moment apart eventually would.
+    readings a moment apart eventually would. `ceiling_mb` is the most models
+    may hold on unified memory (0: no ceiling).
 
     Never raises and never returns nothing: a machine that cannot be read
     reports pools of zero, which reads as "no answer" rather than as "no room",
@@ -186,7 +197,7 @@ def of(host, reserve_mb: float = DEFAULT_RESERVE_MB, card=None) -> Budget:
             total_mb=machine_total or card.memory_total_mb,
             used_mb=machine_used,
             used_by_models_mb=card.memory_used_mb,
-            reserve_mb=reserve_mb),))
+            reserve_mb=reserve_mb, ceiling_mb=ceiling_mb),))
     return Budget(pools=_dedicated_pools(card, machine_used, machine_total, reserve_mb),
                   unified=False)
 

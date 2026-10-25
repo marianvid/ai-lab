@@ -21,6 +21,8 @@ import { render as renderReservations,
 import { render as renderStorage } from './views/storage.js';
 import { render as renderGpuHealth,
          stopRefreshing as stopGpuHealthRefreshing } from './views/gpu_health.js';
+import { render as renderAccess,
+         stopRefreshing as stopAccessRefreshing } from './views/access.js';
 
 // "Models" is the list you run; "Library" is what is on disk. They were both
 // called models before, which was the same confusion as calling a row a slot.
@@ -53,6 +55,10 @@ const VIEWS = [
   // readings arrive without events, so it refreshes on a timer of its own.
   { id: 'gpu-health', label: 'GPU health', render: renderGpuHealth,
     leave: stopGpuHealthRefreshing, topics: [] },
+  // Who may call: On/Off, the clients and their schedulers' maps, the
+  // operation log, and Security (docs/access.md). Refreshed on a timer.
+  { id: 'access', label: 'Access', render: renderAccess,
+    leave: stopAccessRefreshing, topics: [] },
   { id: 'storage', label: 'Storage', render: renderStorage,
     topics: ['storage', 'engines'] },
   { id: 'settings', label: 'Settings', render: renderSettings,
@@ -147,7 +153,37 @@ async function drawHostSummary() {
     + `${accelerator.name || 'unknown'} · ${memory} · ${settings.host.supervisor}`;
 }
 
-drawTabs();
-select(current);
-drawHostSummary().catch(() => {});
-startEventStream();
+// With login on and no session yet, the page is only the password field; the
+// rest waits until the server has let this browser in (docs/access.md).
+function drawLogin() {
+  const password = element('input', { type: 'password', placeholder: 'password', autofocus: 'autofocus' });
+  const failed = element('p', { class: 'error' });
+  const enter = async () => {
+    try {
+      await api.login(password.value);
+      window.location.reload();
+    } catch (error) {
+      failed.textContent = error.message;
+    }
+  };
+  password.addEventListener('keydown', (event) => { if (event.key === 'Enter') enter(); });
+  view.replaceChildren(element('div', { class: 'section login' }, [
+    element('h3', { text: 'AI-Lab' }),
+    element('div', { class: 'card' }, [password,
+      element('button', { class: 'action', text: 'Log in', onclick: enter }), failed]),
+  ]));
+}
+
+async function start() {
+  const session = await api.session().catch(() => ({ login_required: false }));
+  if (session.login_required && !session.logged_in) {
+    drawLogin();
+    return;
+  }
+  drawTabs();
+  select(current);
+  drawHostSummary().catch(() => {});
+  startEventStream();
+}
+
+start();

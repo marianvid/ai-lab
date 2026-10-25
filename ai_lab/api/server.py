@@ -20,8 +20,8 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
-from ..clients.errors import (AiLabOffError, ModelReplacedError, TokenInvalidError,
-                              TokenMissingError)
+from ..clients.errors import (AccessDeniedError, AiLabOffError, ModelReplacedError,
+                              TokenInvalidError, TokenMissingError)
 from ..events import EventBus
 from ..gateway.core import CardBusyError, ModelNotLoadedError
 from ..multipart import MultipartBody
@@ -44,7 +44,7 @@ STATUS = {
     AiLabOffError: HTTPStatus.SERVICE_UNAVAILABLE,
     ModelReplacedError: HTTPStatus.CONFLICT,
     # A wrong password, or a heartbeat without a client's token.
-    PermissionError: HTTPStatus.FORBIDDEN,
+    AccessDeniedError: HTTPStatus.FORBIDDEN,
     KeyError: HTTPStatus.NOT_FOUND,
     FileNotFoundError: HTTPStatus.NOT_FOUND,
     NotImplementedError: HTTPStatus.NOT_IMPLEMENTED,
@@ -177,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
             result = handler(query=query, body=self._body(), headers=self.headers,
-                             alive=self._client_alive, **captured)
+                             alive=self._wanted, **captured)
             if isinstance(result, Passthrough):
                 self._passthrough(result)
             elif isinstance(result, Reply):
@@ -197,6 +197,11 @@ class Handler(BaseHTTPRequestHandler):
             self._error(error)
         except CLIENT_GONE:
             self.close_connection = True
+
+    def _wanted(self) -> bool:
+        """Still to be served: the client is there, and AI-Lab was not switched Off."""
+        switched_off = self.access is not None and not self.access.power.on
+        return not switched_off and self._client_alive()
 
     def _client_alive(self) -> bool:
         """Whether the other end is still there, without reading anything.

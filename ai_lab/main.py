@@ -12,6 +12,7 @@ from .api.routes import RouteParts
 from .api.server import build_router, serve
 from .clients.access import Access
 from .gpu_health.service import GpuHealth
+from .runtime.journal import OperationJournal, PhaseFollower
 from .lanes import SideLanes
 from .reservations import ReservationBook, ReservationPolicy
 from .wiring import build
@@ -56,12 +57,12 @@ def main() -> None:
     operations.recover_moves()
     _restore_last_model(operations)
 
-    # Who may call (A1–A2): tokens and the web session, kept with the host's state.
-    access = Access.in_folder(state_dir, log=_log)
+    journal = _journal(state_dir, manager)
+    access = _access(state_dir, manager.gateway, journal)
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
-        parts = _parts(manager, book, health, access)
+        parts = _parts(manager, book, health, access, journal)
         serve(build_router(operations, parts), manager.bus, (host, port), access)
     finally:
         health.stop()
@@ -69,16 +70,35 @@ def main() -> None:
         manager.host.stop_all()
 
 
-def _parts(manager, book, health, access) -> RouteParts:
+def _journal(state_dir: Path, manager) -> OperationJournal:
+    """The operation log (A9): model steps from the bus, card switches from the gateway."""
+    journal = OperationJournal(state_dir / "logs")
+    PhaseFollower(journal).follow(manager.bus)
+    manager.gateway.note = journal.write
+    return journal
+
+
+def _access(state_dir: Path, gateway, journal: OperationJournal) -> Access:
+    """Who may call (A1, A2) and the On/Off switch (A6), kept with the host's state.
+
+    Switching Off turns away everyone waiting; the calls running end by
+    themselves, because the server stops serving them while AI-Lab is Off.
+    """
+    def log(line: str) -> None:
+        print(line, flush=True)
+        journal.write(line)
+
+    access = Access.in_folder(state_dir, log=log)
+    access.power.when_off(lambda: gateway.reset("AI-Lab was switched Off"))
+    return access
+
+
+def _parts(manager, book, health, access, journal) -> RouteParts:
     """What the routes are bound to besides the operations."""
     return RouteParts(gateway=manager.gateway, lanes=manager.lanes, book=book,
                       store=manager.store, image_jobs=manager.image_jobs,
-                      media_jobs=manager.media_jobs, gpu_health=health, access=access)
-
-
-def _log(line: str) -> None:
-    """One line in the manager's journal, written at once."""
-    print(line, flush=True)
+                      media_jobs=manager.media_jobs, gpu_health=health, access=access,
+                      journal=journal)
 
 
 def _restore_last_model(operations) -> None:

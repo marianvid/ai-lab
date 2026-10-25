@@ -9,7 +9,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from .door import Door
+from .door import Door, DoorKeys
+from .errors import AccessDeniedError
+from .power import Power
 from .presence import Presence
 from .registry import ClientRegistry
 from .security import SecuritySettings
@@ -17,27 +19,30 @@ from .sessions import SessionBook, cookie_header, session_of
 
 CLIENTS_FILE = "clients.json"
 SECURITY_FILE = "security.json"
+POWER_FILE = "power.json"
 ENDED = 0
 
 
 class Access:
-    """The clients, the door, the web sessions and Settings → Security."""
+    """The clients, the door, the web sessions, Settings → Security and On/Off."""
 
     def __init__(self, registry: ClientRegistry, security: SecuritySettings,
-                 presence: Presence | None = None, sessions: SessionBook | None = None,
-                 log: Callable[[str], None] = print) -> None:
+                 power: Power, log: Callable[[str], None] = print) -> None:
         self.registry = registry
         self.security = security
-        self.presence = presence or Presence()
-        self.sessions = sessions or SessionBook()
-        self.door = Door(registry, self.presence, security, self.sessions, log)
+        self.power = power
+        self.log = log
+        self.presence = Presence()
+        self.sessions = SessionBook()
+        self.door = Door(DoorKeys(registry, self.presence, security, self.sessions), log, power)
 
     @classmethod
     def in_folder(cls, state_dir: Path, log: Callable[[str], None] = print) -> Access:
-        """The access kept in `state_dir` (clients.json, security.json)."""
+        """The access kept in `state_dir` (clients.json, security.json, power.json)."""
         state_dir = Path(state_dir)
         return cls(ClientRegistry(state_dir / CLIENTS_FILE),
-                   SecuritySettings(state_dir / SECURITY_FILE), log=log)
+                   SecuritySettings(state_dir / SECURITY_FILE),
+                   Power(state_dir / POWER_FILE), log=log)
 
     # -- clients ------------------------------------------------------------
 
@@ -60,8 +65,16 @@ class Access:
         """Keep the calling scheduler's map; the time received is returned."""
         name = self.door.caller(headers)
         if name is None:
-            raise PermissionError("A heartbeat needs a registered client's token")
+            raise AccessDeniedError("A heartbeat needs a registered client's token")
         return self.presence.heartbeat(name, body.get("map"))
+
+    def switch(self, on: bool) -> dict:
+        """Switch AI-Lab On or Off (A6), and say so in the log."""
+        was = self.power.on
+        view = self.power.switch(on)
+        if was != view["on"]:
+            self.log(f"AI-Lab switched {'On' if view['on'] else 'Off'}")
+        return view
 
     # -- the web interface --------------------------------------------------
 
@@ -71,9 +84,9 @@ class Access:
                 "logged_in": self.sessions.valid(session_of(headers))}
 
     def login(self, password: str) -> str:
-        """A Set-Cookie value for a right password; PermissionError otherwise."""
+        """A Set-Cookie value for a right password; AccessDeniedError otherwise."""
         if not self.security.check(password):
-            raise PermissionError("Wrong password")
+            raise AccessDeniedError("Wrong password")
         return cookie_header(self.sessions.start())
 
     def logout(self, headers) -> str:

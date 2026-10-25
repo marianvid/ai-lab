@@ -35,7 +35,11 @@ class EvictionPlanner:
             return others
         if needed <= free_mb:
             return []
-        return _until_it_fits(others, needed, free_mb, needs_mb, capacity_mb)
+        # The replacement rule (the approved list, A5): one model is enough if
+        # its place alone frees the room — the one used longest ago first, idle
+        # before busy. Only when no single one is enough do several go.
+        alone = _one_is_enough(others, needed, free_mb, needs_mb)
+        return alone or _until_it_fits(others, needed, free_mb, needs_mb, capacity_mb)
 
 
 def _over(needed: float, limit: float, *, inclusive: bool = False) -> bool:
@@ -49,6 +53,13 @@ def _oldest_idle_first(loaded: list[dict]) -> list[dict]:
     """Idle models before busy ones, each group least recently used first."""
     return sorted(loaded, key=lambda item: (bool(item["in_flight"]),
                                             item["last_used"]))
+
+
+def _one_is_enough(others: list, needed: float, free_mb: float,
+                   needs_mb: Callable[[ShapeT], float]) -> list:
+    """The first model, in the order given, whose place alone makes room; else none."""
+    alone = next((shape for shape in others if needed <= free_mb + needs_mb(shape)), None)
+    return [] if alone is None else [alone]
 
 
 def _until_it_fits(others: list, needed: float, free_mb: float,

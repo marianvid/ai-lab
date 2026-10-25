@@ -31,6 +31,12 @@ class TokenInvalidError(RefusalError):
     code = "token_invalid"
 
 
+class AccessDeniedError(RefusalError):
+    """A wrong password, or a call that needs a registered client's token (403)."""
+
+    code = "access_denied"
+
+
 class AiLabOffError(RefusalError):
     """AI-Lab was switched Off: it serves nothing until it is switched On."""
 

@@ -43,12 +43,13 @@ class RouteParts:
     `store` (the configuration store); `image_jobs` and `media_jobs`
     are the two job queues; `gpu_health` is the card's health monitor (or
     the reason there is none); `access` is who may call (tokens, login,
-    Security). A router built for a test leaves out what it does not need, and
+    Security, On/Off); `journal` is the operation log. A router built for a test leaves out what it does not need, and
     those routes are simply not there.
     """
 
     gateway: Any = None
     access: Any = None
+    journal: Any = None
     lanes: Any = NO_LANES
     book: Any = None
     store: Any = None
@@ -74,4 +75,4 @@ def register_all(router, operations, parts: RouteParts | None = None) -> None:
     if parts.gpu_health is not None:
         gpu_health.register(router, parts.gpu_health)
     if parts.access is not None:
-        clients.register(router, parts.access)
+        clients.register(router, parts.access, parts.journal)

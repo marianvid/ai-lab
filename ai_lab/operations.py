@@ -98,7 +98,8 @@ class Operations:
 
     def machine_budget(self, card=None) -> budget.Budget:
         """What this machine can offer models now, pool by pool (`card`: a reading already taken)."""
-        return budget.of(self._host, self.reserve_mb(), card=card)
+        return budget.of(self._host, self.reserve_mb(), card=card,
+                         ceiling_mb=self._settings_changes.ceiling_mb())
 
     def load(self, instance_id: str, settings: dict | None = None):
         """Start this model, replacing whatever this entry was running."""

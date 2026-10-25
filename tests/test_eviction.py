@@ -21,6 +21,14 @@ class EvictionPlannerTests(unittest.TestCase):
     def test_idle_victims_are_selected_before_busy(self):
         self.assertEqual(self.choose(), ['idle-old', 'idle-new'])
 
+    def test_the_one_used_longest_ago_goes_alone_when_its_place_is_enough(self):
+        self.sizes['wanted'] = 4
+        self.assertEqual(self.choose(), ['idle-old'])
+
+    def test_one_model_whose_place_is_enough_goes_before_several(self):
+        self.sizes.update({'wanted': 5, 'idle-new': 4})
+        self.assertEqual(self.choose(), ['idle-new'])
+
     def test_model_that_fits_needs_no_eviction(self):
         self.assertEqual(self.choose(free=8), [])
 

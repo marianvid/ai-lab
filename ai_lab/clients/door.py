@@ -12,8 +12,10 @@ is logged, or refused. The web interface is let in by its session cookie.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
-from .errors import TokenInvalidError, TokenMissingError
+from .errors import AiLabOffError, TokenInvalidError, TokenMissingError
+from .power import Power, uses_a_model
 from .presence import Presence
 from .registry import ClientRegistry
 from .security import SecuritySettings
@@ -40,23 +42,40 @@ def route_key(path: str) -> str:
     return "/" + "/".join(path.strip("/").split("/")[:2])
 
 
+@dataclass(frozen=True)
+class DoorKeys:
+    """What the door checks a call against: tokens, sessions, and the switches."""
+
+    registry: ClientRegistry
+    presence: Presence
+    security: SecuritySettings
+    sessions: SessionBook
+
+
 class Door:
     """Says who is calling, or refuses the call."""
 
-    def __init__(self, registry: ClientRegistry, presence: Presence,
-                 security: SecuritySettings, sessions: SessionBook,
-                 log: Callable[[str], None] = print) -> None:
-        self.registry = registry
-        self.presence = presence
-        self.security = security
-        self.sessions = sessions
+    def __init__(self, keys: DoorKeys, log: Callable[[str], None] = print,
+                 power: Power | None = None) -> None:
+        self.registry = keys.registry
+        self.presence = keys.presence
+        self.security = keys.security
+        self.sessions = keys.sessions
         self.log = log
+        self.power = power
         self._logged: set[tuple[str, str]] = set()
 
     def admit(self, method: str, path: str, headers) -> str:
         """The caller's name, `web`, or `anonymous`; raises when refusing."""
         if (method.upper(), path) in OPEN:
             return ANONYMOUS
+        caller = self._who(path, headers)
+        if self.power is not None and not self.power.on and uses_a_model(method, path):
+            raise AiLabOffError("AI-Lab is switched Off: it serves no model until it is "
+                                "switched On", since=self.power.view()["since"])
+        return caller
+
+    def _who(self, path: str, headers) -> str:
         token = bearer(headers)
         if token is not None:
             name = self.registry.identify(token)

@@ -158,4 +158,18 @@ export const api = {
   generateImage: (payload) => request('POST', '/v1/images/generations', payload),
   editImage: (payload) => requestForm('POST', '/v1/images/edits', payload),
   cancelImageJob: (id) => request('DELETE', `/api/image-jobs/${encodeURIComponent(id)}`),
+  // Who may call (docs/access.md): the clients, On/Off, the log, login, Security.
+  clients: () => request('GET', '/api/clients'),
+  registerClient: (name) => request('POST', '/api/clients', { name }),
+  removeClient: (name) => request('DELETE', `/api/clients/${encodeURIComponent(name)}`),
+  power: () => request('GET', '/api/power'),
+  switchPower: (on) => request('POST', '/api/power', { on }),
+  journal: (after) => request('GET', `/api/journal?after=${after || 0}`),
+  session: () => request('GET', '/api/session'),
+  login: (password) => request('POST', '/api/login', { password }),
+  logout: () => request('POST', '/api/logout'),
+  security: () => request('GET', '/api/security'),
+  updateSecurity: (changes) => request('PATCH', '/api/security', changes),
+  setPassword: (newPassword, current) =>
+    request('POST', '/api/security/password', { new: newPassword, current }),
 };

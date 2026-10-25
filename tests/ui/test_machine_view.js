@@ -55,9 +55,10 @@ async function draw(memory, { chip = CHIP, host = { supervisor: 'systemd' },
   return context;
 }
 
-const field = (view) => view.querySelector('input[type="number"]');
+// The reserve is the last field: on unified memory the ceiling comes before it.
+const field = (view) => [...view.querySelectorAll('input[type="number"]')].pop();
 const saveButton = (view) => [...view.querySelectorAll('button')]
-  .find((b) => b.textContent.trim() === 'Save');
+  .filter((b) => b.textContent.trim() === 'Save').pop();
 // Label and value are separate elements, so they are read separately: joining
 // them gives "VRAM32623 MB", which no assertion should have to know about.
 const rows = (view) => [...view.querySelectorAll('.row')].map((r) => ({
@@ -157,8 +158,23 @@ describe('the machine', () => {
                      { label: 'Unified memory', value: '114688 / 131072 MB' });
     assert.equal(view.textContent.includes('VRAM'), false,
                  'one pool shown twice doubles the machine');
-    assert.equal(listed.length, 3,
-                 'expected the chip, one memory line and the reserve');
+    assert.equal(listed.length, 4,
+                 'expected the chip, one memory line, the ceiling and the reserve');
+  });
+
+  it('offers the ceiling for models on unified memory only', async () => {
+    const mac = await draw(MAC, { chip: APPLE, responses: { 'PATCH /api/memory': MAC } });
+    assert.match(mac.view.textContent, /Ceiling for models/);
+    const ceiling = mac.view.querySelectorAll('input[type="number"]')[0];
+    ceiling.value = '98304';
+    ceiling.dispatchEvent(new window.Event('input', { bubbles: true }));
+    [...mac.view.querySelectorAll('button')]
+      .find((b) => b.textContent.trim() === 'Save').click();
+    await settle();
+    const sent = mac.calls.find((call) => call.method === 'PATCH');
+    assert.deepEqual(JSON.parse(sent.body), { ceiling_mb: 98304 });
+    const linux = await draw(LINUX);
+    assert.equal(linux.view.textContent.includes('Ceiling for models'), false);
   });
 
   it('names the reserve for what it protects, not for what it withholds', async () => {
