@@ -12,8 +12,9 @@ from ai_lab import network
 ROOT = Path(network.__file__).resolve().parent
 # The code that starts an engine's API, or is that API.
 ENGINE_CODE = [*sorted((ROOT / "engines").rglob("*.py")),
-               ROOT / "engine_host" / "http_host.py",
-               ROOT / "speech" / "higgs_server.py"]
+               ROOT / "engine_host" / "http_host.py"]
+# Starts both an API (on loopback) and a page (on PAGE_INTERFACES, by name).
+API_AND_PAGE = ROOT / "speech" / "higgs_server.py"
 
 
 class EngineBindingTest(unittest.TestCase):
@@ -29,6 +30,13 @@ class EngineBindingTest(unittest.TestCase):
                 self.assertNotIn("ALL_INTERFACES", text)
                 self.assertNotIn("PAGE_INTERFACES", text)
                 self.assertNotIn("0.0.0.0", text)
+
+    def test_the_higgs_page_is_named_and_its_api_is_on_loopback(self):
+        text = API_AND_PAGE.read_text()
+        self.assertNotIn("ALL_INTERFACES", text)
+        self.assertNotIn("0.0.0.0", text)
+        self.assertIn('"--host", PAGE_INTERFACES', text)
+        self.assertIn("ThreadingHTTPServer((LOOPBACK", text)
 
 
 if __name__ == "__main__":

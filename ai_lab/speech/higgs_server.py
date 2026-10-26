@@ -22,7 +22,7 @@ from pathlib import Path
 from threading import Thread
 
 from ai_lab.engine_host.http_host import GenerationHost
-from ai_lab.network import LOOPBACK
+from ai_lab.network import LOOPBACK, PAGE_INTERFACES
 from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH
 from ai_lab.speech.higgs_backend import HiggsBackend
 
@@ -82,7 +82,8 @@ def _start_playground(worker_port: int, ui_port: int) -> subprocess.Popen:
         str(playground_root), env.get("PYTHONPATH", ""))))
     return subprocess.Popen([
         sys.executable, "-m", "playground.higgs.app", "--api-base",
-        f"http://{LOOPBACK}:{worker_port}", "--port", str(ui_port)], env=env)
+        f"http://{LOOPBACK}:{worker_port}", "--host", PAGE_INTERFACES,
+        "--port", str(ui_port)], env=env)
 
 
 def _wait_for_playground(playground: subprocess.Popen, ui_port: int) -> None:
