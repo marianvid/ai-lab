@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...network import ALL_INTERFACES
+from ...network import LOOPBACK
 from ...types import Format, ModelSet, Task
 from ..base import DIARIZATION_PATHS, TRANSCRIPTION_PATHS, LaunchPlan, ParamSpec, validate
 from ..isolated import IsolatedEngine, weights_mb
@@ -48,7 +48,7 @@ class NemoEngine(IsolatedEngine):
                                 else "nemo"),
                   "--model", model.entrypoint,
                   "--name", model.name,
-                  "--host", ALL_INTERFACES,
+                  "--host", LOOPBACK,
                   "--port", str(port),
                   "--precision", str(settings["precision"])],
             env={"PYTHONUNBUFFERED": "1"},

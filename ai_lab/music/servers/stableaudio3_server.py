@@ -12,7 +12,7 @@ from pathlib import Path
 from ai_lab.engine_host.http_host import serve
 from ai_lab.music.hosting import PORT, UI_PORT, parse
 from ai_lab.music.backends.stableaudio3_backend import StableAudio3Backend
-from ai_lab.network import ALL_INTERFACES
+from ai_lab.network import PAGE_INTERFACES
 
 
 # Room for the base64 source recordings (two WAVs of up to 25 MiB).
@@ -34,7 +34,7 @@ def launch_native_ui(backend: StableAudio3Backend, port: int) -> None:
 
     page = create_diffusion_cond_ui(backend.model, gradio_title="Stable Audio 3")
     page.queue(default_concurrency_limit=1)
-    page.launch(server_name=ALL_INTERFACES, server_port=port, share=False,
+    page.launch(server_name=PAGE_INTERFACES, server_port=port, share=False,
                 inbrowser=False, prevent_thread_lock=True, show_error=True,
                 js=getattr(page, "_sao_js", None),
                 theme=getattr(page, "_sao_theme", None))

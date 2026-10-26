@@ -65,3 +65,17 @@ What AI-Lab is doing, one line per step: a model starting or stopping, a model p
 ## Images and music (A10)
 
 Ordinary calls: `POST /v1/images/generations`, `/v1/images/edits` (by named profile, `GET /api/image-profiles`), `POST /v1/audio/music/generations`. No job list, job id or polling. Each kind has its own first-byte limit in `gateway.task_timeouts`, counted from the moment the call reaches the engine.
+
+## Engine ports (E)
+
+Every engine's API (vLLM, llama-server, the image, speech, music, audio and
+embeddings servers) listens on `127.0.0.1` only (`network.LOOPBACK`). Another
+machine reaches a model only through AI-Lab's own port, with a token.
+AI-Lab, the benchmark and the health checks call the engines on the same
+machine, so they are not affected.
+
+The pages a person opens from an engine's button (Music, Speak, Create, Edit:
+ComfyUI, the studios, the editors) listen on `network.PAGE_INTERFACES`, today
+every network card. llama-server's chat page shares its API port, so its Chat
+button works only in a browser on the same machine.
+

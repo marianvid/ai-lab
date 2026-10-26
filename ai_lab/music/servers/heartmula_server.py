@@ -13,7 +13,7 @@ from ai_lab.engine_host.http_host import serve
 from ai_lab.music.bundles import Checkpoint, Sampling
 from ai_lab.music.backends.heartmula_backend import HeartMulaBackend
 from ai_lab.music.hosting import CHECKPOINT_OPTIONS, PORT, SAMPLING_OPTIONS, UI_PORT, parse
-from ai_lab.network import ALL_INTERFACES
+from ai_lab.network import PAGE_INTERFACES
 
 
 def main() -> None:
@@ -35,7 +35,7 @@ def launch_heartmuse(backend: HeartMulaBackend, args: argparse.Namespace) -> Non
         "CKPT_DIR": str(args.bundle_root),
         "OUTPUT_DIR": str(args.output_root / "heartmuse"),
         "MODEL_VARIANT": "base", "LAZY_LOAD": "true",
-        "HF_HUB_OFFLINE": "1", "SERVER_HOST": ALL_INTERFACES,
+        "HF_HUB_OFFLINE": "1", "SERVER_HOST": PAGE_INTERFACES,
         "SERVER_PORT": str(args.ui_port), "STYLE_TRANSFER": "true",
         "TRANSCRIPTION": "true",
     })
@@ -60,7 +60,7 @@ def launch_heartmuse(backend: HeartMulaBackend, args: argparse.Namespace) -> Non
     generator.unload_pipeline = lambda: None
     heartmuse: Any = importlib.import_module("app")
     heartmuse.app.queue(default_concurrency_limit=1).launch(
-        server_name=ALL_INTERFACES, server_port=args.ui_port,
+        server_name=PAGE_INTERFACES, server_port=args.ui_port,
         allowed_paths=[heart_config.OUTPUT_DIR], js=heartmuse.PLAYLIST_JS,
         share=False, inbrowser=False, prevent_thread_lock=True,
         show_error=True)

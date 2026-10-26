@@ -19,7 +19,7 @@ import inspect
 from pathlib import Path
 
 from ..hosts.command import which
-from ..network import ALL_INTERFACES
+from ..network import LOOPBACK
 from ..types import Format, ModelSet, Task
 from .base import LaunchPlan, ParamSpec, validate
 from .probe import http_ok
@@ -117,7 +117,7 @@ class IsolatedEngine:
         return LaunchPlan(
             argv=[self.binary, self.server, "--backend", self.backend,
                   "--model", model.entrypoint, "--name", model.name,
-                  "--host", ALL_INTERFACES, "--port", str(port)],
+                  "--host", LOOPBACK, "--port", str(port)],
             env={"PYTHONUNBUFFERED": "1"})
 
     def ready(self, port: int) -> bool:

@@ -1,7 +1,7 @@
 """Qwen forced alignment with local weights and the shared audio gateway."""
 from __future__ import annotations
 
-from ...network import ALL_INTERFACES
+from ...network import LOOPBACK
 from ...types import ModelSet, Task
 from ..base import ALIGNMENT_PATHS, LaunchPlan
 from ..isolated import IsolatedEngine, model_directory, script_env, with_headroom_mb
@@ -25,7 +25,7 @@ class QwenAlignEngine(IsolatedEngine):
         return LaunchPlan(argv=[
             self.binary, self.server, "--backend", "qwen-align",
             "--model", model_directory(model), "--name", model.name,
-            "--host", ALL_INTERFACES, "--port", str(port)],
+            "--host", LOOPBACK, "--port", str(port)],
             env=script_env())
 
     def needs_mb(self, model: ModelSet, params: dict, card_total_mb: float) -> float:

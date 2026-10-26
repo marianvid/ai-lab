@@ -17,7 +17,7 @@ from ai_lab.speech.higgs_local_backend import HiggsLocalBackend
 from ai_lab.speech.kokoro_backend import KokoroBackend
 from ai_lab.speech.qwen import MODES, QwenTtsBackend
 from ai_lab.speech.voxcpm_backend import VoxCpmBackend
-from ai_lab.network import ALL_INTERFACES
+from ai_lab.network import PAGE_INTERFACES
 
 
 def main() -> None:
@@ -88,7 +88,7 @@ def launch_native_qwen_ui(backend: QwenTtsBackend, model_path: Path,
 
     demo = build_demo(backend.model, str(model_path), {})
     demo.queue(default_concurrency_limit=1)
-    demo.launch(server_name=ALL_INTERFACES, server_port=port, share=False,
+    demo.launch(server_name=PAGE_INTERFACES, server_port=port, share=False,
                 inbrowser=False, prevent_thread_lock=True, show_error=True)
 
 
@@ -101,7 +101,7 @@ def launch_native_voxcpm_ui(backend: VoxCpmBackend, model_path: Path,
     demo.voxcpm_model = backend.model
     interface = upstream.create_demo_interface(demo)
     interface.queue(max_size=10, default_concurrency_limit=1).launch(
-        server_name=ALL_INTERFACES, server_port=port, show_error=True,
+        server_name=PAGE_INTERFACES, server_port=port, show_error=True,
         i18n=upstream.I18N, theme=upstream._APP_THEME,
         css=upstream._CUSTOM_CSS, share=False, inbrowser=False,
         prevent_thread_lock=True)
@@ -114,7 +114,7 @@ def launch_native_kokoro_ui(backend: KokoroBackend, model_path: Path,
 
     interface = create_demo(backend, model_path)
     interface.queue(max_size=10, default_concurrency_limit=1).launch(
-        server_name=ALL_INTERFACES, server_port=port, show_error=True,
+        server_name=PAGE_INTERFACES, server_port=port, show_error=True,
         share=False, inbrowser=False, prevent_thread_lock=True)
 
 

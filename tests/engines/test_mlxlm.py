@@ -43,7 +43,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(argv[:2], [PYTHON, "/app/mlxlm_server.py"])
         self.assertEqual(self.flag("--model"), "/models/mlx/qwen-4bit")
         self.assertEqual(self.flag("--port"), "8130")
-        self.assertEqual(self.flag("--host"), "0.0.0.0")
+        self.assertEqual(self.flag("--host"), "127.0.0.1")
 
     def test_defaults_are_applied(self):
         self.assertEqual(self.flag("--decode-concurrency"), "8")

@@ -42,7 +42,7 @@ from threading import Thread
 from ai_lab.multipart import MultipartBody
 
 from .higgs_local_backend import HiggsLocalBackend, sampling_settings
-from ..network import ALL_INTERFACES
+from ..network import PAGE_INTERFACES
 
 FRONTEND = (Path(__file__).resolve().parents[1] / "vendor" / "sglang_omni"
             / "playground" / "higgs" / "frontend")
@@ -55,7 +55,7 @@ STATIC_FILES = ("app.js", "styles.css", "favicon.ico", "sgl-omni-logo.png")
 def serve(backend: HiggsLocalBackend, port: int) -> ThreadingHTTPServer:
     """Start the playground on `port` in a background thread and return it."""
     handler = type("PlaygroundHandler", (Handler,), {"backend": backend})
-    server = ThreadingHTTPServer((ALL_INTERFACES, port), handler)
+    server = ThreadingHTTPServer((PAGE_INTERFACES, port), handler)
     Thread(target=server.serve_forever, name="higgs-playground",
            daemon=True).start()
     return server

@@ -24,7 +24,7 @@ from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol, cast
 
-from ..network import ALL_INTERFACES
+from ..network import LOOPBACK
 
 MUSIC_PATH = "/v1/audio/music/generations"
 # The largest JSON request a generation host reads, unless told otherwise.
@@ -187,11 +187,11 @@ def form_text(fields: Form, name: str, default: str | None) -> str | None:
 
 def serve(backend: Generator, port: int, max_body_bytes: int = MAX_JSON_BYTES,
           request_path: str = MUSIC_PATH, noun: str = "music") -> None:
-    """Answer JSON requests for `backend` on every interface until stopped."""
+    """Answer JSON requests for `backend` on this machine only (loopback) until stopped."""
     handler = type("BoundGenerationHost", (GenerationHost,), {
         "backend": backend, "max_body_bytes": max_body_bytes,
         "request_path": request_path, "noun": noun})
-    ThreadingHTTPServer((ALL_INTERFACES, port), handler).serve_forever()
+    ThreadingHTTPServer((LOOPBACK, port), handler).serve_forever()
 
 
 def serve_uploads(host: type[UploadHost], backend: UploadBackend, model_name: str,

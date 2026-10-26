@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...network import ALL_INTERFACES
+from ...network import LOOPBACK
 from ...types import Format, ModelSet, Task
 from ..base import IMAGE_EDIT_PATHS, IMAGE_GENERATION_PATHS, LaunchPlan, ParamSpec, validate
 from ..isolated import IsolatedEngine, weights_mb
@@ -54,7 +54,7 @@ class ComfyUiEngine(IsolatedEngine):
             raise ValueError("ComfyUI path is not configured (engine_settings.comfyui.comfyui)")
         argv = [self.binary, self.server, "--comfyui", self.comfyui,
                 "--model-root", model.entrypoint, "--name", model.name,
-                "--host", ALL_INTERFACES, "--port", str(port)]
+                "--host", LOOPBACK, "--port", str(port)]
         mode = settings["vram_mode"]
         if mode in _MODE_FLAGS:
             argv.append(_MODE_FLAGS[mode])

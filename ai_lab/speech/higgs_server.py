@@ -22,7 +22,7 @@ from pathlib import Path
 from threading import Thread
 
 from ai_lab.engine_host.http_host import GenerationHost
-from ai_lab.network import ALL_INTERFACES, LOOPBACK
+from ai_lab.network import LOOPBACK
 from ai_lab.speech.contract import MAX_REQUEST_BYTES, PATH
 from ai_lab.speech.higgs_backend import HiggsBackend
 
@@ -52,7 +52,7 @@ def main() -> None:
         raise
     try:
         _wait_for_playground(playground, args.ui_port)
-        server = ThreadingHTTPServer((ALL_INTERFACES, args.port), _host_for(backend))
+        server = ThreadingHTTPServer((LOOPBACK, args.port), _host_for(backend))
     except Exception:
         _stop(playground)
         backend.close()

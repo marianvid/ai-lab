@@ -26,7 +26,7 @@ from ai_lab.music.hosting import (
     wait_until_ready,
 )
 from ai_lab.music.backends.yue2_web_backend import Yue2WebBackend
-from ai_lab.network import ALL_INTERFACES, LOOPBACK
+from ai_lab.network import LOOPBACK, PAGE_INTERFACES
 
 # How long the studio may take to come up, and to stop.
 STUDIO_START_S = 60
@@ -62,7 +62,7 @@ def launch_studio(args: argparse.Namespace, ui_url: str) -> None:
     config = studio_config(args)
     child = subprocess.Popen(
         [sys.executable, "-m", "server", "--config", str(config),
-         "--host", ALL_INTERFACES, "--port", str(args.ui_port)],
+         "--host", PAGE_INTERFACES, "--port", str(args.ui_port)],
         cwd=args.webui_root, env=studio_env(args.device))
     stop_on_exit(lambda: terminate(child, STUDIO_STOP_S))
     wait_until_ready(Readiness(ui_url + "/api/config", STUDIO_START_S, _answers_json),
@@ -82,7 +82,7 @@ def studio_config(args: argparse.Namespace) -> Path:
     config = data_dir / "config.yaml"
     python = sys.executable
     config.write_text(
-        f"host: {ALL_INTERFACES}\n"
+        f"host: {PAGE_INTERFACES}\n"
         f"port: {args.ui_port}\n"
         f"data_dir: {data_dir}\n"
         "residency: always\nrelease_idle_minutes: 0\noffline: true\n"

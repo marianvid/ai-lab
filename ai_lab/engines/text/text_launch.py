@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...hosts.command import which
-from ...network import ALL_INTERFACES
+from ...network import LOOPBACK
 from ...types import Format, ModelSet, Task
 from ..base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from ..isolated import AI_LAB_PACKAGE, MIB
@@ -108,7 +108,7 @@ class MlxTextEngine:
         """
         settings = self._checked(model, params)
         argv = [self.binary, self.server, "--model", model.entrypoint,
-                "--host", ALL_INTERFACES, "--port", str(port), *self._settings_argv(settings)]
+                "--host", LOOPBACK, "--port", str(port), *self._settings_argv(settings)]
         return LaunchPlan(argv=argv, env={"PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1"},
                           health_path="/health", web_ui=False)
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...hosts.command import which
-from ...network import ALL_INTERFACES
+from ...network import LOOPBACK
 from ...types import Format, ModelSet, Task
 from ..base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from ..isolated import MIB
@@ -210,7 +210,7 @@ class LlamaCppEngine:
             self.binary,
             "--model", model.entrypoint,
             "--alias", model.name,
-            "--host", ALL_INTERFACES,
+            "--host", LOOPBACK,
             "--port", str(port),
             "--jinja",
             "--ctx-size", str(settings["context_size"]),

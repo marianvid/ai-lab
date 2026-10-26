@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from ai_lab.engine_host.http_host import MUSIC_PATH, serve
 from ai_lab.music.hosting import PORT, UI_PORT, parse
 from ai_lab.music.request_fields import MAX_LYRICS_CHARS, MAX_PROMPT_CHARS, MAX_SEED
-from ai_lab.network import ALL_INTERFACES
+from ai_lab.network import PAGE_INTERFACES
 
 PATH = MUSIC_PATH
 # What one request may ask for, beside the limits every music engine shares.
@@ -167,7 +167,7 @@ def launch_native_ui(backend: AceStepBackend, config_name: str,
         "default_batch_size": 1,
     }, language="en")
     demo.queue(max_size=20, default_concurrency_limit=1)
-    demo.launch(server_name=ALL_INTERFACES, server_port=port,
+    demo.launch(server_name=PAGE_INTERFACES, server_port=port,
                 share=False, inbrowser=False, prevent_thread_lock=True,
                 show_error=True, allowed_paths=[str(backend.output_root)])
 

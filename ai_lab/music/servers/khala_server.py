@@ -24,7 +24,7 @@ from ai_lab.music.hosting import (
     wait_until_ready,
 )
 from ai_lab.music.backends.khala_backend import KhalaBackend
-from ai_lab.network import ALL_INTERFACES, LOOPBACK
+from ai_lab.network import LOOPBACK, PAGE_INTERFACES
 
 # Where Khala's own worker and dispatcher listen (their defaults).
 WORKER_PORT = 8001
@@ -73,7 +73,7 @@ def launch_official_ui(project_root: Path, model_path: Path, ui_port: int) -> No
            "--worker-base-port", str(WORKER_PORT)], project_root,
           Readiness(f"http://{LOOPBACK}:{API_PORT}/status", API_START_S,
                     _says("total_gpus", 1)))
-    start(["npm", "run", "dev", "--", "--host", ALL_INTERFACES, "--port", str(ui_port)],
+    start(["npm", "run", "dev", "--", "--host", PAGE_INTERFACES, "--port", str(ui_port)],
           frontend, Readiness(f"http://{LOOPBACK}:{ui_port}/", PAGE_START_S))
 
 

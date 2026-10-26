@@ -26,7 +26,7 @@ from typing import Any
 
 from ai_lab.comfyui_templates import for_model
 from ai_lab.engine_host.http_host import JsonReplies
-from ai_lab.network import ALL_INTERFACES, LOOPBACK
+from ai_lab.network import LOOPBACK, PAGE_INTERFACES
 
 # How long one job may run, how long ComfyUI may take to start, how often
 # the job's history is asked for.
@@ -87,7 +87,7 @@ class Backend:
         launch.state.mkdir(parents=True, exist_ok=True)
         extra = launch.state / "extra_model_paths.yaml"
         extra.write_text(_model_paths(launch.model_roots))
-        command = [launch.python, launch.comfyui, "--listen", ALL_INTERFACES,
+        command = [launch.python, launch.comfyui, "--listen", PAGE_INTERFACES,
                    "--port", str(launch.port), "--extra-model-paths-config", str(extra),
                    "--output-directory", str(launch.state / "output"),
                    "--temp-directory", str(launch.state / "temp"),
