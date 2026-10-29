@@ -19,30 +19,18 @@ class Clock:
 
 
 class PresenceTest(unittest.TestCase):
-    def test_a_quiet_client_without_heartbeat_is_never_down(self):
+    def test_last_call_and_last_heartbeat_per_client(self):
         clock = Clock()
-        presence = Presence(clock, down_after_s=180)
+        presence = Presence(clock)
         presence.seen("voice-studio")
-        clock.now += 10_000
-        row = presence.view(["voice-studio"])[0]
-        self.assertEqual(row["last_call_at"], 1000.0)
-        self.assertFalse(row["down"])
-        self.assertIsNone(row["map"])
-
-    def test_a_scheduler_silent_too_long_is_down(self):
-        clock = Clock()
-        presence = Presence(clock, down_after_s=180)
-        self.assertEqual(presence.heartbeat("scheduler-linux", {"cards": []}), 1000.0)
-        clock.now += 179
-        self.assertFalse(presence.view(["scheduler-linux"])[0]["down"])
-        clock.now += 2
-        row = presence.view(["scheduler-linux"])[0]
-        self.assertTrue(row["down"])
-        self.assertEqual(row["map"], {"cards": []})
-
-    def test_a_heartbeat_needs_a_map(self):
-        with self.assertRaises(ValueError):
-            Presence().heartbeat("scheduler-linux", [])
+        clock.now = 1200.0
+        self.assertEqual(presence.heartbeat("scheduler-linux"), 1200.0)
+        rows = presence.view(["voice-studio", "scheduler-linux", "never"])
+        self.assertEqual(rows[0], {"name": "voice-studio", "last_call_at": 1000.0,
+                                   "heartbeat_at": None})
+        self.assertEqual(rows[1], {"name": "scheduler-linux", "last_call_at": 1200.0,
+                                   "heartbeat_at": 1200.0})
+        self.assertEqual(rows[2]["last_call_at"], None)
 
     def test_an_unknown_name_has_an_empty_row(self):
         row = Presence().view(["never"])[0]

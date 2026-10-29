@@ -1,4 +1,4 @@
-// The Access page: On/Off, the clients and their maps, the log, Security.
+// The Access page: On/Off, the clients, the log, Security.
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
@@ -7,11 +7,8 @@ import { button, installDom, settle } from './support/dom.js';
 
 const CLIENTS = { clients: [
   { name: 'scheduler-linux', registered_at: 1, last_call_at: 1760700000,
-    heartbeat_at: 1760700000, down: false,
-    map: { cards: [{ card: 'linux', reservations: [
-      { start: '21:15', end: '21:45', task: 'ingest collect' }] }] } },
-  { name: 'voice-studio', registered_at: 1, last_call_at: null, heartbeat_at: null,
-    down: false, map: null },
+    heartbeat_at: 1760700000 },
+  { name: 'voice-studio', registered_at: 1, last_call_at: null, heartbeat_at: null },
 ] };
 const BASE = {
   '/api/power': { on: true, since: null },
@@ -40,13 +37,12 @@ async function renderPage(responses = BASE) {
 }
 
 describe('the Access page', () => {
-  it('shows the clients, the announced reservations and the log', async () => {
+  it('shows the clients with their last call and heartbeat, and the log', async () => {
     const { view } = await renderPage();
     const text = view.textContent;
     assert.match(text, /scheduler-linux/);
-    assert.match(text, /heartbeat/);
-    assert.match(text, /calls only/);
-    assert.match(text, /ingest collect/);
+    assert.match(text, /Last heartbeat/);
+    assert.doesNotMatch(text, /Reservations announced/);
     assert.match(text, /qwen36: starting/);
     assert.match(text, /Set password/);
   });
@@ -59,10 +55,10 @@ describe('the Access page', () => {
     assert.deepEqual(JSON.parse(sent.body), { on: false });
   });
 
-  it('says when nothing is announced and when AI-Lab is Off', async () => {
+  it('says when AI-Lab is Off', async () => {
     const { view } = await renderPage({ ...BASE, '/api/power': { on: false, since: 1760700000 },
                                         '/api/clients': { clients: [] } });
-    assert.match(view.textContent, /No reservation announced/);
+    assert.doesNotMatch(view.textContent, /reservation/i);
     assert.match(view.textContent, /Off since/);
     assert.ok(button(view, 'Switch On'));
   });

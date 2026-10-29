@@ -1,5 +1,5 @@
-// The Access page (docs/access.md): On/Off, the registered clients and the
-// reservation maps their schedulers send, the operation log, and Security.
+// The Access page (docs/access.md): On/Off, the registered clients with their
+// last call and last heartbeat, the operation log, and Security.
 //
 // Nothing here arrives as an event, so the page refreshes itself on a timer,
 // like the Gateway page.
@@ -54,12 +54,10 @@ function powerSection(power, refresh) {
 }
 
 function clientRow(client, refresh) {
-  const state = client.down ? 'down' : (client.heartbeat_at ? 'heartbeat' : 'calls only');
   return element('tr', {}, [
     element('td', { text: client.name }),
     element('td', { text: when(client.last_call_at) }),
     element('td', { text: when(client.heartbeat_at) }),
-    element('td', { class: client.down ? 'error' : '', text: state }),
     element('td', {}, [element('button', {
       class: 'action small', text: 'Remove',
       onclick: () => act('Could not remove the client', () => api.removeClient(client.name), refresh),
@@ -81,28 +79,12 @@ function registerForm(refresh) {
 }
 
 function clientsSection(clients, refresh) {
-  const head = element('tr', {}, ['Client', 'Last call', 'Last heartbeat', 'State', '']
+  const head = element('tr', {}, ['Client', 'Last call', 'Last heartbeat', '']
     .map((text) => element('th', { text })));
   return section('Clients', [
     element('table', { class: 'table' }, [head, ...clients.map((c) => clientRow(c, refresh))]),
     registerForm(refresh),
   ]);
-}
-
-function mapRows(client) {
-  const cards = (client.map && client.map.cards) || [];
-  return cards.flatMap((card) => (card.reservations || []).map((item) =>
-    element('tr', {}, [client.name, card.card, item.start, item.end, item.task]
-      .map((text) => element('td', { text: String(text ?? '') })))));
-}
-
-function mapsSection(clients) {
-  const rows = clients.flatMap(mapRows);
-  const head = element('tr', {}, ['Scheduler', 'Card', 'Start', 'End', 'Task']
-    .map((text) => element('th', { text })));
-  return section('Reservations announced by the schedulers', rows.length
-    ? [element('table', { class: 'table' }, [head, ...rows])]
-    : [element('p', { class: 'muted', text: 'No reservation announced.' })]);
 }
 
 function journalSection(journal) {
@@ -142,7 +124,6 @@ export async function render(target) {
   target.replaceChildren(
     powerSection(power, refresh),
     clientsSection(clients.clients, refresh),
-    mapsSection(clients.clients),
     journalSection(journal),
     securitySection(security, refresh));
   stopRefreshing();

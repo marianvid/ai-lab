@@ -71,13 +71,15 @@ class AccessTest(unittest.TestCase):
     def setUp(self):
         self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
 
-    def test_the_heartbeat_keeps_the_callers_map(self):
+    def test_the_heartbeat_is_noted_and_a_map_is_not_kept(self):
         token = self.access.register("scheduler-mac")["token"]
-        self.access.heartbeat({"Authorization": f"Bearer {token}"}, {"map": {"cards": [1]}})
+        self.access.heartbeat({"Authorization": f"Bearer {token}"})
         row = self.access.clients()["clients"][0]
-        self.assertEqual(row["map"], {"cards": [1]})
+        self.assertIsNotNone(row["heartbeat_at"])
+        self.assertNotIn("map", row)
+        self.assertNotIn("down", row)
         with self.assertRaises(AccessDeniedError):
-            self.access.heartbeat({}, {"map": {}})
+            self.access.heartbeat({})
 
     def test_login_logout_and_the_page_cookie(self):
         self.access.set_password("a long password", None)

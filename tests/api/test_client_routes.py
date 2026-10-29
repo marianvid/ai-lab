@@ -69,11 +69,14 @@ class ClientRoutesTest(unittest.TestCase):
         auth = {"Authorization": f"Bearer {created['token']}"}
         status, echoed, _ = self.call("POST", "/v1/echo", {"a": 1}, auth)
         self.assertEqual((status, echoed), (200, {"a": 1}))
-        status, beat, _ = self.call("POST", "/api/clients/heartbeat", {"map": {"cards": []}}, auth)
+        status, beat, _ = self.call("POST", "/api/clients/heartbeat", {}, auth)
         self.assertEqual(status, 200)
         self.assertTrue(beat["on"])
+        status, _, _ = self.call("POST", "/api/clients/heartbeat", {"map": {"cards": []}}, auth)
+        self.assertEqual(status, 200, "an older scheduler's map is accepted and ignored")
         _, listed, _ = self.call("GET", "/api/clients", headers=auth)
-        self.assertEqual(listed["clients"][0]["map"], {"cards": []})
+        self.assertIsNotNone(listed["clients"][0]["heartbeat_at"])
+        self.assertNotIn("map", listed["clients"][0])
         status, _, _ = self.call("DELETE", "/api/clients/scheduler-linux", headers=auth)
         self.assertEqual(status, 200)
 

@@ -25,8 +25,8 @@ def register(router, access, journal=None) -> None:
 
 
 def _clients(router, access) -> None:
-    def heartbeat(headers, body, **_):
-        return {"received_at": access.heartbeat(headers, body), "on": access.power.on}
+    def heartbeat(headers, **_):
+        return {"received_at": access.heartbeat(headers), "on": access.power.on}
 
     router.add("GET", "/api/clients", lambda **_: access.clients())
     router.add("POST", "/api/clients",

@@ -27,11 +27,17 @@ OpenAI-shaped on `/v1/...`, a sentence elsewhere; the code is in both:
 
 ## The heartbeat (A8)
 
-`POST /api/clients/heartbeat` with the scheduler's token, once a minute:
+`POST /api/clients/heartbeat` with the client's token. A scheduler sends it
+only while one of its runs is active, every 10 s, so that it finds out early
+when AI-Lab is unusable. The body may be empty (`{}`); a `map` an older
+scheduler still sends is accepted and ignored.
 
-    {"map": {"made_at": "...", "cards": [{"card": "...", "reservations": [...], "running": [...], "queued": [...]}]}}
+Answer, fast: `{"received_at": <unix time>, "on": true|false}`.
 
-Answer: `{"received_at": <unix time>, "on": true|false}`. AI-Lab keeps the last map per client in memory only and shows it; it enforces nothing. A client that has sent a heartbeat shows as down after 3 minutes of silence; one that never sends any (voice-studio, the owner's tests) is never "down". `GET /api/clients` lists every client with `last_call_at`, `heartbeat_at`, `down` and `map`.
+AI-Lab keeps no reservation map and shows none: it knows only calls. It keeps,
+in memory only, each client's last call and last heartbeat. `GET /api/clients`
+lists every client with `last_call_at` and `heartbeat_at`. No client is marked
+"down": a scheduler is silent whenever it runs nothing.
 
 ## Login (A1)
 

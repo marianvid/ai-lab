@@ -47,7 +47,7 @@ class Access:
     # -- clients ------------------------------------------------------------
 
     def clients(self) -> dict:
-        """Every registered client, with when it was last heard from and its map."""
+        """Every registered client, with its last call and its last heartbeat."""
         rows = self.registry.names()
         seen = {row["name"]: row for row in self.presence.view([r["name"] for r in rows])}
         return {"clients": [{**row, **seen[row["name"]]} for row in rows]}
@@ -61,12 +61,16 @@ class Access:
         """Forget a client."""
         self.registry.remove(name)
 
-    def heartbeat(self, headers, body: dict) -> float:
-        """Keep the calling scheduler's map; the time received is returned."""
+    def heartbeat(self, headers) -> float:
+        """Note the calling client's heartbeat; the time received is returned.
+
+        The body is not read: an older scheduler that still sends a `map` is
+        answered the same, and the map is dropped.
+        """
         name = self.door.caller(headers)
         if name is None:
             raise AccessDeniedError("A heartbeat needs a registered client's token")
-        return self.presence.heartbeat(name, body.get("map"))
+        return self.presence.heartbeat(name)
 
     def switch(self, on: bool) -> dict:
         """Switch AI-Lab On or Off (A6), and say so in the log."""
