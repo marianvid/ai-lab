@@ -165,6 +165,21 @@ class ProviderPoolTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in pool.catalogue()], ["claude/sonnet"])
         self.assertEqual(pool.stats()["anthropic"]["models"], ["claude/sonnet"])
 
+    def test_the_catalogue_shows_the_limits_written_down(self):
+        raw = {"vendors": {"openai": {"dialect": "codex", "binary": "/opt/cli/codex",
+                                      "concurrency": 3}},
+               "models": {"codex/gpt-5.6-sol": {"vendor": "openai", "model": "gpt-5.6-sol",
+                                                "context_size": 258400},
+                          "codex/out": {"vendor": "openai", "model": "x",
+                                        "context_size": 1000, "max_output_tokens": 200},
+                          "codex/bare": {"vendor": "openai", "model": "y"}}}
+        pool = ProviderPool(ProvidersConfig.from_mapping(raw), UsageLog(Path(self._temporary.name)))
+        rows = {row["id"]: row["ai_lab"] for row in pool.catalogue()}
+        self.assertEqual(rows["codex/gpt-5.6-sol"]["params"],
+                         {"context_size": 258400, "max_sequences": 3})
+        self.assertEqual(rows["codex/out"]["params"]["max_output_tokens"], 200)
+        self.assertNotIn("params", rows["codex/bare"])
+
     def test_built_from_configuration(self):
         pool = ProviderPool.from_config(RAW, Path(self._temporary.name))
         self.assertTrue(pool.serves("claude/sonnet"))

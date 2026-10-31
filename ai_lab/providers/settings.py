@@ -14,13 +14,19 @@ Shape in `config.json`::
       },
       "models": {
         "claude/sonnet":       {"vendor": "anthropic", "model": "sonnet"},
-        "codex/gpt-5.6-terra": {"vendor": "openai", "model": "gpt-5.6-terra"},
+        "codex/gpt-5.6-terra": {"vendor": "openai", "model": "gpt-5.6-terra",
+                                "context_size": 258400},
         "opencode/kimi-k2":    {"vendor": "opencode", "model": "<provider>/<model>"}
       }
     }
 
 For opencode, `model` is a `provider/model` name from opencode's own
 configuration in its home; the gateway does not repeat that configuration.
+
+A model may also say its limits, which the model list then shows the way it
+shows a local model's (`ai_lab.params`): `context_size` (tokens of prompt and
+answer the vendor accepts) and `max_output_tokens` (the longest answer). Both
+are optional; the vendor's `concurrency` is shown as `max_sequences`.
 
 Every limit is optional; the defaults are the values measured in production
 (see `docs/decisions/0001-subscription-providers.md`).
@@ -103,11 +109,14 @@ class Vendor:
 
 @dataclass(frozen=True)
 class ProviderModel:
-    """A name the gateway answers to, and the model its CLI is asked for."""
+    """A name the gateway answers to, the model its CLI is asked for, and the
+    limits the owner wrote down for it (0 when not given)."""
 
     name: str
     vendor: str
     model: str
+    context_size: int = 0
+    max_output_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -136,7 +145,17 @@ def _model(name: str, raw: dict, vendors: dict[str, Vendor]) -> ProviderModel:
     model = raw.get("model")
     if not isinstance(model, str) or not model.strip():
         raise ValueError(f"providers.models.{name}.model must be a model name")
-    return ProviderModel(name=name, vendor=raw["vendor"], model=model.strip())
+    return ProviderModel(name=name, vendor=raw["vendor"], model=model.strip(),
+                         context_size=_tokens(name, "context_size", raw),
+                         max_output_tokens=_tokens(name, "max_output_tokens", raw))
+
+
+def _tokens(model: str, key: str, raw: dict) -> int:
+    """An optional limit in tokens: a whole number above 0, or 0 when absent."""
+    value = raw.get(key, 0)
+    if type(value) is not int or value < 0:
+        raise ValueError(f"providers.models.{model}.{key} must be a whole number of tokens")
+    return value
 
 
 def _absolute(vendor: str, key: str, value) -> str:

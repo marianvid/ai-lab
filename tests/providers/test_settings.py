@@ -58,6 +58,19 @@ class ProvidersConfigTests(unittest.TestCase):
             with self.subTest(words=words), self.assertRaisesRegex(ValueError, words):
                 ProvidersConfig.from_mapping(raw)
 
+    def test_a_models_limits_are_read_and_checked(self):
+        models = {"codex/terra": {"vendor": "openai", "model": "gpt-5.6-terra",
+                                  "context_size": 258400, "max_output_tokens": 128000}}
+        config = ProvidersConfig.from_mapping({"vendors": VENDORS, "models": models})
+        model = config.models["codex/terra"]
+        self.assertEqual((model.context_size, model.max_output_tokens), (258400, 128000))
+        self.assertEqual(ProvidersConfig.from_mapping(
+            {"vendors": VENDORS, "models": MODELS}).models["codex/terra"].context_size, 0)
+        for bad in (-1, "big", 1.5, True):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                ProvidersConfig.from_mapping({"vendors": VENDORS, "models": {
+                    "codex/terra": {"vendor": "openai", "model": "m", "context_size": bad}}})
+
     def test_a_bad_section_stops_the_manager_at_start(self):
         config = Config(providers={"vendors": {"x": {"dialect": "y", "binary": "/b"}}})
         with self.assertRaisesRegex(ValueError, "providers.vendors.x.dialect"):

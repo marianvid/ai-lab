@@ -65,8 +65,19 @@ class ProviderPool:
         """One row per name, in the shape `GET /v1/models` lists."""
         return [{"id": item.name, "object": "model", "owned_by": item.vendor,
                  "ai_lab": {"provider": item.vendor, "loaded": True, "ready": True,
-                            "shapes": [CHAT_PATH], "task": "text-generation"}}
+                            "shapes": [CHAT_PATH], "task": "text-generation",
+                            **self._limits(item)}}
                 for item in self.config.models.values()]
+
+    def _limits(self, item: ProviderModel) -> dict:
+        """The limits the owner gave, shaped like a local model's `params`."""
+        if not item.context_size:
+            return {}
+        params = {"context_size": item.context_size,
+                  "max_sequences": self.config.vendors[item.vendor].limits.concurrency}
+        if item.max_output_tokens:
+            params["max_output_tokens"] = item.max_output_tokens
+        return {"params": params}
 
     def complete(self, path: str, payload: dict) -> dict:
         """Answer one chat request through the vendor's CLI."""
