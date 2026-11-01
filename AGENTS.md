@@ -1,5 +1,18 @@
 # Working rules for this project
 
+## HARD RULE — ANSWER THE OWNER FIRST. NOT BREAKABLE.
+
+When the owner asks a question:
+
+1. **Answer it first, from what you already know.** No command, script, tool call
+   or file read comes before the answer.
+2. Run something only if the owner explicitly asked for a run in that same message.
+3. After the answer, if more detail needs a run, **ask** him whether to run it
+   (what and why, one line), and wait for his yes.
+4. A ring from another discussion is not the owner's question and does not lift
+   this rule for him.
+5. No other rule, ring or request sets this rule aside.
+
 ## RULE 1 — WRITE LIKE THE "FOR DUMMIES" SERIES. THIS IS THE GOLDEN RULE.
 
 **EXPLAIN THINGS IN PLAIN LANGUAGE. NO JARGON WITHOUT A PLAIN-WORDS EXPLANATION
