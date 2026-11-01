@@ -12,8 +12,13 @@ address, so a caller does not need to know which engine is behind a model name.
 | MuLaCover | New vocal version (a "cover") of an uploaded WAV | yes | no | none |
 | Khala | Song or instrumental, length chosen as a "bucket" | no | yes | Khala Studio |
 | ComfyUI Music | Runs a ComfyUI workflow, such as MiniMax Music 3 | yes | no | Native ComfyUI |
-| LeVo 2 | Song, or an instrumental when no lyrics are sent. **Research licence only: never for broadcast or any commercial use** | yes | no | none |
-| Stable Audio 3 | Instrumental music or sound from a text prompt, up to 380 s | yes | no | none |
+| LeVo 2 | Song, or an instrumental when no lyrics are sent. **Research licence only: never for broadcast or any commercial use** | yes | yes¹ | none |
+| Stable Audio 3 | Instrumental music or sound from a text prompt, up to 380 s | yes | yes | none |
+
+¹ On macOS, LeVo2.cpp is built with Metal. Metal has no `DIAG_MASK_INF`, so the
+build used there makes the same causal mask from `FILL` and `TRI` and passes it
+to `soft_max_ext`. The patch is in the machine's own copy of LeVo2.cpp, not in
+this repository.
 
 "Linux" and "macOS" say which host the engine is offered on
 (`hosts/linux.py` and `hosts/darwin.py`). An engine still needs its runtime

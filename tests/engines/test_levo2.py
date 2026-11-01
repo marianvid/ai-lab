@@ -38,3 +38,11 @@ class Levo2EngineTests(unittest.TestCase):
         self.assertTrue(self.engine.supports(model()))
         self.assertFalse(self.engine.supports(model("other")))
         self.assertEqual(self.engine.needs_mb(model(), {}, 32000), 20000)
+
+
+class HostTests(unittest.TestCase):
+    def test_both_hosts_offer_it(self):
+        # LeVo2.cpp is ggml: CUDA on Linux, Metal on the Mac.
+        from ai_lab.hosts import darwin, linux
+        self.assertIn("levo2", darwin.DARWIN_ENGINES)
+        self.assertIn("levo2", linux.LINUX_ENGINES)
