@@ -11,6 +11,7 @@ would pass Linux's limit on the length of one argument (128 KiB).
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import subprocess
@@ -150,6 +151,18 @@ class OpencodeCli:
         return stdout.strip()
 
 
+def user_names(environ: dict[str, str]) -> dict[str, str]:
+    """`USER` and `LOGNAME` when the manager was started without them.
+
+    Claude Code on macOS keeps its sign-in in the Keychain under the user's
+    name, read from `USER`. The AI-Lab Menu app starts the manager with only
+    `HOME` and `PATH`, so Claude Code answered "Not logged in" although the
+    owner was signed in. Measured on the Mac, 2026-11-01.
+    """
+    name = environ.get("USER") or environ.get("LOGNAME") or getpass.getuser()
+    return {key: name for key in ("USER", "LOGNAME") if not environ.get(key)}
+
+
 DIALECTS: dict[str, Dialect] = {"claude": ClaudeCli(), "codex": CodexCli(),
                                 "opencode": OpencodeCli()}
 
@@ -164,7 +177,7 @@ def run(dialect: Dialect, vendor: Vendor, model: str, prompt: str,
             completed = subprocess.run(
                 call.argv, input=call.prompt, capture_output=True, text=True,
                 timeout=vendor.limits.timeout_s, cwd=workdir, check=False,
-                env={**os.environ, **call.env})
+                env={**os.environ, **user_names(dict(os.environ)), **call.env})
         except subprocess.TimeoutExpired:
             return Outcome(returncode=-1, answer="", errors="timeout", timed_out=True)
         except OSError as error:

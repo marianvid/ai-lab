@@ -13,6 +13,7 @@ from ai_lab.providers.dialects import (
     CodexCli,
     OpencodeCli,
     run,
+    user_names,
 )
 from ai_lab.providers.settings import Vendor, VendorLimits
 
@@ -110,6 +111,22 @@ class DialectTests(unittest.TestCase):
         self.assertEqual(call.env, CLAUDE_NO_SELF_UPDATE)
         self.assertNotIn("--effort", call.argv)
         self.assertIn("HOME", os.environ)
+
+    def test_a_manager_started_without_a_user_name_still_passes_one(self):
+        # The AI-Lab Menu app gives the manager only HOME and PATH; Claude Code
+        # then finds no Keychain sign-in. The CLI must get USER and LOGNAME.
+        self.assertEqual(user_names({"USER": "owner", "LOGNAME": "owner"}), {})
+        self.assertEqual(user_names({"LOGNAME": "owner"}), {"USER": "owner"})
+        filled = user_names({})
+        self.assertEqual(set(filled), {"USER", "LOGNAME"})
+        self.assertTrue(filled["USER"])
+        script = self.script("who", "#!/bin/sh\ncat > /dev/null\necho \"user=$USER\"\n")
+        saved = {key: os.environ.pop(key, None) for key in ("USER", "LOGNAME")}
+        try:
+            outcome = run(ClaudeCli(), self.vendor(script), "opus", "x")
+        finally:
+            os.environ.update({key: value for key, value in saved.items() if value})
+        self.assertNotEqual(outcome.answer, "user=")
 
 
 if __name__ == "__main__":
