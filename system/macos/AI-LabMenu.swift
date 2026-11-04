@@ -58,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var healthInFlight = false
     /// Unexpected exits that were restarted, within the restart window.
     private var restarts: [Date] = []
+    /// True in the Error after the disk wait ran out: the disk is still checked, and AI-Lab starts when it appears.
+    private var watchingDisk = false
 
     private var diskWait: TimeInterval { settings.diskWaitSeconds ?? 300 }
 
@@ -210,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func startManager() {
         wanted = true
         restarts = []
+        watchingDisk = false
         beginStart()
     }
 
@@ -236,17 +239,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func diskTick() {
-        guard wanted, phase == .waiting else {
+        let afterError = phase == .error && watchingDisk
+        guard (wanted && phase == .waiting) || afterError else {
             stopWaiting()
             return
         }
         guard let missing = missingPrerequisite() else {
-            record("the files are there")
+            if afterError {
+                record("the files appeared after the error; starting")
+                watchingDisk = false
+                wanted = true
+                restarts = []
+            } else {
+                record("the files are there")
+            }
             beginStart()
             return
         }
+        if afterError { return }
         if Date().timeIntervalSince(waitingSince ?? Date()) >= diskWait {
-            fail("The disk with the code did not appear in \(Int(diskWait)) s. Missing: \(missing)")
+            fail("The disk with the code did not appear in \(Int(diskWait)) s. Missing: \(missing). "
+                 + "Still checking every \(Int(Self.diskCheckInterval)) s; AI-Lab starts when it appears.",
+                 keepWatchingDisk: true)
         } else {
             refreshStatus()
         }
@@ -256,6 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diskTimer?.invalidate()
         diskTimer = nil
         waitingSince = nil
+        watchingDisk = false
     }
 
     private func launch() {
@@ -337,8 +352,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func fail(_ why: String) {
-        stopWaiting()
+    /// Shows Error and tells the owner; with keepWatchingDisk the disk timer goes on checking.
+    private func fail(_ why: String, keepWatchingDisk: Bool = false) {
+        if keepWatchingDisk {
+            watchingDisk = true
+        } else {
+            stopWaiting()
+        }
         wanted = false
         phase = .error
         reason = why

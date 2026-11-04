@@ -20,6 +20,8 @@ after login. Before starting, the menu checks every 5 s that it can read
 `ai_lab/main.py` in the project directory and the configuration, and that the
 Python is executable. When they are not there within `diskWaitSeconds`
 (in the app's settings file, which the installer writes; 300 s when absent), the menu shows Error.
+It keeps checking every 5 s while in that Error, and starts AI-Lab when the files appear;
+Stop ends the checking.
 
 ## Restarts
 
