@@ -152,7 +152,7 @@ These calls have no body, so they name the YuE2 entry with `?model=`:
 |---|---|
 | `GET /v1/audio/music/generations/{generation_id}/audio?model=<entry>` | the whole song, FLAC |
 | `GET /v1/audio/music/generations/{generation_id}/window-audio?model=<entry>` | the regenerated clip (window plus context), WAV; a window candidate only |
-| `DELETE /v1/audio/music/generations/{generation_id}?model=<entry>` | removes the song, for a candidate not kept; nothing expires on its own. Through YuE2 Studio while YuE2 is loaded (it refuses a song a job is still writing: 409), from the folder when it is not. The source of a window call still waiting or running is refused: 409 |
+| `DELETE /v1/audio/music/generations/{generation_id}?model=<entry>` | removes the song, for a candidate not kept; nothing expires on its own. Through YuE2 Studio while YuE2 is loaded (its refusal of a song a job is still writing, which the Studio sends as a 404 with that reason, is answered 409), from the folder when it is not. The source of a window call still waiting or running is refused: 409 |
 
 The defaults and limits are the YuE2 instance's settings, shown with their
 explanations on its page (`window_*`): context 5.0 s, edge ramp 0.4 s,

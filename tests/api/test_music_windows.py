@@ -129,20 +129,35 @@ class Gateway:
 
 
 class StudioDeletes(BaseHTTPRequestHandler):
-    """YuE2 Studio's library delete: refuses `busy`, does not know `gone`."""
+    """YuE2 Studio's library delete as `routes.delete_song` answers it.
+
+    Both refusals are a 404 with FastAPI's `detail`: `busy` is a folder a job is
+    writing (`library.delete_directory`'s ValueError), `gone` an unknown song.
+    """
 
     deleted: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
 
     def do_DELETE(self):  # noqa: N802 - the name http.server calls
         name = self.path.rsplit("/", 1)[1]
-        status = {"busy": 400, "gone": 404}.get(name, 200)
-        if status == 200:
+        details = {"busy": "an active job is writing to this directory (job #7); cancel it first",
+                   "gone": f"no such item: {name}"}
+        if name == "boom":
+            self.send_response(500)
+            self.send_header("Content-Length", "13")
+            self.end_headers()
+            self.wfile.write(b"Server error.")
+            return
+        if name in details:
+            status, body = 404, {"detail": details[name]}
+        else:
             StudioDeletes.deleted.append(name)
-        body = json.dumps({"detail": "an active job is writing to this directory"}).encode()
+            status, body = 200, {"deleted": name}
+        data = json.dumps(body).encode()
         self.send_response(status)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(data)
 
     def log_message(self, *args):
         """Quiet."""
@@ -182,16 +197,18 @@ class GenerationFilesTests(unittest.TestCase):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
             self.gateway.studio_port = server.server_port
-            for name in ("busy", "gone"):
+            for name in ("busy", "gone", "boom"):
                 (self.folder / name).mkdir()
             self.assertEqual(self.route("DELETE", "/v1/audio/music/generations/song-a-w101", model="yue2"),
                              {"deleted": "song-a-w101"})
             self.assertEqual(StudioDeletes.deleted, ["song-a-w101"])
             self.assertTrue((self.folder / "song-a-w101").exists())     # the studio's job, not ours
-            with self.assertRaisesRegex(WindowCallActiveError, "active job"):
+            with self.assertRaisesRegex(WindowCallActiveError, "active job is writing"):
                 self.route("DELETE", "/v1/audio/music/generations/busy", model="yue2")
-            with self.assertRaises(FileNotFoundError):
+            with self.assertRaisesRegex(FileNotFoundError, "no generation gone"):
                 self.route("DELETE", "/v1/audio/music/generations/gone", model="yue2")
+            with self.assertRaisesRegex(RuntimeError, "HTTP 500"):
+                self.route("DELETE", "/v1/audio/music/generations/boom", model="yue2")
         finally:
             server.shutdown()
             server.server_close()

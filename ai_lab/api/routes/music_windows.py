@@ -37,6 +37,8 @@ WINDOW_PATH = MUSIC_WINDOW_PATHS[0]
 CANCEL_CALL_S = 30
 # A song's file is sent in pieces of this size.
 CHUNK_BYTES = 1 << 20
+# How YuE2 Studio's refusal to delete a song a job is still writing begins (`library.delete_directory`).
+STUDIO_IN_USE = "an active job is writing"
 # The files a generation serves, by route: name in its folder, and media type.
 FILES = {"audio": ("audio.flac", "audio/flac"), "window-audio": ("window.wav", "audio/wav")}
 
@@ -234,7 +236,12 @@ class GenerationFiles:
 
 
 def _studio_delete(studio_port: int, generation_id: str) -> None:
-    """YuE2 Studio's own delete of a library song; its refusal of a folder in use is a 409."""
+    """YuE2 Studio's own delete of a library song; its refusal of a folder in use is a 409.
+
+    The Studio answers both refusals with 404 and says which in `detail`
+    (`routes.delete_song`): an unknown song, or "an active job is writing to this
+    directory" (`library.delete_directory`), which is not "not found".
+    """
     request = urllib.request.Request(
         f"http://{LOOPBACK}:{studio_port}/api/library/songs/{quote(generation_id, safe='')}",
         method="DELETE")
@@ -242,12 +249,22 @@ def _studio_delete(studio_port: int, generation_id: str) -> None:
         with urllib.request.urlopen(request, timeout=CANCEL_CALL_S):
             return
     except urllib.error.HTTPError as error:
-        detail = error.read().decode(errors="replace")
+        detail = _detail(error)
+        if error.code == HTTPStatus.NOT_FOUND and detail.startswith(STUDIO_IN_USE):
+            raise WindowCallActiveError(f"YuE2 Studio refused to delete {generation_id}: {detail}") from error
         if error.code == HTTPStatus.NOT_FOUND:
             raise FileNotFoundError(f"no generation {generation_id}") from error
-        if error.code == HTTPStatus.BAD_REQUEST:
-            raise WindowCallActiveError(f"YuE2 Studio refused to delete {generation_id}: {detail}") from error
         raise RuntimeError(f"YuE2 Studio could not delete {generation_id}: HTTP {error.code}") from error
+
+
+def _detail(error: urllib.error.HTTPError) -> str:
+    """The Studio's `detail` sentence, or the body as it came."""
+    body = error.read().decode(errors="replace")
+    try:
+        detail = json.loads(body).get("detail", body)
+    except (ValueError, AttributeError):
+        return body
+    return str(detail)
 
 
 def _pieces(path: Path) -> Iterator[bytes]:
