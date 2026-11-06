@@ -44,6 +44,10 @@ POLL_S = 1.0
 CALL_S = 30
 # The studio's answer to a request it refuses as written.
 STUDIO_REFUSED = HTTPStatus.BAD_REQUEST
+# How long a cancel that arrived before its window call is remembered. The front door
+# sends the cancel only once the call has its place, so the call follows within
+# milliseconds; a minute is ample and keeps a stray id from blocking that id for long.
+EARLY_CANCEL_S = 60.0
 
 # -- the window call's shape ------------------------------------------------
 
@@ -269,6 +273,8 @@ class Yue2WebBackend:
         self.window = window
         self._studio = studio or ask_studio(self.ui_url)
         self._calls: dict[str, _WindowCall] = {}
+        # Cancels that arrived before their call: request_id -> when they arrived.
+        self._early_cancels: dict[str, float] = {}
         self._calls_lock = threading.Lock()
 
     def generate(self, body: dict) -> dict:
@@ -327,7 +333,10 @@ class Yue2WebBackend:
         with self._calls_lock:
             call = self._calls.get(request_id)
             if call is None:
-                raise KeyError(f"no window call {request_id} is running")
+                # The call is on its way from the front door: it starts already cancelled.
+                self._forget_old_cancels()
+                self._early_cancels[request_id] = time.monotonic()
+                return {"request_id": request_id, "state": "cancelled", "job": None}
             call.cancelled = True
             job_id = call.job_id
         if job_id is not None:
@@ -343,11 +352,20 @@ class Yue2WebBackend:
                 self._studio("DELETE", f"/api/library/songs/{name}", None)
 
     def _register(self, request_id: str) -> _WindowCall:
+        """The call, recorded; already cancelled when its cancel came first."""
         with self._calls_lock:
             if request_id in self._calls:
                 raise WindowActiveError(f"a window call {request_id} is already running")
             call = self._calls[request_id] = _WindowCall()
+            self._forget_old_cancels()
+            call.cancelled = self._early_cancels.pop(request_id, None) is not None
         return call
+
+    def _forget_old_cancels(self) -> None:
+        """Drop early cancels older than `EARLY_CANCEL_S` (the lock is held)."""
+        oldest = time.monotonic() - EARLY_CANCEL_S
+        for request_id in [key for key, at in self._early_cancels.items() if at < oldest]:
+            del self._early_cancels[request_id]
 
     def _window_job(self, request: dict, candidate_seed: int, call: _WindowCall) -> dict:
         params = {key: request[key] for key in STUDIO_WINDOW_FIELDS}

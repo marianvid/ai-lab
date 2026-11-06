@@ -26,7 +26,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from ...engines.base import MUSIC_WINDOW_PATHS
-from ...gateway.errors import WindowCallActiveError, WindowRequestError
+from ...engines.isolated import ui_port
+from ...gateway.errors import ModelNotLoadedError, WindowCallActiveError, WindowRequestError
 from ...music.backends.yue2_web_backend import REQUEST_ID, check_generation_id
 from ...network import LOOPBACK
 from ..passthrough import Passthrough
@@ -56,12 +57,18 @@ class WindowCalls:
         self._lock = threading.Lock()
         self._calls: dict[str, dict] = {}
 
-    def begin(self, request_id: str) -> None:
+    def begin(self, request_id: str, source: str | None = None) -> None:
         """A call starts waiting; a 409 when that id is already in use."""
         with self._lock:
             if request_id in self._calls:
                 raise WindowCallActiveError(f"a window call {request_id} is already waiting or running")
-            self._calls[request_id] = {"port": None, "cancelled": False}
+            self._calls[request_id] = {"port": None, "cancelled": False, "source": source}
+
+    def in_use(self, generation_id: str) -> str | None:
+        """The window call editing this generation, if one is waiting or running."""
+        with self._lock:
+            return next((request_id for request_id, call in self._calls.items()
+                         if call["source"] == generation_id), None)
 
     def running(self, request_id: str, port: int) -> None:
         """The call has its place and is on the engine at `port`."""
@@ -129,13 +136,19 @@ def window_call(gateway, path: str, ask: WindowAsk, windows: WindowCalls,
     the place back.
     """
     request_id = window_request_id(ask.payload)
-    windows.begin(request_id)
+    source = ask.payload.get("source")
+    windows.begin(request_id, source if isinstance(source, str) else None)
     try:
         def still_wanted() -> bool:
             return windows.wanted(request_id) and (ask.alive is None or ask.alive())
         lease = gateway.acquire(ask.model, shape=path, settings=ask.settings,
                                 still_wanted=still_wanted)
         windows.running(request_id, lease.port)
+        if not windows.wanted(request_id):
+            # Cancelled between getting the place and recording it: nothing is sent.
+            lease.release()
+            windows.end(request_id)
+            return _cancelled_before_start(request_id)
         try:
             answer = send(lease)
         except BaseException:
@@ -145,6 +158,13 @@ def window_call(gateway, path: str, ask: WindowAsk, windows: WindowCalls,
         windows.end(request_id)
         raise
     return ended_with(answer, lambda: windows.end(request_id))
+
+
+def _cancelled_before_start(request_id: str) -> Passthrough:
+    """The answer of a window call cancelled before it reached the engine."""
+    body = {"request_id": request_id, "candidates": [], "cancelled": True}
+    return Passthrough(status=HTTPStatus.OK, content_type="application/json",
+                       chunks=iter([json.dumps(body).encode()]), headers={})
 
 
 def ended_with(answer: Passthrough, done) -> Passthrough:
@@ -163,9 +183,10 @@ def ended_with(answer: Passthrough, done) -> Passthrough:
 class GenerationFiles:
     """A YuE2 entry's songs, read and removed in its engine's folder."""
 
-    def __init__(self, gateway, operations) -> None:
+    def __init__(self, gateway, operations, windows: WindowCalls | None = None) -> None:
         self.gateway = gateway
         self.operations = operations
+        self.windows = windows or WindowCalls()
 
     def folder(self, query: dict | None, generation_id: str) -> Path:
         """The generation's folder, for the entry named by `?model=`."""
@@ -192,9 +213,41 @@ class GenerationFiles:
                            headers={"Content-Disposition": f'attachment; filename="{generation_id}-{name}"'})
 
     def delete(self, query: dict | None, generation_id: str) -> dict:
-        """Remove the generation's folder (a candidate not kept)."""
-        shutil.rmtree(self.folder(query, generation_id))
+        """Remove the generation (a candidate not kept).
+
+        Through YuE2 Studio when the engine is up, so its own guard refuses a folder
+        a job is writing and its cached mp3 goes too; straight from the folder when it
+        is down, since then nothing can be writing. The source of a window call that
+        is waiting or running is refused (409) either way.
+        """
+        folder = self.folder(query, generation_id)
+        editing = self.windows.in_use(generation_id)
+        if editing is not None:
+            raise WindowCallActiveError(f"{generation_id} is the source of window call {editing}")
+        try:
+            port, _name = self.gateway.where_loaded((query or {})["model"], WINDOW_PATH)
+        except ModelNotLoadedError:
+            shutil.rmtree(folder)
+        else:
+            _studio_delete(int(ui_port(port)), generation_id)
         return {"deleted": generation_id}
+
+
+def _studio_delete(studio_port: int, generation_id: str) -> None:
+    """YuE2 Studio's own delete of a library song; its refusal of a folder in use is a 409."""
+    request = urllib.request.Request(
+        f"http://{LOOPBACK}:{studio_port}/api/library/songs/{quote(generation_id, safe='')}",
+        method="DELETE")
+    try:
+        with urllib.request.urlopen(request, timeout=CANCEL_CALL_S):
+            return
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        if error.code == HTTPStatus.NOT_FOUND:
+            raise FileNotFoundError(f"no generation {generation_id}") from error
+        if error.code == HTTPStatus.BAD_REQUEST:
+            raise WindowCallActiveError(f"YuE2 Studio refused to delete {generation_id}: {detail}") from error
+        raise RuntimeError(f"YuE2 Studio could not delete {generation_id}: HTTP {error.code}") from error
 
 
 def _pieces(path: Path) -> Iterator[bytes]:

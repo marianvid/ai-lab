@@ -19,7 +19,12 @@ from ai_lab.api.routes.music_windows import (
     window_call,
     window_request_id,
 )
-from ai_lab.gateway.errors import NotConfiguredError, WindowCallActiveError, WindowRequestError
+from ai_lab.gateway.errors import (
+    ModelNotLoadedError,
+    NotConfiguredError,
+    WindowCallActiveError,
+    WindowRequestError,
+)
 
 
 class EngineAnswering(BaseHTTPRequestHandler):
@@ -106,11 +111,41 @@ class Operations:
 
 
 class Gateway:
+    """Resolves entries; `studio_port` is where the YuE2 Studio answers, None when not loaded."""
+
+    def __init__(self, studio_port=None):
+        self.studio_port = studio_port
+
     def resolve(self, wanted, entries):
         for entry in entries:
             if entry["id"] == wanted:
                 return entry
         raise NotConfiguredError(f"no {wanted}")
+
+    def where_loaded(self, wanted, shape):
+        if self.studio_port is None:
+            raise ModelNotLoadedError(wanted, [])
+        return self.studio_port - 10000, "yue2-3b"
+
+
+class StudioDeletes(BaseHTTPRequestHandler):
+    """YuE2 Studio's library delete: refuses `busy`, does not know `gone`."""
+
+    deleted: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
+
+    def do_DELETE(self):  # noqa: N802 - the name http.server calls
+        name = self.path.rsplit("/", 1)[1]
+        status = {"busy": 400, "gone": 404}.get(name, 200)
+        if status == 200:
+            StudioDeletes.deleted.append(name)
+        body = json.dumps({"detail": "an active job is writing to this directory"}).encode()
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        """Quiet."""
 
 
 class GenerationFilesTests(unittest.TestCase):
@@ -122,7 +157,10 @@ class GenerationFilesTests(unittest.TestCase):
         (song / "audio.flac").write_bytes(b"F" * 10)
         (song / "window.wav").write_bytes(b"RIFF")
         self.router = Router()
-        register_files(self.router, GenerationFiles(Gateway(), Operations(self.folder)), WindowCalls())
+        self.windows = WindowCalls()
+        self.gateway = Gateway()
+        register_files(self.router, GenerationFiles(self.gateway, Operations(self.folder), self.windows),
+                       self.windows)
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -138,6 +176,31 @@ class GenerationFilesTests(unittest.TestCase):
         self.assertEqual((audio.content_type, b"".join(audio.chunks)), ("audio/flac", b"F" * 10))
         clip = self.route("GET", "/v1/audio/music/generations/song-a-w101/window-audio", model="yue2")
         self.assertEqual(b"".join(clip.chunks), b"RIFF")
+
+    def test_with_the_engine_up_the_studio_deletes(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), StudioDeletes)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            self.gateway.studio_port = server.server_port
+            for name in ("busy", "gone"):
+                (self.folder / name).mkdir()
+            self.assertEqual(self.route("DELETE", "/v1/audio/music/generations/song-a-w101", model="yue2"),
+                             {"deleted": "song-a-w101"})
+            self.assertEqual(StudioDeletes.deleted, ["song-a-w101"])
+            self.assertTrue((self.folder / "song-a-w101").exists())     # the studio's job, not ours
+            with self.assertRaisesRegex(WindowCallActiveError, "active job"):
+                self.route("DELETE", "/v1/audio/music/generations/busy", model="yue2")
+            with self.assertRaises(FileNotFoundError):
+                self.route("DELETE", "/v1/audio/music/generations/gone", model="yue2")
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_the_source_of_a_window_call_is_not_deleted(self):
+        self.windows.begin("run-1", "song-a-w101")
+        with self.assertRaisesRegex(WindowCallActiveError, "run-1"):
+            self.route("DELETE", "/v1/audio/music/generations/song-a-w101", model="yue2")
+        self.assertTrue((self.folder / "song-a-w101").exists())
 
     def test_a_delete_removes_the_folder(self):
         self.assertEqual(self.route("DELETE", "/v1/audio/music/generations/song-a-w101", model="yue2"),
@@ -179,17 +242,23 @@ class Lease:
 
 
 class CardGateway:
-    """The gateway as the forwarder uses it, with the card's answer chosen by the test."""
+    """The gateway as the forwarder uses it, with the card's answer chosen by the test.
 
-    def __init__(self, fail=None):
+    `meanwhile` runs just before the place is handed over, as a cancel landing there would.
+    """
+
+    def __init__(self, fail=None, meanwhile=None):
         self.fail = fail
+        self.meanwhile = meanwhile
         self.lease = Lease()
-        self.asked = []
+        self.asked: list[tuple] = []
 
     def acquire(self, wanted, shape=None, settings=None, still_wanted=None):
         self.asked.append((wanted, shape, still_wanted()))
         if self.fail is not None:
             raise self.fail
+        if self.meanwhile is not None:
+            self.meanwhile()
         return self.lease
 
 
@@ -231,6 +300,20 @@ class ForwardingTests(unittest.TestCase):
             self.handle(gateway, {"model": "yue2", "request_id": "run-3"}, send=broken)
         self.assertTrue(gateway.lease.released)
         self.assertEqual(self.windows.active(), [])
+
+    def test_a_cancel_at_the_hand_over_sends_nothing(self):
+        gateway = CardGateway(meanwhile=lambda: self.windows.cancel("run-4"))
+        answer = self.handle(gateway, {"model": "yue2", "request_id": "run-4"})
+        self.assertEqual(json.loads(b"".join(answer.chunks)),
+                         {"request_id": "run-4", "candidates": [], "cancelled": True})
+        self.assertEqual(self.sent, [])
+        self.assertTrue(gateway.lease.released)
+        self.assertEqual(self.windows.active(), [])
+
+    def test_the_source_is_recorded_for_the_delete_guard(self):
+        self.handle(CardGateway(), {"model": "yue2", "request_id": "run-5", "source": "song-a"})
+        self.assertEqual(self.windows.in_use("song-a"), "run-5")
+        self.assertIsNone(self.windows.in_use("other"))
 
     def test_no_request_id_is_a_422_before_the_queue(self):
         gateway = CardGateway()

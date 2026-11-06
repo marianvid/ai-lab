@@ -141,7 +141,9 @@ outside the window the song does not change. The work runs in YuE2 Studio's
   waiting for the card, it is dropped from the queue (`"was": "waiting"`);
   running, no further candidate starts and the one running is cancelled
   (`"was": "running"`); the candidates already done are in its answer. A
-  client that only closes its connection does not stop the work: call this.
+  cancel that lands as the call is handed to the engine still holds: the call
+  then answers `cancelled` with no candidates and sends nothing. A client that
+  only closes its connection does not stop the work: call this.
 
 The songs' files, read from the engine's folder (the model need not be loaded).
 These calls have no body, so they name the YuE2 entry with `?model=`:
@@ -150,7 +152,7 @@ These calls have no body, so they name the YuE2 entry with `?model=`:
 |---|---|
 | `GET /v1/audio/music/generations/{generation_id}/audio?model=<entry>` | the whole song, FLAC |
 | `GET /v1/audio/music/generations/{generation_id}/window-audio?model=<entry>` | the regenerated clip (window plus context), WAV; a window candidate only |
-| `DELETE /v1/audio/music/generations/{generation_id}?model=<entry>` | removes the song's folder, for a candidate not kept; nothing expires on its own |
+| `DELETE /v1/audio/music/generations/{generation_id}?model=<entry>` | removes the song, for a candidate not kept; nothing expires on its own. Through YuE2 Studio while YuE2 is loaded (it refuses a song a job is still writing: 409), from the folder when it is not. The source of a window call still waiting or running is refused: 409 |
 
 The defaults and limits are the YuE2 instance's settings, shown with their
 explanations on its page (`window_*`): context 5.0 s, edge ramp 0.4 s,

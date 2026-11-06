@@ -174,12 +174,27 @@ class WindowBackendTests(unittest.TestCase):
         made = backend(studio)
         replies: list[dict] = []
         studio.after_job = lambda: replies.append(made.cancel_window("run-1"))
-        with self.assertRaises(KeyError):
-            made.cancel_window("nobody")
         answer = made.generate_window(body())
         self.assertEqual((replies[0]["state"], replies[0]["job"]), ("cancelling", 1))
         self.assertEqual(studio.deleted, ["/api/jobs/1"])
         self.assertEqual((len(answer["candidates"]), answer["cancelled"]), (1, True))
+
+    def test_a_cancel_that_comes_first_stops_the_call_before_any_job(self):
+        studio = FakeStudio()
+        made = backend(studio)
+        self.assertEqual(made.cancel_window("run-1")["state"], "cancelled")
+        answer = made.generate_window(body())
+        self.assertEqual((answer["candidates"], answer["cancelled"], studio.posted), ([], True, []))
+        made.generate_window(body())                  # remembered once only
+        self.assertEqual(len(studio.posted), 2)
+
+    def test_an_early_cancel_is_forgotten_after_a_while(self):
+        studio = FakeStudio()
+        made = backend(studio)
+        made.cancel_window("run-1")
+        with patch.object(yue2_web_backend, "EARLY_CANCEL_S", -1.0):
+            answer = made.generate_window(body())
+        self.assertEqual(len(answer["candidates"]), 2)
 
     def test_a_second_call_with_the_same_id_is_refused_while_the_first_runs(self):
         studio = FakeStudio()

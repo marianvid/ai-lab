@@ -96,7 +96,7 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) 
     windows = WindowCalls()
     for path in FORWARDED:
         router.add("POST", path, _forwarder(gateway, path, lanes, windows))
-    register_files(router, GenerationFiles(gateway, operations), windows)
+    register_files(router, GenerationFiles(gateway, operations, windows), windows)
     if lanes.cpu is not None:
         cpu = lanes.cpu
         router.add("POST", "/api/cpu-models/{name}/start",
