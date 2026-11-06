@@ -78,7 +78,9 @@ A few engine-specific details:
 - **YuE2** can take an ABC score in `abc`. ABC is a plain-text way of writing
   down music notes. The answer returns the score it used in `score_abc`, and
   a `truncated` flag. YuE2 reports truncation per stage; `truncated` is true
-  only when some stage actually cut the song short.
+  only when some stage actually cut the song short. It also returns
+  `generation_id`: the name of the song's folder in YuE2 Studio, which a
+  window edit names as its `source` (below).
 - **Khala** measures length in buckets: numbered length steps instead of
   seconds. The allowed range comes from the model's configuration. The answer
   repeats the `length_bucket` used.
@@ -88,6 +90,73 @@ A few engine-specific details:
 `GET /api/instances` shows, under `music_form`, what each loaded music model
 needs — for example whether lyrics are required and which kind of duration it
 takes.
+
+## YuE2: regenerating one window of a song
+
+`POST /v1/audio/music/window-generations` takes a YuE2 song made earlier and
+regenerates only a window of it (for example a line whose words were sung
+wrongly), once per candidate seed. Each candidate is the whole song again, with
+only that window new, kept as a song of its own with its own `generation_id`.
+The one kept can be the `source` of the next edit. The recipe is the one
+radio-lab/music proved in its lab on 2026-11-05: the new tokens are written for
+the window only, and the audio around it is held to the original (RePaint), so
+outside the window the song does not change. The work runs in YuE2 Studio's
+`window` job, on the model already loaded (the Studio patch:
+`system/engines/ds-yue-webui-window.patch`).
+
+```
+{
+  "model": "<the YuE2 entry>",
+  "request_id": "<chosen by the caller, 1-64 of A-Z a-z 0-9 . _ ->",
+  "source": "<generation_id of the song to edit>",
+  "window": {"start_s": 41.0, "end_s": 56.4},
+  "lyrics": "<the whole lyrics, the same section tags, the window's lines edited>",
+  "candidates": [{"seed": 101}, {"seed": 202}],
+  "context_s": 5.0, "edge_s": 0.4, "crossfade_s": 0.3,
+  "sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 100,
+               "repetition_penalty": 1.2, "penalty_window": 50}
+}
+```
+
+- `context_s`, `edge_s`, `crossfade_s` and `sampling` (or any part of it) may be
+  left out: the instance's settings apply. The window's seconds are rounded to
+  YuE2's frames (1/25 s). Style and score stay the source's: a changed score
+  is a new full song, not a window.
+- It is an ordinary call, like the song call: it waits for the card and is
+  answered when every candidate is done, within the same first-byte limit
+  (`gateway.task_timeouts.music-generation`). About two minutes per candidate
+  for a 30 s window on the Mac (an estimate until it is measured).
+- The answer lists the candidates, without audio: `request_id`, `source`,
+  `window_s`, `clip_s` (the window plus its context), `noise_seed` (the first
+  song's seed, kept through every edit), `cancelled`, and per candidate `seed`,
+  `generation_id`, `tokens_changed_pct`, `short_window` (true when fewer new
+  tokens came than the window holds and the rest was taken from the original),
+  `seconds` and `timings`.
+- Refused with **422** and the reason: no usable `request_id`; an unknown
+  field; a window outside the song or outside the allowed length; a source that
+  is unknown or whose files are gone; lyrics whose section tags differ from the
+  source's; more candidates than allowed. A `request_id` already waiting or
+  running: **409**.
+- `DELETE /v1/audio/music/window-generations/{request_id}` stops a call. Still
+  waiting for the card, it is dropped from the queue (`"was": "waiting"`);
+  running, no further candidate starts and the one running is cancelled
+  (`"was": "running"`); the candidates already done are in its answer. A
+  client that only closes its connection does not stop the work: call this.
+
+The songs' files, read from the engine's folder (the model need not be loaded).
+These calls have no body, so they name the YuE2 entry with `?model=`:
+
+| Call | What |
+|---|---|
+| `GET /v1/audio/music/generations/{generation_id}/audio?model=<entry>` | the whole song, FLAC |
+| `GET /v1/audio/music/generations/{generation_id}/window-audio?model=<entry>` | the regenerated clip (window plus context), WAV; a window candidate only |
+| `DELETE /v1/audio/music/generations/{generation_id}?model=<entry>` | removes the song's folder, for a candidate not kept; nothing expires on its own |
+
+The defaults and limits are the YuE2 instance's settings, shown with their
+explanations on its page (`window_*`): context 5.0 s, edge ramp 0.4 s,
+crossfade 0.3 s, swap margin 2.5 s (how far outside the window the new audio
+replaces the old; within the context), at most 5 candidates, a window of
+1-60 s, and the window's sampling (1.0 / 0.95 / 100 / 1.2 / 50).
 
 ---
 

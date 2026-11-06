@@ -43,6 +43,29 @@ class Yue2EngineTests(unittest.TestCase):
             plan = metal.plan(model, 8124, {})
             self.assertEqual(plan.argv[plan.argv.index('--device') + 1], 'mps')
 
+    def test_window_settings_reach_the_host_and_are_checked(self):
+        import json
+        engine = made(Yue2Engine, binary='/yue2/python', vae_path='/models/vae',
+                      output_root='/tmp/music', webui_root='/opt/yue-studio',
+                      model_options={'m': {'cot': 'full', 'memory_budget_gib': 24,
+                                           'memory_reservation_mb': 28000}})
+        with TemporaryDirectory() as root:
+            checkpoint = Path(root) / 'model.safetensors'
+            checkpoint.touch()
+            model = ModelSet(id='music/m', name='m', format=Format.SAFETENSORS,
+                             task=Task.MUSIC_GENERATION, entrypoint=str(checkpoint),
+                             files=(ModelFile('model.safetensors', 1024),))
+            plan = engine.plan(model, 8124, {'window_context_s': 4.0})
+            window = json.loads(plan.argv[plan.argv.index('--window-settings') + 1])
+            self.assertEqual((window['window_context_s'], window['window_crossfade_s'],
+                              window['window_max_candidates']), (4.0, 0.3, 5))
+            with self.assertRaisesRegex(ValueError, 'Unknown settings'):
+                engine.plan(model, 8124, {'nope': 1})
+        self.assertEqual(engine.generations_dir(),
+                         Path('/tmp/music/yue2-studio/data/outputs'))
+        self.assertIn('/v1/audio/music/window-generations', engine.api_paths())
+        self.assertTrue(all(spec.help and spec.group == 'generation' for spec in engine.params()))
+
     def test_unknown_accelerator_is_refused(self):
         for bad in ('cpu', 'metal', ''):
             with self.assertRaises(ValueError):

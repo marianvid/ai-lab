@@ -1,0 +1,216 @@
+"""Regenerating a window of a YuE2 song: the calls by `request_id`, and the songs' files.
+
+`POST /v1/audio/music/window-generations` is forwarded like any music call (it waits for the
+card, `gateway.py`); what is added here is what the front door must know about it:
+
+- the call's `request_id`, so `DELETE /v1/audio/music/window-generations/{request_id}` can
+  stop it: still waiting for the card, it is dropped from the queue; already running, the
+  engine is told to cancel it;
+- the songs themselves, read from the engine's folder without the model loaded:
+  `GET /v1/audio/music/generations/{generation_id}/audio` (the whole song, FLAC),
+  `GET .../{generation_id}/window-audio` (the regenerated clip, WAV) and
+  `DELETE /v1/audio/music/generations/{generation_id}`. The engine is found by the
+  `model` query parameter (`?model=<the YuE2 entry>`).
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import threading
+import urllib.error
+import urllib.request
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from http import HTTPStatus
+from pathlib import Path
+from urllib.parse import quote
+
+from ...engines.base import MUSIC_WINDOW_PATHS
+from ...gateway.errors import WindowCallActiveError, WindowRequestError
+from ...music.backends.yue2_web_backend import REQUEST_ID, check_generation_id
+from ...network import LOOPBACK
+from ..passthrough import Passthrough
+
+WINDOW_PATH = MUSIC_WINDOW_PATHS[0]
+# How long the engine may take to say it is cancelling.
+CANCEL_CALL_S = 30
+# A song's file is sent in pieces of this size.
+CHUNK_BYTES = 1 << 20
+# The files a generation serves, by route: name in its folder, and media type.
+FILES = {"audio": ("audio.flac", "audio/flac"), "window-audio": ("window.wav", "audio/wav")}
+
+
+def window_request_id(payload) -> str:
+    """The call's `request_id`, refused (422) unless it is 1-64 of [A-Za-z0-9._-]."""
+    value = payload.get("request_id") if isinstance(payload, dict) else None
+    if not isinstance(value, str) or not REQUEST_ID.fullmatch(value):
+        raise WindowRequestError("a window call needs a request_id of 1-64 characters "
+                                 "of A-Z a-z 0-9 . _ -")
+    return value
+
+
+class WindowCalls:
+    """Window calls by `request_id`: waiting for the card, or running on an engine."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._calls: dict[str, dict] = {}
+
+    def begin(self, request_id: str) -> None:
+        """A call starts waiting; a 409 when that id is already in use."""
+        with self._lock:
+            if request_id in self._calls:
+                raise WindowCallActiveError(f"a window call {request_id} is already waiting or running")
+            self._calls[request_id] = {"port": None, "cancelled": False}
+
+    def running(self, request_id: str, port: int) -> None:
+        """The call has its place and is on the engine at `port`."""
+        with self._lock:
+            if request_id in self._calls:
+                self._calls[request_id]["port"] = port
+
+    def wanted(self, request_id: str) -> bool:
+        """False once the call was cancelled while it waited."""
+        with self._lock:
+            call = self._calls.get(request_id)
+            return call is not None and not call["cancelled"]
+
+    def end(self, request_id: str) -> None:
+        """The call is over, however it ended."""
+        with self._lock:
+            self._calls.pop(request_id, None)
+
+    def active(self) -> list[str]:
+        """The ids waiting or running, for the page and the tests."""
+        with self._lock:
+            return sorted(self._calls)
+
+    def cancel(self, request_id: str) -> dict:
+        """Stop the call: dropped while it waits, cancelled by the engine while it runs."""
+        with self._lock:
+            call = self._calls.get(request_id)
+            if call is None:
+                raise KeyError(f"no window call {request_id} is waiting or running")
+            if call["port"] is None:
+                call["cancelled"] = True
+                return {"request_id": request_id, "state": "cancelled", "was": "waiting"}
+            port = call["port"]
+        return _engine_cancel(port, request_id)
+
+
+def _engine_cancel(port: int, request_id: str) -> dict:
+    request = urllib.request.Request(
+        f"http://{LOOPBACK}:{port}{WINDOW_PATH}/{quote(request_id, safe='')}", method="DELETE")
+    try:
+        with urllib.request.urlopen(request, timeout=CANCEL_CALL_S) as response:
+            answer = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == HTTPStatus.NOT_FOUND:
+            return {"request_id": request_id, "state": "finished", "was": "running"}
+        raise RuntimeError(f"the engine could not cancel {request_id}: HTTP {error.code}") from error
+    return {**answer, "was": "running"}
+
+
+@dataclass(frozen=True)
+class WindowAsk:
+    """What a window call asks the card for: its body, the model, its start settings, its client."""
+
+    payload: dict
+    model: str
+    settings: dict | None
+    alive: Callable[[], bool] | None
+
+
+def window_call(gateway, path: str, ask: WindowAsk, windows: WindowCalls,
+                send: Callable[[object], Passthrough]) -> Passthrough:
+    """A window call: known by its `request_id` from the queue until its answer is closed.
+
+    `send(lease)` forwards the request on the place it was given; a failure gives
+    the place back.
+    """
+    request_id = window_request_id(ask.payload)
+    windows.begin(request_id)
+    try:
+        def still_wanted() -> bool:
+            return windows.wanted(request_id) and (ask.alive is None or ask.alive())
+        lease = gateway.acquire(ask.model, shape=path, settings=ask.settings,
+                                still_wanted=still_wanted)
+        windows.running(request_id, lease.port)
+        try:
+            answer = send(lease)
+        except BaseException:
+            lease.release()
+            raise
+    except BaseException:
+        windows.end(request_id)
+        raise
+    return ended_with(answer, lambda: windows.end(request_id))
+
+
+def ended_with(answer: Passthrough, done) -> Passthrough:
+    """The engine's answer, calling `done` once when it is closed."""
+    close = answer.close
+
+    def closing() -> None:
+        try:
+            close()
+        finally:
+            done()
+    answer.close = closing
+    return answer
+
+
+class GenerationFiles:
+    """A YuE2 entry's songs, read and removed in its engine's folder."""
+
+    def __init__(self, gateway, operations) -> None:
+        self.gateway = gateway
+        self.operations = operations
+
+    def folder(self, query: dict | None, generation_id: str) -> Path:
+        """The generation's folder, for the entry named by `?model=`."""
+        model = (query or {}).get("model")
+        if not model:
+            raise ValueError("name the YuE2 entry with ?model=")
+        instance = self.gateway.resolve(model, self.operations.configured())
+        engine = self.operations.engine(instance["engine"])
+        where = getattr(engine, "generations_dir", None)
+        if where is None:
+            raise ValueError(f"{model} keeps no generations")
+        folder = where() / check_generation_id(generation_id)
+        if not folder.is_dir():
+            raise FileNotFoundError(f"no generation {generation_id}")
+        return folder
+
+    def send(self, query: dict | None, generation_id: str, what: str) -> Passthrough:
+        """One of the generation's files (`FILES`), in pieces."""
+        name, media_type = FILES[what]
+        path = self.folder(query, generation_id) / name
+        if not path.is_file():
+            raise FileNotFoundError(f"generation {generation_id} has no {name}")
+        return Passthrough(status=200, content_type=media_type, chunks=_pieces(path),
+                           headers={"Content-Disposition": f'attachment; filename="{generation_id}-{name}"'})
+
+    def delete(self, query: dict | None, generation_id: str) -> dict:
+        """Remove the generation's folder (a candidate not kept)."""
+        shutil.rmtree(self.folder(query, generation_id))
+        return {"deleted": generation_id}
+
+
+def _pieces(path: Path) -> Iterator[bytes]:
+    with path.open("rb") as handle:
+        while piece := handle.read(CHUNK_BYTES):
+            yield piece
+
+
+def register_files(router, files: GenerationFiles, windows: WindowCalls) -> None:
+    """The generation routes and the window cancel."""
+    base = "/v1/audio/music/generations/{generation_id}"
+    router.add("GET", base + "/audio",
+               lambda generation_id, query=None, **_: files.send(query, generation_id, "audio"))
+    router.add("GET", base + "/window-audio",
+               lambda generation_id, query=None, **_: files.send(query, generation_id, "window-audio"))
+    router.add("DELETE", base,
+               lambda generation_id, query=None, **_: files.delete(query, generation_id))
+    router.add("DELETE", WINDOW_PATH + "/{request_id}",
+               lambda request_id, **_: windows.cancel(request_id))

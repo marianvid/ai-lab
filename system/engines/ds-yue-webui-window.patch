@@ -1,0 +1,708 @@
+AI-Lab patch to ds-yue-webui (YuE2 Studio): the "window" job kind, which regenerates one
+window of a finished song (docs/music.md, "YuE2: regenerating one window of a song").
+Base: DocShotgun/ds-yue-webui a7130aa7bef8f278edbc24e15e39b42806eb30df
+Apply in the Studio checkout (engines.yue2.webui_root):  git apply <this file>
+Then restart the YuE2 instance. Check: its tests/test_window.py.
+
+diff --git a/server/jobs.py b/server/jobs.py
+index fd5e9fc..190e785 100644
+--- a/server/jobs.py
++++ b/server/jobs.py
+@@ -13,7 +13,10 @@ from pathlib import Path
+ 
+ from .config import Settings
+ 
+-KINDS = ("generate", "plan", "transcribe", "decode")
++KINDS = ("generate", "plan", "transcribe", "decode", "window")
++# The fields of a window job handed to the worker as they are (see worker/yue2_window.py).
++WINDOW_FIELDS = ("start_s", "end_s", "lyrics", "seed", "context_s", "edge_s", "crossfade_s",
++                 "swap_margin_s", "sampling")
+ TERMINAL = ("done", "failed", "cancelled")
+ 
+ 
+@@ -528,6 +531,14 @@ class JobQueue:
+                        "output_dir": params["output_dir"], "source_dir": str(source_dir),
+                        "vae": vae, "offline": self.settings.offline}
+             return yue2_spec, command
++        if kind == "window":
++            source_dir = Path(self.settings.outputs_dir) / params["source"]
++            if not (source_dir / "result.json").is_file():
++                raise ValueError(f"Library song {params['source']!r} has no completed result to edit")
++            command = {"cmd": "run", "action": "window", "job_id": None,
++                       "output_dir": params["output_dir"], "source_dir": str(source_dir),
++                       **{key: params[key] for key in WINDOW_FIELDS}}
++            return yue2_spec, command
+         audio = Path(self.settings.uploads_dir) / params["audio"]
+         if not audio.is_file():
+             raise FileNotFoundError(f"Uploaded audio {params['audio']!r} is missing")
+diff --git a/server/routes.py b/server/routes.py
+index b66d5d1..d1fcabc 100644
+--- a/server/routes.py
++++ b/server/routes.py
+@@ -13,12 +13,18 @@ from pydantic import BaseModel, Field
+ from . import abc_service, library
+ from .config import Settings
+ from .jobs import TERMINAL
+-from .validation import (ValidationError, slugify, validate_decode, validate_generate,
+-                         validate_plan, validate_transcribe)
++from .validation import (ValidationError, section_tags, slugify, validate_decode, validate_generate,
++                         validate_plan, validate_transcribe, validate_window)
++
++# What a window job needs saved from its source song (see worker/yue2_window.py).
++WINDOW_SOURCE_FILES = ("result.json", "request.json", "semantic.npy", "latent.npy",
++                       "abc_tokens.npy", "audio.flac")
++# Semantic tokens per second: a window's seconds are rounded to these frames.
++WINDOW_FPS = 25
+ 
+ 
+ class JobRequest(BaseModel):
+-    kind: str = Field(pattern="^(generate|plan|transcribe|decode)$")
++    kind: str = Field(pattern="^(generate|plan|transcribe|decode|window)$")
+     name: str | None = None
+     params: dict = Field(default_factory=dict)
+ 
+@@ -76,8 +82,36 @@ def _prepare_decode(settings: Settings, name: str | None, kind: str, params: dic
+     return warnings
+ 
+ 
++def _prepare_window(settings: Settings, name: str | None, kind: str, params: dict) -> list[str]:
++    """A window of a finished song: its files are there, the window is inside it, the tags are kept."""
++    cleaned, warnings = validate_window(params)
++    source_dir = settings.outputs_dir / cleaned["source"]
++    missing = [file for file in WINDOW_SOURCE_FILES if not (source_dir / file).is_file()]
++    if missing:
++        raise ValidationError(f"Song {cleaned['source']!r} is unknown or its files are gone: {missing}")
++    try:
++        result = json.loads((source_dir / "result.json").read_bytes().decode("utf-8"))
++        request = json.loads((source_dir / "request.json").read_bytes().decode("utf-8"))
++    except (OSError, ValueError) as exc:
++        raise ValidationError(f"Song {cleaned['source']!r} cannot be read: {exc}") from exc
++    if result.get("status") != "complete":
++        raise ValidationError(f"Song {cleaned['source']!r} did not complete")
++    song_s = float(result.get("audio_seconds") or 0.0)
++    if cleaned["end_s"] > song_s + 1 / WINDOW_FPS:
++        raise ValidationError(f"the window ends after the song ({song_s:.2f} s)")
++    if section_tags(cleaned["lyrics"]) != section_tags(request.get("lyrics", "")):
++        raise ValidationError("the lyrics must keep the source's section tags, in the same order")
++    slug = slugify(f"{cleaned['source']}-w{cleaned['seed']}")
++    params.clear()
++    params.update(cleaned)
++    params.update({"name": name, "slug": slug,
++                   "output_dir": str(library.unique_directory(settings.outputs_dir, slug))})
++    return warnings
++
++
+ _PREPARERS = {"generate": _prepare_generate, "plan": _prepare_generate,
+-              "transcribe": _prepare_transcribe, "decode": _prepare_decode}
++              "transcribe": _prepare_transcribe, "decode": _prepare_decode,
++              "window": _prepare_window}
+ 
+ 
+ def create_router(settings: Settings) -> APIRouter:
+diff --git a/server/validation.py b/server/validation.py
+index 6f3117c..246703d 100644
+--- a/server/validation.py
++++ b/server/validation.py
+@@ -192,3 +192,55 @@ def validate_decode(params: dict) -> tuple[dict, list[str]]:
+     if vae not in ("standard", "legacy"):
+         raise ValidationError(f"vae must be standard or legacy, got {vae!r}")
+     return {"source": source, "vae": vae}, []
++
++
++# A window job (AI-Lab patch): every number is required, the caller's settings are the only defaults.
++WINDOW_NUMBERS = {"start_s": (0.0, 3600.0), "end_s": (0.0, 3600.0), "context_s": (0.0, 60.0),
++                  "edge_s": (0.0, 10.0), "crossfade_s": (0.0, 10.0), "swap_margin_s": (0.0, 60.0)}
++WINDOW_SAMPLING = ("temperature", "top_p", "top_k", "repetition_penalty", "penalty_window")
++SECTION_TAG = re.compile(r"\[[^\]\n]+\]")
++
++
++def section_tags(lyrics: str) -> list[str]:
++    """The lyrics' section tags in order, as written: [Verse 1], [Chorus], ..."""
++    return SECTION_TAG.findall(lyrics)
++
++
++def validate_window(params: dict) -> tuple[dict, list[str]]:
++    if not isinstance(params, dict):
++        raise ValidationError("Request body must be an object")
++    known = {"source", "lyrics", "seed", "sampling", *WINDOW_NUMBERS}
++    unknown = set(params) - known
++    if unknown:
++        raise ValidationError(f"Unknown request fields: {sorted(unknown)}")
++    missing = sorted(known - set(params))
++    if missing:
++        raise ValidationError(f"Missing window fields: {missing}")
++    source = params["source"]
++    if not isinstance(source, str) or not ID_PATTERN.fullmatch(source):
++        raise ValidationError("source must be a library song name")
++    cleaned: dict = {"source": source}
++    for key, (low, high) in WINDOW_NUMBERS.items():
++        value = params[key]
++        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
++                or not low <= value <= high:
++            raise ValidationError(f"{key} must be a number in [{low}, {high}]")
++        cleaned[key] = float(value)
++    if cleaned["end_s"] <= cleaned["start_s"]:
++        raise ValidationError("end_s must be after start_s")
++    if cleaned["swap_margin_s"] > cleaned["context_s"]:
++        raise ValidationError("swap_margin_s must not exceed context_s (the swap stays in the forced zone)")
++    lyrics = params["lyrics"]
++    if not isinstance(lyrics, str) or not lyrics.strip() or len(lyrics) > 60000:
++        raise ValidationError("lyrics must be nonempty text (max 60000 characters)")
++    cleaned["lyrics"] = lyrics
++    seed = _check_seed(params["seed"])
++    if seed is None:
++        raise ValidationError("seed is required")
++    cleaned["seed"] = seed
++    sampling = params["sampling"]
++    if not isinstance(sampling, dict) or set(sampling) != set(WINDOW_SAMPLING):
++        raise ValidationError(f"sampling must give exactly {list(WINDOW_SAMPLING)}")
++    _clean_sampling(sampling, "window")
++    cleaned["sampling"] = {key: sampling[key] for key in WINDOW_SAMPLING}
++    return cleaned, []
+diff --git a/tests/mock_worker_body.py b/tests/mock_worker_body.py
+index 9d59c23..6c813ca 100644
+--- a/tests/mock_worker_body.py
++++ b/tests/mock_worker_body.py
+@@ -51,6 +51,12 @@ def run_fn(obj, command, events, cancelled):
+             {"status": "complete", "audio_seconds": 9.0, "decoder": command.get("vae", "standard")}),
+             encoding="utf-8")
+         return {"status": "complete", "output": str(output), "audio_seconds": 9.0}
++    if action == "window":
++        window = {"source": Path(command["source_dir"]).name, "seed": command["seed"],
++                  "window_s": [command["start_s"], command["end_s"]]}
++        (output / "result.json").write_text(json.dumps(
++            {"status": "complete", "audio_seconds": 10.0, "window": window}), encoding="utf-8")
++        return {"status": "complete", "output": str(output), "audio_seconds": 10.0, "window": window}
+     raise ValueError(f"unknown action: {action!r}")
+ 
+ 
+diff --git a/worker/yue2_worker.py b/worker/yue2_worker.py
+index e502ac7..6c74d30 100644
+--- a/worker/yue2_worker.py
++++ b/worker/yue2_worker.py
+@@ -132,6 +132,9 @@ def run_yue2(pipe, command: dict, events, cancelled) -> dict:
+                 "truncated": plan.truncated, "seconds": seconds or plan.timing.get("seconds", 0.0)}
+     if action == "decode":
+         return run_decode(pipe, command, output_dir)
++    if action == "window":
++        from yue2_window import run_window
++        return run_window(pipe, command, events, cancelled)
+     raise ValueError(f"Unknown yue2 action: {action!r}")
+ 
+ 
+diff --git a/worker/yue2_window.py b/worker/yue2_window.py
+new file mode 100644
+index 0000000..7b2a239
+--- /dev/null
++++ b/worker/yue2_window.py
+@@ -0,0 +1,264 @@
++"""Regenerate one window of a finished song, keeping the rest of it (AI-Lab patch).
++
++The recipe proven in radio-lab/music's lab on 2026-11-05 (`research/yue2-window/lab.py`,
++test `t5`, and `splice.py`), run on the resident model instead of a second copy:
++
++1. AR: from the source's prefix (with the new lyrics) and its semantic tokens before the
++   window, generate exactly the window's length in new tokens, with the candidate's seed.
++2. Splice the tokens: before + new + after.
++3. NAR on a clip (the window plus `context_s` each side) with RePaint: after every flow
++   step the state outside the window is put back on the original trajectory
++   t*noise + (1-t)*x0, softened over `edge_s` at both ends. The noise is the whole song's
++   noise from the SOURCE request's seed, so the part outside the window stays the original.
++4. Decode the clip and splice it into the original audio, inside the forced zone
++   (`swap_margin_s` outside the window), with a `crossfade_s` crossfade.
++
++Every number comes in the command; nothing here has a default of its own.
++"""
++from __future__ import annotations
++
++import json
++import shutil
++import time
++from pathlib import Path
++
++import numpy as np
++
++# YuE2's semantic tokens per second, its audio sample rate and its flow steps (the model's own).
++FPS = 25
++SAMPLE_RATE = 48000
++NAR_STEPS = 32
++SOURCE_FILES = ("result.json", "request.json", "semantic.npy", "latent.npy",
++                "abc_tokens.npy", "audio.flac")
++SAMPLING_KEYS = ("temperature", "top_p", "top_k", "repetition_penalty", "penalty_window")
++
++
++def window_frames(start_s: float, end_s: float, frames: int) -> tuple[int, int]:
++    """The window [p1, p2) in frames, refused when it is empty or outside the song."""
++    p1, p2 = int(round(start_s * FPS)), int(round(end_s * FPS))
++    if not 0 <= p1 < p2 <= frames:
++        raise ValueError(f"window {start_s}-{end_s} s is outside the song (0-{frames / FPS:.2f} s)")
++    return p1, p2
++
++
++def clip_frames(p1: int, p2: int, frames: int, context_s: float) -> tuple[int, int]:
++    """The clip [c0, c1): the window plus `context_s` each side, inside the song."""
++    margin = int(round(context_s * FPS))
++    return max(0, p1 - margin), min(frames, p2 + margin)
++
++
++def keep_mask(length: int, w0: int, w1: int, edge_frames: int) -> np.ndarray:
++    """1 where the clip keeps the original, 0 inside the window, a ramp of `edge_frames` at its ends."""
++    keep = np.ones(length, np.float32)
++    keep[w0:w1] = 0
++    for i in range(edge_frames):
++        fraction = 1 - (i + 1) / (edge_frames + 1)
++        if w0 + i < w1:
++            keep[w0 + i] = max(keep[w0 + i], fraction)
++        if w1 - 1 - i >= w0:
++            keep[w1 - 1 - i] = max(keep[w1 - 1 - i], fraction)
++    return keep
++
++
++def channels_last(audio) -> np.ndarray:
++    """Audio as [samples, channels] float32."""
++    audio = np.asarray(audio, np.float32)
++    if audio.ndim == 1:
++        return audio[:, None]
++    if audio.shape[0] <= 2 < audio.shape[1]:
++        return audio.T.copy()
++    return audio
++
++
++def splice_audio(original: np.ndarray, clip: np.ndarray, clip_s: tuple[float, float],
++                 window_s: tuple[float, float], swap_margin_s: float, crossfade_s: float,
++                 rate: int = SAMPLE_RATE) -> np.ndarray:
++    """The original with the clip swapped in over the window plus `swap_margin_s`, crossfaded."""
++    original, clip = channels_last(original), channels_last(clip)
++    if clip.shape[1] != original.shape[1]:
++        clip = np.repeat(clip[:, :1], original.shape[1], axis=1)
++    c0, c1 = clip_s
++    w0, w1 = window_s
++    s0 = int(max(c0, w0 - swap_margin_s) * rate)
++    s1 = int(min(c1, w1 + swap_margin_s) * rate)
++    offset = int(c0 * rate)
++    segment = clip[s0 - offset:s1 - offset]
++    count = min(len(segment), s1 - s0, len(original) - s0)
++    out = original.copy()
++    if count <= 0:
++        return out
++    fade = min(int(crossfade_s * rate), count // 2)
++    new = segment[:count].copy()
++    if fade > 0:
++        ramp = np.linspace(0, 1, fade, dtype=np.float32)[:, None]
++        new[:fade] = out[s0:s0 + fade] * (1 - ramp) + segment[:fade] * ramp
++        new[count - fade:count] = (segment[count - fade:count] * (1 - ramp)
++                                   + out[s0 + count - fade:s0 + count] * ramp)
++    out[s0:s0 + count] = new
++    return out
++
++
++def changed_percent(new: list[int], old: list[int]) -> float:
++    """How many of the window's tokens differ from the original's, in percent."""
++    if not old:
++        return 0.0
++    return round(100 * float(np.mean(np.asarray(new) != np.asarray(old))), 1)
++
++
++def _read_json(path: Path) -> dict:
++    return json.loads(path.read_bytes().decode("utf-8"))
++
++
++def _write_json(path: Path, value: dict) -> None:
++    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
++
++
++def load_source(source_dir: Path, weights: dict | None) -> dict:
++    """The source song's saved files, refused when one is missing or the model differs."""
++    for name in SOURCE_FILES:
++        if not (source_dir / name).is_file():
++            raise ValueError(f"Source song is missing {name}: {source_dir.name}")
++    result = _read_json(source_dir / "result.json")
++    if result.get("status") != "complete":
++        raise ValueError("Source song did not complete")
++    source_mot = (result.get("weights") or {}).get("mot")
++    if source_mot is not None and weights is not None and source_mot != weights.get("mot"):
++        raise ValueError("Source song was generated by a different YuE2 model; "
++                         "semantic tokens are model-specific")
++    score = source_dir / "score.abc"
++    return {"result": result,
++            "request": _read_json(source_dir / "request.json"),
++            "semantic": np.load(source_dir / "semantic.npy", allow_pickle=False).astype(np.int64).tolist(),
++            "latent": np.load(source_dir / "latent.npy", allow_pickle=False).astype(np.float32),
++            "abc_ids": np.load(source_dir / "abc_tokens.npy", allow_pickle=False).astype(np.int64).tolist(),
++            "score": score.read_text(encoding="utf-8") if score.is_file() else None}
++
++
++def full_noise(frames: int, seed: int):
++    """The whole song's NAR noise, drawn exactly as `yue2.nar` draws it for a song."""
++    import torch
++    generator = torch.Generator(device="cpu").manual_seed(int(seed))
++    return torch.randn((frames, 64), dtype=torch.float32, device="cpu", generator=generator)
++
++
++def repaint(model, prefix, tokens, noise, x0, keep, cancelled):
++    """Flow matching on one clip; where keep==1 the state is put back on the original trajectory."""
++    import torch
++    from yue2.nar import CachedNAR, Chunk
++    from yue2.protocol import CODEC_OFFSET, MUSIC_END
++    chunk = Chunk(list(prefix) + [t + CODEC_OFFSET for t in tokens] + [MUSIC_END], noise)
++    engine = CachedNAR(model, chunk)
++    try:
++        device, dtype = engine.device, engine.dtype
++        state = noise.to(device=device, dtype=dtype)
++        original = torch.as_tensor(x0, device=device, dtype=dtype)
++        start = noise.to(device=device, dtype=dtype)
++        kept = torch.as_tensor(keep, device=device, dtype=dtype)[:, None]
++        dt = 1.0 / NAR_STEPS
++        with torch.inference_mode():
++            for step in range(NAR_STEPS):
++                if cancelled():
++                    raise InterruptedError("Cancelled during the window's NAR")
++                t = 1.0 - step * dt
++                raw = torch.logit(torch.tensor(t, dtype=torch.float64)).clamp(-20, 20).item()
++                first = engine.velocity(state, raw)
++                middle = state - first * (dt / 2)
++                raw_mid = torch.logit(torch.tensor(t - dt / 2, dtype=torch.float64)).clamp(-20, 20).item()
++                state = state - engine.velocity(middle, raw_mid) * dt
++                after = t - dt
++                target = after * start + (1 - after) * original
++                state = kept * target + (1 - kept) * state
++        return state.float().cpu().numpy()
++    finally:
++        engine.close()
++
++
++def run_window(pipe, command: dict, events, cancelled) -> dict:
++    """One candidate: the source song with one window regenerated, saved as a song of its own."""
++    import soundfile as sf
++    from yue2 import SymbolicPlan
++    from yue2.protocol import CODEC_OFFSET, Sampling, SongRequest, token_prefixes
++    from yue2.sampling import generate_tokens
++
++    started = time.monotonic()
++    job_id = command["job_id"]
++    source_dir, out = Path(command["source_dir"]), Path(command["output_dir"])
++    source = load_source(source_dir, getattr(pipe, "weights", None))
++    semantic = source["semantic"]
++    frames = len(semantic)
++    p1, p2 = window_frames(float(command["start_s"]), float(command["end_s"]), frames)
++    length = p2 - p1
++    c0, c1 = clip_frames(p1, p2, frames, float(command["context_s"]))
++    request = SongRequest(**{**source["request"], "lyrics": command["lyrics"]})
++    prefix = token_prefixes(request, pipe.tokenizer, source["abc_ids"])
++
++    sampling = command["sampling"]
++    settings = Sampling(float(sampling["temperature"]), float(sampling["top_p"]),
++                        int(sampling["top_k"]), float(sampling["repetition_penalty"]),
++                        int(sampling["penalty_window"]), length, length)
++    counter = [0]
++
++    def on_token(phase, token):
++        counter[0] += 1
++        if counter[0] % 25 == 0:
++            events.progress(job_id, stage="window-ar", tokens=counter[0], of=length)
++
++    ar_in = prefix + [t + CODEC_OFFSET for t in semantic[:p1]]
++    ids, _timing, _truncated = generate_tokens(pipe._load_model(), ar_in, settings, int(command["seed"]),
++                                               "semantic", cancelled=cancelled, on_token=on_token,
++                                               use_cuda_graph=False)
++    new = [int(x) - CODEC_OFFSET for x in ids if int(x) >= CODEC_OFFSET][:length]
++    short = len(new) < length
++    if short:
++        new = new + semantic[p1 + len(new):p2]
++    tokens = semantic[:p1] + new + semantic[p2:]
++    ar_s = time.monotonic() - started
++
++    events.progress(job_id, stage="window-nar")
++    noise = full_noise(frames, request.seed)
++    keep = keep_mask(c1 - c0, p1 - c0, p2 - c0, int(round(float(command["edge_s"]) * FPS)))
++    nar_started = time.monotonic()
++    latent_clip = repaint(pipe._load_model(for_nar=True), prefix, tokens[c0:c1], noise[c0:c1],
++                          source["latent"][c0:c1], keep, cancelled)
++    nar_s = time.monotonic() - nar_started
++
++    events.progress(job_id, stage="window-decode")
++    decode_started = time.monotonic()
++    clip_audio = channels_last(pipe.decode(latent_clip))
++    original, rate = sf.read(source_dir / "audio.flac", dtype="float32", always_2d=True)
++    window_s, clip_s = (p1 / FPS, p2 / FPS), (c0 / FPS, c1 / FPS)
++    song = splice_audio(original, clip_audio, clip_s, window_s, float(command["swap_margin_s"]),
++                        float(command["crossfade_s"]), rate)
++    decode_s = time.monotonic() - decode_started
++
++    latent = source["latent"].copy()
++    latent[c0:c1] = latent_clip
++    out.mkdir(parents=True, exist_ok=True)
++    SymbolicPlan(request, source["score"], source["abc_ids"], prefix).save(out)
++    np.save(out / "semantic.npy", np.asarray(tokens, np.int32))
++    np.save(out / "latent.npy", latent.astype(np.float32))
++    sf.write(out / "audio.flac", song, rate, subtype="PCM_24")
++    sf.write(out / "window.wav", clip_audio, SAMPLE_RATE, subtype="PCM_24")
++    _write_json(out / "request.json", request.to_dict())
++    if (source_dir / "config.json").is_file():
++        shutil.copyfile(source_dir / "config.json", out / "config.json")
++    timings = {"ar_s": round(ar_s, 1), "nar_s": round(nar_s, 1), "decode_s": round(decode_s, 1),
++               "total_s": round(time.monotonic() - started, 1)}
++    window = {"source": source_dir.name, "window_s": [round(window_s[0], 2), round(window_s[1], 2)],
++              "clip_s": [round(clip_s[0], 2), round(clip_s[1], 2)], "frames": [p1, p2],
++              "clip_frames": [c0, c1], "seed": int(command["seed"]), "noise_seed": request.seed,
++              "context_s": command["context_s"], "edge_s": command["edge_s"],
++              "crossfade_s": command["crossfade_s"], "swap_margin_s": command["swap_margin_s"],
++              "sampling": {key: sampling[key] for key in SAMPLING_KEYS},
++              "tokens_changed_pct": changed_percent(new, semantic[p1:p2]),
++              "short_window": short, "timings": timings}
++    _write_json(out / "window.json", window)
++    audio_seconds = len(song) / rate
++    _write_json(out / "result.json", {
++        "status": "complete", "sample_rate": rate, "audio_seconds": audio_seconds,
++        "truncated": {"abc": False, "semantic": False},
++        "weights": source["result"].get("weights"),
++        "sources": {"song": source_dir.name, "result_json": "a window regenerated from this song"},
++        "window": window})
++    return {"status": "complete", "output": str(out), "audio_seconds": audio_seconds,
++            "truncated": False, "seconds": timings["total_s"], "window": window}
+diff --git a/tests/test_window.py b/tests/test_window.py
+new file mode 100644
+index 0000000..e3b89ed
+--- /dev/null
++++ b/tests/test_window.py
+@@ -0,0 +1,240 @@
++"""The window job (AI-Lab patch): validation, the route, the job command and the pure helpers."""
++import json
++import sys
++import time
++from pathlib import Path
++
++import numpy as np
++import pytest
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
++import yue2_window  # noqa: E402
++
++from server.validation import ValidationError, section_tags, validate_window  # noqa: E402
++
++SAMPLING = {"temperature": 1.0, "top_p": 0.95, "top_k": 100, "repetition_penalty": 1.2,
++            "penalty_window": 50}
++LYRICS = "[Verse]\nLa la\n[Chorus]\nminute"
++
++
++def _params(**changes):
++    params = {"source": "song-a", "start_s": 2.0, "end_s": 4.0, "lyrics": LYRICS, "seed": 101,
++              "context_s": 5.0, "edge_s": 0.4, "crossfade_s": 0.3, "swap_margin_s": 2.5,
++              "sampling": dict(SAMPLING)}
++    params.update(changes)
++    return params
++
++
++def _source(settings, name="song-a", seconds=10.0, skip=()):
++    directory = settings.outputs_dir / name
++    directory.mkdir(parents=True, exist_ok=True)
++    files = {"result.json": json.dumps({"status": "complete", "audio_seconds": seconds}),
++             "request.json": json.dumps({"style": "rap", "lyrics": LYRICS, "seed": 9202}),
++             "semantic.npy": "", "latent.npy": "", "abc_tokens.npy": "", "audio.flac": ""}
++    for file, text in files.items():
++        if file not in skip:
++            (directory / file).write_text(text, encoding="utf-8")
++    return directory
++
++
++# -- validation -------------------------------------------------------------
++
++def test_validate_window_accepts_a_full_request():
++    cleaned, warnings = validate_window(_params())
++    assert cleaned["start_s"] == 2.0 and cleaned["seed"] == 101 and warnings == []
++    assert cleaned["sampling"] == SAMPLING
++
++
++@pytest.mark.parametrize("changes, words", [
++    ({"end_s": 2.0}, "after start_s"),
++    ({"swap_margin_s": 6.0}, "forced zone"),
++    ({"seed": None}, "seed is required"),
++    ({"lyrics": " "}, "lyrics"),
++    ({"source": "../x"}, "library song"),
++    ({"context_s": -1}, "context_s"),
++    ({"sampling": {"temperature": 1.0}}, "sampling must give"),
++    ({"extra": 1}, "Unknown"),
++])
++def test_validate_window_refusals(changes, words):
++    with pytest.raises(ValidationError, match=words):
++        validate_window(_params(**changes))
++
++
++def test_validate_window_needs_every_number():
++    params = _params()
++    del params["edge_s"]
++    with pytest.raises(ValidationError, match="Missing window fields"):
++        validate_window(params)
++
++
++def test_section_tags_in_order():
++    assert section_tags("[Intro]\nx\n[Verse 1]\ny") == ["[Intro]", "[Verse 1]"]
++
++
++# -- the route and the job ----------------------------------------------------
++
++def _poll(client, job_id, timeout=30.0):
++    deadline = time.time() + timeout
++    while True:
++        job = client.get(f"/api/jobs/{job_id}").json()
++        if job["status"] in ("done", "failed", "cancelled"):
++            return job
++        assert time.time() < deadline
++        time.sleep(0.1)
++
++
++def test_window_job_flow(client, settings):
++    _source(settings)
++    response = client.post("/api/jobs", json={"kind": "window", "params": _params()})
++    assert response.status_code == 200, response.text
++    job = _poll(client, response.json()["job"]["id"])
++    assert job["status"] == "done", job
++    assert Path(job["output_dir"]).name.startswith("song-a-w101")
++    assert job["result"]["window"]["source"] == "song-a"
++
++
++@pytest.mark.parametrize("params, skip, words", [
++    (_params(lyrics="[Verse]\nLa\n[Bridge]\nx"), (), "section tags"),
++    (_params(end_s=12.0), (), "ends after the song"),
++    (_params(), ("latent.npy",), "files are gone"),
++    (_params(source="nobody"), (), "files are gone"),
++])
++def test_window_route_refusals(client, settings, params, skip, words):
++    _source(settings, skip=skip)
++    response = client.post("/api/jobs", json={"kind": "window", "params": params})
++    assert response.status_code == 400
++    assert words in response.json()["detail"]
++
++
++def test_window_command_carries_every_field(queue, settings):
++    source = _source(settings)
++    params = {**validate_window(_params())[0], "output_dir": str(settings.outputs_dir / "out")}
++    _spec, command = queue._build("window", params)
++    assert command["action"] == "window" and command["source_dir"] == str(source)
++    for key in ("start_s", "end_s", "lyrics", "seed", "context_s", "edge_s", "crossfade_s",
++                "swap_margin_s", "sampling"):
++        assert command[key] == params[key]
++
++
++# -- the pure helpers of the recipe -------------------------------------------
++
++def test_window_and_clip_frames():
++    assert yue2_window.window_frames(2.0, 4.0, 250) == (50, 100)
++    assert yue2_window.clip_frames(50, 100, 250, 5.0) == (0, 225)
++    with pytest.raises(ValueError, match="outside the song"):
++        yue2_window.window_frames(9.0, 11.0, 250)
++
++
++def test_keep_mask_ramps_into_the_window():
++    keep = yue2_window.keep_mask(20, 5, 15, 2)
++    assert keep[:5].tolist() == [1.0] * 5 and keep[15:].tolist() == [1.0] * 5
++    assert keep[5] == pytest.approx(2 / 3) and keep[6] == pytest.approx(1 / 3)
++    assert keep[14] == pytest.approx(2 / 3) and keep[10] == 0.0
++
++
++def test_splice_keeps_the_outside_and_fades():
++    rate = 100
++    original = np.zeros((1000, 2), np.float32)
++    clip = np.ones((600, 2), np.float32)             # the clip covers 2.0-8.0 s
++    out = yue2_window.splice_audio(original, clip, (2.0, 8.0), (4.0, 6.0), 1.0, 0.1, rate)
++    assert out[:300].max() == 0.0 and out[700:].max() == 0.0     # outside the swap zone
++    assert out[350:650].min() == 1.0                             # inside it
++    assert 0.0 < out[302, 0] < 1.0                               # the crossfade
++
++
++def test_splice_takes_mono_and_channels_first():
++    original = np.zeros((1000, 2), np.float32)
++    clip = np.ones((2, 600), np.float32)
++    out = yue2_window.splice_audio(original, clip, (2.0, 8.0), (4.0, 6.0), 1.0, 0.0, 100)
++    assert out[400].tolist() == [1.0, 1.0]
++    mono = yue2_window.splice_audio(original, np.ones(600, np.float32), (2.0, 8.0), (4.0, 6.0), 1.0, 0.0, 100)
++    assert mono[400].tolist() == [1.0, 1.0]
++
++
++def test_changed_percent():
++    assert yue2_window.changed_percent([1, 2, 3, 4], [1, 0, 3, 0]) == 50.0
++    assert yue2_window.changed_percent([], []) == 0.0
++
++
++def test_load_source_refuses_missing_files_and_other_models(tmp_path):
++    with pytest.raises(ValueError, match="missing result.json"):
++        yue2_window.load_source(tmp_path, None)
++    for name in yue2_window.SOURCE_FILES:
++        (tmp_path / name).write_text("{}")
++    (tmp_path / "result.json").write_text(json.dumps({"status": "complete", "weights": {"mot": "a"}}))
++    with pytest.raises(ValueError, match="different YuE2 model"):
++        yue2_window.load_source(tmp_path, {"mot": "b"})
++
++
++# -- run_window end to end, with the model's stages replaced -------------------
++
++class _FakePipe:
++    """The parts of YuE2Pipeline run_window uses; decode gives one 48 kHz sample per latent slot."""
++
++    weights = {"mot": "same"}
++    tokenizer = None
++
++    def _load_model(self, for_nar=False):
++        return None
++
++    def decode(self, latents):
++        frames = len(latents)
++        return np.full((frames * 48000 // 25, 2), 0.5, np.float32)
++
++
++class _Events:
++    def __init__(self):
++        self.seen = []
++
++    def progress(self, job_id, **fields):
++        self.seen.append(fields)
++
++
++def test_run_window_writes_a_whole_song(tmp_path, monkeypatch):
++    pytest.importorskip("yue2")
++    import soundfile as sf
++    import yue2.protocol
++    import yue2.sampling
++
++    frames, seconds = 250, 10.0
++    source = tmp_path / "song-a"
++    source.mkdir()
++    (source / "result.json").write_text(json.dumps({"status": "complete", "weights": {"mot": "same"}}))
++    (source / "request.json").write_text(json.dumps(
++        {"style": "rap", "lyrics": LYRICS, "cot": "full", "seed": 9202, "abc": None,
++         "cfg_scale": None, "id": "song"}))
++    np.save(source / "semantic.npy", np.arange(frames, dtype=np.int32) % 7)
++    np.save(source / "latent.npy", np.zeros((frames, 64), np.float32))
++    np.save(source / "abc_tokens.npy", np.asarray([1, 2, 3], np.int32))
++    (source / "score.abc").write_text("X:1\n")
++    sf.write(source / "audio.flac", np.zeros((int(seconds * 48000), 2), np.float32), 48000)
++
++    monkeypatch.setattr(yue2.protocol, "token_prefixes", lambda request, tokenizer, ids: [5, 6])
++    offset = yue2.protocol.CODEC_OFFSET
++    monkeypatch.setattr(yue2.sampling, "generate_tokens",
++                        lambda model, prefix, sampling, seed, phase, **_: (
++                            [offset + 9] * (sampling.max_tokens - 5), {}, False))
++    monkeypatch.setattr(yue2_window, "repaint",
++                        lambda model, prefix, tokens, noise, x0, keep, cancelled:
++                        np.ones((len(tokens), 64), np.float32))
++    out = tmp_path / "out"
++    command = {"job_id": 1, "source_dir": str(source), "output_dir": str(out), **_params(),
++               "lyrics": LYRICS.replace("minute", "minut")}
++    result = yue2_window.run_window(_FakePipe(), command, _Events(), lambda: False)
++
++    window = json.loads((out / "window.json").read_text())
++    assert result["status"] == "complete" and window["short_window"] is True
++    assert window["frames"] == [50, 100] and window["noise_seed"] == 9202 and window["seed"] == 101
++    semantic = np.load(out / "semantic.npy")
++    assert semantic[:50].tolist() == (np.arange(50) % 7).tolist()        # before: the original
++    assert semantic[50:95].tolist() == [9] * 45                          # the new tokens
++    assert semantic[95:100].tolist() == (np.arange(95, 100) % 7).tolist()  # padded from the original
++    latent = np.load(out / "latent.npy")
++    assert latent[:, 0].sum() == 225                                     # the clip 0-9 s replaced
++    song, rate = sf.read(out / "audio.flac", always_2d=True)
++    assert song[int(8 * rate)].tolist() == [0.0, 0.0]                    # after the swap zone (6.5 s)
++    assert abs(song[int(3 * rate), 0] - 0.5) < 1e-3                       # inside it
++    request = json.loads((out / "request.json").read_text())
++    assert "minut" in request["lyrics"] and request["seed"] == 9202
++    for name in ("plan.json", "prefix.npy", "abc_tokens.npy", "score.abc", "window.wav", "result.json"):
++        assert (out / name).is_file(), name

@@ -59,3 +59,14 @@ class CardBusyError(RuntimeError):
     def __init__(self, message: str, holder: dict) -> None:
         super().__init__(message)
         self.detail = {"busy": holder}
+
+
+class WindowCallActiveError(RuntimeError):
+    """A window call with this `request_id` is already waiting or running: a 409.
+
+    The id is how its caller cancels it, so two calls may not share one.
+    """
+
+
+class WindowRequestError(ValueError):
+    """A window call the front door cannot take as it is (no usable `request_id`): a 422."""

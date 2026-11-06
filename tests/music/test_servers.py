@@ -112,7 +112,20 @@ class ServerTests(unittest.TestCase):
             "--ui-port", "9011", "--webui-root", "/w"], "Yue2WebBackend",
             launch_studio=lambda args, url: studios.append(url))
         self.assertEqual(backend.args[1:], ("yue2", "full"))
+        self.assertIsNone(backend.kwargs["window"])
         self.assertTrue(studios[0].endswith(":9011"))
+
+    def test_yue2_reads_its_window_settings(self):
+        from ai_lab.engines.base import validate
+        from ai_lab.engines.music.yue2 import WINDOW_SETTINGS
+        settings = json.dumps(validate(WINDOW_SETTINGS, {}))
+        backend, (served, _) = run(yue2_server, [
+            "--model-path", "/m/yue2", "--vae-path", "/v", "--output-root", "/o",
+            "--cot", "full", "--memory-budget-gib", "20", "--port", "9010",
+            "--ui-port", "9011", "--webui-root", "/w", "--window-settings", settings],
+            "Yue2WebBackend", launch_studio=lambda args, url: None)
+        self.assertEqual(backend.kwargs["window"].swap_margin_s, 2.5)
+        self.assertEqual(served[1], 9010)
 
 
 class CompanionTests(unittest.TestCase):

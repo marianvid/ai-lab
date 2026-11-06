@@ -29,6 +29,7 @@ from ...engines.base import (
     TOKENIZE_PATHS,
     DIARIZATION_PATHS,
     MUSIC_PATHS,
+    MUSIC_WINDOW_PATHS,
     OCR_PATHS,
     OPENAI_PATHS,
     SPEECH_PATHS,
@@ -44,6 +45,7 @@ from ...types import Task
 from ..multipart import MultipartBody
 from ..answer_cap import Hooks, PlaceKeeper, Waits, forward, send_capped
 from ..uploads import UploadRejectedError, validate_image
+from .music_windows import GenerationFiles, WindowAsk, WindowCalls, register_files, window_call
 
 # Every shape any engine here can answer. Registered as routes whatever is
 # configured: a path that exists and explains why this model cannot serve it is
@@ -51,6 +53,7 @@ from ..uploads import UploadRejectedError, validate_image
 FORWARDED = tuple(dict.fromkeys(OPENAI_PATHS + ANTHROPIC_PATHS
                                 + TRANSCRIPTION_PATHS + VAD_PATHS
                                 + DIARIZATION_PATHS + OCR_PATHS + MUSIC_PATHS
+                                + MUSIC_WINDOW_PATHS
                                 + SPEECH_PATHS + ALIGNMENT_PATHS
                                 + TOKENIZE_PATHS + (EMBEDDINGS_PATH,)))
 NO_LANES = SideLanes()
@@ -66,7 +69,7 @@ _TASK_OF_PATH = {
     **dict.fromkeys(VAD_PATHS, Task.VAD),
     **dict.fromkeys(DIARIZATION_PATHS, Task.DIARIZATION),
     **dict.fromkeys(OCR_PATHS, Task.OCR),
-    **dict.fromkeys(MUSIC_PATHS, Task.MUSIC_GENERATION),
+    **dict.fromkeys(MUSIC_PATHS + MUSIC_WINDOW_PATHS, Task.MUSIC_GENERATION),
     **dict.fromkeys(SPEECH_PATHS, Task.SPEECH_SYNTHESIS),
     **dict.fromkeys(ALIGNMENT_PATHS, Task.ALIGNMENT),
 }
@@ -90,8 +93,10 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) 
         return _stats(gateway, lanes)
 
     router.add("PATCH", "/api/gateway", settings)
+    windows = WindowCalls()
     for path in FORWARDED:
-        router.add("POST", path, _forwarder(gateway, path, lanes))
+        router.add("POST", path, _forwarder(gateway, path, lanes, windows))
+    register_files(router, GenerationFiles(gateway, operations), windows)
     if lanes.cpu is not None:
         cpu = lanes.cpu
         router.add("POST", "/api/cpu-models/{name}/start",
@@ -154,7 +159,8 @@ def _one_model(row: dict, detailed: bool = False) -> dict:
 SETTINGS_FIELD = "ai_lab"
 
 
-def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
+def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
+               windows: WindowCalls | None = None):
     """The handler for one forwarded path.
 
     Calls are served first come, first served (the approved list, A3): who may
@@ -169,6 +175,12 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES):
         side = _side_lane(lanes, path, payload, wanted)
         if side is not None:
             return side
+        if path in MUSIC_WINDOW_PATHS and windows is not None:
+            if isinstance(payload, MultipartBody):
+                raise ValueError("a window call takes a JSON request")
+            call = _Call(wanted, alive, cut)
+            return window_call(gateway, path, WindowAsk(payload, wanted, _start_settings(payload), alive),
+                               windows, lambda lease: _forward(gateway, lease, path, payload, call))
         _check_upload(gateway, path, payload)
         lease = gateway.acquire(wanted, shape=path, settings=_start_settings(payload),
                                 still_wanted=alive)

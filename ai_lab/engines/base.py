@@ -130,6 +130,8 @@ VAD_PATHS = ("/v1/audio/speech-segments",)
 DIARIZATION_PATHS = ("/v1/audio/diarizations",)
 OCR_PATHS = ("/v1/images/ocr",)
 MUSIC_PATHS = ("/v1/audio/music/generations",)
+# One window of an earlier song regenerated (YuE2 only, `docs/music.md`).
+MUSIC_WINDOW_PATHS = ("/v1/audio/music/window-generations",)
 SPEECH_PATHS = ("/v1/audio/speech/generations",)
 ALIGNMENT_PATHS = ("/v1/audio/alignments",)
 

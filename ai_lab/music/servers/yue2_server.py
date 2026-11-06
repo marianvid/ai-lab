@@ -5,6 +5,12 @@ YuE2 runs inside ds-yue-webui ("YuE2 Studio"), which keeps the model loaded
 and has its own page. This writes the studio's configuration, starts it, waits
 until it answers, and then answers AI-Lab's music contract through it
 (`Yue2WebBackend`). Stopping this host stops the studio.
+
+Besides the song call it answers `POST /v1/audio/music/window-generations`
+(one window of an earlier song regenerated, when every candidate is done) and
+`DELETE /v1/audio/music/window-generations/{request_id}` (stop one). A refused
+window request is a 422, a `request_id` already running a 409, an unknown one
+a 404 (`docs/music.md`).
 """
 from __future__ import annotations
 
@@ -13,9 +19,12 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
+from http import HTTPStatus
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from ai_lab.engine_host.http_host import serve
+from ai_lab.engine_host.http_host import GenerationHost
 from ai_lab.music.hosting import (
     PORT,
     UI_PORT,
@@ -25,12 +34,65 @@ from ai_lab.music.hosting import (
     terminate,
     wait_until_ready,
 )
-from ai_lab.music.backends.yue2_web_backend import Yue2WebBackend
+from ai_lab.music.backends.yue2_web_backend import (
+    WindowActiveError,
+    WindowRefusedError,
+    WindowSettings,
+    Yue2WebBackend,
+)
 from ai_lab.network import LOOPBACK, PAGE_INTERFACES
 
 # How long the studio may take to come up, and to stop.
 STUDIO_START_S = 60
 STUDIO_STOP_S = 15
+WINDOW_PATH = "/v1/audio/music/window-generations"
+# Each refusal of a window call and the status it is answered with; anything else is a 500.
+WINDOW_STATUS: tuple[tuple[type[Exception], HTTPStatus], ...] = (
+    (WindowRefusedError, HTTPStatus.UNPROCESSABLE_ENTITY),
+    (WindowActiveError, HTTPStatus.CONFLICT),
+    (KeyError, HTTPStatus.NOT_FOUND),
+    (ValueError, HTTPStatus.BAD_REQUEST),
+    (TypeError, HTTPStatus.BAD_REQUEST),
+)
+
+
+class Yue2Host(GenerationHost):
+    """`GenerationHost` with the window call and its cancel (`Yue2WebBackend`)."""
+
+    backend: Yue2WebBackend
+
+    def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
+        """The window call, or the ordinary music call."""
+        if self.path != WINDOW_PATH:
+            super().do_POST()
+            return
+        backend = self.backend
+        self._answer(lambda: backend.generate_window(self._body()))
+
+    def do_DELETE(self) -> None:  # noqa: N802 - the name http.server calls
+        """Cancel the window call named by the last part of the path."""
+        prefix = WINDOW_PATH + "/"
+        request_id = self.path[len(prefix):] if self.path.startswith(prefix) else ""
+        if not request_id or "/" in request_id:
+            self._not_found()
+            return
+        backend = self.backend
+        self._answer(lambda: backend.cancel_window(request_id))
+
+    def _answer(self, work: Callable[[], dict]) -> None:
+        try:
+            self._json(HTTPStatus.OK, work())
+        except Exception as error:
+            status = next((status for kind, status in WINDOW_STATUS if isinstance(error, kind)),
+                          HTTPStatus.INTERNAL_SERVER_ERROR)
+            message = error.args[0] if isinstance(error, KeyError) and error.args else str(error)
+            self._json(status, {"error": {"message": message}})
+
+
+def serve(backend: Yue2WebBackend, port: int) -> None:
+    """Answer the song and window calls on this machine only (loopback) until stopped."""
+    handler = type("BoundYue2Host", (Yue2Host,), {"backend": backend})
+    ThreadingHTTPServer((LOOPBACK, port), handler).serve_forever()
 
 
 def main() -> None:
@@ -38,12 +100,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cot", choices=("full", "melody"), required=True)
     parser.add_argument("--device", choices=("cuda", "mps"), default="cuda")
+    # The instance's `window_*` settings as JSON (`Yue2Engine.plan`); without them
+    # window calls are refused rather than run on numbers nobody chose.
+    parser.add_argument("--window-settings", type=json.loads, default=None)
     args = parse(("--model-path", Path), ("--vae-path", Path), ("--output-root", Path),
                  ("--memory-budget-gib", float), PORT, UI_PORT, ("--webui-root", Path),
                  parser=parser)
     ui_url = f"http://{LOOPBACK}:{args.ui_port}"
     launch_studio(args, ui_url)
-    serve(Yue2WebBackend(ui_url, args.model_path.name, args.cot), args.port)
+    window = (WindowSettings.from_params(args.window_settings)
+              if args.window_settings is not None else None)
+    serve(Yue2WebBackend(ui_url, args.model_path.name, args.cot, window=window), args.port)
 
 
 def studio_env(device: str) -> dict[str, str]:
