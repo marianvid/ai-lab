@@ -101,22 +101,20 @@ class BundleTests(unittest.TestCase):
 
 
 DOOR_PREFIX = "/ai/ai-lab-linux"
-SONG_PATH = DOOR_PREFIX + "/v1/audio/music/generations/song-a?model=yue2"
 
 
 class FakeDoor(BaseHTTPRequestHandler):
     """This machine's scheduler door, with the other AI-Lab behind it.
 
-    Answers the bundle of `served`, records each call's `X-Run-Id` and any token it got,
-    and gives the door's own refusals (a `scheduler` key) for the names that ask for them.
+    Answers the bundle of `served`, records each call's `X-Run-Id`, any token it got and any
+    delete (a pull sends none), and gives the door's own refusals (a `scheduler` key) for the
+    names that ask for them.
     """
 
     served: dict[str, bytes] = {}  # noqa: RUF012 - set by each test
     deletes: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
     runs: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
     tokens: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
-    refuse_delete = False
-    door_refuses_delete = False
 
     def _seen(self) -> str | None:
         FakeDoor.runs.append(self.headers.get("X-Run-Id", ""))
@@ -135,24 +133,16 @@ class FakeDoor(BaseHTTPRequestHandler):
             self._answer(409, b'{"error": "in use"}')
         elif name == "lost":
             self._door(502, "partner_lost", "the partner no longer knows this call")
+        elif name == "unrouted":
+            self._door(404, "unknown_provider", "the partner's calls are not set up here")
         elif name in FakeDoor.served:
             self._answer(200, FakeDoor.served[name])
         else:
             self._answer(404, b'{"error": "no generation"}')
 
     def do_DELETE(self):  # noqa: N802 - the name http.server calls
-        name = self._seen()
-        if name is None:
-            return
-        if FakeDoor.door_refuses_delete:
-            self._door(404, "unknown_provider", "the partner's calls are not set up here")
-        elif name == "gone":
-            self._answer(404, b'{"error": "no generation"}')
-        elif FakeDoor.refuse_delete:
-            self._answer(409, b'{"error": "a job writes there"}')
-        else:
-            FakeDoor.deletes.append(self.path)
-            self._answer(200, b'{"deleted": true}')
+        FakeDoor.deletes.append(self.path)                     # a pull must never send one
+        self._answer(200, b'{"deleted": true}')
 
     def _door(self, status, reason, detail):
         self._answer(status, json.dumps({"scheduler": {"reason": reason, "detail": detail}}).encode())
@@ -252,7 +242,6 @@ class PullTests(unittest.TestCase):
         register_transfers(self.router, self.files)
         FakeDoor.served = {"song-a": bundle_bytes(song(self.root / "linux"))}
         FakeDoor.deletes, FakeDoor.runs, FakeDoor.tokens = [], [], []
-        FakeDoor.refuse_delete = FakeDoor.door_refuses_delete = False
 
     def tearDown(self):
         self.door.shutdown()
@@ -269,19 +258,13 @@ class PullTests(unittest.TestCase):
     def pull(self, name="song-a", peer="ai-lab-linux", run="run-7", **more):
         return self.route("POST", f"/v1/audio/music/generations/{name}/pull", {"from": peer, **more}, run)
 
-    def kept_here(self, name="song-a"):
-        """A song pulled before: complete, as the Studio marks it."""
-        folder = song(self.here, name)
-        (folder / "result.json").write_text('{"status": "complete"}')
-        return folder
-
-    def test_the_song_moves_through_the_door_and_the_source_is_deleted(self):
+    def test_the_song_is_copied_through_the_door_and_the_source_left_alone(self):
         answer = self.pull()
         self.assertEqual(answer, {"generation_id": "song-a", "machine": "ai-lab-mac", "files": 2,
-                                  "bytes": 10014, "source_removed": True})
+                                  "bytes": 10014, "checked": True})
         self.assertEqual((self.here / "song-a" / "audio.flac").read_bytes(), b"F" * 10000)
-        self.assertEqual(FakeDoor.deletes, [SONG_PATH])
-        self.assertEqual(FakeDoor.runs, ["run-7", "run-7"])            # the bundle, then the delete
+        self.assertEqual(FakeDoor.runs, ["run-7"])                     # the bundle only
+        self.assertEqual(FakeDoor.deletes, [])                         # music deletes the other copy
         self.assertEqual(FakeDoor.tokens, [])                         # no token between the AI-Labs
         self.assertEqual([path.name for path in self.here.iterdir()], ["song-a"])
 
@@ -297,57 +280,19 @@ class PullTests(unittest.TestCase):
         FakeDoor.served["song-a"] = bytes(data)
         with self.assertRaisesRegex(TransferCheckError, "audio.flac arrived different"):
             self.pull()
-        self.assertEqual((list(self.here.iterdir()), FakeDoor.deletes), ([], []))
+        self.assertEqual((list(self.here.iterdir()), FakeDoor.deletes), ([], []))   # source untouched
 
-    def test_a_source_that_is_not_deleted_is_said(self):
-        FakeDoor.refuse_delete = True
-        answer = self.pull()
-        self.assertFalse(answer["source_removed"])
-        self.assertIn("a job writes there", answer["source_error"])
-        self.assertTrue((self.here / "song-a").is_dir())
+    def test_the_doors_404_is_not_a_missing_song(self):
+        with self.assertRaisesRegex(SchedulerDoorError, r"HTTP 404, unknown_provider"):
+            self.pull("unrouted")
+        self.assertEqual(list(self.here.iterdir()), [])
 
-    def test_the_doors_404_on_the_delete_is_not_a_removed_source(self):
-        FakeDoor.door_refuses_delete = True
-        answer = self.pull()
-        self.assertFalse(answer["source_removed"])
-        self.assertIn("scheduler door refused", answer["source_error"])
-        self.assertIn("unknown_provider", answer["source_error"])
-
-    def test_a_retry_sends_only_the_delete(self):
-        FakeDoor.refuse_delete = True
-        self.assertFalse(self.pull()["source_removed"])
-        (self.here / "song-a" / "result.json").write_text('{"status": "complete"}')
-        FakeDoor.refuse_delete, FakeDoor.runs = False, []
-        answer = self.pull(retry_delete=True, run="run-8")
-        self.assertEqual(answer, {"generation_id": "song-a", "machine": "ai-lab-mac", "source_removed": True})
-        self.assertEqual(FakeDoor.deletes, [SONG_PATH])
-        self.assertEqual(FakeDoor.runs, ["run-8"])                     # only the delete, under its run
-
-    def test_a_retry_whose_peer_copy_is_gone_counts_as_removed(self):
-        self.kept_here("gone")
-        self.assertTrue(self.pull("gone", retry_delete=True)["source_removed"])
-
-    def test_a_retry_that_fails_again_says_why(self):
-        self.kept_here()
-        FakeDoor.refuse_delete = True
-        answer = self.pull(retry_delete=True)
-        self.assertFalse(answer["source_removed"])
-        self.assertIn("a job writes there", answer["source_error"])
-
-    def test_retry_refusals(self):
-        with self.assertRaisesRegex(FileNotFoundError, "pull it first"):
+    def test_the_old_retry_field_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "Unknown pull fields: retry_delete"):
             self.pull(retry_delete=True)
-        song(self.here, "song-a")                                  # no result.json: not complete
-        with self.assertRaisesRegex(WindowCallActiveError, "not a complete song"):
-            self.pull(retry_delete=True)
-        (self.here / "song-a" / "result.json").write_text('{"status": "failed"}')
-        with self.assertRaisesRegex(WindowCallActiveError, "not a complete song"):
-            self.pull(retry_delete=True)
-        self.assertEqual(FakeDoor.deletes, [])
-        with self.assertRaisesRegex(ValueError, "retry_delete must be"):
-            self.pull(retry_delete="yes")
         with self.assertRaisesRegex(ValueError, "Unknown pull fields: extra"):
             self.pull(extra=1)
+        self.assertEqual(FakeDoor.runs, [])
 
     def test_refusals(self):
         with self.assertRaisesRegex(FileNotFoundError, "has no generation nobody"):
@@ -362,6 +307,7 @@ class PullTests(unittest.TestCase):
         with self.assertRaisesRegex(WindowCallActiveError, "already on this machine"):
             self.pull()
         self.assertEqual(len(FakeDoor.runs), 3)
+        self.assertEqual(FakeDoor.deletes, [])
         self.assertEqual([path.name for path in self.here.iterdir()], ["song-a"])   # no half-copy left
 
     def test_a_door_that_does_not_answer(self):

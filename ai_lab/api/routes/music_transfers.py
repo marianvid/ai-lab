@@ -1,7 +1,7 @@
 """Moving a YuE2 song (a generation) from one AI-Lab to another.
 
-The machine that should have the song pulls it, so the other deletes it only after
-the copy is known to be whole:
+The machine that should have the song pulls it; the copy is kept only once it is
+known to be whole:
 
 - `GET /v1/audio/music/generations/{id}/bundle?model=<m>` answers the song's folder as an
   uncompressed tar. Its first member is `MANIFEST.json`: `{"generation_id", "files":
@@ -9,13 +9,14 @@ the copy is known to be whole:
 - `POST /v1/audio/music/generations/{id}/pull?model=<m>` with `{"from": "<peer>"}` and the
   header `X-Run-Id` fetches that bundle from the peer named in `engines.yue2.transfer`,
   writes it into a hidden folder beside the songs, checks every size and sha256 against the
-  manifest, renames it into place, then deletes the song on the peer.
+  manifest, and renames it into place. It never deletes the peer's copy: the caller
+  (music) does that itself once the answer says `checked: true`.
 
-The AI-Labs never talk directly: both the fetch and the delete go through this machine's
-scheduler door, `{scheduler}/ai/<peer>/v1/audio/music/generations/{id}...`, carrying the
-caller's `X-Run-Id` (the run the door checks) and no token. A pull without `X-Run-Id` is
-refused (400). The door's own refusals (its `scheduler` key) are told apart from the other
-AI-Lab's answers: a door's 404 is never taken for "the peer's copy is already gone".
+The AI-Labs never talk directly: the fetch goes through this machine's scheduler door,
+`{scheduler}/ai/<peer>/v1/audio/music/generations/{id}/bundle`, carrying the caller's
+`X-Run-Id` (the run the door checks) and no token. A pull without `X-Run-Id` is refused
+(400). The door's own refusals (its `scheduler` key) are told apart from the other AI-Lab's
+answers: a door's 404 is never taken for "the peer has no such song".
 
 Both read and write the engine's folder, so they work whether YuE2 is loaded or not.
 """
@@ -170,25 +171,11 @@ def _write_checked(source, target: Path, item: dict, chunk_bytes: int) -> int:
     return size
 
 
-def complete_song(folder: Path) -> bool:
-    """Whether a song here looks whole: its audio is there and the Studio marked it complete.
-
-    The cheap check before deleting the peer's copy on a retry; the full check (every
-    size and sha256) was made when the song was pulled.
-    """
-    try:
-        result = json.loads((folder / "result.json").read_text())
-    except (OSError, ValueError):
-        return False
-    return (folder / "audio.flac").is_file() and isinstance(result, dict) \
-        and result.get("status") == "complete"
-
-
 class Pull:
     """One pull: the peer, the song, and the engine's folder it goes into.
 
-    With `"retry_delete": true` it fetches nothing: the song is already here (pulled before,
-    its peer's delete failed) and only the delete on the peer is sent again.
+    It only copies: the peer's song is left as it is. The caller (music) deletes the other
+    copy itself once it has the answer.
     """
 
     def __init__(self, files: Songs, query: dict | None, generation_id: str, body,
@@ -198,12 +185,9 @@ class Pull:
                              "which the scheduler door checks")
         self.run_id = run_id
         body = body if isinstance(body, dict) else {}
-        unknown = set(body) - {"from", "retry_delete"}
+        unknown = set(body) - {"from"}
         if unknown:
             raise ValueError("Unknown pull fields: " + ", ".join(sorted(unknown)))
-        self.retry_delete = body.get("retry_delete", False)
-        if not isinstance(self.retry_delete, bool):
-            raise ValueError("retry_delete must be true or false")
         self.engine = files.engine(query)
         self.transfer = self.engine.transfer
         self.peer = self.transfer.peer(body.get("from"))
@@ -211,25 +195,14 @@ class Pull:
         self.generation_id = check_generation_id(generation_id)
         self.target = self.engine.generations_dir() / self.generation_id
         files.refuse_busy(query, self.generation_id)
-        if self.retry_delete:
-            self._check_kept_copy()
-        elif self.target.exists():
+        if self.target.exists():
             raise WindowCallActiveError(f"{self.generation_id} is already on this machine")
 
-    def _check_kept_copy(self) -> None:
-        if not self.target.is_dir():
-            raise FileNotFoundError(f"{self.generation_id} is not on this machine: pull it first")
-        if not complete_song(self.target):
-            raise WindowCallActiveError(f"{self.generation_id} here is not a complete song; "
-                                        f"the copy on {self.peer.name} is kept")
-
     def run(self) -> dict:
-        """Fetch, check, move into place, then delete on the peer (only the delete on a retry)."""
-        if self.retry_delete:
-            return self._removed({"generation_id": self.generation_id, "machine": self.transfer.machine})
+        """Fetch the bundle, check every file, move the copy into place."""
         temporary = self.target.parent / f".pull-{self.generation_id}-{secrets.token_hex(4)}"
         try:
-            with self._ask("GET", "/bundle") as response:
+            with self._fetch() as response:
                 count, size = receive(response, temporary, self.transfer.chunk_bytes)
             if self.target.exists():
                 raise WindowCallActiveError(f"{self.generation_id} appeared on this machine meanwhile")
@@ -237,22 +210,14 @@ class Pull:
         except BaseException:
             shutil.rmtree(temporary, ignore_errors=True)
             raise
-        return self._removed({"generation_id": self.generation_id, "machine": self.transfer.machine,
-                              "files": count, "bytes": size})
+        return {"generation_id": self.generation_id, "machine": self.transfer.machine,
+                "files": count, "bytes": size, "checked": True}
 
-    def _removed(self, answer: dict) -> dict:
-        """`answer` with whether the peer's copy is gone, and why not when it is not."""
-        error = self._delete_on_peer()
-        answer["source_removed"] = error is None
-        if error is not None:
-            answer["source_error"] = error
-        return answer
-
-    def _ask(self, method: str, suffix: str):
-        """One call to the peer through this machine's scheduler door (no token: the door asks none)."""
+    def _fetch(self):
+        """The bundle, through this machine's scheduler door (no token: the door asks none)."""
         url = (f"{self.peer.url}/v1/audio/music/generations/{quote(self.generation_id, safe='')}"
-               f"{suffix}?{urlencode({'model': self.model})}")
-        request = urllib.request.Request(url, method=method, headers={RUN_HEADER: self.run_id})
+               f"/bundle?{urlencode({'model': self.model})}")
+        request = urllib.request.Request(url, method="GET", headers={RUN_HEADER: self.run_id})
         try:
             return urllib.request.urlopen(request, timeout=self.transfer.timeout_s)
         except urllib.error.HTTPError as error:
@@ -262,7 +227,7 @@ class Pull:
                                      f"{getattr(error, 'reason', error)}") from None
 
     def _refused(self, code: int, text: str) -> Exception:
-        """The error for a refused call: the door's own refusal, or the peer AI-Lab's answer."""
+        """The error for a refused fetch: the door's own refusal, or the peer AI-Lab's answer."""
         door = _door_refusal(text)
         if door is not None:
             return SchedulerDoorError(f"the scheduler door refused the call to {self.peer.name} "
@@ -272,16 +237,6 @@ class Pull:
         if code == HTTPStatus.CONFLICT:
             return WindowCallActiveError(f"{self.peer.name} refused: {text[:500]}")
         return RuntimeError(f"{self.peer.name} answered HTTP {code}: {text[:500]}")
-
-    def _delete_on_peer(self) -> str | None:
-        """None when the peer's copy is gone (deleted now, or already: its 404), else why not."""
-        try:
-            with self._ask("DELETE", ""):
-                return None
-        except FileNotFoundError:
-            return None
-        except Exception as error:
-            return str(error)
 
 
 def _door_refusal(text: str) -> str | None:

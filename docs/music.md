@@ -164,44 +164,37 @@ replaces the old; within the context), at most 5 candidates, a window of
 
 A YuE2 song (a generation) can move between machines, for example from Linux
 to the Mac where the music page edits it. The machine that should have it
-pulls it, and the other deletes its copy only once the copy here is checked.
+pulls a copy and checks it. AI-Lab never deletes the other copy: the caller
+(music) does that itself once the pull answers `checked: true`.
 
 | Call | What |
 |---|---|
 | `GET /v1/audio/music/generations/{generation_id}/bundle?model=<entry>` | the song's folder as an uncompressed tar. Its first member is `MANIFEST.json`, `{"generation_id", "files": [{"name", "size", "sha256"}]}`; the files follow, flat, in that order. 404 unknown; 409 while it is the source of a window call or a YuE2 Studio job works on it |
-| `POST /v1/audio/music/generations/{generation_id}/pull?model=<entry>`, body `{"from": "<peer>"}`, header `X-Run-Id` | fetches that bundle from the peer through this machine's scheduler door, writes it into a hidden folder beside the songs, checks every size and sha256, renames it into place, then deletes the song on the peer (`DELETE .../generations/{id}`, so the peer's Studio guard applies) |
+| `POST /v1/audio/music/generations/{generation_id}/pull?model=<entry>`, body `{"from": "<peer>"}`, header `X-Run-Id` | fetches that bundle from the peer through this machine's scheduler door, writes it into a hidden folder beside the songs, checks every size and sha256 against the manifest, and renames it into place in one step |
 
-The AI-Labs never talk to each other directly. Both the fetch and the delete
-go to this machine's scheduler, at
-`{scheduler}/ai/<peer>/v1/audio/music/generations/{id}/bundle?model=<entry>`
-and `{scheduler}/ai/<peer>/v1/audio/music/generations/{id}?model=<entry>`.
-The scheduler passes them to the partner scheduler, which passes them to its
-own AI-Lab. Each carries the caller's `X-Run-Id` (the run the door checks) and
-no token: the door asks none of its callers. A pull without `X-Run-Id` is
-refused with **400**.
+The AI-Labs never talk to each other directly. The fetch goes to this
+machine's scheduler, at
+`{scheduler}/ai/<peer>/v1/audio/music/generations/{id}/bundle?model=<entry>`.
+The scheduler passes it to the partner scheduler, which passes it to its own
+AI-Lab. It carries the caller's `X-Run-Id` (the run the door checks) and no
+token: the door asks none of its callers.
 
-The door's own refusals (an answer with a `scheduler` key, such as
-`run_stopped`, `unknown_provider` or `partner_lost`) end the pull with
-**502**. On the delete, the door's refusal becomes `source_error`. A door's
-404 is never taken for "the peer has no copy". The same **502** is given when
-the door does not answer.
+The pull answers `{"generation_id", "machine", "files", "bytes", "checked":
+true}`. Refusals:
 
-The pull answers `{"generation_id", "machine", "files", "bytes",
-"source_removed"}`, and `source_error` when the peer kept its copy (the song is
-then on both machines). A peer that answers the delete with 404 already has no
-copy, which counts as removed.
+- **400**: no `X-Run-Id`, a peer that is not configured, or a field other
+  than `from` in the body.
+- **404**: the peer does not have the song.
+- **409**: the song is already on this machine, is being edited here, or the
+  peer refused it as in use.
+- **502**:
+  - a copy that fails its check (it is removed; the source is untouched);
+  - the door's own refusal (an answer with a `scheduler` key, such as
+    `run_stopped`, `unknown_provider` or `partner_lost`), named in the
+    message; a door's 404 is never taken for "the peer has no such song";
+  - a door that does not answer.
 
-To try the peer's delete again, send the same pull with
-`{"from": "<peer>", "retry_delete": true}`. It fetches nothing: the song must
-already be here (else **404**), and look whole, meaning its `audio.flac` is
-there and its `result.json` says `complete` (else **409**, and the peer's copy
-is kept; the full check, every size and sha256, was made when it was pulled).
-It answers `{"generation_id", "machine", "source_removed"}`, with
-`source_error` if the peer still keeps its copy. A copy that
-fails its check is removed, the source is kept, and the answer is a **502**.
-**409** when the song is already on this machine or is being edited here;
-**404** when the peer does not have it; **400** for a peer that is not
-configured. Both calls work whether YuE2 is loaded or not.
+Both calls work whether YuE2 is loaded or not.
 
 The scheduler and the other machines are configured in the YuE2 engine's
 section, as `transfer` (`engines.yue2.transfer`, see
@@ -212,7 +205,7 @@ section, as `transfer` (`engines.yue2.transfer`, see
 | `machine` | empty | the name this AI-Lab goes by, given back as `machine` |
 | `scheduler` | empty | this machine's scheduler (`http(s)://host:port`), whose model door reaches the other machines. Needed as soon as `peers` names one |
 | `peers` | none | the other machines' providers a song may be pulled from: their names in the LLM Map, as the door knows them (e.g. `["ai-lab-linux"]`). Empty: every pull is refused (400, "no peer") |
-| `timeout_s` | 60 | how long the door may stay silent while a song is fetched or deleted, in seconds. Through the partner, the answer starts only once the partner holds the whole song (~50 MB), so this covers the whole fetch on the other side |
+| `timeout_s` | 60 | how long the door may stay silent while a song is fetched, in seconds. Through the partner, the answer starts only once the partner holds the whole song (~50 MB), so this covers the whole fetch on the other side |
 | `chunk_bytes` | 1048576 | the piece a song is read, written and checked in, in bytes (4096 to 64 MiB) |
 
 ---

@@ -20,7 +20,7 @@ Configured in the YuE2 engine's section as `transfer` (`engines.yue2.transfer`):
   the other machine. AI-Lab sends it no token: the door asks none of its callers.
 - `peers`: the other machines' providers (their names in the LLM Map, as the door knows
   them) a song may be pulled from. Empty: no pull is possible.
-- `timeout_s`: how long the door may stay silent while a song is fetched or deleted
+- `timeout_s`: how long the door may stay silent while a song is fetched
   (seconds). Through the partner the answer only starts once the partner holds the whole
   song (~50 MB), so this covers the whole fetch on the other side.
 - `chunk_bytes`: the piece a song is read, written and checked in (bytes).
