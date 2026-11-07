@@ -70,3 +70,10 @@ class WindowCallActiveError(RuntimeError):
 
 class WindowRequestError(ValueError):
     """A window call the front door cannot take as it is (no usable `request_id`): a 422."""
+
+
+class TransferCheckError(RuntimeError):
+    """A song fetched from another AI-Lab did not arrive as its manifest says: a 502.
+
+    The copy is removed and the source kept; the other AI-Lab's answer was wrong, not the request.
+    """

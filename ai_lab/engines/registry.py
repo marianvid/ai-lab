@@ -98,6 +98,8 @@ def accepted_settings(cls: type) -> set[str]:
     """The keys an engine's configuration section may hold."""
     names = set(inspect.signature(cls).parameters) - {"locations"}
     names |= set(getattr(cls, "location_settings", ()))
+    # Grouped settings the engine's own `from_settings` reads (yue2's `transfer`).
+    names |= set(getattr(cls, "section_settings", ()))
     return names | MAINTENANCE_KEYS
 
 

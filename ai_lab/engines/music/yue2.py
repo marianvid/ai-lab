@@ -8,6 +8,7 @@ from ...types import ModelSet, Task
 from ..base import MUSIC_PATHS, MUSIC_WINDOW_PATHS, LaunchPlan, ParamSpec, validate
 from ..isolated import ConfiguredEngine, model_directory, script_env, ui_port
 from . import music_server
+from .transfer import TransferSettings
 
 # The accelerators YuE2 runs on: the NVIDIA card on Linux, Metal on a Mac.
 DEVICES = ("cuda", "mps")
@@ -74,17 +75,31 @@ class Yue2Engine(ConfiguredEngine):
     script = music_server("yue2")
     reserves_memory = True
     location_settings = ("vae_path", "output_root", "webui_root")
+    # Read by `from_settings`: moving songs between AI-Labs (`transfer.py`).
+    section_settings = ("transfer",)
 
     def __init__(self, binary: str | None = None, server: str | None = None,
                  model_options: dict[str, dict] | None = None,
                  locations: dict[str, str] | None = None, device: str = "cuda") -> None:
         super().__init__(binary, server, model_options, locations)
+        # Moving songs between this AI-Lab and the others (`transfer.py`);
+        # read from the section's `transfer` by `from_settings`.
+        self.transfer = TransferSettings()
         # Which accelerator the YuE2 runtime and its Studio use. Configured
         # per host rather than guessed, so a Mac never silently falls back to
         # the CPU.
         if device not in DEVICES:
             raise ValueError("YuE2 device must be cuda or mps")
         self.device = device
+
+    @classmethod
+    def from_settings(cls, settings: dict) -> Yue2Engine:
+        """Built from the engine's section, with its `transfer` settings checked."""
+        engine = super().from_settings(settings)
+        if not isinstance(engine, Yue2Engine):
+            raise TypeError("from_settings built another engine")
+        engine.transfer = TransferSettings.from_mapping(settings.get("transfer"))
+        return engine
 
     def music_form(self, model_name: str) -> dict:
         """What the music page asks for: lyrics, and an editable score."""

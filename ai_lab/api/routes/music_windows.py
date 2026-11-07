@@ -31,12 +31,16 @@ from ...gateway.errors import ModelNotLoadedError, WindowCallActiveError, Window
 from ...music.backends.yue2_web_backend import REQUEST_ID, check_generation_id
 from ...network import LOOPBACK
 from ..passthrough import Passthrough
+from .music_transfers import register_transfers
 
 WINDOW_PATH = MUSIC_WINDOW_PATHS[0]
 # How long the engine may take to say it is cancelling.
 CANCEL_CALL_S = 30
 # A song's file is sent in pieces of this size.
 CHUNK_BYTES = 1 << 20
+# How many of the Studio's latest jobs are looked at for one still working on a song;
+# the Studio runs one job at a time, so the pending and running ones are among the latest.
+STUDIO_JOBS_LOOKED_AT = 50
 # How YuE2 Studio's refusal to delete a song a job is still writing begins (`library.delete_directory`).
 STUDIO_IN_USE = "an active job is writing"
 # The files a generation serves, by route: name in its folder, and media type.
@@ -190,20 +194,40 @@ class GenerationFiles:
         self.operations = operations
         self.windows = windows or WindowCalls()
 
-    def folder(self, query: dict | None, generation_id: str) -> Path:
-        """The generation's folder, for the entry named by `?model=`."""
+    def engine(self, query: dict | None):
+        """The engine of the entry named by `?model=`, refused unless it keeps generations."""
         model = (query or {}).get("model")
         if not model:
             raise ValueError("name the YuE2 entry with ?model=")
         instance = self.gateway.resolve(model, self.operations.configured())
         engine = self.operations.engine(instance["engine"])
-        where = getattr(engine, "generations_dir", None)
-        if where is None:
+        if getattr(engine, "generations_dir", None) is None:
             raise ValueError(f"{model} keeps no generations")
-        folder = where() / check_generation_id(generation_id)
+        return engine
+
+    def folder(self, query: dict | None, generation_id: str) -> Path:
+        """The generation's folder, for the entry named by `?model=`."""
+        folder = self.engine(query).generations_dir() / check_generation_id(generation_id)
         if not folder.is_dir():
             raise FileNotFoundError(f"no generation {generation_id}")
         return folder
+
+    def studio_port(self, query: dict | None) -> int | None:
+        """The YuE2 Studio's port while the entry is loaded, else None."""
+        try:
+            port, _name = self.gateway.where_loaded((query or {})["model"], WINDOW_PATH)
+        except ModelNotLoadedError:
+            return None
+        return int(ui_port(port))
+
+    def refuse_busy(self, query: dict | None, generation_id: str) -> None:
+        """409 when a window call edits this generation, or a Studio job writes or reads it."""
+        editing = self.windows.in_use(generation_id)
+        if editing is not None:
+            raise WindowCallActiveError(f"{generation_id} is the source of window call {editing}")
+        port = self.studio_port(query)
+        if port is not None and _studio_uses(port, generation_id):
+            raise WindowCallActiveError(f"a YuE2 Studio job is working on {generation_id}")
 
     def send(self, query: dict | None, generation_id: str, what: str) -> Passthrough:
         """One of the generation's files (`FILES`), in pieces."""
@@ -226,12 +250,11 @@ class GenerationFiles:
         editing = self.windows.in_use(generation_id)
         if editing is not None:
             raise WindowCallActiveError(f"{generation_id} is the source of window call {editing}")
-        try:
-            port, _name = self.gateway.where_loaded((query or {})["model"], WINDOW_PATH)
-        except ModelNotLoadedError:
+        port = self.studio_port(query)
+        if port is None:
             shutil.rmtree(folder)
         else:
-            _studio_delete(int(ui_port(port)), generation_id)
+            _studio_delete(port, generation_id)
         return {"deleted": generation_id}
 
 
@@ -257,6 +280,17 @@ def _studio_delete(studio_port: int, generation_id: str) -> None:
         raise RuntimeError(f"YuE2 Studio could not delete {generation_id}: HTTP {error.code}") from error
 
 
+def _studio_uses(studio_port: int, generation_id: str) -> bool:
+    """Whether a pending or running Studio job writes this generation, or edits it as its source."""
+    url = f"http://{LOOPBACK}:{studio_port}/api/jobs?limit={STUDIO_JOBS_LOOKED_AT}"
+    with urllib.request.urlopen(url, timeout=CANCEL_CALL_S) as response:
+        jobs = json.load(response).get("jobs", [])
+    return any(job.get("status") in ("pending", "running")
+               and (Path(job.get("output_dir") or "").name == generation_id
+                    or (job.get("params") or {}).get("source") == generation_id)
+               for job in jobs)
+
+
 def _detail(error: urllib.error.HTTPError) -> str:
     """The Studio's `detail` sentence, or the body as it came."""
     body = error.read().decode(errors="replace")
@@ -274,7 +308,7 @@ def _pieces(path: Path) -> Iterator[bytes]:
 
 
 def register_files(router, files: GenerationFiles, windows: WindowCalls) -> None:
-    """The generation routes and the window cancel."""
+    """The generation routes (files, bundle, pull) and the window cancel."""
     base = "/v1/audio/music/generations/{generation_id}"
     router.add("GET", base + "/audio",
                lambda generation_id, query=None, **_: files.send(query, generation_id, "audio"))
@@ -284,3 +318,4 @@ def register_files(router, files: GenerationFiles, windows: WindowCalls) -> None
                lambda generation_id, query=None, **_: files.delete(query, generation_id))
     router.add("DELETE", WINDOW_PATH + "/{request_id}",
                lambda request_id, **_: windows.cancel(request_id))
+    register_transfers(router, files)

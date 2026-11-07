@@ -160,6 +160,35 @@ crossfade 0.3 s, swap margin 2.5 s (how far outside the window the new audio
 replaces the old; within the context), at most 5 candidates, a window of
 1-60 s, and the window's sampling (1.0 / 0.95 / 100 / 1.2 / 50).
 
+## YuE2: moving a song to another AI-Lab
+
+A YuE2 song (a generation) can move between machines, for example from Linux
+to the Mac where the music page edits it. The machine that should have it
+pulls it, and the other deletes its copy only once the copy here is checked.
+
+| Call | What |
+|---|---|
+| `GET /v1/audio/music/generations/{generation_id}/bundle?model=<entry>` | the song's folder as an uncompressed tar. Its first member is `MANIFEST.json`, `{"generation_id", "files": [{"name", "size", "sha256"}]}`; the files follow, flat, in that order. 404 unknown; 409 while it is the source of a window call or a YuE2 Studio job works on it |
+| `POST /v1/audio/music/generations/{generation_id}/pull?model=<entry>`, body `{"from": "<peer>"}` | fetches that bundle from the peer, directly (AI-Lab to AI-Lab, not through a scheduler), writes it into a hidden folder beside the songs, checks every size and sha256, renames it into place, then deletes the song on the peer (`DELETE .../generations/{id}`, so the peer's Studio guard applies) |
+
+The pull answers `{"generation_id", "machine", "files", "bytes",
+"source_removed"}`, and `source_error` when the peer kept its copy (the song is
+then on both machines; delete it there once the reason is cleared). A copy that
+fails its check is removed, the source is kept, and the answer is a **502**.
+**409** when the song is already on this machine or is being edited here;
+**404** when the peer does not have it; **400** for a peer that is not
+configured. Both calls work whether YuE2 is loaded or not.
+
+The other AI-Labs are configured in the YuE2 engine's section, as `transfer`
+(`engines.yue2.transfer`, see `ai_lab/engines/music/transfer.py`):
+
+| Setting | Default | What it is |
+|---|---|---|
+| `machine` | empty | the name this AI-Lab goes by, given back as `machine` |
+| `peers` | none | each other AI-Lab by name: `url` (`http(s)://host:port`), `token_file` (an absolute path to a JSON file kept privately, in `opts`) and `token_key` (the client's entry in it). The token itself is never in the configuration; it is read when a pull runs |
+| `timeout_s` | 60 | how long a peer may stay silent while a song is fetched or deleted, in seconds; a song (~50 MB) comes in pieces, each waited for this long |
+| `chunk_bytes` | 1048576 | the piece a song is read, written and checked in, in bytes (4096 to 64 MiB) |
+
 ---
 
 [← all documents](../README.md)  ·  [Use a model directly](direct-use.md)
