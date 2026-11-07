@@ -117,6 +117,9 @@ class FakePeer(BaseHTTPRequestHandler):
             self._answer(404, b'{"error": "no generation"}')
 
     def do_DELETE(self):  # noqa: N802 - the name http.server calls
+        if "/gone?" in self.path:
+            self._answer(404, b'{"error": "no generation"}')
+            return
         if FakePeer.refuse_delete:
             self._answer(409, b'{"error": "a job writes there"}')
             return
@@ -223,8 +226,14 @@ class PullTests(unittest.TestCase):
         handler, captured = matched
         return handler(query={"model": "yue2"}, body=body, **captured)
 
-    def pull(self, name="song-a", peer="ai-lab-linux"):
-        return self.route("POST", f"/v1/audio/music/generations/{name}/pull", {"from": peer})
+    def pull(self, name="song-a", peer="ai-lab-linux", **more):
+        return self.route("POST", f"/v1/audio/music/generations/{name}/pull", {"from": peer, **more})
+
+    def kept_here(self, name="song-a"):
+        """A song pulled before: complete, as the Studio marks it."""
+        folder = song(self.here, name)
+        (folder / "result.json").write_text('{"status": "complete"}')
+        return folder
 
     def test_the_song_moves_and_the_source_is_deleted(self):
         answer = self.pull()
@@ -249,6 +258,42 @@ class PullTests(unittest.TestCase):
         self.assertFalse(answer["source_removed"])
         self.assertIn("a job writes there", answer["source_error"])
         self.assertTrue((self.here / "song-a").is_dir())
+
+    def test_a_retry_sends_only_the_delete(self):
+        FakePeer.refuse_delete = True
+        self.assertFalse(self.pull()["source_removed"])
+        (self.here / "song-a" / "result.json").write_text('{"status": "complete"}')
+        FakePeer.refuse_delete, FakePeer.tokens = False, []
+        answer = self.pull(retry_delete=True)
+        self.assertEqual(answer, {"generation_id": "song-a", "machine": "ai-lab-mac", "source_removed": True})
+        self.assertEqual(FakePeer.deletes, ["/v1/audio/music/generations/song-a?model=yue2"])
+        self.assertEqual(FakePeer.tokens, [])                     # nothing fetched
+
+    def test_a_retry_whose_peer_copy_is_gone_counts_as_removed(self):
+        self.kept_here("gone")
+        self.assertTrue(self.pull("gone", retry_delete=True)["source_removed"])
+
+    def test_a_retry_that_fails_again_says_why(self):
+        self.kept_here()
+        FakePeer.refuse_delete = True
+        answer = self.pull(retry_delete=True)
+        self.assertFalse(answer["source_removed"])
+        self.assertIn("a job writes there", answer["source_error"])
+
+    def test_retry_refusals(self):
+        with self.assertRaisesRegex(FileNotFoundError, "pull it first"):
+            self.pull(retry_delete=True)
+        song(self.here, "song-a")                                  # no result.json: not complete
+        with self.assertRaisesRegex(WindowCallActiveError, "not a complete song"):
+            self.pull(retry_delete=True)
+        (self.here / "song-a" / "result.json").write_text('{"status": "failed"}')
+        with self.assertRaisesRegex(WindowCallActiveError, "not a complete song"):
+            self.pull(retry_delete=True)
+        self.assertEqual(FakePeer.deletes, [])
+        with self.assertRaisesRegex(ValueError, "retry_delete must be"):
+            self.pull(retry_delete="yes")
+        with self.assertRaisesRegex(ValueError, "Unknown pull fields: extra"):
+            self.pull(extra=1)
 
     def test_refusals(self):
         with self.assertRaisesRegex(FileNotFoundError, "has no generation nobody"):

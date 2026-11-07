@@ -161,22 +161,58 @@ def _write_checked(source, target: Path, item: dict, chunk_bytes: int) -> int:
     return size
 
 
+def complete_song(folder: Path) -> bool:
+    """Whether a song here looks whole: its audio is there and the Studio marked it complete.
+
+    The cheap check before deleting the peer's copy on a retry; the full check (every
+    size and sha256) was made when the song was pulled.
+    """
+    try:
+        result = json.loads((folder / "result.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return (folder / "audio.flac").is_file() and isinstance(result, dict) \
+        and result.get("status") == "complete"
+
+
 class Pull:
-    """One pull: the peer, the song, and the engine's folder it goes into."""
+    """One pull: the peer, the song, and the engine's folder it goes into.
+
+    With `"retry_delete": true` it fetches nothing: the song is already here (pulled before,
+    its peer's delete failed) and only the delete on the peer is sent again.
+    """
 
     def __init__(self, files: Songs, query: dict | None, generation_id: str, body) -> None:
+        body = body if isinstance(body, dict) else {}
+        unknown = set(body) - {"from", "retry_delete"}
+        if unknown:
+            raise ValueError("Unknown pull fields: " + ", ".join(sorted(unknown)))
+        self.retry_delete = body.get("retry_delete", False)
+        if not isinstance(self.retry_delete, bool):
+            raise ValueError("retry_delete must be true or false")
         self.engine = files.engine(query)
         self.transfer = self.engine.transfer
-        self.peer = self.transfer.peer((body or {}).get("from") if isinstance(body, dict) else None)
+        self.peer = self.transfer.peer(body.get("from"))
         self.model = (query or {})["model"]
         self.generation_id = check_generation_id(generation_id)
         self.target = self.engine.generations_dir() / self.generation_id
-        if self.target.exists():
-            raise WindowCallActiveError(f"{self.generation_id} is already on this machine")
         files.refuse_busy(query, self.generation_id)
+        if self.retry_delete:
+            self._check_kept_copy()
+        elif self.target.exists():
+            raise WindowCallActiveError(f"{self.generation_id} is already on this machine")
+
+    def _check_kept_copy(self) -> None:
+        if not self.target.is_dir():
+            raise FileNotFoundError(f"{self.generation_id} is not on this machine: pull it first")
+        if not complete_song(self.target):
+            raise WindowCallActiveError(f"{self.generation_id} here is not a complete song; "
+                                        f"the copy on {self.peer.name} is kept")
 
     def run(self) -> dict:
-        """Fetch, check, move into place, then delete on the peer."""
+        """Fetch, check, move into place, then delete on the peer (only the delete on a retry)."""
+        if self.retry_delete:
+            return self._removed({"generation_id": self.generation_id, "machine": self.transfer.machine})
         temporary = self.target.parent / f".pull-{self.generation_id}-{secrets.token_hex(4)}"
         try:
             with self._ask("GET", "/bundle") as response:
@@ -187,11 +223,15 @@ class Pull:
         except BaseException:
             shutil.rmtree(temporary, ignore_errors=True)
             raise
-        answer = {"generation_id": self.generation_id, "machine": self.transfer.machine,
-                  "files": count, "bytes": size, "source_removed": True}
+        return self._removed({"generation_id": self.generation_id, "machine": self.transfer.machine,
+                              "files": count, "bytes": size})
+
+    def _removed(self, answer: dict) -> dict:
+        """`answer` with whether the peer's copy is gone, and why not when it is not."""
         error = self._delete_on_peer()
+        answer["source_removed"] = error is None
         if error is not None:
-            answer.update(source_removed=False, source_error=error)
+            answer["source_error"] = error
         return answer
 
     def _ask(self, method: str, suffix: str):
@@ -210,10 +250,12 @@ class Pull:
             raise RuntimeError(f"{self.peer.name} answered HTTP {error.code}: {text}") from None
 
     def _delete_on_peer(self) -> str | None:
-        """None when the peer deleted its copy, else why it did not."""
+        """None when the peer's copy is gone (deleted now, or already: its 404), else why not."""
         try:
             with self._ask("DELETE", ""):
                 return None
+        except FileNotFoundError:
+            return None
         except Exception as error:
             return str(error)
 

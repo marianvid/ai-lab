@@ -173,7 +173,16 @@ pulls it, and the other deletes its copy only once the copy here is checked.
 
 The pull answers `{"generation_id", "machine", "files", "bytes",
 "source_removed"}`, and `source_error` when the peer kept its copy (the song is
-then on both machines; delete it there once the reason is cleared). A copy that
+then on both machines). A peer that answers the delete with 404 already has no
+copy, which counts as removed.
+
+To try the peer's delete again, send the same pull with
+`{"from": "<peer>", "retry_delete": true}`. It fetches nothing: the song must
+already be here (else **404**), and look whole, meaning its `audio.flac` is
+there and its `result.json` says `complete` (else **409**, and the peer's copy
+is kept; the full check, every size and sha256, was made when it was pulled).
+It answers `{"generation_id", "machine", "source_removed"}`, with
+`source_error` if the peer still keeps its copy. A copy that
 fails its check is removed, the source is kept, and the answer is a **502**.
 **409** when the song is already on this machine or is being edited here;
 **404** when the peer does not have it; **400** for a peer that is not
