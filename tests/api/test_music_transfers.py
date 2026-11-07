@@ -1,4 +1,4 @@
-"""Moving a YuE2 song between AI-Labs: the bundle, its check, and the pull against a fake peer."""
+"""Moving a YuE2 song between AI-Labs: the bundle, its check, and the pull through a fake scheduler door."""
 
 import io
 import json
@@ -16,6 +16,7 @@ from ai_lab.api.routes.music_transfers import (
     manifest,
     receive,
     register_transfers,
+    run_id_of,
     tar_pieces,
 )
 from ai_lab.api.routes.music_windows import GenerationFiles, WindowCalls
@@ -24,6 +25,7 @@ from ai_lab.engines.music.yue2 import Yue2Engine
 from ai_lab.gateway.errors import (
     ModelNotLoadedError,
     NotConfiguredError,
+    SchedulerDoorError,
     TransferCheckError,
     WindowCallActiveError,
 )
@@ -98,33 +100,62 @@ class BundleTests(unittest.TestCase):
                 receive(io.BytesIO(data), self.root / f"copy{number}", CHUNK)
 
 
-class FakePeer(BaseHTTPRequestHandler):
-    """Another AI-Lab: answers the bundle of `served` and records deletes and tokens."""
+DOOR_PREFIX = "/ai/ai-lab-linux"
+SONG_PATH = DOOR_PREFIX + "/v1/audio/music/generations/song-a?model=yue2"
+
+
+class FakeDoor(BaseHTTPRequestHandler):
+    """This machine's scheduler door, with the other AI-Lab behind it.
+
+    Answers the bundle of `served`, records each call's `X-Run-Id` and any token it got,
+    and gives the door's own refusals (a `scheduler` key) for the names that ask for them.
+    """
 
     served: dict[str, bytes] = {}  # noqa: RUF012 - set by each test
     deletes: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
+    runs: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
     tokens: list[str] = []  # noqa: RUF012 - a record kept by the test, on purpose
     refuse_delete = False
+    door_refuses_delete = False
+
+    def _seen(self) -> str | None:
+        FakeDoor.runs.append(self.headers.get("X-Run-Id", ""))
+        if self.headers.get("Authorization"):
+            FakeDoor.tokens.append(self.headers["Authorization"])
+        if not self.path.startswith(DOOR_PREFIX + "/"):
+            self._door(404, "unknown_provider", "this scheduler serves only 'ai-lab-mac'")
+            return None
+        return self.path.split("/")[7].split("?")[0]
 
     def do_GET(self):  # noqa: N802 - the name http.server calls
-        FakePeer.tokens.append(self.headers.get("Authorization", ""))
-        name = self.path.split("/")[5]
+        name = self._seen()
+        if name is None:
+            return
         if name == "busy":
             self._answer(409, b'{"error": "in use"}')
-        elif name in FakePeer.served:
-            self._answer(200, FakePeer.served[name])
+        elif name == "lost":
+            self._door(502, "partner_lost", "the partner no longer knows this call")
+        elif name in FakeDoor.served:
+            self._answer(200, FakeDoor.served[name])
         else:
             self._answer(404, b'{"error": "no generation"}')
 
     def do_DELETE(self):  # noqa: N802 - the name http.server calls
-        if "/gone?" in self.path:
+        name = self._seen()
+        if name is None:
+            return
+        if FakeDoor.door_refuses_delete:
+            self._door(404, "unknown_provider", "the partner's calls are not set up here")
+        elif name == "gone":
             self._answer(404, b'{"error": "no generation"}')
-            return
-        if FakePeer.refuse_delete:
+        elif FakeDoor.refuse_delete:
             self._answer(409, b'{"error": "a job writes there"}')
-            return
-        FakePeer.deletes.append(self.path)
-        self._answer(200, b'{"deleted": true}')
+        else:
+            FakeDoor.deletes.append(self.path)
+            self._answer(200, b'{"deleted": true}')
+
+    def _door(self, status, reason, detail):
+        self._answer(status, json.dumps({"scheduler": {"reason": reason, "detail": detail}}).encode())
 
     def _answer(self, status, body):
         self.send_response(status)
@@ -194,40 +225,49 @@ def serving(handler):
     return server
 
 
+class Headers(dict):
+    """Request headers as the server hands them over: looked up without regard to case."""
+
+    def get(self, key, default=None):
+        for name, value in self.items():
+            if name.lower() == key.lower():
+                return value
+        return default
+
+
 class PullTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.here = self.root / "mac"
         self.here.mkdir()
-        self.peer = serving(FakePeer)
-        tokens = self.root / "tokens.json"
-        tokens.write_text('{"server": "s3cret"}')
+        self.door = serving(FakeDoor)
         transfer = TransferSettings.from_mapping({
             "machine": "ai-lab-mac", "timeout_s": 5, "chunk_bytes": CHUNK,
-            "peers": {"ai-lab-linux": {"url": f"http://127.0.0.1:{self.peer.server_port}",
-                                       "token_file": str(tokens), "token_key": "server"}}})
+            "scheduler": f"http://127.0.0.1:{self.door.server_port}", "peers": ["ai-lab-linux"]})
         self.windows = WindowCalls()
         self.gateway = Gateway()
         self.files = GenerationFiles(self.gateway, Operations(Engine(self.here, transfer)), self.windows)
         self.router = Router()
         register_transfers(self.router, self.files)
-        FakePeer.served = {"song-a": bundle_bytes(song(self.root / "linux"))}
-        FakePeer.deletes, FakePeer.tokens, FakePeer.refuse_delete = [], [], False
+        FakeDoor.served = {"song-a": bundle_bytes(song(self.root / "linux"))}
+        FakeDoor.deletes, FakeDoor.runs, FakeDoor.tokens = [], [], []
+        FakeDoor.refuse_delete = FakeDoor.door_refuses_delete = False
 
     def tearDown(self):
-        self.peer.shutdown()
-        self.peer.server_close()
+        self.door.shutdown()
+        self.door.server_close()
         self.temporary.cleanup()
 
-    def route(self, method, path, body=None):
+    def route(self, method, path, body=None, run="run-7"):
         matched = self.router.match(method, path)
         assert matched is not None, path
         handler, captured = matched
-        return handler(query={"model": "yue2"}, body=body, **captured)
+        headers = Headers({"x-run-id": run} if run is not None else {})
+        return handler(query={"model": "yue2"}, body=body, headers=headers, **captured)
 
-    def pull(self, name="song-a", peer="ai-lab-linux", **more):
-        return self.route("POST", f"/v1/audio/music/generations/{name}/pull", {"from": peer, **more})
+    def pull(self, name="song-a", peer="ai-lab-linux", run="run-7", **more):
+        return self.route("POST", f"/v1/audio/music/generations/{name}/pull", {"from": peer, **more}, run)
 
     def kept_here(self, name="song-a"):
         """A song pulled before: complete, as the Studio marks it."""
@@ -235,39 +275,53 @@ class PullTests(unittest.TestCase):
         (folder / "result.json").write_text('{"status": "complete"}')
         return folder
 
-    def test_the_song_moves_and_the_source_is_deleted(self):
+    def test_the_song_moves_through_the_door_and_the_source_is_deleted(self):
         answer = self.pull()
         self.assertEqual(answer, {"generation_id": "song-a", "machine": "ai-lab-mac", "files": 2,
                                   "bytes": 10014, "source_removed": True})
         self.assertEqual((self.here / "song-a" / "audio.flac").read_bytes(), b"F" * 10000)
-        self.assertEqual(FakePeer.deletes, ["/v1/audio/music/generations/song-a?model=yue2"])
-        self.assertEqual(set(FakePeer.tokens), {"Bearer s3cret"})
+        self.assertEqual(FakeDoor.deletes, [SONG_PATH])
+        self.assertEqual(FakeDoor.runs, ["run-7", "run-7"])            # the bundle, then the delete
+        self.assertEqual(FakeDoor.tokens, [])                         # no token between the AI-Labs
         self.assertEqual([path.name for path in self.here.iterdir()], ["song-a"])
 
+    def test_a_pull_without_its_run_is_refused_before_any_call(self):
+        for run in (None, "", "  "):
+            with self.subTest(run=run), self.assertRaisesRegex(ValueError, "needs the header X-Run-Id"):
+                self.pull(run=run)
+        self.assertEqual((FakeDoor.runs, list(self.here.iterdir())), ([], []))
+
     def test_a_copy_that_fails_its_check_is_removed_and_the_source_kept(self):
-        data = bytearray(FakePeer.served["song-a"])
+        data = bytearray(FakeDoor.served["song-a"])
         data[data.index(b"FFFF")] = ord("G")
-        FakePeer.served["song-a"] = bytes(data)
+        FakeDoor.served["song-a"] = bytes(data)
         with self.assertRaisesRegex(TransferCheckError, "audio.flac arrived different"):
             self.pull()
-        self.assertEqual((list(self.here.iterdir()), FakePeer.deletes), ([], []))
+        self.assertEqual((list(self.here.iterdir()), FakeDoor.deletes), ([], []))
 
     def test_a_source_that_is_not_deleted_is_said(self):
-        FakePeer.refuse_delete = True
+        FakeDoor.refuse_delete = True
         answer = self.pull()
         self.assertFalse(answer["source_removed"])
         self.assertIn("a job writes there", answer["source_error"])
         self.assertTrue((self.here / "song-a").is_dir())
 
+    def test_the_doors_404_on_the_delete_is_not_a_removed_source(self):
+        FakeDoor.door_refuses_delete = True
+        answer = self.pull()
+        self.assertFalse(answer["source_removed"])
+        self.assertIn("scheduler door refused", answer["source_error"])
+        self.assertIn("unknown_provider", answer["source_error"])
+
     def test_a_retry_sends_only_the_delete(self):
-        FakePeer.refuse_delete = True
+        FakeDoor.refuse_delete = True
         self.assertFalse(self.pull()["source_removed"])
         (self.here / "song-a" / "result.json").write_text('{"status": "complete"}')
-        FakePeer.refuse_delete, FakePeer.tokens = False, []
-        answer = self.pull(retry_delete=True)
+        FakeDoor.refuse_delete, FakeDoor.runs = False, []
+        answer = self.pull(retry_delete=True, run="run-8")
         self.assertEqual(answer, {"generation_id": "song-a", "machine": "ai-lab-mac", "source_removed": True})
-        self.assertEqual(FakePeer.deletes, ["/v1/audio/music/generations/song-a?model=yue2"])
-        self.assertEqual(FakePeer.tokens, [])                     # nothing fetched
+        self.assertEqual(FakeDoor.deletes, [SONG_PATH])
+        self.assertEqual(FakeDoor.runs, ["run-8"])                     # only the delete, under its run
 
     def test_a_retry_whose_peer_copy_is_gone_counts_as_removed(self):
         self.kept_here("gone")
@@ -275,7 +329,7 @@ class PullTests(unittest.TestCase):
 
     def test_a_retry_that_fails_again_says_why(self):
         self.kept_here()
-        FakePeer.refuse_delete = True
+        FakeDoor.refuse_delete = True
         answer = self.pull(retry_delete=True)
         self.assertFalse(answer["source_removed"])
         self.assertIn("a job writes there", answer["source_error"])
@@ -289,7 +343,7 @@ class PullTests(unittest.TestCase):
         (self.here / "song-a" / "result.json").write_text('{"status": "failed"}')
         with self.assertRaisesRegex(WindowCallActiveError, "not a complete song"):
             self.pull(retry_delete=True)
-        self.assertEqual(FakePeer.deletes, [])
+        self.assertEqual(FakeDoor.deletes, [])
         with self.assertRaisesRegex(ValueError, "retry_delete must be"):
             self.pull(retry_delete="yes")
         with self.assertRaisesRegex(ValueError, "Unknown pull fields: extra"):
@@ -300,12 +354,33 @@ class PullTests(unittest.TestCase):
             self.pull("nobody")
         with self.assertRaisesRegex(WindowCallActiveError, "refused"):
             self.pull("busy")
+        with self.assertRaisesRegex(SchedulerDoorError, "partner_lost"):
+            self.pull("lost")
         with self.assertRaisesRegex(ValueError, "no peer 'other'"):
             self.pull(peer="other")
         (self.here / "song-a").mkdir()
         with self.assertRaisesRegex(WindowCallActiveError, "already on this machine"):
             self.pull()
-        self.assertEqual(FakePeer.tokens, ["Bearer s3cret", "Bearer s3cret"])
+        self.assertEqual(len(FakeDoor.runs), 3)
+        self.assertEqual([path.name for path in self.here.iterdir()], ["song-a"])   # no half-copy left
+
+    def test_a_door_that_does_not_answer(self):
+        port = self.door.server_port
+        self.door.shutdown()
+        self.door.server_close()
+        self.door = serving(FakeDoor)                                # tearDown closes this one
+        transfer = TransferSettings.from_mapping({"scheduler": f"http://127.0.0.1:{port}",
+                                                  "peers": ["ai-lab-linux"], "timeout_s": 2})
+        files = GenerationFiles(self.gateway, Operations(Engine(self.here, transfer)), self.windows)
+        router = Router()
+        register_transfers(router, files)
+        matched = router.match("POST", "/v1/audio/music/generations/song-a/pull")
+        assert matched is not None
+        handler, captured = matched
+        with self.assertRaisesRegex(SchedulerDoorError, "did not answer"):
+            handler(query={"model": "yue2"}, body={"from": "ai-lab-linux"},
+                    headers=Headers({"X-Run-Id": "run-7"}), **captured)
+        self.assertEqual(list(self.here.iterdir()), [])
 
     def test_a_song_being_edited_is_not_pulled_or_bundled(self):
         self.windows.begin("run-1", "song-a")
@@ -332,37 +407,40 @@ class PullTests(unittest.TestCase):
             studio.server_close()
 
 
+class RunIdTests(unittest.TestCase):
+    def test_the_run_id_of_the_headers(self):
+        self.assertEqual(run_id_of(Headers({"x-run-id": " run-1 "})), "run-1")
+        self.assertIsNone(run_id_of(Headers({"x-run-id": " "})))
+        self.assertIsNone(run_id_of(Headers()))
+        self.assertIsNone(run_id_of(None))
+
+
 class TransferSettingsTests(unittest.TestCase):
     def test_defaults_and_a_peer(self):
         settings = TransferSettings.from_mapping(None)
-        self.assertEqual((settings.machine, settings.peers, settings.timeout_s, settings.chunk_bytes),
-                         ("", {}, 60.0, 1 << 20))
-        with tempfile.TemporaryDirectory() as folder:
-            tokens = Path(folder) / "t.json"
-            tokens.write_text('{"a": "x"}')
-            peer = TransferSettings.from_mapping({"peers": {"linux": {
-                "url": "http://h:8090/", "token_file": str(tokens), "token_key": "a"}}}).peer("linux")
-            self.assertEqual((peer.url, peer.token()), ("http://h:8090", "x"))
-            tokens.write_text("{}")
-            with self.assertRaisesRegex(RuntimeError, "has no 'a'"):
-                peer.token()
-            tokens.unlink()
-            with self.assertRaisesRegex(RuntimeError, "cannot be read"):
-                peer.token()
+        self.assertEqual((settings.machine, settings.scheduler, settings.peers, settings.timeout_s,
+                          settings.chunk_bytes), ("", "", {}, 60.0, 1 << 20))
+        peer = TransferSettings.from_mapping({"scheduler": "http://127.0.0.1:8230/",
+                                              "peers": ["ai-lab-linux"]}).peer("ai-lab-linux")
+        self.assertEqual((peer.name, peer.url), ("ai-lab-linux", "http://127.0.0.1:8230/ai/ai-lab-linux"))
+        with self.assertRaisesRegex(ValueError, "configured: none"):
+            TransferSettings.from_mapping({"machine": "ai-lab-mac", "peers": []}).peer("ai-lab-linux")
 
     def test_refusals(self):
-        peer = {"url": "http://h:1", "token_file": "/t.json", "token_key": "a"}
+        door = "http://127.0.0.1:8230"
         cases: list[tuple[Any, str]] = [
             ([], "must be an object"),
             ({"other": 1}, "Unknown"),
             ({"machine": 1}, "machine must be text"),
             ({"timeout_s": 0}, "timeout_s"),
             ({"chunk_bytes": 10}, "chunk_bytes"),
-            ({"peers": []}, "peers must be an object"),
-            ({"peers": {"p": {"url": "h"}}}, "needs exactly"),
-            ({"peers": {"p": {**peer, "url": "ftp://h"}}}, "url must be"),
-            ({"peers": {"p": {**peer, "token_file": "t.json"}}}, "absolute path"),
-            ({"peers": {"p": {**peer, "token_key": ""}}}, "token_key"),
+            ({"scheduler": "h:8230"}, "scheduler must be"),
+            ({"scheduler": 8230}, "scheduler must be"),
+            ({"peers": ["ai-lab-linux"]}, "need the scheduler"),
+            ({"scheduler": door, "peers": {"ai-lab-linux": {}}}, "list of provider names"),
+            ({"scheduler": door, "peers": [1]}, "list of provider names"),
+            ({"scheduler": door, "peers": ["a/b"]}, "not a provider name"),
+            ({"scheduler": door, "peers": ["a", "a"]}, "twice"),
         ]
         for raw, words in cases:
             with self.subTest(words=words), self.assertRaisesRegex(ValueError, words):

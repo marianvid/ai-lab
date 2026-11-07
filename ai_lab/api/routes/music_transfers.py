@@ -6,10 +6,16 @@ the copy is known to be whole:
 - `GET /v1/audio/music/generations/{id}/bundle?model=<m>` answers the song's folder as an
   uncompressed tar. Its first member is `MANIFEST.json`: `{"generation_id", "files":
   [{"name", "size", "sha256"}]}`; the files follow, flat, in the manifest's order.
-- `POST /v1/audio/music/generations/{id}/pull?model=<m>` with `{"from": "<peer>"}` fetches
-  that bundle from the peer named in `engines.yue2.transfer` (directly, AI-Lab to AI-Lab),
+- `POST /v1/audio/music/generations/{id}/pull?model=<m>` with `{"from": "<peer>"}` and the
+  header `X-Run-Id` fetches that bundle from the peer named in `engines.yue2.transfer`,
   writes it into a hidden folder beside the songs, checks every size and sha256 against the
   manifest, renames it into place, then deletes the song on the peer.
+
+The AI-Labs never talk directly: both the fetch and the delete go through this machine's
+scheduler door, `{scheduler}/ai/<peer>/v1/audio/music/generations/{id}...`, carrying the
+caller's `X-Run-Id` (the run the door checks) and no token. A pull without `X-Run-Id` is
+refused (400). The door's own refusals (its `scheduler` key) are told apart from the other
+AI-Lab's answers: a door's 404 is never taken for "the peer's copy is already gone".
 
 Both read and write the engine's folder, so they work whether YuE2 is loaded or not.
 """
@@ -30,9 +36,10 @@ from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 from urllib.parse import quote, urlencode
 
-from ...gateway.errors import TransferCheckError, WindowCallActiveError
+from ...gateway.errors import SchedulerDoorError, TransferCheckError, WindowCallActiveError
 from ...music.backends.yue2_web_backend import check_generation_id
 from ..passthrough import Passthrough
+
 
 class Songs(Protocol):
     """The songs of a YuE2 entry, as `music_windows.GenerationFiles` keeps them."""
@@ -54,6 +61,8 @@ MANIFEST = "MANIFEST.json"
 # A manifest larger than this is not one (a song has about a dozen files).
 LARGEST_MANIFEST_BYTES = 1 << 20
 BUNDLE_TYPE = "application/x-tar"
+# The run a pull belongs to: checked by the scheduler door, passed on unchanged.
+RUN_HEADER = "X-Run-Id"
 
 
 def manifest(folder: Path, chunk_bytes: int) -> dict:
@@ -182,7 +191,12 @@ class Pull:
     its peer's delete failed) and only the delete on the peer is sent again.
     """
 
-    def __init__(self, files: Songs, query: dict | None, generation_id: str, body) -> None:
+    def __init__(self, files: Songs, query: dict | None, generation_id: str, body,
+                 run_id: str | None = None) -> None:
+        if not run_id:
+            raise ValueError(f"a pull needs the header {RUN_HEADER}: the run it belongs to, "
+                             "which the scheduler door checks")
+        self.run_id = run_id
         body = body if isinstance(body, dict) else {}
         unknown = set(body) - {"from", "retry_delete"}
         if unknown:
@@ -235,19 +249,29 @@ class Pull:
         return answer
 
     def _ask(self, method: str, suffix: str):
+        """One call to the peer through this machine's scheduler door (no token: the door asks none)."""
         url = (f"{self.peer.url}/v1/audio/music/generations/{quote(self.generation_id, safe='')}"
                f"{suffix}?{urlencode({'model': self.model})}")
-        request = urllib.request.Request(url, method=method,
-                                         headers={"Authorization": "Bearer " + self.peer.token()})
+        request = urllib.request.Request(url, method=method, headers={RUN_HEADER: self.run_id})
         try:
             return urllib.request.urlopen(request, timeout=self.transfer.timeout_s)
         except urllib.error.HTTPError as error:
-            text = error.read().decode(errors="replace")[:500]
-            if error.code == HTTPStatus.NOT_FOUND:
-                raise FileNotFoundError(f"{self.peer.name} has no generation {self.generation_id}") from None
-            if error.code == HTTPStatus.CONFLICT:
-                raise WindowCallActiveError(f"{self.peer.name} refused: {text}") from None
-            raise RuntimeError(f"{self.peer.name} answered HTTP {error.code}: {text}") from None
+            raise self._refused(error.code, error.read().decode(errors="replace")) from None
+        except (urllib.error.URLError, OSError) as error:
+            raise SchedulerDoorError(f"the scheduler door at {self.transfer.scheduler} did not answer: "
+                                     f"{getattr(error, 'reason', error)}") from None
+
+    def _refused(self, code: int, text: str) -> Exception:
+        """The error for a refused call: the door's own refusal, or the peer AI-Lab's answer."""
+        door = _door_refusal(text)
+        if door is not None:
+            return SchedulerDoorError(f"the scheduler door refused the call to {self.peer.name} "
+                                      f"(HTTP {code}, {door})")
+        if code == HTTPStatus.NOT_FOUND:
+            return FileNotFoundError(f"{self.peer.name} has no generation {self.generation_id}")
+        if code == HTTPStatus.CONFLICT:
+            return WindowCallActiveError(f"{self.peer.name} refused: {text[:500]}")
+        return RuntimeError(f"{self.peer.name} answered HTTP {code}: {text[:500]}")
 
     def _delete_on_peer(self) -> str | None:
         """None when the peer's copy is gone (deleted now, or already: its 404), else why not."""
@@ -260,10 +284,30 @@ class Pull:
             return str(error)
 
 
+def _door_refusal(text: str) -> str | None:
+    """`reason: detail` when an answer is the scheduler door's own refusal (its `scheduler` key)."""
+    try:
+        door = json.loads(text).get("scheduler")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(door, dict):
+        return None
+    return f"{door.get('reason', '?')}: {door.get('detail', '')}"
+
+
+def run_id_of(headers) -> str | None:
+    """The caller's `X-Run-Id`, if it sent one."""
+    value = headers.get(RUN_HEADER) if headers is not None else None
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
 def register_transfers(router, files: Songs) -> None:
     """The bundle and pull routes."""
     base = "/v1/audio/music/generations/{generation_id}"
     router.add("GET", base + "/bundle",
                lambda generation_id, query=None, **_: bundle(files, query, generation_id))
     router.add("POST", base + "/pull",
-               lambda generation_id, query=None, body=None, **_: Pull(files, query, generation_id, body).run())
+               lambda generation_id, query=None, body=None, headers=None, **_:
+               Pull(files, query, generation_id, body, run_id_of(headers)).run())

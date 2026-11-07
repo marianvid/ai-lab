@@ -25,7 +25,12 @@ from ..clients.errors import (AccessDeniedError, AiLabOffError, ModelReplacedErr
                               RefusalError, TokenInvalidError, TokenMissingError)
 from ..events import EventBus
 from ..gateway.core import CardBusyError, ModelNotLoadedError
-from ..gateway.errors import TransferCheckError, WindowCallActiveError, WindowRequestError
+from ..gateway.errors import (
+    SchedulerDoorError,
+    TransferCheckError,
+    WindowCallActiveError,
+    WindowRequestError,
+)
 from ..multipart import MultipartBody
 from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
@@ -58,6 +63,8 @@ STATUS = {
     WindowRequestError: HTTPStatus.UNPROCESSABLE_ENTITY,
     # A song moved from another AI-Lab arrived different from its manifest.
     TransferCheckError: HTTPStatus.BAD_GATEWAY,
+    # The scheduler door a pull goes through refused it or did not answer.
+    SchedulerDoorError: HTTPStatus.BAD_GATEWAY,
     # A subscription's allowance is spent: the caller may retry later.
     ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
     # The vendor's CLI could not answer: the caller's fallback should take over.

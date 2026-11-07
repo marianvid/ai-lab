@@ -169,7 +169,22 @@ pulls it, and the other deletes its copy only once the copy here is checked.
 | Call | What |
 |---|---|
 | `GET /v1/audio/music/generations/{generation_id}/bundle?model=<entry>` | the song's folder as an uncompressed tar. Its first member is `MANIFEST.json`, `{"generation_id", "files": [{"name", "size", "sha256"}]}`; the files follow, flat, in that order. 404 unknown; 409 while it is the source of a window call or a YuE2 Studio job works on it |
-| `POST /v1/audio/music/generations/{generation_id}/pull?model=<entry>`, body `{"from": "<peer>"}` | fetches that bundle from the peer, directly (AI-Lab to AI-Lab, not through a scheduler), writes it into a hidden folder beside the songs, checks every size and sha256, renames it into place, then deletes the song on the peer (`DELETE .../generations/{id}`, so the peer's Studio guard applies) |
+| `POST /v1/audio/music/generations/{generation_id}/pull?model=<entry>`, body `{"from": "<peer>"}`, header `X-Run-Id` | fetches that bundle from the peer through this machine's scheduler door, writes it into a hidden folder beside the songs, checks every size and sha256, renames it into place, then deletes the song on the peer (`DELETE .../generations/{id}`, so the peer's Studio guard applies) |
+
+The AI-Labs never talk to each other directly. Both the fetch and the delete
+go to this machine's scheduler, at
+`{scheduler}/ai/<peer>/v1/audio/music/generations/{id}/bundle?model=<entry>`
+and `{scheduler}/ai/<peer>/v1/audio/music/generations/{id}?model=<entry>`.
+The scheduler passes them to the partner scheduler, which passes them to its
+own AI-Lab. Each carries the caller's `X-Run-Id` (the run the door checks) and
+no token: the door asks none of its callers. A pull without `X-Run-Id` is
+refused with **400**.
+
+The door's own refusals (an answer with a `scheduler` key, such as
+`run_stopped`, `unknown_provider` or `partner_lost`) end the pull with
+**502**. On the delete, the door's refusal becomes `source_error`. A door's
+404 is never taken for "the peer has no copy". The same **502** is given when
+the door does not answer.
 
 The pull answers `{"generation_id", "machine", "files", "bytes",
 "source_removed"}`, and `source_error` when the peer kept its copy (the song is
@@ -188,14 +203,16 @@ fails its check is removed, the source is kept, and the answer is a **502**.
 **404** when the peer does not have it; **400** for a peer that is not
 configured. Both calls work whether YuE2 is loaded or not.
 
-The other AI-Labs are configured in the YuE2 engine's section, as `transfer`
-(`engines.yue2.transfer`, see `ai_lab/engines/music/transfer.py`):
+The scheduler and the other machines are configured in the YuE2 engine's
+section, as `transfer` (`engines.yue2.transfer`, see
+`ai_lab/engines/music/transfer.py`):
 
 | Setting | Default | What it is |
 |---|---|---|
 | `machine` | empty | the name this AI-Lab goes by, given back as `machine` |
-| `peers` | none | each other AI-Lab by name: `url` (`http(s)://host:port`), `token_file` (an absolute path to a JSON file kept privately, in `opts`) and `token_key` (the client's entry in it). The token itself is never in the configuration; it is read when a pull runs |
-| `timeout_s` | 60 | how long a peer may stay silent while a song is fetched or deleted, in seconds; a song (~50 MB) comes in pieces, each waited for this long |
+| `scheduler` | empty | this machine's scheduler (`http(s)://host:port`), whose model door reaches the other machines. Needed as soon as `peers` names one |
+| `peers` | none | the other machines' providers a song may be pulled from: their names in the LLM Map, as the door knows them (e.g. `["ai-lab-linux"]`). Empty: every pull is refused (400, "no peer") |
+| `timeout_s` | 60 | how long the door may stay silent while a song is fetched or deleted, in seconds. Through the partner, the answer starts only once the partner holds the whole song (~50 MB), so this covers the whole fetch on the other side |
 | `chunk_bytes` | 1048576 | the piece a song is read, written and checked in, in bytes (4096 to 64 MiB) |
 
 ---

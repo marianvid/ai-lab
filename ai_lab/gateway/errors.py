@@ -77,3 +77,11 @@ class TransferCheckError(RuntimeError):
 
     The copy is removed and the source kept; the other AI-Lab's answer was wrong, not the request.
     """
+
+
+class SchedulerDoorError(RuntimeError):
+    """This machine's scheduler door refused a pull's call, or did not answer: a 502.
+
+    Told apart from the other AI-Lab's own answers by the door's `scheduler` key; the
+    message carries the door's reason and detail (e.g. `run_stopped`, `partner_lost`).
+    """
