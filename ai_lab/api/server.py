@@ -32,6 +32,7 @@ from ..gateway.errors import (
     WindowRequestError,
 )
 from ..multipart import MultipartBody
+from ..raw_body import RawBody, is_raw
 from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
 from . import sse
@@ -243,11 +244,15 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return True
 
-    def _body(self) -> dict | MultipartBody:
+    def _body(self) -> dict | MultipartBody | RawBody:
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             return {}
         content_type = self.headers.get("Content-Type", "application/json")
+        if is_raw(content_type):
+            # Read by the handler, maybe not at all: nothing may follow on this connection.
+            self.close_connection = True
+            return RawBody(content_type, length, self.rfile)
         data = self.rfile.read(length)
         if content_type.lower().startswith("multipart/form-data"):
             return MultipartBody(content_type, data)

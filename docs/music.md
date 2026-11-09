@@ -207,6 +207,56 @@ section, as `transfer` (`engines.yue2.transfer`, see
 | `peers` | none | the other machines' providers a song may be pulled from: their names in the LLM Map, as the door knows them (e.g. `["ai-lab-linux"]`). Empty: every pull is refused (400, "no peer") |
 | `timeout_s` | 60 | how long the door may stay silent while a song is fetched, in seconds. Through the partner, the answer starts only once the partner holds the whole song (~50 MB), so this covers the whole fetch on the other side |
 | `chunk_bytes` | 1048576 | the piece a song is read, written and checked in, in bytes (4096 to 64 MiB) |
+| `list_most` | 200 | the most generations one list call answers (1 to 10000). 200 covers the Mac's Studio today (169 folders) in one call |
+| `put_back_most_bytes` | 1073741824 | the largest bundle a put-back takes, in bytes (1 MiB to 8 GiB), judged by the request's `Content-Length` before anything is read. A song's bundle is about 25–60 MB, so 1 GiB is ample |
+
+## YuE2: the Studio's generations, and putting one back
+
+YuE2 Studio is only a working place: a song stays there while music may still
+regenerate its windows. When a song leaves it, music keeps the song's bundle
+(the `bundle` call above) in the song's own folder and deletes it from the
+Studio. These two calls show what is in the Studio, and bring a kept song
+back when it is to be edited again.
+
+| Call | What |
+|---|---|
+| `GET /v1/audio/music/generations?model=<entry>[&limit=<n>][&offset=<k>]` | this machine's generations, newest first. A read: nothing is changed. `limit` 1 to `list_most` (default `list_most`), `offset` from 0 (default 0); any other value is refused (400) |
+| `POST /v1/audio/music/generations/{generation_id}/put-back?model=<entry>`, body the bundle with `Content-Type: application/x-tar`, header `X-Run-Id` | puts a kept bundle back under the same id: every file is checked against the manifest exactly as a pull checks it, written into a hidden folder, and renamed into place in one step |
+
+The list answers `{"machine", "total", "offset", "limit", "generations": [...]}`.
+Each generation has:
+
+- `generation_id`, the folder's name;
+- `made_at`, when it was finished (the time of its `result.json`; of the folder
+  while it has none), ISO 8601 in UTC;
+- `bytes` and `files`, its size on disk;
+- `complete`, whether the Studio finished it;
+- `kind`, `song` or `window` (a window regenerated from another song), with
+  `source`, that song's id, for a window;
+- `seconds`, the audio's length;
+- `style` and `lyrics_start`, the first 300 characters of the request's style
+  and lyrics, to recognise it by;
+- `seed`, `cot` and `cfg_scale`, as the request gave them (`null` when it did not).
+
+The put-back answers `{"generation_id", "machine", "files", "bytes", "checked":
+true}`. Refusals:
+
+- **400**: no `X-Run-Id`; a body that is not `application/x-tar`; a body of 0
+  bytes or larger than `put_back_most_bytes`; a bundle that fails its check (it
+  does not start with its manifest, its manifest names another generation, a
+  file is missing, extra or different, or it is not a tar). Nothing of a
+  refused bundle is kept.
+- **409**: a generation with that id is already on this machine, or it is the
+  source of a window call or a YuE2 Studio job works on it. An existing song is
+  never overwritten.
+
+Like the other calls, a caller on the other machine reaches it through its own
+scheduler door (`{scheduler}/ai/<provider>/v1/audio/music/...`). A put-back to
+the other machine carries the whole bundle (about 25–60 MB) through the
+partner exchange between the schedulers, which today gives each exchange
+10 seconds: enough on the home network's cable, tight on a weak Wi-Fi.
+
+Both calls work whether YuE2 is loaded or not.
 
 ---
 

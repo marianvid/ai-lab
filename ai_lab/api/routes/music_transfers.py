@@ -11,6 +11,13 @@ known to be whole:
   writes it into a hidden folder beside the songs, checks every size and sha256 against the
   manifest, and renames it into place. It never deletes the peer's copy: the caller
   (music) does that itself once the answer says `checked: true`.
+- `GET /v1/audio/music/generations?model=<m>[&limit=<n>][&offset=<k>]` lists this machine's
+  generations, newest first, with what recognises each one. A read: nothing is changed.
+- `POST /v1/audio/music/generations/{id}/put-back?model=<m>` with a bundle as the body
+  (`Content-Type: application/x-tar`, the same tar `bundle` answers) and the header
+  `X-Run-Id` puts a kept song back: every file is checked against the manifest as a pull
+  checks it, written into a hidden folder, and renamed into place under the same id.
+  Refused, never overwritten, when that id is already here or busy.
 
 The AI-Labs never talk directly: the fetch goes through this machine's scheduler door,
 `{scheduler}/ai/<peer>/v1/audio/music/generations/{id}/bundle`, carrying the caller's
@@ -31,6 +38,7 @@ import tarfile
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from http import HTTPStatus
 from io import BytesIO
 from pathlib import Path
@@ -39,6 +47,7 @@ from urllib.parse import quote, urlencode
 
 from ...gateway.errors import SchedulerDoorError, TransferCheckError, WindowCallActiveError
 from ...music.backends.yue2_web_backend import check_generation_id
+from ...raw_body import RawBody
 from ..passthrough import Passthrough
 
 
@@ -119,15 +128,15 @@ def bundle(files: Songs, query: dict | None, generation_id: str) -> Passthrough:
                        headers={"Content-Disposition": f'attachment; filename="{generation_id}.tar"'})
 
 
-def receive(stream, temporary: Path, chunk_bytes: int) -> tuple[int, int]:
-    """Unpack a bundle into `temporary`, checking each file; (files, bytes) when all match."""
+def receive(stream, temporary: Path, chunk_bytes: int,
+            generation_id: str | None = None) -> tuple[int, int]:
+    """Unpack a bundle into `temporary`, checking each file; (files, bytes) when all match.
+
+    With `generation_id`, the manifest must name that generation.
+    """
     temporary.mkdir()
     with tarfile.open(fileobj=stream, mode="r|") as tar:
-        first = tar.next()
-        if first is None or first.name != MANIFEST or not first.isfile() \
-                or first.size > LARGEST_MANIFEST_BYTES:
-            raise TransferCheckError("the bundle does not start with its manifest")
-        expected = _expected(json.load(_member(tar, first)))
+        expected = _read_manifest(tar, generation_id)
         got: dict[str, int] = {}
         # `tar.next()`, not `for member in tar`: iterating a stream starts again
         # with the members already read (the manifest).
@@ -140,6 +149,20 @@ def receive(stream, temporary: Path, chunk_bytes: int) -> tuple[int, int]:
     if missing:
         raise TransferCheckError(f"the bundle ended without: {', '.join(missing)}")
     return len(got), sum(got.values())
+
+
+def _read_manifest(tar: tarfile.TarFile, generation_id: str | None) -> dict[str, dict]:
+    """The bundle's first member, its manifest, as the files it lists by name."""
+    first = tar.next()
+    if first is None or first.name != MANIFEST or not first.isfile() \
+            or first.size > LARGEST_MANIFEST_BYTES:
+        raise TransferCheckError("the bundle does not start with its manifest")
+    listing = json.load(_member(tar, first))
+    expected = _expected(listing)
+    if generation_id is not None and listing.get("generation_id") != generation_id:
+        raise TransferCheckError(f"the bundle is {listing.get('generation_id')!r}, "
+                                 f"not {generation_id!r}")
+    return expected
 
 
 def _expected(listing) -> dict[str, dict]:
@@ -203,7 +226,8 @@ class Pull:
         temporary = self.target.parent / f".pull-{self.generation_id}-{secrets.token_hex(4)}"
         try:
             with self._fetch() as response:
-                count, size = receive(response, temporary, self.transfer.chunk_bytes)
+                count, size = receive(response, temporary, self.transfer.chunk_bytes,
+                                      self.generation_id)
             if self.target.exists():
                 raise WindowCallActiveError(f"{self.generation_id} appeared on this machine meanwhile")
             os.rename(temporary, self.target)
@@ -250,6 +274,126 @@ def _door_refusal(text: str) -> str | None:
     return f"{door.get('reason', '?')}: {door.get('detail', '')}"
 
 
+# What a list entry quotes from the song's request, at most (characters).
+QUOTED_CHARS = 300
+
+
+def generations(files: Songs, query: dict | None) -> dict:
+    """This machine's generations, newest first, `?limit=` (at most `list_most`) from `?offset=`."""
+    engine = files.engine(query)
+    most = engine.transfer.list_most
+    limit = _count(query, "limit", most, 1, most)
+    offset = _count(query, "offset", 0, 0, None)
+    root = engine.generations_dir()
+    folders = [path for path in root.iterdir()
+               if path.is_dir() and not path.name.startswith(".")] if root.is_dir() else []
+    entries = sorted((_entry(path) for path in folders),
+                     key=lambda item: (item["made_at"], item["generation_id"]), reverse=True)
+    return {"machine": engine.transfer.machine, "total": len(entries), "offset": offset,
+            "limit": limit, "generations": entries[offset:offset + limit]}
+
+
+def _count(query: dict | None, key: str, default: int, lowest: int, highest: int | None) -> int:
+    raw = (query or {}).get(key)
+    if raw is None:
+        return default
+    if not raw.isdigit() or int(raw) < lowest or (highest is not None and int(raw) > highest):
+        top = "" if highest is None else f" to {highest}"
+        raise ValueError(f"{key} must be a whole number from {lowest}{top}")
+    return int(raw)
+
+
+def _entry(folder: Path) -> dict:
+    """One generation: its id, when it was made, its size, and what recognises it."""
+    files = [path for path in folder.iterdir() if path.is_file() and not path.name.startswith(".")]
+    request = _json_file(folder / "request.json")
+    result = _json_file(folder / "result.json")
+    made = (folder / "result.json") if result else folder
+    sources = result.get("sources") if isinstance(result.get("sources"), dict) else {}
+    seconds = result.get("audio_seconds")
+    return {
+        "generation_id": folder.name,
+        "made_at": _iso(made.stat().st_mtime),
+        "bytes": sum(path.stat().st_size for path in files),
+        "files": len(files),
+        "complete": result.get("status") == "complete",
+        "kind": "window" if sources else "song",
+        "source": sources.get("song") if sources else None,
+        "seconds": round(float(seconds), 2) if isinstance(seconds, (int, float)) else None,
+        "style": _quote(request.get("style")),
+        "lyrics_start": _quote(request.get("lyrics")),
+        "seed": request.get("seed"),
+        "cot": request.get("cot"),
+        "cfg_scale": request.get("cfg_scale"),
+    }
+
+
+def _json_file(path: Path) -> dict:
+    """A small JSON file of the Studio's as a dictionary; empty when missing or unreadable."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _quote(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if len(value) <= QUOTED_CHARS else value[:QUOTED_CHARS] + "…"
+
+
+def _iso(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat(timespec="seconds")
+
+
+class PutBack:
+    """One bundle put back into this machine's Studio, under the id it was taken from.
+
+    The caller kept the bundle (`GET …/bundle`) when the song left the Studio; this checks
+    it as a pull checks a fetched one. A bundle that does not match is refused (400) and
+    nothing of it is kept.
+    """
+
+    def __init__(self, files: Songs, query: dict | None, generation_id: str, body,
+                 run_id: str | None = None) -> None:
+        if not run_id:
+            raise ValueError(f"a put-back needs the header {RUN_HEADER}: the run it belongs to")
+        if not isinstance(body, RawBody):
+            raise ValueError(f"a put-back's body is the bundle, sent as {BUNDLE_TYPE}")
+        self.engine = files.engine(query)
+        self.transfer = self.engine.transfer
+        most = self.transfer.put_back_most_bytes
+        if not 0 < body.length <= most:
+            raise ValueError(f"a bundle must be 1 to {most} bytes (put_back_most_bytes); "
+                             f"this one says {body.length}")
+        self.body = body
+        self.generation_id = check_generation_id(generation_id)
+        self.target = self.engine.generations_dir() / self.generation_id
+        files.refuse_busy(query, self.generation_id)
+        if self.target.exists():
+            raise WindowCallActiveError(f"{self.generation_id} is already on this machine")
+
+    def run(self) -> dict:
+        """Check every file against the manifest, then move the folder into place."""
+        temporary = self.target.parent / f".put-back-{self.generation_id}-{secrets.token_hex(4)}"
+        try:
+            try:
+                count, size = receive(self.body, temporary, self.transfer.chunk_bytes,
+                                      self.generation_id)
+            except (TransferCheckError, tarfile.TarError, ValueError) as error:
+                raise ValueError(f"the bundle was refused: {error}") from None
+            if self.target.exists():
+                raise WindowCallActiveError(f"{self.generation_id} appeared on this machine meanwhile")
+            os.rename(temporary, self.target)
+        except BaseException:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+        return {"generation_id": self.generation_id, "machine": self.transfer.machine,
+                "files": count, "bytes": size, "checked": True}
+
+
 def run_id_of(headers) -> str | None:
     """The caller's `X-Run-Id`, if it sent one."""
     value = headers.get(RUN_HEADER) if headers is not None else None
@@ -266,3 +410,8 @@ def register_transfers(router, files: Songs) -> None:
     router.add("POST", base + "/pull",
                lambda generation_id, query=None, body=None, headers=None, **_:
                Pull(files, query, generation_id, body, run_id_of(headers)).run())
+    router.add("POST", base + "/put-back",
+               lambda generation_id, query=None, body=None, headers=None, **_:
+               PutBack(files, query, generation_id, body, run_id_of(headers)).run())
+    router.add("GET", "/v1/audio/music/generations",
+               lambda query=None, **_: generations(files, query))

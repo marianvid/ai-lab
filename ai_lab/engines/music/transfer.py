@@ -12,7 +12,8 @@ Configured in the YuE2 engine's section as `transfer` (`engines.yue2.transfer`):
       "machine": "ai-lab-mac",
       "scheduler": "http://127.0.0.1:8230",
       "peers": ["ai-lab-linux"],
-      "timeout_s": 60, "chunk_bytes": 1048576
+      "timeout_s": 60, "chunk_bytes": 1048576,
+      "list_most": 200, "put_back_most_bytes": 1073741824
     }
 
 - `machine`: the name this AI-Lab goes by in a pull's answer.
@@ -24,6 +25,11 @@ Configured in the YuE2 engine's section as `transfer` (`engines.yue2.transfer`):
   (seconds). Through the partner the answer only starts once the partner holds the whole
   song (~50 MB), so this covers the whole fetch on the other side.
 - `chunk_bytes`: the piece a song is read, written and checked in (bytes).
+- `list_most`: the most generations one list call answers (`?limit=` may ask fewer;
+  `?offset=` pages on). 200 covers the Mac's Studio today (169 folders) in one call.
+- `put_back_most_bytes`: the largest bundle a put-back takes (bytes), judged by the
+  request's Content-Length before anything is read. A song's bundle is about 25-60 MB
+  (the Mac's Studio, 2026-11-09), so 1 GiB is ample.
 
 Nothing here is a hidden value: the defaults below are what applies when the section
 leaves a setting out, and `docs/music.md` lists them with the same explanations.
@@ -41,7 +47,12 @@ DEFAULT_CHUNK_BYTES = 1 << 20
 LONGEST_TIMEOUT_S = 3600.0
 SMALLEST_CHUNK_BYTES = 4096
 LARGEST_CHUNK_BYTES = 64 << 20
-TRANSFER_FIELDS = {"machine", "scheduler", "peers", "timeout_s", "chunk_bytes"}
+DEFAULT_LIST_MOST = 200
+LARGEST_LIST_MOST = 10000
+DEFAULT_PUT_BACK_MOST_BYTES = 1 << 30
+LARGEST_PUT_BACK_MOST_BYTES = 8 << 30
+TRANSFER_FIELDS = {"machine", "scheduler", "peers", "timeout_s", "chunk_bytes",
+                   "list_most", "put_back_most_bytes"}
 # A provider's name is one segment of the door's path.
 PROVIDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -63,6 +74,8 @@ class TransferSettings:
     peers: dict[str, Peer] = field(default_factory=dict)
     timeout_s: float = DEFAULT_TIMEOUT_S
     chunk_bytes: int = DEFAULT_CHUNK_BYTES
+    list_most: int = DEFAULT_LIST_MOST
+    put_back_most_bytes: int = DEFAULT_PUT_BACK_MOST_BYTES
 
     @classmethod
     def from_mapping(cls, raw: Mapping | None) -> TransferSettings:
@@ -83,7 +96,12 @@ class TransferSettings:
         return cls(machine=machine, scheduler=scheduler,
                    peers={name: Peer(name, f"{scheduler}/ai/{name}") for name in names},
                    timeout_s=_timeout(raw.get("timeout_s", DEFAULT_TIMEOUT_S)),
-                   chunk_bytes=_chunk(raw.get("chunk_bytes", DEFAULT_CHUNK_BYTES)))
+                   chunk_bytes=_chunk(raw.get("chunk_bytes", DEFAULT_CHUNK_BYTES)),
+                   list_most=_whole(raw.get("list_most", DEFAULT_LIST_MOST),
+                                    "list_most", 1, LARGEST_LIST_MOST),
+                   put_back_most_bytes=_whole(
+                       raw.get("put_back_most_bytes", DEFAULT_PUT_BACK_MOST_BYTES),
+                       "put_back_most_bytes", 1 << 20, LARGEST_PUT_BACK_MOST_BYTES))
 
     def peer(self, name) -> Peer:
         """The peer called `name`; ValueError when there is none."""
@@ -124,4 +142,10 @@ def _chunk(value) -> int:
     if type(value) is not int or not SMALLEST_CHUNK_BYTES <= value <= LARGEST_CHUNK_BYTES:
         raise ValueError(f"yue2 transfer chunk_bytes must be a whole number from "
                          f"{SMALLEST_CHUNK_BYTES} to {LARGEST_CHUNK_BYTES}")
+    return value
+
+
+def _whole(value, name: str, lowest: int, highest: int) -> int:
+    if type(value) is not int or not lowest <= value <= highest:
+        raise ValueError(f"yue2 transfer {name} must be a whole number from {lowest} to {highest}")
     return value
