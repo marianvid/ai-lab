@@ -111,7 +111,7 @@ class ServerTests(unittest.TestCase):
             "--cot", "full", "--memory-budget-gib", "20", "--port", "9010",
             "--ui-port", "9011", "--webui-root", "/w"], "Yue2WebBackend",
             launch_studio=lambda args, url: studios.append(url))
-        self.assertEqual(backend.args[1:], ("yue2", "full"))
+        self.assertEqual(backend.args[1:], ("yue2", yue2_server.SongDefaults("full", 1.0)))
         self.assertIsNone(backend.kwargs["window"])
         self.assertTrue(studios[0].endswith(":9011"))
 

@@ -19,6 +19,7 @@ from ai_lab.engines.base import validate
 from ai_lab.engines.music.yue2 import WINDOW_SETTINGS
 from ai_lab.music.backends import yue2_web_backend
 from ai_lab.music.backends.yue2_web_backend import (
+    SongDefaults,
     StudioRefusedError,
     WindowActiveError,
     WindowRefusedError,
@@ -122,7 +123,7 @@ class FakeStudio:
 
 
 def backend(studio):
-    return Yue2WebBackend("http://studio", "yue2", "full", window=SETTINGS, studio=studio)
+    return Yue2WebBackend("http://studio", "yue2", SongDefaults("full"), window=SETTINGS, studio=studio)
 
 
 class WindowBackendTests(unittest.TestCase):
@@ -165,7 +166,7 @@ class WindowBackendTests(unittest.TestCase):
         self.assertTrue(answer["cancelled"] is False and answer["candidates"] == [])
 
     def test_without_settings_windows_are_refused(self):
-        made = Yue2WebBackend("http://studio", "yue2", "full", studio=FakeStudio())
+        made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"), studio=FakeStudio())
         with self.assertRaisesRegex(WindowRefusedError, "without window settings"):
             made.generate_window(body())
 
@@ -232,7 +233,7 @@ class FullSongTests(unittest.TestCase):
             (output / "score.abc").write_text("X:1\n")
             replies: Iterator[dict] = iter([{"job": {"id": 1}}, {"status": "done", "output_dir": str(output),
                                                                "result": {"audio_seconds": 0.01}}])
-            made = Yue2WebBackend("http://studio", "yue2", "full",
+            made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"),
                                   studio=lambda *args: next(replies))
             answer = made.generate({"prompt": "rap", "lyrics": LYRICS, "instrumental": False,
                                     "seed": 1})
@@ -241,12 +242,12 @@ class FullSongTests(unittest.TestCase):
 
     def test_a_failed_song_is_an_error(self):
         replies: Iterator[dict] = iter([{"job": {"id": 1}}, {"status": "failed", "error": "out of memory"}])
-        made = Yue2WebBackend("http://studio", "yue2", "full", studio=lambda *args: next(replies))
+        made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"), studio=lambda *args: next(replies))
         with self.assertRaisesRegex(RuntimeError, "out of memory"):
             made.generate({"prompt": "rap", "lyrics": LYRICS, "instrumental": False})
 
     def test_a_song_that_never_ends_times_out(self):
-        made = Yue2WebBackend("http://studio", "yue2", "full",
+        made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"),
                               studio=lambda *args: {"status": "running", "job": {"id": 1}})
         with patch.object(yue2_web_backend, "SONG_LIMIT_S", 0), self.assertRaises(TimeoutError):
             made.generate({"prompt": "rap", "lyrics": LYRICS, "instrumental": False})

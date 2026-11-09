@@ -63,6 +63,16 @@ WINDOW_SETTINGS = tuple(
               group="generation", help=what)
     for key, label, kind, default, low, high, what in _WINDOW_ROWS)
 
+# A song call's guidance (`cfg_scale`) when it gives none. A call's `cot` falls back
+# on the instance's `cot` option, chosen per machine.
+CFG_SETTING = ParamSpec(
+    "cfg_scale", "Song CFG scale", "float", 1.0, minimum=0.0, maximum=20.0,
+    group="generation",
+    help="Classifier-free guidance for a song call that names none: how strictly "
+         "YuE2 follows the style. 1.0 is no guidance, YuE2's own default; any other "
+         "value runs the model a second time per step, so a song takes longer. A call "
+         "may send its own `cfg_scale` (0-20). Default: YuE2's (2026-11-09).")
+
 
 class Yue2Engine(ConfiguredEngine):
     """YuE2 songs from lyrics, with the YuE2 Studio page beside the API."""
@@ -71,7 +81,7 @@ class Yue2Engine(ConfiguredEngine):
     display_name = "YuE2"
     task = Task.MUSIC_GENERATION
     paths = MUSIC_PATHS + MUSIC_WINDOW_PATHS
-    settings = WINDOW_SETTINGS
+    settings = (CFG_SETTING,) + WINDOW_SETTINGS
     script = music_server("yue2")
     reserves_memory = True
     location_settings = ("vae_path", "output_root", "webui_root")
@@ -125,7 +135,7 @@ class Yue2Engine(ConfiguredEngine):
             "--vae-path", where["vae_path"], "--output-root", where["output_root"],
             "--cot", options["cot"], "--memory-budget-gib",
             str(options["memory_budget_gib"]), "--port", str(port),
-            "--ui-port", ui_port(port),
+            "--ui-port", ui_port(port), "--cfg-scale", str(window["cfg_scale"]),
             "--webui-root", where["webui_root"], "--device", self.device,
             "--window-settings", json.dumps(window, sort_keys=True)],
             env=script_env())

@@ -32,7 +32,15 @@ from ..request_fields import (
     wav_answer,
 )
 
-ALLOWED_FIELDS = {"model", "prompt", "lyrics", "instrumental", "seed", "abc"}
+ALLOWED_FIELDS = {"model", "prompt", "lyrics", "instrumental", "seed", "abc", "cot", "cfg_scale"}
+# YuE2's chain of thought, the musical plan it writes before the audio: `full` is
+# melody and chords, `melody` the melody only. A song call may choose it; without
+# one the instance's `cot` option applies. (The studio's `off` is not offered.)
+COT_MODES = ("full", "melody")
+# Classifier-free guidance: how strictly the model follows the style. YuE2's own
+# limits; 1.0 is no guidance. Without one the instance's `cfg_scale` setting applies.
+LOWEST_CFG = 0.0
+HIGHEST_CFG = 20.0
 PROMPT = TextRule("style must contain 1–4000 characters", MAX_PROMPT_CHARS, shortest=1)
 LYRICS = TextRule("lyrics must contain 1–12000 characters", MAX_LYRICS_CHARS, shortest=1)
 # An editable ABC score sent back with a request; longer is not a score.
@@ -88,6 +96,15 @@ class StudioRefusedError(RuntimeError):
         super().__init__(f"YuE2 Studio rejected the request: {message}")
         self.status = status
         self.reason = message
+
+
+@dataclass(frozen=True)
+class SongDefaults:
+    """What a song call falls back on when it names no `cot` or `cfg_scale`:
+    the instance's `cot` option and its `cfg_scale` setting."""
+
+    cot: str
+    cfg_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -265,11 +282,11 @@ class Yue2WebBackend:
     `studio` is how the studio is asked (`ask_studio(ui_url)` unless a test says).
     """
 
-    def __init__(self, ui_url: str, model_name: str, cot: str,
+    def __init__(self, ui_url: str, model_name: str, song: SongDefaults,
                  window: WindowSettings | None = None, studio: StudioCall | None = None) -> None:
         self.ui_url = ui_url.rstrip("/")
         self.model_name = model_name
-        self.cot = cot
+        self.song = song
         self.window = window
         self._studio = studio or ask_studio(self.ui_url)
         self._calls: dict[str, _WindowCall] = {}
@@ -281,7 +298,8 @@ class Yue2WebBackend:
         """One song for the request, as base64 WAV, with its score and its generation id."""
         request = self._validate(body)
         params = {"style": request["prompt"], "lyrics": request["lyrics"],
-                  "cot": self.cot, "seed": request["seed"]}
+                  "cot": request["cot"], "cfg_scale": request["cfg_scale"],
+                  "seed": request["seed"]}
         if request["abc"]:
             params["abc"] = request["abc"]
         job = self._wait(self._submit("generate", params, "AI-Lab generation"))
@@ -405,7 +423,24 @@ class Yue2WebBackend:
             raise ValueError("ABC score is too large")
         if body.get("instrumental") is not False:
             raise ValueError("YuE2 needs lyric-conditioned generation")
-        return {"prompt": prompt, "lyrics": lyrics, "abc": abc, "seed": seed(body)}
+        return {"prompt": prompt, "lyrics": lyrics, "abc": abc, "seed": seed(body),
+                "cot": _cot(body.get("cot", self.song.cot)),
+                "cfg_scale": _cfg_scale(body.get("cfg_scale", self.song.cfg_scale))}
+
+
+def _cot(value) -> str:
+    """The song's chain-of-thought mode, refused unless it is one YuE2 offers here."""
+    if value not in COT_MODES:
+        raise ValueError("cot must be full or melody")
+    return value
+
+
+def _cfg_scale(value) -> float:
+    """The song's guidance scale, refused (never clamped) outside YuE2's limits."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) \
+            or not LOWEST_CFG <= value <= HIGHEST_CFG:
+        raise ValueError(f"cfg_scale must be a number from {LOWEST_CFG:g} to {HIGHEST_CFG:g}")
+    return float(value)
 
 
 def _candidate(job: dict) -> dict:

@@ -35,6 +35,7 @@ from ai_lab.music.hosting import (
     wait_until_ready,
 )
 from ai_lab.music.backends.yue2_web_backend import (
+    SongDefaults,
     WindowActiveError,
     WindowRefusedError,
     WindowSettings,
@@ -100,6 +101,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cot", choices=("full", "melody"), required=True)
     parser.add_argument("--device", choices=("cuda", "mps"), default="cuda")
+    # The instance's `cfg_scale` setting: a song call's guidance when it gives none.
+    parser.add_argument("--cfg-scale", type=float, default=1.0)
     # The instance's `window_*` settings as JSON (`Yue2Engine.plan`); without them
     # window calls are refused rather than run on numbers nobody chose.
     parser.add_argument("--window-settings", type=json.loads, default=None)
@@ -110,7 +113,8 @@ def main() -> None:
     launch_studio(args, ui_url)
     window = (WindowSettings.from_params(args.window_settings)
               if args.window_settings is not None else None)
-    serve(Yue2WebBackend(ui_url, args.model_path.name, args.cot, window=window), args.port)
+    song = SongDefaults(cot=args.cot, cfg_scale=args.cfg_scale)
+    serve(Yue2WebBackend(ui_url, args.model_path.name, song, window=window), args.port)
 
 
 def studio_env(device: str) -> dict[str, str]:

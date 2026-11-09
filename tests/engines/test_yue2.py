@@ -59,6 +59,11 @@ class Yue2EngineTests(unittest.TestCase):
             window = json.loads(plan.argv[plan.argv.index('--window-settings') + 1])
             self.assertEqual((window['window_context_s'], window['window_crossfade_s'],
                               window['window_max_candidates']), (4.0, 0.3, 5))
+            self.assertEqual(plan.argv[plan.argv.index('--cfg-scale') + 1], '1.0')
+            plan = engine.plan(model, 8124, {'cfg_scale': 1.5})
+            self.assertEqual(plan.argv[plan.argv.index('--cfg-scale') + 1], '1.5')
+            with self.assertRaises(ValueError):
+                engine.plan(model, 8124, {'cfg_scale': 21})
             with self.assertRaisesRegex(ValueError, 'Unknown settings'):
                 engine.plan(model, 8124, {'nope': 1})
         self.assertEqual(engine.generations_dir(),

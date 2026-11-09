@@ -66,7 +66,7 @@ with an error, not silently dropped.
 |---|---|---|
 | ACE-Step | `lyrics`, `duration`, `instrumental`, `vocal_language` | duration 5–180 s, default 30 |
 | HeartMuLa | `lyrics`, `duration`, `instrumental` | lyrics required; `instrumental` must be `false`; duration 5–180 s, default 60 |
-| YuE2 | `lyrics`, `instrumental`, `abc` | lyrics required; `instrumental` must be `false`; no duration |
+| YuE2 | `lyrics`, `instrumental`, `abc`, `cot`, `cfg_scale` | lyrics required; `instrumental` must be `false`; no duration; `cot` (the plan YuE2 writes before the audio) `full` = melody and chords or `melody` = melody only, default the instance's `cot` option; `cfg_scale` (how strictly the style is followed) 0–20, 1.0 = no guidance, default the instance's `cfg_scale` setting (1.0); other values are refused, never changed. A window call takes neither: it keeps the source song's own |
 | MuLaCover | `lyrics`, `instrumental`, `reference_audio_base64` | lyrics and a WAV of at most 25 MiB required; `instrumental` must be `false` |
 | Khala | `lyrics`, `instrumental`, `vocal_language`, `length_bucket` | language one of Chinese, English, Japanese, Korean, Cantonese |
 | ComfyUI Music | `lyrics`, `instrumental`, `duration` | `instrumental` (true or false) must be sent; lyrics required unless instrumental; duration 5–120 s, default 30 |
