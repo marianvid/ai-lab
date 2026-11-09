@@ -45,18 +45,13 @@ class Section:
 
 
 MAX_PORT = 65535
-# Khala's largest length bucket.
-KHALA_MAX_BUCKET = 20
-
-MODEL_MAP_FIELDS = {"acestep": "model_configs", "qwentts": "model_modes",
+MODEL_MAP_FIELDS = {"qwentts": "model_modes",
                     "kokoro": "model_options", "voxcpm": "model_options",
-                    "khala": "model_options", "higgs": "model_options",
+                    "higgs": "model_options",
                     "higgs_local": "model_options",
                     "heartmula": "model_options", "yue2": "model_options",
                     "comfy_music": "model_options",
-                    "mulacover": "model_options",
-                    "levo2": "model_options",
-                    "stableaudio3": "model_options"}
+                    "mulacover": "model_options"}
 
 
 # -- small rules, each about one option --------------------------------------
@@ -120,13 +115,6 @@ def one_of(key: str, allowed: set[str]) -> Rule:
     return lambda options: isinstance(options.get(key), str) and options[key] in allowed
 
 
-def bucket_range(options: dict) -> bool:
-    """Khala's default length bucket lies within 0 and its maximum (≤ 20)."""
-    default, maximum = options.get("default_bucket"), options.get("maximum_bucket")
-    return (type(default) is int and type(maximum) is int
-            and 0 <= default <= maximum <= KHALA_MAX_BUCKET)
-
-
 MEMORY = positive("memory_reservation_mb")
 GUIDANCE = number("cfg_scale", 0, 10, above_low=True)
 TOP_K = whole("topk", 1, 1000)
@@ -139,7 +127,6 @@ ENGINE_RULES: dict[str, tuple[str, tuple[Rule, ...]]] = {
     "voxcpm": ("VoxCPM inference settings are invalid",
                (number("cfg_value", 0, 10, above_low=True),
                 whole("inference_timesteps", 1, 100))),
-    "khala": ("Khala length buckets are invalid", (bucket_range,)),
     "higgs": ("Higgs worker settings are invalid",
               (whole("worker_port", 1, 65535), MEMORY,
                number("mem_fraction_static", 0, 1, above_low=True, below_high=True))),
@@ -154,11 +141,6 @@ ENGINE_RULES: dict[str, tuple[str, tuple[Rule, ...]]] = {
                     (absolute_path("workflow"), file_names("component_subdirs"), MEMORY)),
     "mulacover": ("MuLaCover settings are invalid",
                   (file_name("checkpoint_subdir"), TOP_K, TEMPERATURE, GUIDANCE, MEMORY)),
-    "levo2": ("LeVo 2 settings are invalid",
-              (file_name("lm"), file_name("flow"), file_name("vae"),
-               whole("steps", 1, 200), number("cfg", 0, 10, above_low=True), MEMORY)),
-    "stableaudio3": ("Stable Audio 3 settings are invalid",
-                     (whole("steps", 1, 100), GUIDANCE, MEMORY)),
 }
 
 

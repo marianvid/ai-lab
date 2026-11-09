@@ -170,6 +170,6 @@ def _reason(engine_id: str, capabilities: Capabilities) -> str:
     if engine_id in ("vllm", "nemo") and capabilities.accelerator_kind != "cuda":
         return "Requires an NVIDIA GPU"
     if engine_id in ("vllm", "nemo", "mlxlm", "mlxvlm", "mlxwhisper", "onnx", "pyannote",
-                     "paddleocr", "comfyui", "acestep", "qwentts", "kokoro"):
+                     "paddleocr", "comfyui", "qwentts", "kokoro"):
         return "Not installed"
     return "Binary not found"

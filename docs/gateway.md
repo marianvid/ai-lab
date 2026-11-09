@@ -313,8 +313,8 @@ llama.cpp the weights are taken as a floor and nothing more — measured at a
 +6,663** across four models, so a computed cache figure would look precise and
 be wrong. Engines that run as a separate worker with a fixed appetite — Higgs,
 YuE2, HeartMuLa, MuLaCover, ComfyUI music — use a figure written per
-model in the configuration, `memory_reservation_mb`. Qwen-TTS, VoxCPM and
-Khala take their weights plus half again, and at least 2 GB more; the rest
+model in the configuration, `memory_reservation_mb`. Qwen-TTS and VoxCPM
+take their weights plus half again, and at least 2 GB more; the rest
 mostly take their weights. What a model took last time is knowledge about the
 past, and it belongs to whatever is making the requests.
 

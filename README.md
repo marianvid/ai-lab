@@ -46,13 +46,13 @@ macOS with Apple silicon, where it supervises them itself. Which engines each
 side supports:
 
 - **Both:** llama.cpp, ComfyUI (images), ONNX Runtime, pyannote.audio,
-  PaddleOCR, ACE-Step, Qwen3-TTS and YuE2. Higgs TTS runs on both, through a
+  PaddleOCR, Qwen3-TTS and YuE2. Higgs TTS runs on both, through a
   different engine on each.
 - **Linux only:** vLLM, NVIDIA NeMo Speech, HeartMuLa, MuLaCover, and ComfyUI
   for music.
 - **macOS only:** MLX LM (text models in Apple's MLX format), MLX VLM (the
   same models reading pictures as well as text), MLX Whisper,
-  Kokoro, VoxCPM, Khala and the Qwen forced aligner.
+  Kokoro, VoxCPM and the Qwen forced aligner.
 
 An engine the machine supports but has not installed stays visible but
 disabled, with the reason. An engine the machine cannot support is not listed.
@@ -79,7 +79,7 @@ before it says how it works.
 |---|---|
 | [Writing a request](docs/requests.md) | Chat and multipart audio requests, the `ai_lab` field for startup settings, and what a refusal contains so a client can correct itself. |
 | [Using a model directly](docs/direct-use.md) | A loaded model's own web page: llama.cpp's chat, ComfyUI, and the upstream speech and music editors. Other engines remain available through the API. |
-| [Music generation](docs/music.md) | The six music engines (ACE-Step, HeartMuLa, YuE2, MuLaCover, Khala, ComfyUI), what each accepts, direct use and agent API. |
+| [Music generation](docs/music.md) | The four music engines (HeartMuLa, YuE2, MuLaCover, ComfyUI), what each accepts, direct use and agent API. |
 | [Updating an engine](docs/engines.md) | Reading what an update brings before taking it, and installing beside what already works so there is a way back. |
 | [Audio](docs/audio.md) | Speech-to-text, VAD, speaker diarization, transcript alignment and speech synthesis, and their endpoints. |
 | [Who may call](docs/access.md) | Client tokens, the schedulers' heartbeat, login, On/Off, the operation log and the Mac's memory ceiling. |

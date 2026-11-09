@@ -8,12 +8,10 @@ is ready. A stopped instance shows a disabled action; it starts no UI process.
 | llama.cpp | Chat | The engine's own chat page | both |
 | ComfyUI image/edit | Create / Edit | Native ComfyUI with a model-specific template adapted to installed weights | both |
 | ComfyUI music | Music | Native ComfyUI with the MiniMax Music 3 template adapted to INT8 | Linux |
-| ACE-Step 1.5 | Music | Upstream Gradio playground using the already-loaded AI-Lab model | both |
 | Qwen3-TTS VoiceDesign / CustomVoice | Speak | Upstream Gradio demo using the already-loaded AI-Lab model | both |
 | Higgs TTS 3 | Speak | Official SGLang-Omni playground connected to the already-loaded Higgs worker (Linux), or the same page answered by the in-process model (Mac) | both |
 | VoxCPM2 | Speak | Upstream Gradio editor using the already-loaded model | macOS |
 | Kokoro | Speak | Upstream Gradio editor using the already-loaded model | macOS |
-| Khala | Music | Full Khala Studio frontend and its native queued Mac worker | macOS |
 | YuE2 | Music | Full ds-yue-webui Studio: generate, cover, edit, ABC score and library | both |
 | HeartMuLa | Music | Full HeartMuse Studio using the already-loaded pipeline | Linux |
 
@@ -28,7 +26,7 @@ AI-Lab does not substitute small browser forms for their full interfaces.
 MuLaCover has no verified full native editor. ASR, VAD, diarization,
 alignment and OCR remain API utilities. These entries have no
 direct-use button rather than a misleading one.
-ACE-Step and Qwen3-TTS each expose their upstream Gradio editor on the
+Qwen3-TTS exposes its upstream Gradio editor on the
 instance port plus 10000, in the same process as the API and with the same
 model object; opening the editor does not load a second checkpoint. Their
 Gradio queue is limited to one request at a time. API requests should not be
@@ -58,9 +56,6 @@ VoxCPM2 uses its upstream Gradio editor on the instance port plus 10000.
 Kokoro uses its upstream Gradio editor on the instance port plus 10000 and
 keeps the official US/UK voice, speed, token, pronunciation and streaming
 controls. It reuses the resident checkpoint; it does not load another model.
-Khala starts its complete Studio stack with the AI-Lab instance: the upstream
-React frontend, queue/progress dispatcher and the Apple-Silicon worker. The
-worker owns the resident model and is terminated when the instance unloads.
 YuE2 starts the pinned ds-yue-webui Studio and its resident YuE2 worker. Both
 the Studio and the AI-Lab music endpoint submit work to that same worker, so
 the checkpoint is not loaded twice.

@@ -41,8 +41,8 @@ USED_PAGES = ("Pages active", "Pages wired down", "Pages occupied by compressor"
 
 # The engines this host can run, each with its program configured per machine.
 DARWIN_ENGINES = ("llamacpp", "mlxwhisper", "onnx", "pyannote", "paddleocr", "comfyui",
-                  "acestep", "qwentts", "kokoro", "voxcpm", "qwenalign", "khala", "yue2",
-                  "higgs_local", "mlxlm", "mlxvlm", "stableaudio3", "levo2")
+                  "qwentts", "kokoro", "voxcpm", "qwenalign", "yue2",
+                  "higgs_local", "mlxlm", "mlxvlm")
 
 
 class DarwinHost:

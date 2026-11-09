@@ -9,7 +9,6 @@ from ai_lab.config.validation import (ENGINE_RULES, absolute_path, file_name, fi
 VALID: dict[str, dict] = {
     "kokoro": {"language_code": "a", "default_voice": "af", "repo_id": "x/y"},
     "voxcpm": {"cfg_value": 2.0, "inference_timesteps": 10},
-    "khala": {"default_bucket": 2, "maximum_bucket": 8},
     "higgs": {"worker_port": 9000, "memory_reservation_mb": 1, "mem_fraction_static": 0.5},
     "higgs_local": {"memory_reservation_mb": 1},
     "heartmula": {"version": "3B", "checkpoint_subdir": "ck", "topk": 50,
@@ -19,9 +18,6 @@ VALID: dict[str, dict] = {
                     "memory_reservation_mb": 1},
     "mulacover": {"checkpoint_subdir": "ck", "topk": 50, "temperature": 1.0,
                   "cfg_scale": 1.5, "memory_reservation_mb": 1},
-    "levo2": {"lm": "a.gguf", "flow": "b.gguf", "vae": "c.gguf", "steps": 50,
-              "cfg": 1.5, "memory_reservation_mb": 1},
-    "stableaudio3": {"steps": 8, "cfg_scale": 1.0, "memory_reservation_mb": 1},
 }
 
 

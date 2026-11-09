@@ -14,10 +14,7 @@ from unittest.mock import patch
 from ai_lab.music import hosting
 from ai_lab.music.servers import comfy_server
 from ai_lab.music.servers import heartmula_server
-from ai_lab.music.servers import khala_server
-from ai_lab.music.servers import levo2_server
 from ai_lab.music.servers import mulacover_server
-from ai_lab.music.servers import stableaudio3_server
 from ai_lab.music.servers import yue2_server
 
 
@@ -50,15 +47,6 @@ def run(module, argv, backend_name, **patches):
 
 
 class ServerTests(unittest.TestCase):
-    def test_levo2(self):
-        backend, (args, _) = run(levo2_server, [
-            "--cantor", "/c", "--model-path", "/m", "--lm", "lm", "--flow", "f",
-            "--vae", "v", "--output-root", "/o", "--steps", "8", "--cfg", "1.5",
-            "--port", "9000"], "Levo2Backend")
-        files = backend.args[0]
-        self.assertEqual((files.cantor, files.lm, backend.args[2]), (Path("/c"), "lm", 8))
-        self.assertEqual(args[1], 9000)
-
     def test_mulacover_takes_a_large_body(self):
         backend, (_, kwargs) = run(mulacover_server, [
             "--bundle-root", "/b", "--checkpoint-path", "/b/c", "--checkpoint-subdir", "c",
@@ -76,24 +64,6 @@ class ServerTests(unittest.TestCase):
             "--ui-port", "9003", "--heartmuse-root", "/h"], "HeartMulaBackend",
             launch_heartmuse=lambda built, args: pages.append(args.ui_port))
         self.assertEqual((backend.args[2], pages), ("3B", [9003]))
-
-    def test_stable_audio_starts_its_page(self):
-        pages = []
-        _, (_, kwargs) = run(stableaudio3_server, [
-            "--model-path", "/m", "--steps", "8", "--cfg-scale", "1.0", "--port", "9004",
-            "--ui-port", "9005"], "StableAudio3Backend",
-            launch_native_ui=lambda built, port: pages.append(port))
-        self.assertEqual((pages, kwargs["max_body_bytes"]),
-                         ([9005], stableaudio3_server.MAX_BODY_BYTES))
-
-    def test_khala_starts_its_app(self):
-        apps = []
-        backend, _ = run(khala_server, [
-            "--generator-script", "/k/backend/gen.py", "--model-path", "/m",
-            "--output-root", "/o", "--default-bucket", "1", "--maximum-bucket", "4",
-            "--port", "9006", "--ui-port", "9007"], "KhalaBackend",
-            launch_official_ui=lambda root, model, port: apps.append((root, port)))
-        self.assertEqual((backend.args[3], apps), ((1, 4), [(Path("/k"), 9007)]))
 
     def test_comfy_runs_its_own_comfyui(self):
         with patch.object(comfy_server, "stop_on_exit", lambda stop: None):
@@ -129,11 +99,6 @@ class ServerTests(unittest.TestCase):
 
 
 class CompanionTests(unittest.TestCase):
-    def test_khala_refuses_an_incomplete_app(self):
-        with tempfile.TemporaryDirectory() as folder, \
-                self.assertRaisesRegex(RuntimeError, "incomplete"):
-            khala_server.launch_official_ui(Path(folder), Path(folder), 9)
-
     def test_yue2_refuses_a_missing_studio_and_writes_its_config(self):
         with tempfile.TemporaryDirectory() as folder:
             args = type("Args", (), {
@@ -146,10 +111,7 @@ class CompanionTests(unittest.TestCase):
         self.assertIn("device: mps", config)
         self.assertIn(f"python: {sys.executable}", config)
 
-    def test_khala_readiness_reads_json(self):
-        ready = khala_server._says("status", "idle")
-        self.assertTrue(ready(io.BytesIO(json.dumps({"status": "idle"}).encode())))
-        self.assertFalse(ready(io.BytesIO(b'{"status": "busy"}')))
+    def test_yue2_readiness_reads_json(self):
         self.assertTrue(yue2_server._answers_json(io.BytesIO(b"{}")))
 
 
@@ -181,7 +143,6 @@ class HostingTests(unittest.TestCase):
         hosting.terminate(cast(Any, stubborn), 0.1)
         hosting.terminate(cast(Any, polite), 0.1)
         self.assertEqual((stubborn.calls, polite.calls), (["terminate", "kill"], ["terminate"]))
-        khala_server._stop_all([cast(Any, Child(stops=False))])
 
     def test_stopping_is_wired_to_exit_and_signals(self):
         registered: list = []

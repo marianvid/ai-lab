@@ -38,9 +38,8 @@ APPS_QUERY = "pid,used_gpu_memory"
 
 
 # The engines whose program is configured per machine (llama.cpp is found on PATH).
-LINUX_ENGINES = ("vllm", "nemo", "onnx", "pyannote", "paddleocr", "comfyui", "acestep",
-                 "qwentts", "higgs", "heartmula", "yue2", "comfy_music", "mulacover",
-                 "levo2", "stableaudio3")
+LINUX_ENGINES = ("vllm", "nemo", "onnx", "pyannote", "paddleocr", "comfyui",
+                 "qwentts", "higgs", "heartmula", "yue2", "comfy_music", "mulacover")
 # A line of `--query-compute-apps` is (pid, memory), of `--query-gpu` five fields.
 APP_FIELDS = 2
 GPU_FIELDS = 5
@@ -49,9 +48,8 @@ GPU_FIELDS = 5
 _FOUND_ON_PATH = {"vllm": "vllm", "nemo": "nemo", "onnx": "onnxruntime"}
 
 SUPPORTED_ENGINES = frozenset({"llamacpp", "vllm", "nemo", "onnx", "pyannote",
-                               "paddleocr", "comfyui", "acestep", "qwentts", "higgs",
-                               "heartmula", "yue2", "comfy_music", "mulacover",
-                               "levo2", "stableaudio3"})
+                               "paddleocr", "comfyui", "qwentts", "higgs",
+                               "heartmula", "yue2", "comfy_music", "mulacover"})
 
 
 class LinuxHost:

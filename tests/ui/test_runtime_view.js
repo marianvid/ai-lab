@@ -236,16 +236,6 @@ describe('the Models page', () => {
     assert.equal(loading.view.querySelector('.chat-link').disabled, true);
   });
 
-  it('opens Khala Studio only while Khala is ready', async () => {
-    const khala = { ...INSTANCE, engine: 'khala', task: 'music-generation' };
-    const { view } = await renderPage({ '/api/instances': [khala] });
-    const link = view.querySelector('.chat-link');
-    assert.equal(link.textContent, 'Music');
-    assert.equal(link.getAttribute('href'), 'http://localhost:18080/');
-    const loading = await renderPage({ '/api/instances': [{ ...khala, ready: false }] });
-    assert.equal(loading.view.querySelector('.chat-link').disabled, true);
-  });
-
   it('opens YuE2 Studio only while YuE2 is ready', async () => {
     const yue2 = { ...INSTANCE, engine: 'yue2', task: 'music-generation' };
     const { view } = await renderPage({ '/api/instances': [yue2] });
@@ -282,23 +272,6 @@ describe('the Models page', () => {
     });
     assert.equal(view.querySelector('.chat-link').getAttribute('href'),
                  'http://localhost:8080/');
-  });
-
-  it('offers ACE-Step’s upstream editor instead of an AI-Lab workspace', async () => {
-    const music = { ...INSTANCE, id: 'music-ace-xl', engine: 'acestep',
-      model_id: 'audio-music/ace-step-1.5-xl-turbo', task: 'music-generation',
-      running: true, ready: true, web_ui: false, params: {} };
-    const model = { ...MODEL, id: music.model_id, name: 'ace-step-1.5-xl-turbo',
-      format: 'safetensors', task: 'music-generation' };
-    const engine = { ...ENGINE, id: 'acestep', formats: ['safetensors'],
-      tasks: ['music-generation'], params: [], supported_model_ids: [model.id] };
-    const { view } = await renderPage({
-      '/api/instances': [music], '/api/models': [model],
-      '/api/settings': { title: 'AI-Lab', engines: [engine], repositories: [],
-                         accelerator: {}, host: {} },
-    });
-    assert.equal(view.querySelector('.chat-link').getAttribute('href'),
-                 'http://localhost:18080/');
   });
 
   it('builds the chat address from the page, not from the server', async () => {
@@ -867,7 +840,7 @@ describe('the buttons line up down the page', () => {
 
   it('opens the official music and speech editors for ready models', async () => {
     for (const [task, engine, label] of [
-      ['music-generation', 'acestep', 'Music'],
+      ['music-generation', 'yue2', 'Music'],
       ['speech-synthesis', 'qwentts', 'Speak'],
     ]) {
       const { view } = await renderPage({ '/api/instances': [
@@ -884,7 +857,7 @@ describe('the buttons line up down the page', () => {
                                   ['image-generation', 'comfyui'],
                                   ['image-edit', 'comfyui'],
                                   ['music-generation', 'comfy_music'],
-                                  ['music-generation', 'acestep'],
+                                  ['music-generation', 'yue2'],
                                   ['speech-synthesis', 'qwentts']]) {
       const { view } = await renderPage({ '/api/instances': [
         { ...INSTANCE, task, engine, running: false, ready: false },

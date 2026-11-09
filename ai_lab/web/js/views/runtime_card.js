@@ -279,7 +279,6 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
   function useLink(instance) {
     const task = instance.task || 'text-generation';
     const comfy = ['comfyui', 'comfy_music'].includes(instance.engine);
-    const ace = instance.engine === 'acestep' && task === 'music-generation';
     const qwenTts = instance.engine === 'qwentts' && task === 'speech-synthesis';
     // Both Higgs engines open the same upstream playground: the SGLang worker
     // on Linux, and the in-process transformers port (higgs_local) on a Mac.
@@ -287,15 +286,13 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
       && task === 'speech-synthesis';
     const voxcpm = instance.engine === 'voxcpm' && task === 'speech-synthesis';
     const kokoro = instance.engine === 'kokoro' && task === 'speech-synthesis';
-    const khala = instance.engine === 'khala' && task === 'music-generation';
     const yue2 = instance.engine === 'yue2' && task === 'music-generation';
     const heartmula = instance.engine === 'heartmula' && task === 'music-generation';
-    const sa3 = instance.engine === 'stableaudio3' && task === 'music-generation';
     const llama = instance.engine === 'llamacpp' && task === 'text-generation';
-    if (!comfy && !ace && !qwenTts && !higgs && !voxcpm && !kokoro && !khala && !yue2 && !heartmula && !sa3 && !llama) return null;
+    if (!comfy && !qwenTts && !higgs && !voxcpm && !kokoro && !yue2 && !heartmula && !llama) return null;
     const label = comfy ? ({ 'image-generation': 'Create', 'image-edit': 'Edit',
       'music-generation': 'Music' }[task] || 'ComfyUI')
-      : ace || khala || yue2 || heartmula || sa3 ? 'Music' : qwenTts || higgs || voxcpm || kokoro ? 'Speak' : 'Chat';
+      : yue2 || heartmula ? 'Music' : qwenTts || higgs || voxcpm || kokoro ? 'Speak' : 'Chat';
     if (!instance.ready) return element('button', {
       class: 'pill chat-link', type: 'button', disabled: 'disabled',
       title: instance.running ? 'Wait for the model to finish loading'
@@ -305,18 +302,15 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     return element('a', {
       class: 'pill chat-link', target: '_blank', rel: 'noopener',
       href: `${window.location.protocol}//${window.location.hostname}:`
-        + `${instance.port + (comfy || ace || qwenTts || higgs || voxcpm || kokoro || khala || yue2 || heartmula || sa3 ? 10000 : 0)}/`
+        + `${instance.port + (comfy || qwenTts || higgs || voxcpm || kokoro || yue2 || heartmula ? 10000 : 0)}/`
         + (comfy ? '?ai_lab_preset=1' : ''),
       title: comfy ? 'Open this model in ComfyUI with its configured workflow'
-        : ace ? 'Open the official ACE-Step editor using this loaded model'
         : qwenTts ? 'Open the official Qwen3-TTS editor using this loaded model'
         : higgs ? 'Open the official Higgs Audio playground using this loaded model'
         : voxcpm ? 'Open the official VoxCPM editor using this loaded model'
         : kokoro ? 'Open the official Kokoro editor using this loaded model'
-        : khala ? 'Open Khala Studio using this loaded model'
         : yue2 ? 'Open the full YuE2 Studio using this loaded model'
         : heartmula ? 'Open the full HeartMuse Studio using this loaded model'
-        : sa3 ? 'Open the official Stable Audio 3 page using this loaded model'
         : 'Open the chat page served by llama.cpp',
       text: label,
     });

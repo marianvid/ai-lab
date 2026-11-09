@@ -6,19 +6,14 @@ address, so a caller does not need to know which engine is behind a model name.
 
 | Engine | What it does | Linux | macOS | Direct interface |
 |---|---|---|---|---|
-| ACE-Step 1.5 | Song or instrumental from a style prompt and optional lyrics | yes | yes | ACE-Step's own Gradio page |
 | HeartMuLa | Song from style tags and lyrics | yes | no | HeartMuse Studio |
 | YuE2 | Song from a style and lyrics; also writes an ABC score | yes | yes | ds-yue-webui Studio |
 | MuLaCover | New vocal version (a "cover") of an uploaded WAV | yes | no | none |
-| Khala | Song or instrumental, length chosen as a "bucket" | no | yes | Khala Studio |
 | ComfyUI Music | Runs a ComfyUI workflow, such as MiniMax Music 3 | yes | no | Native ComfyUI |
-| LeVo 2 | Song, or an instrumental when no lyrics are sent. **Research licence only: never for broadcast or any commercial use** | yes | yes¹ | none |
-| Stable Audio 3 | Instrumental music or sound from a text prompt, up to 380 s | yes | yes | none |
 
-¹ On macOS, LeVo2.cpp is built with Metal. Metal has no `DIAG_MASK_INF`, so the
-build used there makes the same causal mask from `FILL` and `TRI` and passes it
-to `soft_max_ext`. The patch is in the machine's own copy of LeVo2.cpp, not in
-this repository.
+ACE-Step 1.5, Khala, LeVo 2 and Stable Audio 3 were tried and removed on
+2026-11-09 (the owner's choice). Their adapters, patches and settings are kept,
+without weights, in the private `music-engines-mac` repository (`ai-lab/`).
 
 "Linux" and "macOS" say which host the engine is offered on
 (`hosts/linux.py` and `hosts/darwin.py`). An engine still needs its runtime
@@ -27,8 +22,7 @@ private `opts`; the public repository supplies only the adapters.
 
 Every engine accepts only models listed in its own configuration. The manager
 cannot load an arbitrary safetensors directory as a music model. This prevents
-a Library label from presenting an unusable Generate button. For ACE-Step the
-model name must map to a checkpoint in ACE-Step's own `checkpoints` folder.
+a Library label from presenting an unusable Generate button.
 
 To use a model by hand, load it on **Models** and press **Music**. That opens
 the engine's own full interface, not a reduced AI-Lab form. See
@@ -64,14 +58,10 @@ with an error, not silently dropped.
 
 | Engine | Other fields | Rules |
 |---|---|---|
-| ACE-Step | `lyrics`, `duration`, `instrumental`, `vocal_language` | duration 5–180 s, default 30 |
 | HeartMuLa | `lyrics`, `duration`, `instrumental` | lyrics required; `instrumental` must be `false`; duration 5–180 s, default 60 |
 | YuE2 | `lyrics`, `instrumental`, `abc`, `cot`, `cfg_scale` | lyrics required; `instrumental` must be `false`; no duration; `cot` (the plan YuE2 writes before the audio) `full` = melody and chords or `melody` = melody only, default the instance's `cot` option; `cfg_scale` (how strictly the style is followed) 0–20, 1.0 = no guidance, default the instance's `cfg_scale` setting (1.0); other values are refused, never changed. A window call takes neither: it keeps the source song's own |
 | MuLaCover | `lyrics`, `instrumental`, `reference_audio_base64` | lyrics and a WAV of at most 25 MiB required; `instrumental` must be `false` |
-| Khala | `lyrics`, `instrumental`, `vocal_language`, `length_bucket` | language one of Chinese, English, Japanese, Korean, Cantonese |
 | ComfyUI Music | `lyrics`, `instrumental`, `duration` | `instrumental` (true or false) must be sent; lyrics required unless instrumental; duration 5–120 s, default 30 |
-| LeVo 2 | `lyrics`, `instrumental`, `duration` | lyrics required unless `instrumental: true`; duration 5–300 s, default 60 |
-| Stable Audio 3 | `instrumental`, `duration`, `negative_prompt` | instrumentals only (`instrumental` may be omitted or `true`, no `lyrics`); duration 1–380 s, default 30; put the tempo (BPM) in the prompt |
 
 A few engine-specific details:
 
@@ -81,9 +71,6 @@ A few engine-specific details:
   only when some stage actually cut the song short. It also returns
   `generation_id`: the name of the song's folder in YuE2 Studio, which a
   window edit names as its `source` (below).
-- **Khala** measures length in buckets: numbered length steps instead of
-  seconds. The allowed range comes from the model's configuration. The answer
-  repeats the `length_bucket` used.
 - **MuLaCover** needs the source song as a WAV file in base64 in
   `reference_audio_base64`.
 

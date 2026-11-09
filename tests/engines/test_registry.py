@@ -17,10 +17,9 @@ class RegistryTests(unittest.TestCase):
     def test_every_engine_is_known_everywhere(self):
         self.assertEqual(set(self.registry.known()),
                          {"llamacpp", "mlxlm", "mlxvlm", "mlxwhisper", "vllm", "nemo", "onnx",
-                          "pyannote", "paddleocr", "comfyui", "acestep", "qwentts",
-                          "kokoro", "voxcpm", "qwenalign", "khala", "higgs", "higgs_local",
-                          "heartmula", "yue2", "comfy_music", "mulacover",
-                          "levo2", "stableaudio3"})
+                          "pyannote", "paddleocr", "comfyui", "qwentts",
+                          "kokoro", "voxcpm", "qwenalign", "higgs", "higgs_local",
+                          "heartmula", "yue2", "comfy_music", "mulacover"})
 
     def test_only_installed_engines_are_available(self):
         self.assertEqual(set(self.registry.available(capabilities())), {"llamacpp"})
@@ -47,12 +46,10 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(rows["paddleocr"]["tasks"], ["ocr"])
         self.assertEqual(rows["comfyui"]["tasks"],
                          ["image-edit", "image-generation"])
-        self.assertEqual(rows["acestep"]["tasks"], ["music-generation"])
         self.assertEqual(rows["qwentts"]["tasks"], ["speech-synthesis"])
         self.assertEqual(rows["kokoro"]["tasks"], ["speech-synthesis"])
         self.assertEqual(rows["voxcpm"]["tasks"], ["speech-synthesis"])
         self.assertEqual(rows["qwenalign"]["tasks"], ["alignment"])
-        self.assertEqual(rows["khala"]["tasks"], ["music-generation"])
         self.assertEqual(rows["higgs"]["tasks"], ["speech-synthesis"])
         self.assertEqual(rows["heartmula"]["tasks"], ["music-generation"])
         transcription = rows["vllm"]["task_params"]["transcription"]

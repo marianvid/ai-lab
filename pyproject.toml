@@ -38,13 +38,13 @@ mypy_path = "benchmark/harness"
 # typo in one of AI-Lab's own imports is still reported.
 [[tool.mypy.overrides]]
 module = [
-    "acestep.*", "aiohttp", "chatterbox.*", "cv2", "dia2", "fireredtts3.*",
+    "aiohttp", "chatterbox.*", "cv2", "dia2", "fireredtts3.*",
     "fish_speech.*", "funasr", "gradio", "heartlib", "infer_preview", "insightface.*",
     "kokoro", "librosa", "mlx_lm", "mlx_lm.*", "mlx_vlm", "mlx_vlm.*", "mlx_whisper",
     "mmgp", "mulacover", "nemo", "nemo.*", "numpy", "omnivoice.*", "ormsgpack",
     "paddleocr", "PIL", "PIL.*", "pyannote.*", "pyarrow", "pyarrow.*", "qwen_asr",
     "qwen_tts", "qwen_tts.*", "sacrebleu.*", "silero_vad", "soundfile",
-    "stable_audio_3", "stable_audio_3.*", "talking_avatar.*", "tangoflux", "torch",
+    "talking_avatar.*", "tangoflux", "torch",
     "torch.*", "torchaudio", "torchmetrics.*", "transformers", "voxcpm", "voxcpm.*",
 ]
 ignore_missing_imports = true

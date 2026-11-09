@@ -228,8 +228,8 @@ section (`builds/core.py`, `builds/installs.py`):
 - `source.kind: "git-app"` — a complete git application such as ComfyUI, as
   described above.
 
-The music and speech adapters (ACE-Step, Qwen3-TTS, Kokoro, VoxCPM, Higgs,
-HeartMuLa, YuE2, Khala, MuLaCover, the ComfyUI music adapter),
+The music and speech adapters (Qwen3-TTS, Kokoro, VoxCPM, Higgs,
+HeartMuLa, YuE2, MuLaCover, the ComfyUI music adapter),
 MLX Whisper and the Qwen aligner are normally configured with only the
 Python that runs them, and no `source` section. Then they have no update row:
 their runtimes are installed and updated outside AI-Lab.
