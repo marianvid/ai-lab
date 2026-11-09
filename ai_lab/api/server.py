@@ -32,11 +32,11 @@ from ..gateway.errors import (
     WindowRequestError,
 )
 from ..multipart import MultipartBody
-from ..raw_body import RawBody, is_raw
 from ..operations import Operations
 from ..providers import ProviderRateLimitError, ProviderUnavailableError
 from . import sse
 from .passthrough import ClientGoneError, Passthrough
+from .raw_body import RawBody, is_raw
 from .router import Reply, Router
 from .routes import RouteParts, register_all
 

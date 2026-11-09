@@ -47,8 +47,8 @@ from urllib.parse import quote, urlencode
 
 from ...gateway.errors import SchedulerDoorError, TransferCheckError, WindowCallActiveError
 from ...music.backends.yue2_web_backend import check_generation_id
-from ...raw_body import RawBody
 from ..passthrough import Passthrough
+from ..raw_body import RawBody
 
 
 class Songs(Protocol):
@@ -287,10 +287,23 @@ def generations(files: Songs, query: dict | None) -> dict:
     root = engine.generations_dir()
     folders = [path for path in root.iterdir()
                if path.is_dir() and not path.name.startswith(".")] if root.is_dir() else []
-    entries = sorted((_entry(path) for path in folders),
-                     key=lambda item: (item["made_at"], item["generation_id"]), reverse=True)
-    return {"machine": engine.transfer.machine, "total": len(entries), "offset": offset,
-            "limit": limit, "generations": entries[offset:offset + limit]}
+    # Sorted by time first, so only the page's folders are read in detail. A folder that
+    # vanishes meanwhile (deleted while this runs) is left out rather than failing the list.
+    dated = sorted(((when, path) for path in folders if (when := _made(path)) is not None),
+                   key=lambda item: (item[0], item[1].name), reverse=True)
+    page = [entry for _when, path in dated[offset:offset + limit] if (entry := _entry(path)) is not None]
+    return {"machine": engine.transfer.machine, "total": len(dated), "offset": offset,
+            "limit": limit, "generations": page}
+
+
+def _made(folder: Path) -> float | None:
+    """When the generation was finished (its `result.json`, else the folder); None if it is gone."""
+    for path in (folder / "result.json", folder):
+        try:
+            return path.stat().st_mtime
+        except FileNotFoundError:
+            continue
+    return None
 
 
 def _count(query: dict | None, key: str, default: int, lowest: int, highest: int | None) -> int:
@@ -303,19 +316,25 @@ def _count(query: dict | None, key: str, default: int, lowest: int, highest: int
     return int(raw)
 
 
-def _entry(folder: Path) -> dict:
-    """One generation: its id, when it was made, its size, and what recognises it."""
-    files = [path for path in folder.iterdir() if path.is_file() and not path.name.startswith(".")]
+def _entry(folder: Path) -> dict | None:
+    """One generation: its id, when it was made, its size, and what recognises it; None if it is gone."""
+    try:
+        made = _made(folder)
+        sizes = [path.stat().st_size for path in folder.iterdir()
+                 if path.is_file() and not path.name.startswith(".")]
+    except FileNotFoundError:
+        return None
+    if made is None:
+        return None
     request = _json_file(folder / "request.json")
     result = _json_file(folder / "result.json")
-    made = (folder / "result.json") if result else folder
     sources = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     seconds = result.get("audio_seconds")
     return {
         "generation_id": folder.name,
-        "made_at": _iso(made.stat().st_mtime),
-        "bytes": sum(path.stat().st_size for path in files),
-        "files": len(files),
+        "made_at": _iso(made),
+        "bytes": sum(sizes),
+        "files": len(sizes),
         "complete": result.get("status") == "complete",
         "kind": "window" if sources else "song",
         "source": sources.get("song") if sources else None,
@@ -384,14 +403,24 @@ class PutBack:
                                       self.generation_id)
             except (TransferCheckError, tarfile.TarError, ValueError) as error:
                 raise ValueError(f"the bundle was refused: {error}") from None
-            if self.target.exists():
-                raise WindowCallActiveError(f"{self.generation_id} appeared on this machine meanwhile")
-            os.rename(temporary, self.target)
+            _into_place(temporary, self.target)
         except BaseException:
             shutil.rmtree(temporary, ignore_errors=True)
             raise
         return {"generation_id": self.generation_id, "machine": self.transfer.machine,
                 "files": count, "bytes": size, "checked": True}
+
+
+def _into_place(temporary: Path, target: Path) -> None:
+    """Rename the checked folder into place; 409 when another put-back or pull got there first."""
+    if target.exists():
+        raise WindowCallActiveError(f"{target.name} appeared on this machine meanwhile")
+    try:
+        os.rename(temporary, target)
+    except OSError as error:
+        if target.exists():
+            raise WindowCallActiveError(f"{target.name} appeared on this machine meanwhile") from error
+        raise
 
 
 def run_id_of(headers) -> str | None:

@@ -12,7 +12,7 @@ from ai_lab.api.routes.music_transfers import MANIFEST, register_transfers
 from ai_lab.api.routes.music_windows import GenerationFiles, WindowCalls
 from ai_lab.engines.music.transfer import TransferSettings
 from ai_lab.gateway.errors import WindowCallActiveError
-from ai_lab.raw_body import RawBody, is_raw
+from ai_lab.api.raw_body import RawBody, is_raw
 from tests.api.test_music_transfers import (
     CHUNK,
     Engine,
@@ -152,6 +152,37 @@ class StudioTests(unittest.TestCase):
             with self.subTest(words=words), self.assertRaisesRegex(ValueError, words):
                 self.put_back("song-a", raw(data))
             self.assertEqual(list(self.here.iterdir()), [])
+
+
+class RaceTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_a_folder_gone_during_the_list_is_left_out(self):
+        from ai_lab.api.routes.music_transfers import _entry, _made
+        self.assertIsNone(_made(self.root / "gone"))
+        self.assertIsNone(_entry(self.root / "gone"))
+
+    def test_a_second_put_back_racing_the_first_is_a_409(self):
+        from unittest.mock import patch
+
+        from ai_lab.api.routes import music_transfers
+        checked = song(self.root, ".put-back-song-a")
+        target = self.root / "song-a"
+
+        def first_one_wins(source, destination):
+            song(self.root, "song-a")
+            raise OSError(66, "Directory not empty")
+        with patch.object(music_transfers.os, "rename", first_one_wins), \
+                self.assertRaisesRegex(WindowCallActiveError, "appeared on this machine meanwhile"):
+            music_transfers._into_place(checked, target)
+        with patch.object(music_transfers.os, "rename", side_effect=OSError(5, "I/O error")), \
+                self.assertRaisesRegex(OSError, "I/O error"):
+            music_transfers._into_place(checked, self.root / "song-b")
 
 
 class RawBodyTests(unittest.TestCase):
