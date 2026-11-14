@@ -132,7 +132,8 @@ class DialectTests(unittest.TestCase):
 
     def test_the_yearly_token_reaches_claude_and_an_api_key_does_not(self):
         token_file = self.root / "claude-token.env"
-        token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-token\n")
+        token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-token\n"
+                              "ANTHROPIC_API_KEY=stand-in-key\n")
         token_file.chmod(0o600)
         script = self.script("claude", "#!/bin/sh\ncat > /dev/null\n"
                              "echo \"token=$CLAUDE_CODE_OAUTH_TOKEN key=$ANTHROPIC_API_KEY "

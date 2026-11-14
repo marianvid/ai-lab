@@ -186,11 +186,13 @@ on every call. For Claude it holds one line, the yearly token
 `claude setup-token` prints: `CLAUDE_CODE_OAUTH_TOKEN=<token>`. The file is
 read at every call, so a token written while AI-Lab runs counts from the next
 call; a missing or empty file means the login again. `ANTHROPIC_API_KEY` and
-`ANTHROPIC_AUTH_TOKEN` are always taken out of Claude Code's environment:
-either would beat the subscription. `GET /api/gateway` shows, per vendor,
+`ANTHROPIC_AUTH_TOKEN` are always taken out of Claude Code's environment,
+also when written in the file (the page then warns): either would beat the
+subscription. `GET /api/gateway` shows, per vendor,
 `sign_in`: `credential` (`token` or `login`), and for a token `set_on` (the
-file's date) and `age_days`, with a `warning` from 335 days on (the token
-lasts about a year), when others can read the file, or when a line is not
+file's date) and `age_days`, with a `warning` from
+`token_warn_after_days` on (a vendor setting, 335 by default: the token lasts
+about a year), when others can read the file, or when a line is not
 understood. The value itself is never sent, logged or shown. Where the file
 is on each machine: `opts/` (`providers.vendors.anthropic.env_file`).
 

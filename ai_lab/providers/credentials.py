@@ -17,34 +17,56 @@ Values go only to the CLI's environment (`read`); nothing logs or shows one.
 
 from __future__ import annotations
 
+import os
 import re
 import stat
 import time
 from pathlib import Path
 
-# `claude setup-token` makes a token valid for one year; warn a month before.
-TOKEN_WARNING_AFTER_DAYS = 335
+# `claude setup-token` makes a token valid for one year (Anthropic's figure).
+# How early to warn is the vendor's `token_warn_after_days` setting.
 TOKEN_LIFETIME_DAYS = 365
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _DAY_S = 86400.0
 _QUOTES = ("\"", "'")
 
 
-def read(path: str) -> dict[str, str]:
-    """The variables in the file; empty when there is no file or it cannot be read."""
+def read(path: str, refused: tuple[str, ...] = ()) -> dict[str, str]:
+    """The variables in the file, less the `refused` names (the ones the CLI
+    must never get, such as an API key that would beat the token); empty when
+    there is no file or it cannot be read."""
     if not path:
         return {}
     try:
         text = Path(path).read_text()
     except (OSError, UnicodeDecodeError):
         return {}
-    return _parse(text)[0]
+    return {key: value for key, value in _parse(text)[0].items() if key not in refused}
 
 
-def describe(path: str, now: float | None = None) -> dict:
+def describe(path: str, warn_after_days: int, refused: tuple[str, ...] = (),
+             now: float | None = None) -> dict:
     """What the page shows: `token` or `login`, the date, any warning. No value."""
-    if not path:
-        return {"credential": "login"}
+    loaded = _load(path) if path else {"credential": "login"}
+    if isinstance(loaded, dict):
+        return loaded
+    info, values, unread = loaded
+    ignored = sorted(key for key in values if key in refused)
+    state: dict[str, str | int] = {"credential": "login", "env_file": path}
+    warnings = [_ignored(ignored)] if ignored else []
+    if any(key not in refused for key in values):
+        age_days = max(int(((time.time() if now is None else now) - info.st_mtime) // _DAY_S), 0)
+        state.update(credential="token", age_days=age_days,
+                     set_on=time.strftime("%Y-%m-%d", time.localtime(info.st_mtime)))
+        warnings += _warnings(age_days, warn_after_days, stat.S_IMODE(info.st_mode), unread)
+    if warnings:
+        state["warning"] = "; ".join(warnings)
+    return state
+
+
+def _load(path: str) -> dict | tuple[os.stat_result, dict[str, str], list[int]]:
+    """The file's details, variables and stray lines; or the page's state when
+    there is no file or it cannot be read."""
     file = Path(path)
     try:
         info = file.stat()
@@ -55,22 +77,18 @@ def describe(path: str, now: float | None = None) -> dict:
         return {"credential": "login", "env_file": path,
                 "warning": f"the file cannot be read ({type(error).__name__}): "
                            f"the CLI uses its own login"}
-    if not values:
-        return {"credential": "login", "env_file": path}
-    age_days = max(int(((time.time() if now is None else now) - info.st_mtime) // _DAY_S), 0)
-    state = {"credential": "token", "env_file": path,
-             "set_on": time.strftime("%Y-%m-%d", time.localtime(info.st_mtime)),
-             "age_days": age_days}
-    warnings = _warnings(age_days, stat.S_IMODE(info.st_mode), unread)
-    if warnings:
-        state["warning"] = "; ".join(warnings)
-    return state
+    return info, values, unread
 
 
-def _warnings(age_days: int, mode: int, unread: list[int]) -> list[str]:
+def _ignored(names: list[str]) -> str:
+    """The warning for names the CLI must not get, written in the file anyway."""
+    return f"{', '.join(names)} in the file: not used (it would beat the subscription)"
+
+
+def _warnings(age_days: int, warn_after_days: int, mode: int, unread: list[int]) -> list[str]:
     """What needs the owner: an old token, a file others can read, a stray line."""
     warnings = []
-    if age_days >= TOKEN_WARNING_AFTER_DAYS:
+    if age_days >= warn_after_days:
         left = TOKEN_LIFETIME_DAYS - age_days
         warnings.append(f"the token was set {age_days} days ago and lasts about "
                         f"{TOKEN_LIFETIME_DAYS}: make a new one with claude setup-token"

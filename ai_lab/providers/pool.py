@@ -138,10 +138,16 @@ class ProviderPool:
         today = self.usage.today()
         return {name: {**gate.state(), "today": today.get(name, {}),
                        "default_effort": self.config.vendors[name].default_effort,
-                       "sign_in": credentials.describe(self.config.vendors[name].env_file),
+                       "sign_in": _sign_in(self.config.vendors[name]),
                        "models": sorted(item.name for item in self.config.models.values()
                                         if item.vendor == name)}
                 for name, gate in self._gates.items()}
+
+
+def _sign_in(vendor: Vendor) -> dict:
+    """How the vendor's CLI signs in, for the page; never a value."""
+    return credentials.describe(vendor.env_file, vendor.token_warn_after_days,
+                                DIALECTS[vendor.dialect].refused_env)
 
 
 def _check_effort(where: str, vendor: Vendor, effort: str) -> None:

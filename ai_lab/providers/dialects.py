@@ -71,6 +71,8 @@ class Dialect(Protocol):
     """
 
     efforts: tuple[str, ...]
+    # Variables this CLI must never get, from the manager or from the vendor's file.
+    refused_env: tuple[str, ...]
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
@@ -86,6 +88,7 @@ class ClaudeCli:
     # Claude Code ignores any other value with only a warning, so a typo
     # would quietly run at the default effort; the gateway refuses it instead.
     efforts: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+    refused_env: tuple[str, ...] = CLAUDE_NOT_THE_PLAN
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
@@ -96,7 +99,7 @@ class ClaudeCli:
         env = dict(CLAUDE_NO_SELF_UPDATE)
         if vendor.home:
             env["HOME"] = vendor.home
-        return Invocation(argv=argv, prompt=prompt, env=env, unset=CLAUDE_NOT_THE_PLAN)
+        return Invocation(argv=argv, prompt=prompt, env=env, unset=self.refused_env)
 
     def answer(self, stdout: str, workdir: Path) -> str:
         """Everything printed is the reply."""
@@ -112,6 +115,7 @@ class CodexCli:
     """
 
     efforts: tuple[str, ...] = ()
+    refused_env: tuple[str, ...] = ()
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
@@ -141,6 +145,7 @@ class OpencodeCli:
 
     # A variant's name belongs to the provider behind opencode.
     efforts: tuple[str, ...] = ()
+    refused_env: tuple[str, ...] = ()
 
     def invocation(self, vendor: Vendor, model: str, prompt: str, effort: str,
                    workdir: Path) -> Invocation:
@@ -173,9 +178,11 @@ def user_names(environ: dict[str, str]) -> dict[str, str]:
 def environment(environ: dict[str, str], call: Invocation, vendor: Vendor) -> dict[str, str]:
     """The CLI's environment: the manager's, less `call.unset`, plus the call's
     own variables and the vendor's private file (read at every call, so a token
-    written while AI-Lab runs counts from the next call)."""
+    written while AI-Lab runs counts from the next call), which cannot bring
+    back a name in `call.unset`."""
     env = {key: value for key, value in environ.items() if key not in call.unset}
-    return {**env, **user_names(environ), **call.env, **credentials.read(vendor.env_file)}
+    return {**env, **user_names(environ), **call.env,
+            **credentials.read(vendor.env_file, refused=call.unset)}
 
 
 DIALECTS: dict[str, Dialect] = {"claude": ClaudeCli(), "codex": CodexCli(),

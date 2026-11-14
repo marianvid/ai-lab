@@ -36,11 +36,16 @@ class ProvidersConfigTests(unittest.TestCase):
         self.assertEqual(config.vendors["openai"].env_file, "")
 
     def test_a_vendor_may_name_its_private_env_file(self):
-        vendors = {"anthropic": {"dialect": "claude", "binary": "/opt/cli/claude",
-                                 "env_file": "/var/lib/ai-lab/cli/anthropic/claude-token.env"}}
+        vendors: dict[str, dict[str, Any]] = {"anthropic": {
+            "dialect": "claude", "binary": "/opt/cli/claude",
+            "env_file": "/var/lib/ai-lab/cli/anthropic/claude-token.env"}}
         config = ProvidersConfig.from_mapping({"vendors": vendors})
         self.assertEqual(config.vendors["anthropic"].env_file,
                          "/var/lib/ai-lab/cli/anthropic/claude-token.env")
+        self.assertEqual(config.vendors["anthropic"].token_warn_after_days, 335)
+        vendors["anthropic"]["token_warn_after_days"] = 300
+        config = ProvidersConfig.from_mapping({"vendors": vendors})
+        self.assertEqual(config.vendors["anthropic"].token_warn_after_days, 300)
 
     def test_impossible_values_are_refused_by_name(self):
         cases: list[tuple[Any, str]] = [
@@ -61,6 +66,8 @@ class ProvidersConfigTests(unittest.TestCase):
              "model name"),
             ({"vendors": {"x": {"dialect": "claude", "binary": "/b",
                                 "env_file": "token.env"}}}, "env_file must be an absolute"),
+            ({"vendors": {"x": {"dialect": "claude", "binary": "/b",
+                                "token_warn_after_days": 0}}}, "token_warn_after_days"),
             ({"vendors": {"x": "claude"}}, "object"),
             ("not a mapping", "providers must be an object"),
         ]

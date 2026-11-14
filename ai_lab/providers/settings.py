@@ -83,7 +83,9 @@ class Vendor:
     empty leaves the choice to the CLI. `env_file` is a private file of
     `NAME=value` lines given to the CLI on every call, such as the yearly
     `CLAUDE_CODE_OAUTH_TOKEN` (see `credentials.py`); empty, or a missing
-    file, leaves the CLI to its own login.
+    file, leaves the CLI to its own login. `token_warn_after_days` is how old
+    a token in that file may get before the page warns (`claude setup-token`
+    makes one for about a year; the default warns a month before).
     """
 
     id: str
@@ -93,6 +95,7 @@ class Vendor:
     limits: VendorLimits = field(default_factory=VendorLimits)
     default_effort: str = ""
     env_file: str = ""
+    token_warn_after_days: int = 335
 
     @classmethod
     def from_mapping(cls, name: str, raw: dict) -> Vendor:
@@ -105,12 +108,15 @@ class Vendor:
         binary = _absolute(name, "binary", raw.get("binary"))
         home = _absolute(name, "home", raw["home"]) if raw.get("home") else ""
         env_file = _absolute(name, "env_file", raw["env_file"]) if raw.get("env_file") else ""
+        warn_after = _whole(name, "token_warn_after_days",
+                            raw.get("token_warn_after_days", cls.token_warn_after_days))
         default_effort = raw.get("default_effort") or ""
         if not isinstance(default_effort, str):
             raise ValueError(f"providers.vendors.{name}.default_effort must be text")
         return cls(id=name, dialect=dialect, binary=binary, home=home,
                    limits=VendorLimits.from_mapping(name, raw),
-                   default_effort=default_effort.strip(), env_file=env_file)
+                   default_effort=default_effort.strip(), env_file=env_file,
+                   token_warn_after_days=warn_after)
 
 
 @dataclass(frozen=True)
