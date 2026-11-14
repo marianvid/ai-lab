@@ -8,6 +8,8 @@ from tempfile import TemporaryDirectory
 
 from ai_lab.providers.dialects import (
     CLAUDE_NO_SELF_UPDATE,
+    CLAUDE_NOT_THE_PLAN,
+    environment,
     OPENCODE_NO_TOOLS,
     ClaudeCli,
     CodexCli,
@@ -127,6 +129,42 @@ class DialectTests(unittest.TestCase):
         finally:
             os.environ.update({key: value for key, value in saved.items() if value})
         self.assertNotEqual(outcome.answer, "user=")
+
+    def test_the_yearly_token_reaches_claude_and_an_api_key_does_not(self):
+        token_file = self.root / "claude-token.env"
+        token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-token\n")
+        token_file.chmod(0o600)
+        script = self.script("claude", "#!/bin/sh\ncat > /dev/null\n"
+                             "echo \"token=$CLAUDE_CODE_OAUTH_TOKEN key=$ANTHROPIC_API_KEY "
+                             "auth=$ANTHROPIC_AUTH_TOKEN\"\n")
+        vendor = Vendor(id="anthropic", dialect="claude", binary=script,
+                        env_file=str(token_file))
+        saved = {key: os.environ.get(key) for key in CLAUDE_NOT_THE_PLAN}
+        os.environ.update(dict.fromkeys(CLAUDE_NOT_THE_PLAN, "left-by-accident"))
+        try:
+            outcome = run(ClaudeCli(), vendor, "opus", "x")
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        self.assertEqual(outcome.answer, "token=stand-in-token key= auth=")
+
+    def test_a_token_written_later_counts_from_the_next_call(self):
+        token_file = self.root / "claude-token.env"
+        vendor = Vendor(id="anthropic", dialect="claude", binary="/b", env_file=str(token_file))
+        call = ClaudeCli().invocation(vendor, "opus", "x", "", self.root)
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", environment({"PATH": "/bin"}, call, vendor))
+        token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-token\n")
+        self.assertEqual(environment({"PATH": "/bin"}, call, vendor)["CLAUDE_CODE_OAUTH_TOKEN"],
+                         "stand-in-token")
+
+    def test_other_clis_keep_the_whole_environment(self):
+        call = CodexCli().invocation(self.vendor("/b", dialect="codex"), "m", "x", "", self.root)
+        env = environment({"ANTHROPIC_API_KEY": "k", "PATH": "/bin"}, call,
+                          self.vendor("/b", dialect="codex"))
+        self.assertEqual(env["ANTHROPIC_API_KEY"], "k")
 
 
 if __name__ == "__main__":

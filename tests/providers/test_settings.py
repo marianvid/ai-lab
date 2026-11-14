@@ -33,6 +33,14 @@ class ProvidersConfigTests(unittest.TestCase):
         self.assertEqual((limits.concurrency, limits.rate_limit_waits_s), (12, (1.0, 2.0)))
         self.assertEqual(config.models["codex/terra"].model, "gpt-5.6-terra")
         self.assertEqual(config.vendors["openai"].home, "")
+        self.assertEqual(config.vendors["openai"].env_file, "")
+
+    def test_a_vendor_may_name_its_private_env_file(self):
+        vendors = {"anthropic": {"dialect": "claude", "binary": "/opt/cli/claude",
+                                 "env_file": "/var/lib/ai-lab/cli/anthropic/claude-token.env"}}
+        config = ProvidersConfig.from_mapping({"vendors": vendors})
+        self.assertEqual(config.vendors["anthropic"].env_file,
+                         "/var/lib/ai-lab/cli/anthropic/claude-token.env")
 
     def test_impossible_values_are_refused_by_name(self):
         cases: list[tuple[Any, str]] = [
@@ -51,6 +59,8 @@ class ProvidersConfigTests(unittest.TestCase):
              "configured vendor"),
             ({"vendors": VENDORS, "models": {"m": {"vendor": "openai", "model": " "}}},
              "model name"),
+            ({"vendors": {"x": {"dialect": "claude", "binary": "/b",
+                                "env_file": "token.env"}}}, "env_file must be an absolute"),
             ({"vendors": {"x": "claude"}}, "object"),
             ("not a mapping", "providers must be an object"),
         ]

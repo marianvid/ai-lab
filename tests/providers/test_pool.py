@@ -164,6 +164,18 @@ class ProviderPoolTests(unittest.TestCase):
         pool = self.pool()
         self.assertEqual([row["id"] for row in pool.catalogue()], ["claude/sonnet"])
         self.assertEqual(pool.stats()["anthropic"]["models"], ["claude/sonnet"])
+        self.assertEqual(pool.stats()["anthropic"]["sign_in"], {"credential": "login"})
+
+    def test_stats_say_the_token_is_used_but_never_show_it(self):
+        token_file = Path(self._temporary.name) / "claude-token.env"
+        token_file.write_text("CLAUDE_CODE_OAUTH_TOKEN=stand-in-token\n")
+        token_file.chmod(0o600)
+        raw = {"vendors": {"anthropic": {**ANTHROPIC, "env_file": str(token_file)}},
+               "models": MODELS}
+        pool = ProviderPool(ProvidersConfig.from_mapping(raw), UsageLog(Path(self._temporary.name)))
+        sign_in = pool.stats()["anthropic"]["sign_in"]
+        self.assertEqual(sign_in["credential"], "token")
+        self.assertNotIn("stand-in-token", repr(pool.stats()))
 
     def test_the_catalogue_shows_the_limits_written_down(self):
         raw = {"vendors": {"openai": {"dialect": "codex", "binary": "/opt/cli/codex",

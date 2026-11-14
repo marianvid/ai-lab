@@ -32,6 +32,8 @@ processor models. How to write the requests is in
 | Models | The names to put in `model`. |
 | Status | Idle, working, or paused: after the vendor says its allowance is spent, every call to that vendor waits, then tries again. |
 | Processing | Calls running now, out of how many may run at once for this vendor. |
+| Signs in with | `yearly token · set <date>` when the vendor's private token file holds one (see [gateway](gateway.md), "How a vendor's CLI signs in"), otherwise the CLI's own login. The token itself is never shown. |
+| Sign-in warning | Only when something needs the owner: the token is 335 days old or more, others can read the file, or a line in it is not understood. |
 | Default effort | How long the model thinks when a request names no `reasoning_effort`. |
 | Today | Calls since midnight, and how many were answered. |
 | Failures today | Counted by the reason the CLI gave. |

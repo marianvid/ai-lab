@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from . import credentials
 from . import dialects
 from . import prompt
 from .dialects import DIALECTS, Dialect, Outcome
@@ -137,6 +138,7 @@ class ProviderPool:
         today = self.usage.today()
         return {name: {**gate.state(), "today": today.get(name, {}),
                        "default_effort": self.config.vendors[name].default_effort,
+                       "sign_in": credentials.describe(self.config.vendors[name].env_file),
                        "models": sorted(item.name for item in self.config.models.values()
                                         if item.vendor == name)}
                 for name, gate in self._gates.items()}

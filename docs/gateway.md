@@ -178,6 +178,22 @@ shown in the same `params`, so the teams size their requests the same way. Examp
 Codex models on the Mac: `codex/gpt-5.6-sol` → `context_size` 258400 (Codex's
 272,000-token window at its 95 % effective share).
 
+**How a vendor's CLI signs in.** By default with the CLI's own login (for
+Claude Code, `/login` in a browser, which can end). A vendor may instead name
+`env_file`, a private file on the machine (mode 600, owned by the user AI-Lab
+runs the CLI as, never in a repository) of `NAME=value` lines given to the CLI
+on every call. For Claude it holds one line, the yearly token
+`claude setup-token` prints: `CLAUDE_CODE_OAUTH_TOKEN=<token>`. The file is
+read at every call, so a token written while AI-Lab runs counts from the next
+call; a missing or empty file means the login again. `ANTHROPIC_API_KEY` and
+`ANTHROPIC_AUTH_TOKEN` are always taken out of Claude Code's environment:
+either would beat the subscription. `GET /api/gateway` shows, per vendor,
+`sign_in`: `credential` (`token` or `login`), and for a token `set_on` (the
+file's date) and `age_days`, with a `warning` from 335 days on (the token
+lasts about a year), when others can read the file, or when a line is not
+understood. The value itself is never sent, logged or shown. Where the file
+is on each machine: `opts/` (`providers.vendors.anthropic.env_file`).
+
 A processor model is started by its first request (a second or two, longer
 when its file is not cached) and stopped after `idle_stop_s` without use
 (30 minutes by default). `POST /api/cpu-models/{name}/start` and `/stop` do

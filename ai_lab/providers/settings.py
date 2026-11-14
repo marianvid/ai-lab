@@ -5,7 +5,8 @@ Shape in `config.json`::
     "providers": {
       "vendors": {
         "anthropic": {"dialect": "claude", "binary": "/opt/ai/cli/bin/claude",
-                      "home": "/var/lib/ai-lab/cli/anthropic", "concurrency": 6},
+                      "home": "/var/lib/ai-lab/cli/anthropic", "concurrency": 6,
+                      "env_file": "/var/lib/ai-lab/cli/anthropic/claude-token.env"},
         "openai":    {"dialect": "codex", "binary": "/opt/ai/cli/bin/codex",
                       "home": "/var/lib/ai-lab/cli/openai"},
         "opencode":  {"dialect": "opencode",
@@ -79,7 +80,10 @@ class Vendor:
     """One subscription: which CLI speaks for it, where it lives, its limits.
 
     `default_effort` is the reasoning effort of a request that names none;
-    empty leaves the choice to the CLI.
+    empty leaves the choice to the CLI. `env_file` is a private file of
+    `NAME=value` lines given to the CLI on every call, such as the yearly
+    `CLAUDE_CODE_OAUTH_TOKEN` (see `credentials.py`); empty, or a missing
+    file, leaves the CLI to its own login.
     """
 
     id: str
@@ -88,6 +92,7 @@ class Vendor:
     home: str = ""
     limits: VendorLimits = field(default_factory=VendorLimits)
     default_effort: str = ""
+    env_file: str = ""
 
     @classmethod
     def from_mapping(cls, name: str, raw: dict) -> Vendor:
@@ -99,12 +104,13 @@ class Vendor:
             raise ValueError(f"providers.vendors.{name}.dialect must be one of {DIALECTS}")
         binary = _absolute(name, "binary", raw.get("binary"))
         home = _absolute(name, "home", raw["home"]) if raw.get("home") else ""
+        env_file = _absolute(name, "env_file", raw["env_file"]) if raw.get("env_file") else ""
         default_effort = raw.get("default_effort") or ""
         if not isinstance(default_effort, str):
             raise ValueError(f"providers.vendors.{name}.default_effort must be text")
         return cls(id=name, dialect=dialect, binary=binary, home=home,
                    limits=VendorLimits.from_mapping(name, raw),
-                   default_effort=default_effort.strip())
+                   default_effort=default_effort.strip(), env_file=env_file)
 
 
 @dataclass(frozen=True)

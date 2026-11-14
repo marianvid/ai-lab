@@ -41,6 +41,19 @@ function words(value) {
   return value === undefined || value === null || value === '' ? '—' : String(value);
 }
 
+// How the vendor's CLI signs in: the yearly token from the private file, or
+// the CLI's own login. Never the token itself: the manager does not send it.
+function signIn(state) {
+  const item = state || {};
+  const value = item.credential === 'token'
+    ? `yearly token · set ${words(item.set_on)} (${figure(item.age_days)} days ago)`
+    : (item.credential === 'login' ? 'the CLI’s own login' : '—');
+  return line('Signs in with', value,
+              'A token from claude setup-token lasts about a year; a login can end '
+              + 'sooner. The token sits in a private file on this machine'
+              + (item.env_file ? ` (${item.env_file}).` : '.'));
+}
+
 // One subscription vendor: its models, how many calls it is answering against
 // its places, any pause after a rate limit, and today's counts.
 function vendor(name, stats) {
@@ -59,6 +72,10 @@ function vendor(name, stats) {
     line('Processing', `${figure(stats.in_flight)} from ${figure(stats.concurrency)}`,
          'Calls running now, against how many may run at once for this vendor. '
          + 'The rest wait their turn here, not in the card’s queue.'),
+    signIn(stats.sign_in),
+    stats.sign_in && stats.sign_in.warning
+      ? line('Sign-in warning', stats.sign_in.warning,
+             'Something about the private token file needs the owner.') : null,
     line('Default effort', words(stats.default_effort),
          'How long the model thinks when a request names no reasoning_effort.'),
     line('Today', `${figure(today.requests ?? 0)} calls · ${figure(today.ok ?? 0)} answered`,

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from . import credentials
 from .settings import Vendor
 
 # Where Codex writes its final message. Read back from the scratch directory.
@@ -30,6 +31,10 @@ OPENCODE_NO_TOOLS = json.dumps({"permission": {"*": "deny"}})
 # Claude Code updates itself in the background unless told not to; the
 # installed version is changed by hand, so every call runs the same binary.
 CLAUDE_NO_SELF_UPDATE = {"DISABLE_AUTOUPDATER": "1"}
+# Claude Code prefers these to the subscription (its yearly token or its
+# login): one left in the manager's environment by accident would bill an API
+# account, or fail, instead of using the plan. AI-Lab only drives the plan.
+CLAUDE_NOT_THE_PLAN = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,8 @@ class Invocation:
     argv: list[str]
     prompt: str
     env: dict[str, str] = field(default_factory=dict)
+    # Variables taken out of the manager's environment before the call.
+    unset: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,7 +96,7 @@ class ClaudeCli:
         env = dict(CLAUDE_NO_SELF_UPDATE)
         if vendor.home:
             env["HOME"] = vendor.home
-        return Invocation(argv=argv, prompt=prompt, env=env)
+        return Invocation(argv=argv, prompt=prompt, env=env, unset=CLAUDE_NOT_THE_PLAN)
 
     def answer(self, stdout: str, workdir: Path) -> str:
         """Everything printed is the reply."""
@@ -163,6 +170,14 @@ def user_names(environ: dict[str, str]) -> dict[str, str]:
     return {key: name for key in ("USER", "LOGNAME") if not environ.get(key)}
 
 
+def environment(environ: dict[str, str], call: Invocation, vendor: Vendor) -> dict[str, str]:
+    """The CLI's environment: the manager's, less `call.unset`, plus the call's
+    own variables and the vendor's private file (read at every call, so a token
+    written while AI-Lab runs counts from the next call)."""
+    env = {key: value for key, value in environ.items() if key not in call.unset}
+    return {**env, **user_names(environ), **call.env, **credentials.read(vendor.env_file)}
+
+
 DIALECTS: dict[str, Dialect] = {"claude": ClaudeCli(), "codex": CodexCli(),
                                 "opencode": OpencodeCli()}
 
@@ -177,7 +192,7 @@ def run(dialect: Dialect, vendor: Vendor, model: str, prompt: str,
             completed = subprocess.run(
                 call.argv, input=call.prompt, capture_output=True, text=True,
                 timeout=vendor.limits.timeout_s, cwd=workdir, check=False,
-                env={**os.environ, **user_names(dict(os.environ)), **call.env})
+                env=environment(dict(os.environ), call, vendor))
         except subprocess.TimeoutExpired:
             return Outcome(returncode=-1, answer="", errors="timeout", timed_out=True)
         except OSError as error:
