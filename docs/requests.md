@@ -59,8 +59,10 @@ the OpenAI shape, so an OpenAI client reads it as usual. Each entry also has an
 | `task` | The kind of work: `text-generation`, `transcription`, `speech-synthesis`, `music-generation` and so on. |
 | `capabilities` | What a text model can do beyond text. `images`: it can read pictures sent in the chat. `tools`: it can ask for tool calls (function calling). Read from the model's own files, not configured. A model started with the setting `language_model_only` loads without its picture reader, so `images` is left out for it. Empty when neither applies, or when the model's files cannot be read. |
 
-`GET /v1/models/{id}` returns one model in the same shape. Its `ai_lab` object
-has more:
+`GET /v1/models/{id}` returns one model in the same shape. A subscription
+model's id has a slash and is sent as it is: `GET /v1/models/claude/sonnet`
+(or encoded, `claude%2Fsonnet`); its `params.max_sequences` is its vendor's
+calls at once. Its `ai_lab` object has more:
 
 - `model_id`: where the model's files are, relative to the model store.
 - `params`: the settings the model will be started with, the engine's defaults

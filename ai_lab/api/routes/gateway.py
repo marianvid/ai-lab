@@ -84,6 +84,10 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) 
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, lanes))
     router.add("GET", "/v1/models/{model}",
                lambda model, **_: _describe(gateway, lanes, model))
+    # A subscription model's name has a slash (`claude/sonnet`, `codex/gpt-5.6-terra`);
+    # a client sends it as two path segments, so it gets its own route.
+    router.add("GET", "/v1/models/{vendor}/{model}",
+               lambda vendor, model, **_: _describe(gateway, lanes, f"{vendor}/{model}"))
     router.add("GET", "/api/gateway", lambda **_: _stats(gateway, lanes))
 
     def settings(body=None, **_):

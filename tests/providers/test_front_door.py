@@ -116,6 +116,23 @@ class FrontDoorTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             _describe(self.gateway, self.lanes, "nothing")
 
+    def test_a_subscription_model_is_described_by_its_two_segment_name(self):
+        from ai_lab.api.router import Router
+        from ai_lab.api.routes.gateway import register
+        router = Router()
+        register(router, cast(Any, None), self.gateway, self.lanes)
+        def describe(path):
+            matched = router.match("GET", path)
+            assert matched is not None, path
+            handler, captured = matched
+            return handler(**captured)
+        for path in ("/v1/models/claude/sonnet", "/v1/models/claude%2Fsonnet"):
+            with self.subTest(path=path):
+                self.assertEqual(describe(path)["id"], "claude/sonnet")
+        self.assertEqual(describe("/v1/models/bge-m3")["id"], "bge-m3")
+        with self.assertRaises(KeyError):
+            describe("/v1/models/claude/nothing")
+
     def test_stopping_the_lanes_stops_the_processor_models(self):
         self.lanes.stop_all()
         self.assertTrue(self.cpu.stopped)
