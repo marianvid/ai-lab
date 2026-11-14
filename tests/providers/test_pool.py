@@ -176,9 +176,12 @@ class ProviderPoolTests(unittest.TestCase):
         pool = ProviderPool(ProvidersConfig.from_mapping(raw), UsageLog(Path(self._temporary.name)))
         rows = {row["id"]: row["ai_lab"] for row in pool.catalogue()}
         self.assertEqual(rows["codex/gpt-5.6-sol"]["params"],
-                         {"context_size": 258400, "max_sequences": 3})
+                         {"context_size": 258400, "max_sequences": 3,
+                          "max_sequences_shared_by": "openai"})
         self.assertEqual(rows["codex/out"]["params"]["max_output_tokens"], 200)
-        self.assertNotIn("params", rows["codex/bare"])
+        # Places are known for every model, also one with no limits written down.
+        self.assertEqual(rows["codex/bare"]["params"],
+                         {"max_sequences": 3, "max_sequences_shared_by": "openai"})
 
     def test_built_from_configuration(self):
         pool = ProviderPool.from_config(RAW, Path(self._temporary.name))

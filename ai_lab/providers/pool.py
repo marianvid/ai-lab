@@ -70,11 +70,18 @@ class ProviderPool:
                 for item in self.config.models.values()]
 
     def _limits(self, item: ProviderModel) -> dict:
-        """The limits the owner gave, shaped like a local model's `params`."""
-        if not item.context_size:
-            return {}
-        params = {"context_size": item.context_size,
-                  "max_sequences": self.config.vendors[item.vendor].limits.concurrency}
+        """The model's limits, shaped like a local model's `params`.
+
+        `max_sequences` is the vendor's calls at once, and it is shared: every model
+        of that vendor draws on the same places. `max_sequences_shared_by` names the
+        vendor, so a caller counts them together (a local model's are its own and
+        carry no such field). `context_size` and `max_output_tokens` only when the
+        owner wrote them down.
+        """
+        params: dict = {"max_sequences": self.config.vendors[item.vendor].limits.concurrency,
+                        "max_sequences_shared_by": item.vendor}
+        if item.context_size:
+            params["context_size"] = item.context_size
         if item.max_output_tokens:
             params["max_output_tokens"] = item.max_output_tokens
         return {"params": params}

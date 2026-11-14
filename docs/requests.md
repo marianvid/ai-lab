@@ -62,7 +62,8 @@ the OpenAI shape, so an OpenAI client reads it as usual. Each entry also has an
 `GET /v1/models/{id}` returns one model in the same shape. A subscription
 model's id has a slash and is sent as it is: `GET /v1/models/claude/sonnet`
 (or encoded, `claude%2Fsonnet`); its `params.max_sequences` is its vendor's
-calls at once. Its `ai_lab` object has more:
+calls at once, shared by all of that vendor's models (`max_sequences_shared_by`
+names the vendor). Its `ai_lab` object has more:
 
 - `model_id`: where the model's files are, relative to the model store.
 - `params`: the settings the model will be started with, the engine's defaults

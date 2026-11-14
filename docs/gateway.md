@@ -168,10 +168,13 @@ comes back plain. A spent allowance answers 429, a CLI that cannot answer
 502. Why and how: [ADR 0001](decisions/0001-subscription-providers.md),
 [ADR 0002](decisions/0002-opencode-provider.md).
 
-A subscription model may carry its limits in the configuration
-(`context_size`, optionally `max_output_tokens`). The model list then shows
-them as a local model's `ai_lab.params`, with the vendor's `concurrency` as
-`max_sequences`, so the teams size their requests the same way. Example, the
+Every subscription model shows its vendor's `concurrency` as
+`ai_lab.params.max_sequences`, with `max_sequences_shared_by: "<vendor>"`:
+those places are shared by all of that vendor's models (AI-Lab's gate counts
+them per vendor), so a caller counts them together. A local model's
+`max_sequences` is its own and has no such field. A subscription model may
+also carry `context_size` and `max_output_tokens` from the configuration,
+shown in the same `params`, so the teams size their requests the same way. Example, the
 Codex models on the Mac: `codex/gpt-5.6-sol` → `context_size` 258400 (Codex's
 272,000-token window at its 95 % effective share).
 
