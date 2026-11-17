@@ -133,10 +133,15 @@ class ProviderModel:
 
 @dataclass(frozen=True)
 class ProvidersConfig:
-    """Every vendor and every model name, cross-checked."""
+    """Every vendor and every model name, cross-checked.
+
+    `machine` is this AI-Lab's name in an error a caller reads ("the anthropic
+    login on ai-lab-linux has expired"): the name the schedulers already use.
+    """
 
     vendors: dict[str, Vendor] = field(default_factory=dict)
     models: dict[str, ProviderModel] = field(default_factory=dict)
+    machine: str = ""
 
     @classmethod
     def from_mapping(cls, raw: dict | None) -> ProvidersConfig:
@@ -148,7 +153,10 @@ class ProvidersConfig:
                    for name, item in (raw.get("vendors") or {}).items()}
         models = {name: _model(name, item, vendors)
                   for name, item in (raw.get("models") or {}).items()}
-        return cls(vendors=vendors, models=models)
+        machine = raw.get("machine") or ""
+        if not isinstance(machine, str):
+            raise ValueError("providers.machine must be text")
+        return cls(vendors=vendors, models=models, machine=machine.strip())
 
 
 def _model(name: str, raw: dict, vendors: dict[str, Vendor]) -> ProviderModel:

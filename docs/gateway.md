@@ -165,7 +165,17 @@ A subscription model answers text only, without streaming. A request that
 names no `reasoning_effort` runs at the vendor's `default_effort`; an effort
 the CLI does not know is refused. A JSON answer wrapped in a Markdown fence
 comes back plain. A spent allowance answers 429, a CLI that cannot answer
-502. Why and how: [ADR 0001](decisions/0001-subscription-providers.md),
+502. **A dead login answers 503 at once**, with no retry and no pause: the
+vendor's CLI said, in its own words, that its sign-in on this machine is dead
+(Claude: "OAuth session expired and could not be refreshed", "Invalid bearer
+token", "Not logged in · Please run /login"; Codex: "Missing bearer or basic
+authentication"). The answer is `{"error": {"type": "authentication_error",
+"code": "vendor_login_expired", "message": "The <vendor> login on <machine>
+has expired: <the CLI's words>"}, "vendor": "...", "machine": "..."}`; the
+machine is `providers.machine` in the configuration, and anything shaped like
+a token is blanked from the CLI's words. Only those phrases count: a timeout,
+a bare 401 or "unauthorized" never do, so a caller is not sent to its
+fallback by mistake. Why and how: [ADR 0001](decisions/0001-subscription-providers.md),
 [ADR 0002](decisions/0002-opencode-provider.md).
 
 Every subscription model shows its vendor's `concurrency` as
@@ -195,6 +205,15 @@ file's date) and `age_days`, with a `warning` from
 about a year), when others can read the file, or when a line is not
 understood. The value itself is never sent, logged or shown. Where the file
 is on each machine: `opts/` (`providers.vendors.anthropic.env_file`).
+
+**The login's last known state** is in `GET /api/gateway`, per vendor, as
+`login`: `{"state": "ok" | "expired" | "unknown", "since", "last_learned",
+"model", "said"}` (`said` only when expired, one short line). It is learned
+**only from real calls**: an answered call says `ok`, a dead-login refusal says
+`expired`, any other failure changes nothing. AI-Lab never checks a login by
+itself. `unknown` until the first call after a start, unless the state file
+beside the usage counters (`ai_lab/providers/logins.py`) kept an earlier state. The page shows it as
+"Login".
 
 A processor model is started by its first request (a second or two, longer
 when its file is not cached) and stopped after `idle_stop_s` without use

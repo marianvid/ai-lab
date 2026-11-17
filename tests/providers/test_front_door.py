@@ -6,10 +6,14 @@ from typing import Any, cast
 
 from ai_lab.api.multipart import MultipartBody
 from ai_lab.api.routes.gateway import _catalogue, _describe, _forwarder, _stats
-from ai_lab.api.server import status_for
+from ai_lab.api.server import error_kind, status_for
 from ai_lab.lanes import SideLanes
 from ai_lab.main import parse_arguments
-from ai_lab.providers import ProviderRateLimitError, ProviderUnavailableError
+from ai_lab.providers import (
+    ProviderLoginExpiredError,
+    ProviderRateLimitError,
+    ProviderUnavailableError,
+)
 
 
 class FakePool:
@@ -141,6 +145,10 @@ class FrontDoorTests(unittest.TestCase):
     def test_provider_failures_map_to_http_statuses(self):
         self.assertEqual(status_for(ProviderRateLimitError("x")), HTTPStatus.TOO_MANY_REQUESTS)
         self.assertEqual(status_for(ProviderUnavailableError("x")), HTTPStatus.BAD_GATEWAY)
+        dead = ProviderLoginExpiredError("anthropic", "ai-lab-linux", "Not logged in")
+        self.assertEqual(status_for(dead), HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(error_kind(dead), "authentication_error")
+        self.assertEqual(dead.code, "vendor_login_expired")
 
 
 class ArgumentTests(unittest.TestCase):

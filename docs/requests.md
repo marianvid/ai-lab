@@ -181,6 +181,11 @@ curl http://localhost:8090/v1/chat/completions \
 No `stream`, no images, no tools. `response_format` with a JSON schema becomes
 an instruction to the model, and the answer comes back as plain JSON.
 
+When the vendor's login on that machine is dead, the answer comes at once as
+**503** with `error.code` `vendor_login_expired` (and `vendor`, `machine`):
+retrying will not help until the owner renews it, so go to your fallback and
+report it as an error (429 is a spent allowance, 502 any other failure).
+
 A **processor model** makes embeddings: one vector per text, compared by
 cosine. Send many short texts in one call rather than several calls at once:
 

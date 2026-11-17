@@ -54,6 +54,19 @@ function signIn(state) {
               + (item.env_file ? ` (${item.env_file}).` : '.'));
 }
 
+// The login's last known state, learned only from real calls: ok, EXPIRED
+// (the vendor refused its sign-in) or not known yet.
+function login(state) {
+  const item = state || {};
+  if (!item.state) return null;
+  const value = item.state === 'expired'
+    ? `EXPIRED since ${words(item.since)} (on ${words(item.model)}): ${words(item.said)}`
+    : (item.state === 'ok' ? `ok since ${words(item.since)}` : 'not known yet (no call since the start)');
+  return line('Login', value,
+              'Learned from real calls only: an answered call says ok, a call the vendor '
+              + 'refused for its sign-in says expired. AI-Lab never checks by itself.');
+}
+
 // One subscription vendor: its models, how many calls it is answering against
 // its places, any pause after a rate limit, and today's counts.
 function vendor(name, stats) {
@@ -73,6 +86,7 @@ function vendor(name, stats) {
          'Calls running now, against how many may run at once for this vendor. '
          + 'The rest wait their turn here, not in the card’s queue.'),
     signIn(stats.sign_in),
+    login(stats.login),
     stats.sign_in && stats.sign_in.warning
       ? line('Sign-in warning', stats.sign_in.warning,
              'Something about the private token file needs the owner.') : null,

@@ -2,7 +2,7 @@ import json
 import unittest
 from typing import Any
 
-from ai_lab.providers.errors import ErrorKind, classify
+from ai_lab.providers.errors import SAID_LENGTH, ErrorKind, classify, said
 from ai_lab.providers.prompt import (
     JSON_ONLY,
     NO_TOOLS,
@@ -18,7 +18,8 @@ class ClassifyTests(unittest.TestCase):
         cases = [
             ("Claude AI usage limit reached|1760000000", ErrorKind.RATE_LIMIT, "usage limit"),
             ("ERROR: 429 Too Many Requests", ErrorKind.RATE_LIMIT, "429"),
-            ("Invalid API key · Please run /login", ErrorKind.FATAL, "invalid api key"),
+            ("Invalid API key", ErrorKind.FATAL, "invalid api key"),
+            ("401 Unauthorized", ErrorKind.FATAL, "unauthorized"),
             ("error: unknown model gpt-9", ErrorKind.FATAL, "unknown model"),
             ("cannot start the CLI: [Errno 2] No such file", ErrorKind.FATAL,
              "cannot start the cli"),
@@ -29,6 +30,41 @@ class ClassifyTests(unittest.TestCase):
         for text, kind, label in cases:
             with self.subTest(text=text):
                 self.assertEqual(classify(text), (kind, label))
+
+    def test_a_dead_login_in_each_vendor_s_own_words(self):
+        # Each text as the CLI printed it (see LOGIN_MARKERS for where and when).
+        seen = [
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+            "Failed to authenticate. API Error: 401 Invalid bearer token",
+            "Not logged in · Please run /login",
+            "Invalid API key · Please run /login",
+            "Login expired · Please run /login",
+            "socket: failed to connect to websocket: HTTP error: 401 Unauthorized | "
+            "ERROR: unexpected status 401 Unauthorized: Missing bearer or basic "
+            "authentication in header, url: https://api.openai.com/v1/responses",
+        ]
+        for text in seen:
+            with self.subTest(text=text):
+                self.assertEqual(classify(text), (ErrorKind.LOGIN, "login expired"))
+
+    def test_nothing_else_is_taken_for_a_dead_login(self):
+        # A false "expired" sends every caller to its fallback: these stay what they are.
+        for text, kind in (("timeout", ErrorKind.TRANSIENT),
+                           ("Claude AI usage limit reached|1760000000", ErrorKind.RATE_LIMIT),
+                           ("429 Too Many Requests", ErrorKind.RATE_LIMIT),
+                           ("401 Unauthorized", ErrorKind.FATAL),
+                           ("error: unknown model gpt-9", ErrorKind.FATAL),
+                           ("error sending request for url", ErrorKind.TRANSIENT)):
+            with self.subTest(text=text):
+                self.assertEqual(classify(text)[0], kind)
+
+    def test_what_a_dead_login_said_is_one_short_line_without_secrets(self):
+        text = "line one\n  Failed to authenticate\nsk-made-up-value-for-the-test " \
+               "req_12bb4239c16e4519977a68b63b5305db"
+        words = said(text)
+        self.assertEqual(words, "line one Failed to authenticate […] […]")
+        self.assertLessEqual(len(said("x " * 500)), SAID_LENGTH)
+        self.assertEqual(said(""), "no output")
 
     def test_unrecognised_text_is_transient_and_keeps_a_stable_label(self):
         first = classify("starting\nerror sending request for url (https://x/1234)")

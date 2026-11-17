@@ -33,7 +33,11 @@ from ..gateway.errors import (
 )
 from ..multipart import MultipartBody
 from ..operations import Operations
-from ..providers import ProviderRateLimitError, ProviderUnavailableError
+from ..providers import (
+    ProviderLoginExpiredError,
+    ProviderRateLimitError,
+    ProviderUnavailableError,
+)
 from . import sse
 from .passthrough import ClientGoneError, Passthrough
 from .raw_body import RawBody, is_raw
@@ -66,6 +70,9 @@ STATUS = {
     TransferCheckError: HTTPStatus.BAD_GATEWAY,
     # The scheduler door a pull goes through refused it or did not answer.
     SchedulerDoorError: HTTPStatus.BAD_GATEWAY,
+    # The vendor refused its sign-in on this machine: no retry helps until the
+    # owner renews it; the caller's fallback takes over and says it plainly.
+    ProviderLoginExpiredError: HTTPStatus.SERVICE_UNAVAILABLE,
     # A subscription's allowance is spent: the caller may retry later.
     ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
     # The vendor's CLI could not answer: the caller's fallback should take over.

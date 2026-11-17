@@ -11,7 +11,9 @@ const STATS = {
     anthropic: {
       in_flight: 2, concurrency: 6, paused_for_s: 0, rate_limit_strikes: 0,
       default_effort: 'medium',
-      today: { requests: 14, ok: 13, failures: { 'not logged in': 1 } },
+      today: { requests: 14, ok: 13, failures: { 'login expired': 1 } },
+      login: { state: 'expired', since: '2026-11-17T14:02:00Z', model: 'opus',
+               said: 'Not logged in · Please run /login' },
       models: ['claude/haiku', 'claude/sonnet'],
     },
   },
@@ -50,7 +52,8 @@ describe('the Cloud & CPU page', () => {
     assert.match(text, /Subscription · anthropic/);
     assert.match(text, /claude\/haiku, claude\/sonnet/);
     assert.match(text, /2 from 6/);
-    assert.match(text, /not logged in ×1/);
+    assert.match(text, /login expired ×1/);
+    assert.match(text, /EXPIRED since 2026-11-17T14:02:00Z \(on opus\): Not logged in/);
     assert.match(text, /Embeddings · bge-m3/);
     assert.match(text, /card · 1 there now/);
     assert.match(text, /1 from 4/);

@@ -2,7 +2,11 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.providers import ProviderRateLimitError, ProviderUnavailableError
+from ai_lab.providers import (
+    ProviderLoginExpiredError,
+    ProviderRateLimitError,
+    ProviderUnavailableError,
+)
 from ai_lab.providers.dialects import Outcome
 from ai_lab.providers.pool import ProviderPool
 from ai_lab.providers.settings import ProvidersConfig
@@ -12,7 +16,7 @@ ANTHROPIC = {"dialect": "claude", "binary": "/opt/cli/claude",
              "launch_spacing_s": 0, "rate_limit_waits_s": [0],
              "rate_limit_retries": 2, "network_waits_s": [5, 15]}
 MODELS = {"claude/sonnet": {"vendor": "anthropic", "model": "sonnet"}}
-RAW = {"vendors": {"anthropic": ANTHROPIC}, "models": MODELS}
+RAW = {"vendors": {"anthropic": ANTHROPIC}, "models": MODELS, "machine": "ai-lab-test"}
 
 
 def with_default(effort):
@@ -80,10 +84,50 @@ class ProviderPoolTests(unittest.TestCase):
         self.assertEqual(len(self.runner.calls), 3)
 
     def test_a_fatal_error_is_answered_at_once(self):
-        pool = self.pool(failed("Invalid API key · Please run /login"))
-        with self.assertRaisesRegex(ProviderUnavailableError, "Invalid API key"):
+        pool = self.pool(failed("error: unknown model sonnet-9"))
+        with self.assertRaisesRegex(ProviderUnavailableError, "unknown model"):
             pool.complete(CHAT, REQUEST)
         self.assertEqual(len(self.runner.calls), 1)
+        self.assertEqual(pool.stats()["anthropic"]["login"], {"state": "unknown"})
+
+    def test_a_dead_login_is_answered_at_once_with_its_own_error(self):
+        dead = failed("Failed to authenticate: OAuth session expired and could not be "
+                      "refreshed sk-made-up-ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        pool = self.pool(dead, ok())
+        with self.assertRaises(ProviderLoginExpiredError) as caught:
+            pool.complete(CHAT, REQUEST)
+        self.assertEqual(len(self.runner.calls), 1)
+        self.assertEqual(self.slept, [])
+        error = caught.exception
+        self.assertEqual((error.kind, error.code), ("authentication_error",
+                                                    "vendor_login_expired"))
+        self.assertEqual(error.detail, {"vendor": "anthropic", "machine": "ai-lab-test"})
+        self.assertIn("The anthropic login on ai-lab-test has expired", str(error))
+        self.assertNotIn("ABCDEFGHIJKLMNOP", str(error))
+        login = pool.stats()["anthropic"]["login"]
+        self.assertEqual((login["state"], login["model"]), ("expired", "sonnet"))
+        self.assertNotIn("ABCDEFGHIJKLMNOP", login["said"])
+        self.assertEqual(pool.stats()["anthropic"]["today"]["failures"], {"login expired": 1})
+        # The next call that answers says the login works again.
+        pool.complete(CHAT, REQUEST)
+        self.assertEqual(pool.stats()["anthropic"]["login"]["state"], "ok")
+
+    def test_other_failures_say_nothing_about_the_login(self):
+        pool = self.pool(ok(), failed("error: unknown model x"),
+                         *[Outcome(returncode=-1, answer="", errors="timeout",
+                                   timed_out=True)] * 3)
+        pool.complete(CHAT, REQUEST)
+        for _ in range(2):
+            with self.assertRaises(ProviderUnavailableError):
+                pool.complete(CHAT, REQUEST)
+        self.assertEqual(pool.stats()["anthropic"]["login"]["state"], "ok")
+
+    def test_an_expired_login_is_remembered_across_a_restart(self):
+        first = self.pool(failed("Not logged in · Please run /login"))
+        with self.assertRaises(ProviderLoginExpiredError):
+            first.complete(CHAT, REQUEST)
+        again = self.pool()
+        self.assertEqual(again.stats()["anthropic"]["login"]["state"], "expired")
 
     def test_network_failures_are_retried_after_each_wait(self):
         network = failed("error sending request for url")

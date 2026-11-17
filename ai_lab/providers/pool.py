@@ -24,11 +24,14 @@ from . import prompt
 from .dialects import DIALECTS, Dialect, Outcome
 from .errors import (
     ErrorKind,
+    ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
     classify,
+    said,
 )
 from .gate import VendorGate
+from .logins import LoginBook
 from .settings import ProviderModel, ProvidersConfig, Vendor
 from .usage import UsageLog
 
@@ -41,9 +44,12 @@ class ProviderPool:
 
     def __init__(self, config: ProvidersConfig, usage: UsageLog,
                  runner: Runner = dialects.run,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
+                 sleep: Callable[[float], None] = time.sleep,
+                 logins: LoginBook | None = None) -> None:
         self.config = config
         self.usage = usage
+        # Beside the usage counters, so it survives a restart with them.
+        self.logins = logins or LoginBook(usage.path.parent)
         self._run = runner
         self._sleep = sleep
         self._gates = {name: VendorGate(vendor.limits)
@@ -115,9 +121,14 @@ class ProviderPool:
             if outcome.succeeded:
                 gate.succeeded()
                 self.usage.record(vendor.id, model.model)
+                self.logins.answered(vendor.id, model.model)
                 return outcome.answer
             kind, label = classify(outcome.errors)
             self.usage.record(vendor.id, model.model, failure=label)
+            if kind is ErrorKind.LOGIN:
+                words = said(outcome.errors)
+                self.logins.refused(vendor.id, model.model, words)
+                raise ProviderLoginExpiredError(vendor.id, self.config.machine, words)
             if kind is ErrorKind.FATAL:
                 raise ProviderUnavailableError(f"{model.name}: {_tail(outcome.errors)}")
             if kind is ErrorKind.RATE_LIMIT:
@@ -139,6 +150,7 @@ class ProviderPool:
         return {name: {**gate.state(), "today": today.get(name, {}),
                        "default_effort": self.config.vendors[name].default_effort,
                        "sign_in": _sign_in(self.config.vendors[name]),
+                       "login": self.logins.state(name),
                        "models": sorted(item.name for item in self.config.models.values()
                                         if item.vendor == name)}
                 for name, gate in self._gates.items()}

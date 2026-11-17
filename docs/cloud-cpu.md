@@ -33,6 +33,7 @@ processor models. How to write the requests is in
 | Status | Idle, working, or paused: after the vendor says its allowance is spent, every call to that vendor waits, then tries again. |
 | Processing | Calls running now, out of how many may run at once for this vendor. |
 | Signs in with | `yearly token · set <date>` when the vendor's private token file holds one (see [gateway](gateway.md), "How a vendor's CLI signs in"), otherwise the CLI's own login. The token itself is never shown. |
+| Login | The login's last known state, learned only from real calls: `ok since …`, `EXPIRED since … (on <model>): <what the CLI said>`, or not known yet. AI-Lab never checks by itself. |
 | Sign-in warning | Only when something needs the owner: the token is as old as the vendor's `token_warn_after_days` (335 by default) or older, the file names a key AI-Lab refuses, others can read the file, or a line in it is not understood. |
 | Default effort | How long the model thinks when a request names no `reasoning_effort`. |
 | Today | Calls since midnight, and how many were answered. |
