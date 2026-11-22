@@ -21,6 +21,7 @@ startup — which is why every setting below belongs to the memory group.
 
 from __future__ import annotations
 
+import json
 import re
 
 from ...catalog.capabilities import IMAGES
@@ -134,6 +135,22 @@ PARAMS = (
                    "allowed\", because the tokenizer loaded from tekken.json "
                    "carries no chat template. Enter a mode the installed vLLM "
                    "version supports; the engine checks it when loaded."),
+    ParamSpec("draft_tokens", "Tokens guessed ahead", "int", 0,
+              minimum=0, maximum=8, group="memory",
+              help="Speculative decoding: a small extra part of the model "
+                   "guesses this many next tokens and the model checks them "
+                   "all in one step. The answer is the same; only the speed "
+                   "changes, most for one request at a time and less when "
+                   "many share the card. 0 is off. Needs a model that ships "
+                   "the guessing part (Qwen3.8's MTP layer, for one); start "
+                   "with 2 and measure. It takes some memory from the "
+                   "context cache."),
+    ParamSpec("draft_method", "Guessing method", "identifier", "mtp",
+              group="memory",
+              help="Which guesser vLLM uses when Tokens guessed ahead is "
+                   "above 0. `mtp` uses the model's own multi-token "
+                   "prediction layer. Enter a method the installed vLLM "
+                   "version supports; the engine checks it when loaded."),
     ParamSpec("compact_json", "Compact forced JSON", "bool", True,
               group="memory",
               help="When a request forces a JSON answer (response_format), "
@@ -196,6 +213,10 @@ def _text_flags(settings: dict) -> list[str]:
         flags += ["--reasoning-parser", settings["reasoning_parser"]]
     if settings["compact_json"]:
         flags += ["--structured-outputs-config", COMPACT_JSON]
+    if settings["draft_tokens"]:
+        flags += ["--speculative-config", json.dumps(
+            {"method": settings["draft_method"] or "mtp",
+             "num_speculative_tokens": settings["draft_tokens"]})]
     return flags
 
 

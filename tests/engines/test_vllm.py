@@ -113,6 +113,27 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn("--structured-outputs-config",
                          self.argv({"compact_json": False}))
 
+    def test_no_guessing_ahead_by_default(self):
+        self.assertNotIn("--speculative-config", self.argv({}))
+
+    def test_tokens_guessed_ahead_turn_on_the_models_own_mtp(self):
+        argv = self.argv({"draft_tokens": 2})
+        self.assertEqual(json.loads(argv[argv.index("--speculative-config") + 1]),
+                         {"method": "mtp", "num_speculative_tokens": 2})
+
+    def test_the_guessing_method_can_be_named(self):
+        argv = self.argv({"draft_tokens": 1, "draft_method": "qwen3_next_mtp"})
+        self.assertEqual(json.loads(argv[argv.index("--speculative-config") + 1])["method"],
+                         "qwen3_next_mtp")
+
+    def test_guessing_ahead_is_bounded(self):
+        with self.assertRaises(ValueError):
+            self.argv({"draft_tokens": 9})
+
+    def test_a_transcription_model_has_no_guessing_ahead_to_set(self):
+        with self.assertRaises(ValueError):
+            self.engine.plan(model(task=Task.TRANSCRIPTION), 8082, {"draft_tokens": 2})
+
 
 class ParamTests(unittest.TestCase):
     def test_every_setting_reserves_memory(self):
