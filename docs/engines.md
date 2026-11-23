@@ -115,14 +115,20 @@ Measured on the Linux container (RTX PRO 4500, vLLM 0.26.1rc1, FlashInfer
 | ingest's and news' benchmark scores | — | inside their run-to-run noise |
 | time of their lots | — | within 3 % |
 
+The switch is the only way to an 8-bit cache: an `fp8` name typed in Cache
+precision is refused at 16, so the page never shows 16 while 8 runs.
+
 Choosing 8 sets three things beside the cache's precision, all for that one
 engine process. 16 bits gets none of them.
 
 - **The CUDA compiler for FlashInfer.** vLLM serves an fp8 cache only through
   FlashInfer's attention, which compiles its kernels at first use: it needs
-  `nvcc` on `PATH` and the CUDA headers under `CUDA_HOME` (`/usr/local/cuda`,
-  or the manager's own `CUDA_HOME`). `MAX_JOBS=6`, because the first compile
-  with 12 parallel jobs hit the container's memory limit. The compile is cached
+  `nvcc` on `PATH` and the CUDA headers under `CUDA_HOME`. Both come from the
+  engine settings `engines.vllm.cuda_home` (default `/usr/local/cuda`) and
+  `engines.vllm.eight_bit_compile_jobs` (default 6: the first compile with 12
+  parallel jobs hit the container's memory limit). The compiler's folder is put
+  before the `PATH` of the unit that starts the engine (`AI_LAB_PATH_PREPEND`,
+  applied by `hosts/launch.py`), never into the machine's `PATH`. The compile is cached
   under the engine's home, so only the first 8-bit start takes minutes. Never
   put `nvcc` on the machine's `PATH` instead: a global link once made
   `CUDA_HOME` resolve to `/usr/local`, which has no headers, and broke the
@@ -134,8 +140,10 @@ engine process. 16 bits gets none of them.
   under real lots the engine stalled twice and once segfaulted in
   `cuGraphLaunch`. The flag keeps the matrix maths on vLLM's own CUTLASS
   kernels, the ones 16 bits uses.
-- **The memory share capped at 0.90.** At 0.93, an fp8 start left 47 MB free
-  on the card and the engine died under load.
+- **Its own card share, visible beside the switch:** "GPU memory share at 8
+  bits", default 0.90, used instead of "GPU memory share". At 0.93, an fp8
+  start (with FlashInfer's matrix maths) left 47 MB free on the card and the
+  engine died under load.
 
 The first start after a change of these flags recompiles vLLM's kernels and
 reports a smaller cache (144,421 tokens once). The second start reports the

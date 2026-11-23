@@ -67,12 +67,30 @@ def read_spec(instance_id: str, directory: Path | None = None) -> tuple[list[str
     return payload["argv"], payload.get("env", {})
 
 
+# A plan that needs a folder before the process's own PATH (vLLM's 8-bit cache:
+# the CUDA compiler) names it under this key rather than writing a whole PATH,
+# so the engine keeps the PATH of the unit that starts it, not the one the
+# manager had when it wrote the plan.
+PATH_PREPEND = "AI_LAB_PATH_PREPEND"
+
+
+def merged_env(env: dict[str, str], base: dict[str, str] | None = None) -> dict[str, str]:
+    """The process's environment: the base, the plan's variables over it, its PATH prefix applied."""
+    base = dict(os.environ if base is None else base)
+    extra = dict(env)
+    prefix = extra.pop(PATH_PREPEND, "")
+    merged = {**base, **extra}
+    if prefix:
+        merged["PATH"] = f"{prefix}:{merged['PATH']}" if merged.get("PATH") else prefix
+    return merged
+
+
 def main() -> None:
     """Entry point for `ai-lab-run <instance-id>`, called by the systemd unit."""
     if len(sys.argv) != EXPECTED_ARGUMENTS:
         raise SystemExit("usage: ai-lab-run <instance-id>")
     argv, env = read_spec(sys.argv[1])
-    os.execvpe(argv[0], argv, {**os.environ, **env})
+    os.execvpe(argv[0], argv, merged_env(env))
 
 
 if __name__ == "__main__":

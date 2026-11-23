@@ -64,3 +64,23 @@ class StateDirTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MergedEnvTests(unittest.TestCase):
+    """A plan's PATH prefix goes before the starting unit's own PATH."""
+
+    def test_the_prefix_goes_before_the_units_path(self):
+        env = launch.merged_env({"AI_LAB_PATH_PREPEND": "/usr/local/cuda/bin", "X": "1"},
+                                base={"PATH": "/usr/bin:/bin", "HOME": "/h"})
+        self.assertEqual(env["PATH"], "/usr/local/cuda/bin:/usr/bin:/bin")
+        self.assertEqual(env["X"], "1")
+        self.assertEqual(env["HOME"], "/h")
+        self.assertNotIn("AI_LAB_PATH_PREPEND", env)
+
+    def test_no_prefix_changes_nothing(self):
+        env = launch.merged_env({"X": "1"}, base={"PATH": "/usr/bin"})
+        self.assertEqual(env, {"PATH": "/usr/bin", "X": "1"})
+
+    def test_a_prefix_without_a_path_is_the_path(self):
+        env = launch.merged_env({"AI_LAB_PATH_PREPEND": "/c/bin"}, base={})
+        self.assertEqual(env["PATH"], "/c/bin")

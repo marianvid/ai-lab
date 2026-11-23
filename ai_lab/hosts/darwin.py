@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import atexit
 import contextlib
-import os
 import re
 import signal
 import subprocess
@@ -29,6 +28,7 @@ from typing import IO
 
 from ..types import AcceleratorSnapshot, Capabilities, ProcessSpec, ProcessStatus
 from .command import run, which
+from .launch import merged_env
 
 TERMINATE_GRACE_SECONDS = 20
 
@@ -113,7 +113,7 @@ class DarwinHost:
             self._handles[spec.instance_id] = handle
             self._processes[spec.instance_id] = subprocess.Popen(
                 spec.argv,
-                env={**os.environ, **spec.env},
+                env=merged_env(spec.env),
                 stdout=handle,
                 stderr=subprocess.STDOUT,
             )

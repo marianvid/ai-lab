@@ -351,7 +351,7 @@ class MemorySettingsTests(unittest.TestCase):
         self.assertNotIn("--kv-cache-dtype", self.argv({"kv_cache_dtype": "auto"}))
 
     def test_a_smaller_cache_precision_reaches_the_command_line(self):
-        argv = self.argv({"kv_cache_dtype": "fp8"})
+        argv = self.argv({"cache_bits": "8", "kv_cache_dtype": "fp8"})
         self.assertEqual(argv[argv.index("--kv-cache-dtype") + 1], "fp8")
 
     def test_new_cache_precision_needs_no_ai_lab_release(self):
@@ -372,7 +372,7 @@ class MemorySettingsTests(unittest.TestCase):
         self.assertNotIn("--enforce-eager", self.argv({"enforce_eager": False}))
 
     def test_all_three_together(self):
-        argv = self.argv({"kv_cache_dtype": "fp8", "prefix_caching": True,
+        argv = self.argv({"cache_bits": "8", "prefix_caching": True,
                           "enforce_eager": True})
         for flag in ("--kv-cache-dtype", "--enable-prefix-caching",
                      "--enforce-eager"):
@@ -386,19 +386,24 @@ class MemorySettingsTests(unittest.TestCase):
             self.assertTrue(spec.help.strip(), f"{spec.key} has no explanation")
 
 
+
 class CacheBitsTests(unittest.TestCase):
     """The visible 16/8-bit switch, and what an 8-bit cache needs on this card.
 
     Measured on CT 102, 2026-11-23: fp8 needs FlashInfer's JIT (nvcc and the
     CUDA headers for that process only), and the matrix maths must stay on
     vLLM's CUTLASS kernels (FlashInfer bug #6237 crashed the engine otherwise).
+    What the page shows is what the engine gets.
     """
 
     def setUp(self):
         self.engine = VllmEngine(binary="/opt/ai/vllm/.venv/bin/vllm")
 
-    def plan(self, params=None):
-        return self.engine.plan(model(), 8082, params or {})
+    def plan(self, params=None, engine=None):
+        return (engine or self.engine).plan(model(), 8082, params or {})
+
+    def flag(self, plan, name):
+        return plan.argv[plan.argv.index(name) + 1]
 
     def test_sixteen_bits_is_the_default_and_adds_nothing(self):
         plan = self.plan()
@@ -406,38 +411,54 @@ class CacheBitsTests(unittest.TestCase):
         self.assertNotIn("--linear-backend", plan.argv)
         self.assertEqual(plan.env, {})
 
-    def test_sixteen_bits_keeps_the_memory_share_as_set(self):
-        argv = self.plan({"cache_bits": "16", "gpu_memory_fraction": 0.93}).argv
-        self.assertEqual(argv[argv.index("--gpu-memory-utilization") + 1], "0.93")
+    def test_sixteen_bits_uses_the_sixteen_bit_share(self):
+        plan = self.plan({"cache_bits": "16", "gpu_memory_fraction": 0.93,
+                          "eight_bit_memory_fraction": 0.80})
+        self.assertEqual(self.flag(plan, "--gpu-memory-utilization"), "0.93")
 
     def test_eight_bits_sets_fp8_and_cutlass(self):
-        argv = self.plan({"cache_bits": "8"}).argv
-        self.assertEqual(argv[argv.index("--kv-cache-dtype") + 1], "fp8")
-        self.assertEqual(argv[argv.index("--linear-backend") + 1], "cutlass")
+        plan = self.plan({"cache_bits": "8"})
+        self.assertEqual(self.flag(plan, "--kv-cache-dtype"), "fp8")
+        self.assertEqual(self.flag(plan, "--linear-backend"), "cutlass")
 
-    def test_eight_bits_caps_the_memory_share(self):
-        argv = self.plan({"cache_bits": "8", "gpu_memory_fraction": 0.93}).argv
-        self.assertEqual(argv[argv.index("--gpu-memory-utilization") + 1], "0.9")
-        argv = self.plan({"cache_bits": "8", "gpu_memory_fraction": 0.80}).argv
-        self.assertEqual(argv[argv.index("--gpu-memory-utilization") + 1], "0.8")
+    def test_eight_bits_uses_its_own_visible_share(self):
+        plan = self.plan({"cache_bits": "8", "gpu_memory_fraction": 0.93})
+        self.assertEqual(self.flag(plan, "--gpu-memory-utilization"), "0.9")
+        plan = self.plan({"cache_bits": "8", "gpu_memory_fraction": 0.93,
+                          "eight_bit_memory_fraction": 0.85})
+        self.assertEqual(self.flag(plan, "--gpu-memory-utilization"), "0.85")
 
-    def test_eight_bits_gives_flashinfer_the_compiler_for_that_process(self):
+    def test_eight_bits_puts_the_compiler_before_the_units_path(self):
         env = self.plan({"cache_bits": "8"}).env
-        self.assertTrue(env["CUDA_HOME"])
-        self.assertTrue(env["PATH"].startswith(env["CUDA_HOME"] + "/bin:"))
+        self.assertEqual(env["CUDA_HOME"], "/usr/local/cuda")
+        self.assertEqual(env["AI_LAB_PATH_PREPEND"], "/usr/local/cuda/bin")
         self.assertEqual(env["MAX_JOBS"], "6")
+        self.assertNotIn("PATH", env)
 
-    def test_a_typed_fp8_name_gets_the_same_treatment(self):
-        plan = self.plan({"kv_cache_dtype": "fp8_e4m3"})
-        self.assertEqual(plan.argv[plan.argv.index("--kv-cache-dtype") + 1], "fp8_e4m3")
-        self.assertIn("--linear-backend", plan.argv)
-        self.assertIn("CUDA_HOME", plan.env)
+    def test_the_machine_facts_are_engine_settings(self):
+        engine = VllmEngine(binary="/x/vllm", cuda_home="/opt/cuda-13",
+                            eight_bit_compile_jobs=3)
+        env = self.plan({"cache_bits": "8"}, engine).env
+        self.assertEqual(env["CUDA_HOME"], "/opt/cuda-13")
+        self.assertEqual(env["AI_LAB_PATH_PREPEND"], "/opt/cuda-13/bin")
+        self.assertEqual(env["MAX_JOBS"], "3")
+
+    def test_an_fp8_name_at_sixteen_bits_is_refused(self):
+        # The switch must never show 16 while the engine runs 8.
+        with self.assertRaisesRegex(ValueError, "Cache bits 8"):
+            self.plan({"cache_bits": "16", "kv_cache_dtype": "fp8"})
+        with self.assertRaisesRegex(ValueError, "Cache bits 8"):
+            self.plan({"kv_cache_dtype": "fp8_e4m3"})
 
     def test_eight_bits_keeps_a_typed_fp8_variant(self):
-        argv = self.plan({"cache_bits": "8", "kv_cache_dtype": "fp8_e5m2"}).argv
-        self.assertEqual(argv[argv.index("--kv-cache-dtype") + 1], "fp8_e5m2")
+        plan = self.plan({"cache_bits": "8", "kv_cache_dtype": "fp8_e5m2"})
+        self.assertEqual(self.flag(plan, "--kv-cache-dtype"), "fp8_e5m2")
 
-    def test_another_typed_precision_is_not_treated_as_eight_bits(self):
+    def test_eight_bits_overrides_another_typed_precision(self):
+        plan = self.plan({"cache_bits": "8", "kv_cache_dtype": "nvfp4_ds_mla"})
+        self.assertEqual(self.flag(plan, "--kv-cache-dtype"), "fp8")
+
+    def test_another_typed_precision_at_sixteen_is_passed_through(self):
         plan = self.plan({"kv_cache_dtype": "nvfp4_ds_mla"})
         self.assertNotIn("--linear-backend", plan.argv)
         self.assertEqual(plan.env, {})
@@ -446,14 +467,15 @@ class CacheBitsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.plan({"cache_bits": "4"})
 
-    def test_the_switch_is_a_visible_choice(self):
-        spec = next(s for s in self.engine.params() if s.key == "cache_bits")
-        self.assertEqual(spec.kind, "choice")
-        self.assertEqual(spec.choices, ("16", "8"))
-        self.assertEqual(spec.default, "16")
-        self.assertIn("reloads", spec.help)
+    def test_the_switch_and_its_share_are_visible(self):
+        specs = {s.key: s for s in self.engine.params()}
+        self.assertEqual(specs["cache_bits"].kind, "choice")
+        self.assertEqual(specs["cache_bits"].choices, ("16", "8"))
+        self.assertEqual(specs["cache_bits"].default, "16")
+        self.assertIn("reloads", specs["cache_bits"].help)
+        self.assertEqual(specs["eight_bit_memory_fraction"].default, 0.90)
 
-    def test_the_card_share_counted_for_eight_bits_is_the_capped_one(self):
+    def test_the_card_share_counted_is_the_one_launched(self):
         need = self.engine.needs_mb(None, {"cache_bits": "8", "gpu_memory_fraction": 0.93}, 1000)
         self.assertAlmostEqual(need, 900)
         need = self.engine.needs_mb(None, {"gpu_memory_fraction": 0.93}, 1000)
