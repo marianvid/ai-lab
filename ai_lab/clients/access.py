@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .door import Door, DoorKeys
 from .errors import AccessDeniedError
+from .mailbox import OWNER, Mailbox, party_of
 from .power import Power
 from .presence import Presence
 from .registry import ClientRegistry
@@ -18,6 +19,7 @@ from .security import SecuritySettings
 from .sessions import SessionBook, cookie_header, session_of
 
 CLIENTS_FILE = "clients.json"
+MAILBOX_FILE = "mailbox.jsonl"
 SECURITY_FILE = "security.json"
 POWER_FILE = "power.json"
 ENDED = 0
@@ -27,11 +29,13 @@ class Access:
     """The clients, the door, the web sessions, Settings → Security and On/Off."""
 
     def __init__(self, registry: ClientRegistry, security: SecuritySettings,
-                 power: Power, log: Callable[[str], None] = print) -> None:
+                 power: Power, log: Callable[[str], None] = print,
+                 mailbox: Mailbox | None = None) -> None:
         self.registry = registry
         self.security = security
         self.power = power
         self.log = log
+        self.mailbox = mailbox
         self.presence = Presence()
         self.sessions = SessionBook()
         self.door = Door(DoorKeys(registry, self.presence, security, self.sessions), log, power)
@@ -42,7 +46,8 @@ class Access:
         state_dir = Path(state_dir)
         return cls(ClientRegistry(state_dir / CLIENTS_FILE),
                    SecuritySettings(state_dir / SECURITY_FILE),
-                   Power(state_dir / POWER_FILE), log=log)
+                   Power(state_dir / POWER_FILE), log=log,
+                   mailbox=Mailbox(state_dir / MAILBOX_FILE))
 
     # -- clients ------------------------------------------------------------
 
@@ -71,6 +76,30 @@ class Access:
         if name is None:
             raise AccessDeniedError("A heartbeat needs a registered client's token")
         return self.presence.heartbeat(name)
+
+    # -- the mailbox --------------------------------------------------------
+
+    def mail_party(self, headers) -> str:
+        """Who reads or writes the mailbox: a `mailbox-<party>` client, or the web interface as the owner.
+
+        Asked with a token, never anonymously, whatever Settings → Security says:
+        the mailbox is a conversation between named parties.
+        """
+        party = party_of(self.door.caller(headers))
+        if party is not None:
+            return party
+        if self.sessions.valid(session_of(headers)):
+            return OWNER
+        raise AccessDeniedError("The mailbox needs a mailbox client's token "
+                                "(a client named mailbox-<party>) or the web interface")
+
+    def mail_read(self, headers, after: int) -> dict:
+        """The messages after `after` that the caller may read."""
+        return self.mailbox.read(self.mail_party(headers), after)
+
+    def mail_post(self, headers, to: str, text: str) -> dict:
+        """One message from the caller; nothing in it is acted on."""
+        return self.mailbox.post(self.mail_party(headers), to, text)
 
     def switch(self, on: bool) -> dict:
         """Switch AI-Lab On or Off (A6), and say so in the log."""

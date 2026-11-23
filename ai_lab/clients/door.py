@@ -15,7 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .errors import AiLabOffError, TokenInvalidError, TokenMissingError
+from .errors import AccessDeniedError, AiLabOffError, TokenInvalidError, TokenMissingError
+from .mailbox import PREFIX as MAILBOX_PREFIX
 from .power import Power, uses_a_model
 from .presence import Presence
 from .registry import ClientRegistry
@@ -25,6 +26,7 @@ from .sessions import SessionBook, session_of
 # Reachable with nothing at all: "is it up", and what the login page needs.
 OPEN = frozenset({("GET", "/api/health"), ("GET", "/api/session"),
                   ("POST", "/api/login")})
+MAILBOX_ROUTE = "/api/mailbox"
 WEB = "web"
 ANONYMOUS = "anonymous"
 BEARER = "bearer "
@@ -71,6 +73,10 @@ class Door:
         if (method.upper(), path) in OPEN:
             return ANONYMOUS
         caller = self._who(path, headers, peer)
+        # A mailbox token opens the mailbox and nothing else: it cannot call a
+        # model, change a setting or register a client.
+        if caller.startswith(MAILBOX_PREFIX) and route_key(path) != MAILBOX_ROUTE:
+            raise AccessDeniedError("A mailbox token opens the mailbox only")
         if self.power is not None and not self.power.on and uses_a_model(method, path):
             raise AiLabOffError("AI-Lab is switched Off: it serves no model until it is "
                                 "switched On", since=self.power.view()["since"])

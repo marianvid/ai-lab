@@ -22,6 +22,23 @@ def register(router, access, journal=None) -> None:
                    lambda query, **_: journal.since(int(query.get("after") or 0)))
     _clients(router, access)
     _web(router, access)
+    if getattr(access, "mailbox", None) is not None:
+        _mailbox(router, access)
+
+
+def _mailbox(router, access) -> None:
+    def read(headers, query, **_):
+        try:
+            after = int(query.get("after") or 0)
+        except ValueError:
+            raise ValueError("'after' must be a message id") from None
+        return access.mail_read(headers, after)
+
+    def post(headers, body, **_):
+        return access.mail_post(headers, str(body.get("to", "")), body.get("text"))
+
+    router.add("GET", "/api/mailbox", read)
+    router.add("POST", "/api/mailbox", post)
 
 
 def _clients(router, access) -> None:

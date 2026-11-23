@@ -129,6 +129,45 @@ class ClientRoutesTest(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/", timeout=5) as response:
             self.assertIn("HttpOnly", response.headers["Set-Cookie"])
 
+    def test_the_mailbox_between_two_parties_and_the_owner(self):
+        _, sqwad, _ = self.call("POST", "/api/clients", {"name": "mailbox-sqwad"})
+        _, lab, _ = self.call("POST", "/api/clients", {"name": "mailbox-ai-lab"})
+        as_sqwad = {"Authorization": f"Bearer {sqwad['token']}"}
+        as_lab = {"Authorization": f"Bearer {lab['token']}"}
+        status, sent, _ = self.call("POST", "/api/mailbox", {"to": "ai-lab", "text": "hello"}, as_sqwad)
+        self.assertEqual((status, sent["from"], sent["to"]), (200, "sqwad", "ai-lab"))
+        status, got, _ = self.call("GET", "/api/mailbox?after=0", headers=as_lab)
+        self.assertEqual((status, [m["text"] for m in got["messages"]]), (200, ["hello"]))
+        status, _, _ = self.call("POST", "/api/mailbox", {"to": "sqwad", "text": ""}, as_lab)
+        self.assertEqual(status, 400)
+
+    def test_a_mailbox_token_opens_the_mailbox_only(self):
+        _, sqwad, _ = self.call("POST", "/api/clients", {"name": "mailbox-sqwad"})
+        as_sqwad = {"Authorization": f"Bearer {sqwad['token']}"}
+        status, body, _ = self.call("POST", "/v1/echo", {"a": 1}, as_sqwad)
+        self.assertEqual((status, body["ai_lab"]["reason"]), (403, "access_denied"))
+        status, _, _ = self.call("GET", "/api/clients", headers=as_sqwad)
+        self.assertEqual(status, 403)
+
+    def test_the_mailbox_refuses_a_model_token_and_no_token(self):
+        _, model_client, _ = self.call("POST", "/api/clients", {"name": "vm-sqwad"})
+        status, _, _ = self.call("GET", "/api/mailbox",
+                                 headers={"Authorization": f"Bearer {model_client['token']}"})
+        self.assertEqual(status, 403)
+        status, _, _ = self.call("GET", "/api/mailbox")
+        self.assertEqual(status, 403)
+
+    def test_the_owner_reads_the_whole_mailbox_from_the_page(self):
+        _, sqwad, _ = self.call("POST", "/api/clients", {"name": "mailbox-sqwad"})
+        self.call("POST", "/api/mailbox", {"to": "kiro", "text": "x"},
+                  {"Authorization": f"Bearer {sqwad['token']}"})
+        with urllib.request.urlopen(self.base + "/", timeout=5) as response:
+            cookie = {"Cookie": response.headers["Set-Cookie"].split(";")[0]}
+        status, got, _ = self.call("GET", "/api/mailbox", headers=cookie)
+        self.assertEqual((status, len(got["messages"])), (200, 1))
+        status, sent, _ = self.call("POST", "/api/mailbox", {"to": "sqwad", "text": "from me"}, cookie)
+        self.assertEqual((status, sent["from"]), (200, "owner"))
+
     def test_the_event_stream_is_behind_the_door(self):
         self.access.update_security({"require_token": True})
         with self.assertRaises(urllib.error.HTTPError) as refused:

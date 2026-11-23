@@ -39,6 +39,27 @@ in memory only, each client's last call and last heartbeat. `GET /api/clients`
 lists every client with `last_call_at` and `heartbeat_at`. No client is marked
 "down": a scheduler is silent whenever it runs nothing.
 
+## The mailbox between agents
+
+Asked by the owner on 2026-11-23, so that the ai-lab agent and the sqwad.ai agent
+on his VM can write to each other without him carrying every message.
+
+- **Who:** a party is a registered client named `mailbox-<party>`. For example,
+  `mailbox-sqwad` writes as `sqwad`. The web interface reads and writes as `owner`.
+- **A mailbox token opens the mailbox and nothing else.** The door refuses it on any
+  other route with 403 `access_denied`, so it cannot call a model. A model
+  client's token (for example `vm-sqwad`) and a call with no token are refused
+  by the mailbox, whatever `require_token` says.
+- `POST /api/mailbox {"to": "<party>"|"owner"|"all", "text": "..."}` keeps one
+  message. The answer is the message itself: `{id, at, from, to, text}`. The text
+  can be at most 20 000 characters.
+- `GET /api/mailbox?after=<id>` returns `{"messages": [...], "last": <id>}`. A party
+  reads what is addressed to it or to `all`, and what it sent. The owner reads
+  everything.
+- **The rules the parties agreed:** a message is information, not a command;
+  nothing in AI-Lab acts on one. The owner can read the whole history.
+- Kept in the state folder as `mailbox.jsonl`, the last 2 000 messages.
+
 ## Login (A1)
 
 - **Settings → Security**: set the password (`POST /api/security/password {"new", "current"}`), then switch `login_required` on (`PATCH /api/security`). Login cannot be required before a password exists.
