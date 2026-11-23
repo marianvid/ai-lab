@@ -22,6 +22,7 @@ startup — which is why every setting below belongs to the memory group.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from ...catalog.capabilities import IMAGES
@@ -41,6 +42,20 @@ from ...network import LOOPBACK
 # keeps these names bounded; vLLM validates its own supported choices at load.
 
 PARAMS = (
+    ParamSpec("cache_bits", "Cache bits (16 or 8)", "choice", "16",
+              choices=("16", "8"), group="memory",
+              help="The switch between a 16-bit and an 8-bit context cache. "
+                   "8 bits holds about half again as much context in the same "
+                   "memory. Measured here on Qwen3.8-27B NVFP4: 199,035 tokens "
+                   "against 130,389, with ingest's and news' scores inside "
+                   "their noise and times within 3 %. 16 bits is the model's "
+                   "own precision and the safe choice when a task is very "
+                   "sensitive to small numeric differences. Choosing 8 also "
+                   "sets what 8 bits needs on this card: FlashInfer finds the "
+                   "CUDA compiler, the matrix maths stay on vLLM's own CUTLASS "
+                   "kernels (FlashInfer's cuDNN ones crash under captured CUDA "
+                   "graphs, FlashInfer bug #6237), and the memory share is "
+                   "capped at 0.90. Changing it reloads the model."),
     ParamSpec("context_size", "Context size", "int", 32768,
               minimum=512, maximum=1048576, group="memory",
               help="Longest prompt plus answer the model will accept. vLLM "
@@ -76,10 +91,10 @@ PARAMS = (
                    "Qwen3-Coder-30B refused 128k because it wanted 12 GiB of "
                    "cache and had 10.78. The engine names the largest that "
                    "fits when it refuses, so the number to try is in the "
-                   "error. `fp8` is native on Blackwell, but it wants the "
-                   "FlashInfer kernels: without that package the engine "
-                   "refuses to start and says which one is missing, so try it "
-                   "and read what comes back rather than assuming it works."),
+                   "error. For the 8-bit cache use Cache bits instead: it sets "
+                   "`fp8` together with what fp8 needs here. Any `fp8` name "
+                   "typed here gets the same treatment. Other names go to "
+                   "vLLM unchanged."),
     ParamSpec("prefix_caching", "Reuse a repeated prompt", "bool", False,
               group="memory",
               help="Keep the start of a prompt between requests, so an "
@@ -190,15 +205,75 @@ FORMATS = frozenset({Format.SAFETENSORS, Format.FP8, Format.NVFP4,
                      Format.AWQ, Format.GPTQ})
 
 
+def cache_dtype(settings: dict) -> str:
+    """The cache precision vLLM gets: Cache bits 8 means `fp8` unless an fp8 name was typed."""
+    typed = settings.get("kv_cache_dtype", "auto")
+    if settings.get("cache_bits") == "8" and not typed.startswith("fp8"):
+        return "fp8"
+    return typed
+
+
+def eight_bit(settings: dict) -> bool:
+    """Whether this launch keeps its context cache in 8 bits (any fp8 variant)."""
+    return cache_dtype(settings).startswith("fp8")
+
+
+# What an 8-bit cache needs on this machine, measured on CT 102 (RTX PRO 4500,
+# sm120, vLLM 0.26.1rc1, FlashInfer 0.6.17), 2026-11-23:
+# - vLLM serves an fp8 cache only through FlashInfer's attention, and FlashInfer
+#   compiles its kernels at first use. Its JIT looks for nvcc on PATH and for the
+#   CUDA headers under CUDA_HOME; without them the engine refuses to start. They
+#   are set for that one process, never machine-wide: a global nvcc link once
+#   broke the 16-bit start too (CUDA_HOME became /usr/local, which has no headers).
+# - MAX_JOBS: the first compile with 12 parallel nvcc jobs hit the container's
+#   64 GB memory limit; 6 fits.
+# - With FlashInfer usable, vLLM would also move the FP8 and NVFP4 matrix maths
+#   to FlashInfer, whose autotuner picks cuDNN for some shapes. FlashInfer frees
+#   cuDNN plans that captured CUDA graphs still use (FlashInfer bug #6237):
+#   the engine stalled twice and segfaulted once in cuGraphLaunch under ingest's
+#   real lots. `--linear-backend cutlass` keeps the matrix maths on vLLM's own
+#   CUTLASS kernels, the ones the 16-bit cache uses: 0 failures in 2 465 team
+#   calls and a replay of the lot that had crashed it.
+# - The memory share is capped at 0.90: at 0.93 an fp8 start left 47 MB free
+#   on the card and the engine died under load.
+CUDA_HOME = "/usr/local/cuda"
+EIGHT_BIT_JOBS = "6"
+EIGHT_BIT_MEMORY_CEILING = 0.90
+
+
+def memory_fraction(settings: dict) -> float:
+    """The share of the card vLLM claims: the setting, capped for an 8-bit cache."""
+    fraction = float(settings["gpu_memory_fraction"])
+    return min(fraction, EIGHT_BIT_MEMORY_CEILING) if eight_bit(settings) else fraction
+
+
+def eight_bit_env(path: str | None = None) -> dict[str, str]:
+    """The environment of an 8-bit launch: the CUDA compiler for FlashInfer's JIT."""
+    cuda = os.environ.get("CUDA_HOME") or CUDA_HOME
+    inherited = path if path is not None else os.environ.get("PATH", "/usr/bin:/bin")
+    return {"CUDA_HOME": cuda, "PATH": f"{cuda}/bin:{inherited}",
+            "MAX_JOBS": EIGHT_BIT_JOBS}
+
+
+def _cache_flags(settings: dict) -> list[str]:
+    """The cache precision, and for an 8-bit cache the matrix maths that suit it."""
+    # `auto` is vLLM's own default, so saying it changes nothing and leaving
+    # the flag off keeps the command line to what was chosen.
+    dtype = cache_dtype(settings)
+    if dtype == "auto":
+        return []
+    flags = ["--kv-cache-dtype", dtype]
+    if eight_bit(settings):
+        flags += ["--linear-backend", "cutlass"]
+    return flags
+
+
 def _text_flags(settings: dict) -> list[str]:
     """The command-line flags only a text model takes."""
     flags = ["--max-model-len", str(settings["context_size"])]
     if settings["language_model_only"]:
         flags.append("--language-model-only")
-    # `auto` is vLLM's own default, so saying it changes nothing and leaving
-    # the flag off keeps the command line to what was chosen.
-    if settings["kv_cache_dtype"] != "auto":
-        flags += ["--kv-cache-dtype", settings["kv_cache_dtype"]]
+    flags += _cache_flags(settings)
     if settings["tokenizer_mode"] != "auto":
         flags += ["--tokenizer-mode", settings["tokenizer_mode"]]
     if settings["prefix_caching"]:
@@ -292,15 +367,20 @@ class VllmEngine:
             "--served-model-name", model.name,
             "--host", LOOPBACK,
             "--port", str(port),
-            "--gpu-memory-utilization", str(settings["gpu_memory_fraction"]),
+            "--gpu-memory-utilization", str(memory_fraction(settings)
+                                            if model.task is Task.TEXT_GENERATION
+                                            else settings["gpu_memory_fraction"]),
             "--max-num-seqs", str(settings["max_sequences"]),
         ]
+        env: dict[str, str] = {}
         if model.task is Task.TEXT_GENERATION:
             argv += _text_flags(settings)
+            if eight_bit(settings):
+                env = eight_bit_env()
         if settings["enforce_eager"]:
             argv.append("--enforce-eager")
         # No chat page: vLLM serves an API and nothing a person can open.
-        return LaunchPlan(argv=argv, env={}, health_path="/health", web_ui=False)
+        return LaunchPlan(argv=argv, env=env, health_path="/health", web_ui=False)
 
     def ready(self, port: int) -> bool:
         """Whether the server answers its health check."""
@@ -353,6 +433,10 @@ class VllmEngine:
             fraction = float(params.get("gpu_memory_fraction", 0.90))
         except (TypeError, ValueError):
             fraction = 0.90
+        # An 8-bit cache claims at most its ceiling, as `plan` launches it.
+        if eight_bit({"cache_bits": str(params.get("cache_bits", "16")),
+                      "kv_cache_dtype": str(params.get("kv_cache_dtype", "auto"))}):
+            fraction = min(fraction, EIGHT_BIT_MEMORY_CEILING)
         return max(0.0, fraction) * max(0.0, card_total_mb)
 
     def concurrency(self, params: dict) -> int:

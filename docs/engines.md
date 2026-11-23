@@ -99,6 +99,48 @@ entries to unload. The engine is about to be launched from somewhere else, and
 a model already on the card would keep running the old one while the page said
 otherwise.
 
+### vLLM: the 16-bit or 8-bit context cache
+
+A vLLM text model has a visible setting, **Cache bits (16 or 8)**. 16 is the
+model's own precision and the default. 8 keeps the context cache in `fp8`,
+which holds about half again as much context in the same memory. Changing it
+reloads the model.
+
+Measured on the Linux container (RTX PRO 4500, vLLM 0.26.1rc1, FlashInfer
+0.6.17), Qwen3.8-27B NVFP4, 2026-11-23:
+
+| | 16 bits | 8 bits |
+|---|---|---|
+| context cache | 130,389 tokens | 199,035 tokens |
+| ingest's and news' benchmark scores | — | inside their run-to-run noise |
+| time of their lots | — | within 3 % |
+
+Choosing 8 sets three things beside the cache's precision, all for that one
+engine process. 16 bits gets none of them.
+
+- **The CUDA compiler for FlashInfer.** vLLM serves an fp8 cache only through
+  FlashInfer's attention, which compiles its kernels at first use: it needs
+  `nvcc` on `PATH` and the CUDA headers under `CUDA_HOME` (`/usr/local/cuda`,
+  or the manager's own `CUDA_HOME`). `MAX_JOBS=6`, because the first compile
+  with 12 parallel jobs hit the container's memory limit. The compile is cached
+  under the engine's home, so only the first 8-bit start takes minutes. Never
+  put `nvcc` on the machine's `PATH` instead: a global link once made
+  `CUDA_HOME` resolve to `/usr/local`, which has no headers, and broke the
+  16-bit start too.
+- **`--linear-backend cutlass`.** With FlashInfer available, vLLM would also
+  move the FP8 and NVFP4 matrix maths to FlashInfer, whose autotuner picks
+  cuDNN for some shapes. FlashInfer frees cuDNN plans that CUDA graphs captured
+  at start still use ([FlashInfer #6237](https://github.com/flashinfer-ai/flashinfer/issues/6237)):
+  under real lots the engine stalled twice and once segfaulted in
+  `cuGraphLaunch`. The flag keeps the matrix maths on vLLM's own CUTLASS
+  kernels, the ones 16 bits uses.
+- **The memory share capped at 0.90.** At 0.93, an fp8 start left 47 MB free
+  on the card and the engine died under load.
+
+The first start after a change of these flags recompiles vLLM's kernels and
+reports a smaller cache (144,421 tokens once). The second start reports the
+real size.
+
 ### ComfyUI core and custom nodes
 
 ComfyUI is managed as a complete Git application rather than updated inside
