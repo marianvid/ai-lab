@@ -157,6 +157,12 @@ class ClientRoutesTest(unittest.TestCase):
         status, _, _ = self.call("GET", "/api/mailbox")
         self.assertEqual(status, 403)
 
+    def test_no_client_can_become_the_owner_of_the_mailbox(self):
+        status, body, _ = self.call("POST", "/api/clients", {"name": "mailbox-owner"})
+        self.assertEqual(status, 400)
+        status, _, _ = self.call("POST", "/api/clients", {"name": "mailbox-all"})
+        self.assertEqual(status, 400)
+
     def test_the_owner_reads_the_whole_mailbox_from_the_page(self):
         _, sqwad, _ = self.call("POST", "/api/clients", {"name": "mailbox-sqwad"})
         self.call("POST", "/api/mailbox", {"to": "kiro", "text": "x"},

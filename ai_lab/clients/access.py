@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .door import Door, DoorKeys
 from .errors import AccessDeniedError
-from .mailbox import OWNER, Mailbox, party_of
+from .mailbox import OWNER, Mailbox, check_client_name, party_of
 from .power import Power
 from .presence import Presence
 from .registry import ClientRegistry
@@ -44,10 +44,10 @@ class Access:
     def in_folder(cls, state_dir: Path, log: Callable[[str], None] = print) -> Access:
         """The access kept in `state_dir` (clients.json, security.json, power.json)."""
         state_dir = Path(state_dir)
-        return cls(ClientRegistry(state_dir / CLIENTS_FILE),
-                   SecuritySettings(state_dir / SECURITY_FILE),
+        security = SecuritySettings(state_dir / SECURITY_FILE)
+        return cls(ClientRegistry(state_dir / CLIENTS_FILE), security,
                    Power(state_dir / POWER_FILE), log=log,
-                   mailbox=Mailbox(state_dir / MAILBOX_FILE))
+                   mailbox=Mailbox(state_dir / MAILBOX_FILE, security.mailbox_limits))
 
     # -- clients ------------------------------------------------------------
 
@@ -59,6 +59,7 @@ class Access:
 
     def register(self, name: str) -> dict:
         """A new client and its token, shown this once."""
+        check_client_name(name)
         return {"name": name, "token": self.registry.register(name),
                 "note": "Keep this token: AI-Lab shows it only now."}
 
@@ -93,13 +94,18 @@ class Access:
         raise AccessDeniedError("The mailbox needs a mailbox client's token "
                                 "(a client named mailbox-<party>) or the web interface")
 
+    def _box(self) -> Mailbox:
+        if self.mailbox is None:
+            raise RuntimeError("This AI-Lab was built without a mailbox")
+        return self.mailbox
+
     def mail_read(self, headers, after: int) -> dict:
         """The messages after `after` that the caller may read."""
-        return self.mailbox.read(self.mail_party(headers), after)
+        return self._box().read(self.mail_party(headers), after)
 
     def mail_post(self, headers, to: str, text: str) -> dict:
         """One message from the caller; nothing in it is acted on."""
-        return self.mailbox.post(self.mail_party(headers), to, text)
+        return self._box().post(self.mail_party(headers), to, text)
 
     def switch(self, on: bool) -> dict:
         """Switch AI-Lab On or Off (A6), and say so in the log."""

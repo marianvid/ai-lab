@@ -73,7 +73,8 @@ class SecurityTest(unittest.TestCase):
     def test_defaults_let_everything_in(self):
         security = SecuritySettings(self.path)
         self.assertEqual(security.view(), {"require_token": False, "login_required": False,
-                                           "password_set": False})
+                                           "password_set": False, "mailbox_keep": 2000,
+                                           "mailbox_max_chars": 20000})
 
     def test_login_cannot_be_required_without_a_password(self):
         with self.assertRaises(ValueError):

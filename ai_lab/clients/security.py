@@ -20,6 +20,12 @@ from .registry import write_private
 SALT_BYTES = 16
 SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}
 MIN_PASSWORD = 8
+SWITCHES = ("require_token", "login_required")
+# The agents' mailbox (clients/mailbox.py). A mailbox is a conversation, not an
+# archive: 2 000 messages is weeks of two agents talking. 20 000 characters is a
+# long report, and the size of the largest MS Graph result sqwad.ai quotes is
+# what an agent may need to pass on in parts.
+MAILBOX_LIMITS = {"mailbox_keep": (2000, 10, 100000), "mailbox_max_chars": (20000, 100, 200000)}
 
 
 def _hash(password: str, salt: bytes) -> str:
@@ -49,20 +55,36 @@ class SecuritySettings:
         """Whether a password exists."""
         return "password" in self._data
 
+    def mailbox_limit(self, key: str) -> int:
+        """`mailbox_keep` or `mailbox_max_chars`: the value set, else its default."""
+        return int(self._data.get(key, MAILBOX_LIMITS[key][0]))
+
+    def mailbox_limits(self) -> tuple[int, int]:
+        """(messages kept, characters a message may have), as the mailbox reads them at each post."""
+        return self.mailbox_limit("mailbox_keep"), self.mailbox_limit("mailbox_max_chars")
+
     def view(self) -> dict:
         """What the Security page shows (never the hash)."""
         return {"require_token": self.require_token, "login_required": self.login_required,
-                "password_set": self.password_set}
+                "password_set": self.password_set,
+                **{key: self.mailbox_limit(key) for key in MAILBOX_LIMITS}}
 
     def update(self, changes: dict) -> dict:
-        """Change the switches; login cannot be required without a password."""
-        unknown = set(changes) - {"require_token", "login_required"}
+        """Change the switches and the mailbox's limits; login cannot be required without a password."""
+        unknown = set(changes) - set(SWITCHES) - set(MAILBOX_LIMITS)
         if unknown:
             raise ValueError(f"Unknown security setting: {', '.join(sorted(unknown))}")
         if changes.get("login_required") and not self.password_set:
             raise ValueError("Set a password before requiring login")
+        values: dict[str, bool | int] = {key: bool(changes[key]) for key in SWITCHES if key in changes}
+        for key, (_default, low, high) in MAILBOX_LIMITS.items():
+            if key in changes:
+                number = int(changes[key])
+                if not low <= number <= high:
+                    raise ValueError(f"{key} must be between {low} and {high}")
+                values[key] = number
         with self._lock:
-            self._data.update({key: bool(value) for key, value in changes.items()})
+            self._data.update(values)
             write_private(self.path, self._data)
         return self.view()
 
