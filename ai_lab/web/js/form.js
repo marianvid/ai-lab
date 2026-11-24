@@ -122,5 +122,29 @@ export function settingsForm(specs, values = {}) {
     container.addEventListener('change', whenTouched);
   };
 
+  // A setting another one switches off (`applies_when`, for example the 16-bit
+  // card share while Cache bits is 8) is greyed out and says why, so a number
+  // that does nothing is not mistaken for one that does. Its value is kept.
+  const applicable = () => {
+    const now = read();
+    container.querySelectorAll('[data-key]').forEach((node) => {
+      const spec = specs.find((item) => item.key === node.dataset.key);
+      const when = spec && spec.applies_when;
+      if (!when || !when.length) return;
+      const used = when.some(([key, value]) => String(now[key]) === String(value));
+      const label = node.closest('label');
+      node.disabled = !used;
+      if (label) {
+        label.classList.toggle('not-used', !used);
+        const why = `Not used now: applies only when ${when
+          .map(([key, value]) => `${(specs.find((item) => item.key === key) || { label: key }).label} is ${value}`)
+          .join(' or ')}.`;
+        label.title = used ? (spec.help || '') : `${why}${spec.help ? `\n\n${spec.help}` : ''}`;
+      }
+    });
+  };
+  applicable();
+  container.addEventListener('change', applicable);
+
   return { node: container, read, changed, watch };
 }

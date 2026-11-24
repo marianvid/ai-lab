@@ -268,11 +268,27 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
             element('label', { class: 'field' }, [
               element('span', { text: 'Model' }), picker.node,
             ]),
+            instance.running ? poolNote(instance) : null,
             form.node,
           ])
         : null,
       bar,
     ].filter(Boolean));
+  }
+
+  // What the card share became, read from the running engine: the context
+  // pool that every call at once takes its room from. Says nothing when the
+  // engine does not report one (only vLLM does).
+  function poolNote(instance) {
+    const note = element('p', { class: 'muted pool-note', 'data-pool': instance.id });
+    api.model(instance.id).then((detail) => {
+      const tokens = detail?.ai_lab?.live?.kv_cache_tokens;
+      if (tokens) {
+        note.textContent = `Context pool now: ${tokens.toLocaleString()} tokens, `
+          + 'shared by all calls running at once.';
+      }
+    }).catch(() => {});
+    return note;
   }
 
   // Direct use is the engine's own interface, never a reduced AI-Lab form.

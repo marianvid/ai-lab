@@ -79,8 +79,13 @@ _TASK_OF_PATH = {
 _IMAGE_UPLOAD_PATHS = frozenset(OCR_PATHS)
 
 
-def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) -> None:
-    """The model routes, the catalogue, and the front door's own settings."""
+def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES,
+             access=None) -> None:
+    """The model routes, the catalogue, and the front door's own settings.
+
+    `access` (`clients.access.Access`) counts a capped client's text calls
+    against its caps before they take a card place; without it nothing is counted.
+    """
     router.add("GET", "/v1/models", lambda **_: _catalogue(gateway, lanes))
     router.add("GET", "/v1/models/{model}",
                lambda model, **_: _describe(gateway, lanes, model))
@@ -99,7 +104,7 @@ def register(router, operations, gateway: Gateway, lanes: SideLanes = NO_LANES) 
     router.add("PATCH", "/api/gateway", settings)
     windows = WindowCalls()
     for path in FORWARDED:
-        router.add("POST", path, _forwarder(gateway, path, lanes, windows))
+        router.add("POST", path, _forwarder(gateway, path, lanes, windows, access))
     register_files(router, GenerationFiles(gateway, operations, windows), windows)
     if lanes.cpu is not None:
         cpu = lanes.cpu
@@ -164,14 +169,18 @@ SETTINGS_FIELD = "ai_lab"
 
 
 def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
-               windows: WindowCalls | None = None):
+               windows: WindowCalls | None = None, access=None):
     """The handler for one forwarded path.
 
     Calls are served first come, first served (the approved list, A3): who may
     use the card when is the schedulers' business, not AI-Lab's. A reservation
     header an older client still sends is ignored.
+
+    A capped client's text call (`clients/caps.py`) is counted before it asks
+    for a place, and refused at once when it would go over its caps; what it
+    counted is given back when the answer closes, with the place.
     """
-    def handle(body=None, alive=None, cut=None, **_):
+    def handle(body=None, alive=None, cut=None, headers=None, **_):
         payload = body or {}
         wanted = _model_name(payload)
         if path in TOKENIZE_PATHS:
@@ -186,16 +195,39 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
             return window_call(gateway, path, WindowAsk(payload, wanted, _start_settings(payload), alive),
                                windows, lambda lease: _forward(gateway, lease, path, payload, call))
         _check_upload(gateway, path, payload)
-        lease = gateway.acquire(wanted, shape=path, settings=_start_settings(payload),
-                                still_wanted=alive)
+        call = _Call(wanted, alive, cut)
+        lease = _take_place(gateway, path, payload, call, (access, headers))
         # Everything from here gives the place back if it fails: a leaked place
         # breaks nothing visibly, the card simply has one fewer place for ever.
         try:
-            return _forward(gateway, lease, path, payload, _Call(wanted, alive, cut))
+            return _forward(gateway, lease, path, payload, call)
         except BaseException:
-            lease.release()
+            call.release()
             raise
     return handle
+
+
+def _take_place(gateway: Gateway, path: str, payload, call: _Call, caller):
+    """Count a capped client's call, then take a card place; both given back by `call.release`."""
+    access, headers = caller
+    give_back = (access.admit_call(headers, path, payload, gateway.patience.default_max_tokens)
+                 if access is not None else _nothing)
+    try:
+        lease = gateway.acquire(call.model, shape=path, settings=_start_settings(payload),
+                                still_wanted=call.alive)
+    except BaseException:
+        give_back()
+        raise
+
+    def release() -> None:
+        lease.release()
+        give_back()
+    call.release = release
+    return lease
+
+
+def _nothing() -> None:
+    return None
 
 
 def _count_tokens(gateway: Gateway, path: str, payload, wanted: str):
@@ -225,6 +257,8 @@ class _Call:
         self.alive = alive
         self.cut = cut
         self.started = time.time()
+        # Gives back the card place and whatever else the call holds (`_take_place`).
+        self.release: Callable[[], None] = _nothing
 
     def reason_to_cut(self, gateway: Gateway, instance_id: str) -> Exception | None:
         """AI-Lab switched Off, or this call's model taken off for another (A7)."""
@@ -301,13 +335,17 @@ def _outgoing(lease, payload, wanted: str) -> tuple[bytes | dict, str, bool]:
 
 
 def _forward(gateway: Gateway, lease, path: str, payload, call: _Call):
-    """Send the request to the leased engine, by the name that engine knows."""
+    """Send the request to the leased engine, by the name that engine knows.
+
+    The call's own release gives the place back (and what else it holds);
+    a call that did not come through `_take_place` uses the lease's.
+    """
     outgoing, content_type, streaming = _outgoing(lease, payload, call.model)
     # Time to the first token only when streaming was asked for: otherwise the
     # first byte is the whole generation and the average measures neither.
     timed = ((lambda seconds: gateway.first_token(seconds, lease.instance_id))
              if streaming else None)
-    keeper = PlaceKeeper(lease.release)
+    keeper = PlaceKeeper(lease.release if call.release is _nothing else call.release)
     # A stalled engine is restarted, once, so the next requests do not stall too.
     hooks = Hooks(on_close=keeper, on_first_chunk=timed,
                   on_stall=lambda reason: gateway.engine_stalled(lease.instance_id, reason))

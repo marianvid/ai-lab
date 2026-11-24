@@ -53,11 +53,41 @@ function powerSection(power, refresh) {
   ]);
 }
 
+// A client's caps (docs/access.md, "Caps"): how many tokens of its text calls
+// may be in flight at once, counted as prompt + answer limit, and how many
+// calls. Empty is no cap. Over a cap a call is refused at once with 429.
+function capsCell(client, refresh) {
+  const caps = client.caps || {};
+  const box = (key, placeholder, title) => element('input', {
+    type: 'number', min: '1', step: '1', size: 8, placeholder, title,
+    'data-cap': key, value: caps[key] !== undefined ? String(caps[key]) : '',
+  });
+  const tokens = box('max_tokens_in_flight', 'tokens',
+                     'Tokens in flight at once (prompt + answer limit of every call). Empty: no cap.');
+  const calls = box('max_calls_at_once', 'calls', 'Calls at once. Empty: no cap.');
+  const number = (node) => (node.value.trim() === '' ? null : parseInt(node.value, 10));
+  const save = element('button', {
+    class: 'action small', text: 'Save caps',
+    onclick: () => act('Could not set the caps', () => api.setClientCaps(client.name, {
+      max_tokens_in_flight: number(tokens), max_calls_at_once: number(calls),
+    }), refresh),
+  });
+  return element('td', { class: 'caps' }, [tokens, calls, save]);
+}
+
+function inFlight(client) {
+  const held = client.in_flight;
+  if (!client.caps || !Object.keys(client.caps).length || !held) return '—';
+  return `${held.calls} calls, ${held.tokens.toLocaleString()} tokens`;
+}
+
 function clientRow(client, refresh) {
   return element('tr', {}, [
     element('td', { text: client.name }),
     element('td', { text: when(client.last_call_at) }),
     element('td', { text: when(client.heartbeat_at) }),
+    capsCell(client, refresh),
+    element('td', { text: inFlight(client) }),
     element('td', {}, [element('button', {
       class: 'action small', text: 'Remove',
       onclick: () => act('Could not remove the client', () => api.removeClient(client.name), refresh),
@@ -79,7 +109,8 @@ function registerForm(refresh) {
 }
 
 function clientsSection(clients, refresh) {
-  const head = element('tr', {}, ['Client', 'Last call', 'Last heartbeat', '']
+  const head = element('tr', {}, ['Client', 'Last call', 'Last heartbeat',
+    'Caps (tokens, calls)', 'In flight now', '']
     .map((text) => element('th', { text })));
   return section('Clients', [
     element('table', { class: 'table' }, [head, ...clients.map((c) => clientRow(c, refresh))]),

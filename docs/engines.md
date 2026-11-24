@@ -140,10 +140,18 @@ engine process. 16 bits gets none of them.
   under real lots the engine stalled twice and once segfaulted in
   `cuGraphLaunch`. The flag keeps the matrix maths on vLLM's own CUTLASS
   kernels, the ones 16 bits uses.
-- **Its own card share, visible beside the switch:** "GPU memory share at 8
-  bits", default 0.90, used instead of "GPU memory share". At 0.93, an fp8
-  start (with FlashInfer's matrix maths) left 47 MB free on the card and the
-  engine died under load.
+- **Its own card share, visible beside the switch:** "Card share (8-bit
+  cache)", default 0.90, used instead of "Card share (16-bit cache)". The one
+  not used is greyed out on the page. At 0.93, an fp8 start (with FlashInfer's
+  matrix maths) left 47 MB free on the card and the engine died under load.
+  In production on CT 102 it is 0.91 (pool 207,530 tokens) with bge-m3 in 8
+  bits beside it; at 0.92 vLLM grew under load until bge-m3 no longer fit.
+
+The settings page names the vLLM settings by what they do: "Max tokens per
+call" (vLLM's context length: one call's prompt plus answer, not a share of
+anything), "Calls at once" (how many calls run together), and the card share
+of the cache in use. Below the model it shows the context pool the running
+engine reports: the room every call running at once takes its share from.
 
 The first start after a change of these flags recompiles vLLM's kernels and
 reports a smaller cache (144,421 tokens once). The second start reports the

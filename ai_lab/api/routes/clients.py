@@ -51,6 +51,8 @@ def _clients(router, access) -> None:
     router.add("POST", "/api/clients/heartbeat", heartbeat)
     router.add("DELETE", "/api/clients/{name}",
                lambda name, **_: access.remove(name))
+    router.add("PATCH", "/api/clients/{name}/caps",
+               lambda name, body, **_: access.set_caps(name, dict(body)))
 
 
 def _web(router, access) -> None:

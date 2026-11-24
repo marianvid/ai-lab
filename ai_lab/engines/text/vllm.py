@@ -55,36 +55,45 @@ PARAMS = (
                    "CUDA compiler, the matrix maths stay on vLLM's own CUTLASS "
                    "kernels (FlashInfer's cuDNN ones crash under captured CUDA "
                    "graphs, FlashInfer bug #6237), and the card share is "
-                   "'GPU memory share at 8 bits' instead of 'GPU memory "
-                   "share'. Changing it reloads the model."),
-    ParamSpec("eight_bit_memory_fraction", "GPU memory share at 8 bits", "float", 0.90,
+                   "'Card share (8-bit cache)' instead of 'Card share (16-bit "
+                   "cache)'. Changing it reloads the model."),
+    ParamSpec("eight_bit_memory_fraction", "Card share (8-bit cache)", "float", 0.90,
               minimum=0.10, maximum=0.98, group="memory",
+              applies_when=(("cache_bits", "8"),),
               help="How much of the card vLLM claims when Cache bits is 8; "
-                   "'GPU memory share' applies at 16. An 8-bit cache needs "
-                   "more room beside it on the card for FlashInfer's working "
-                   "memory. Measured here on Qwen3.8-27B NVFP4: at 0.93 the "
-                   "card had 47 MB free and the engine died under load; at "
-                   "0.90 it ran, with 199,035 tokens of cache."),
-    ParamSpec("context_size", "Context size", "int", 32768,
+                   "'Card share (16-bit cache)' applies at 16. What is left "
+                   "of it after the weights and vLLM's working memory is the "
+                   "context pool, shared by all calls at once. An 8-bit cache "
+                   "needs more room beside it on the card for FlashInfer's "
+                   "working memory. Measured here on Qwen3.8-27B NVFP4 with "
+                   "bge-m3 (8 bits) on the same card: 0.91 gives a pool of "
+                   "207,530 tokens and kept about 800 MB free under Radio-lab's "
+                   "lots; at 0.92 vLLM grew under load until bge-m3 no longer "
+                   "fit beside it."),
+    ParamSpec("context_size", "Max tokens per call", "int", 32768,
               minimum=512, maximum=1048576, group="memory",
-              help="Longest prompt plus answer the model will accept. vLLM "
-                   "shares one pool of cache across all requests rather than "
-                   "splitting it per slot, so this is a ceiling for a single "
-                   "request, not a division of the total."),
-    ParamSpec("gpu_memory_fraction", "GPU memory share", "float", 0.90,
+              help="The longest prompt plus answer one call may have (vLLM's "
+                   "context length). It is not divided between calls: every "
+                   "call may go up to it, and all calls running at once take "
+                   "their room from one shared context pool, whose size the "
+                   "card share decides. A call that does not fit the pool "
+                   "now waits until room frees."),
+    ParamSpec("gpu_memory_fraction", "Card share (16-bit cache)", "float", 0.90,
               minimum=0.10, maximum=0.98, group="memory",
+              applies_when=(("cache_bits", "16"),),
               help="How much of the card vLLM claims at startup, with a 16-bit "
-                   "cache ('GPU memory share at 8 bits' applies at 8). Whatever is "
-                   "left after the weights becomes cache for concurrent "
-                   "requests. Lower it to leave room for another model on the "
-                   "same card."),
-    ParamSpec("max_sequences", "Concurrent requests", "int", 32,
+                   "cache ('Card share (8-bit cache)' applies at 8). Whatever "
+                   "is left after the weights becomes the context pool, shared "
+                   "by all calls at once. Lower it to leave room for another "
+                   "model on the same card."),
+    ParamSpec("max_sequences", "Calls at once", "int", 32,
               minimum=1, maximum=1024, group="memory",
-              help="How many requests may be in flight at once. Raising it is "
-                   "what buys throughput. It also has to be lowered for models "
-                   "with hybrid or linear attention, which reserve state per "
-                   "sequence: without it they run out of memory no matter how "
-                   "small the context is."),
+              help="How many calls the model works on at the same time; the "
+                   "next one waits for a place. Raising it is what buys "
+                   "throughput. All of them share the one context pool. It "
+                   "also has to be lowered for models with hybrid or linear "
+                   "attention, which reserve state per call: without it they "
+                   "run out of memory no matter how small the context is."),
     ParamSpec("language_model_only", "Text only", "bool", False, group="memory",
               help="Skip the image and audio parts of a multimodal model. On "
                    "startup vLLM pushes fake pictures and sound through those "
@@ -252,7 +261,7 @@ def cache_dtype(settings: dict) -> str:
 #   real lots. `--linear-backend cutlass` keeps the matrix maths on vLLM's own
 #   CUTLASS kernels, the ones the 16-bit cache uses: 0 failures in 2 465 team
 #   calls and a replay of the lot that had crashed it.
-# - The card share is its own visible setting, 'GPU memory share at 8 bits'
+# - The card share is its own visible setting, 'Card share (8-bit cache)'
 #   (default 0.90): at 0.93 an fp8 start left 47 MB free on the card and the
 #   engine died under load.
 # Where CUDA lives and how many compile jobs fit are machine facts: engine

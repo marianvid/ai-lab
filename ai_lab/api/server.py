@@ -125,6 +125,11 @@ def status_for(error: Exception) -> HTTPStatus:
     """
     if _timed_out(error):
         return HTTPStatus.GATEWAY_TIMEOUT
+    # A refusal that names its own status: a client over its caps is told to
+    # retry later (429, clients/caps.py).
+    own = getattr(error, "http_status", None)
+    if isinstance(error, RefusalError) and isinstance(own, int):
+        return HTTPStatus(own)
     for kind, status in STATUS.items():
         if isinstance(error, kind):
             return status
@@ -300,7 +305,10 @@ class Handler(BaseHTTPRequestHandler):
                 "type": error_kind(error),
                 "code": getattr(error, "code", None),
             }
-        self._json(payload, status)
+        # A refusal may name headers of its own (Retry-After); only a plain
+        # dict counts, since urllib's HTTPError carries a `headers` of its own.
+        extra = getattr(error, "headers", None)
+        self._json(payload, status, headers=extra if isinstance(extra, dict) else None)
 
     def _head(self, status, content_type: str, length: int, cache: bool = False,
               headers: dict | None = None):

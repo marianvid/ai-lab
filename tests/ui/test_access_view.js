@@ -55,6 +55,25 @@ describe('the Access page', () => {
     assert.deepEqual(JSON.parse(sent.body), { on: false });
   });
 
+  it('shows a capped client\'s caps and what it has in flight, and saves new caps', async () => {
+    const capped = { clients: [{ name: 'vm-sqwad', registered_at: 1, last_call_at: null,
+      heartbeat_at: null, caps: { max_tokens_in_flight: 77141, max_calls_at_once: 4 },
+      in_flight: { tokens: 12000, calls: 1 } }] };
+    const { view, calls } = await renderPage({ ...BASE, '/api/clients': capped,
+      'PATCH /api/clients/vm-sqwad/caps': { name: 'vm-sqwad', caps: {} } });
+    assert.match(view.textContent, /1 calls, 12,000 tokens/);
+    const tokens = view.querySelector('[data-cap="max_tokens_in_flight"]');
+    const callsBox = view.querySelector('[data-cap="max_calls_at_once"]');
+    assert.equal(tokens.value, '77141');
+    tokens.value = '90000';
+    callsBox.value = '';
+    button(view, 'Save caps').click();
+    await settle();
+    const sent = calls.find((call) => call.method === 'PATCH');
+    assert.equal(sent.path, '/api/clients/vm-sqwad/caps');
+    assert.deepEqual(JSON.parse(sent.body), { max_tokens_in_flight: 90000, max_calls_at_once: null });
+  });
+
   it('says when AI-Lab is Off', async () => {
     const { view } = await renderPage({ ...BASE, '/api/power': { on: false, since: 1760700000 },
                                         '/api/clients': { clients: [] } });

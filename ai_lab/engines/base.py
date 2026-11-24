@@ -38,6 +38,10 @@ class ParamSpec:
     # "generation": only a default for requests — any client can override it
     # per call, so it is a convenience rather than a constraint.
     group: str = "memory"
+    # When another setting decides whether this one is used at all: pairs of
+    # (key, value), any of which makes it apply. The page greys the field out
+    # otherwise, so a number that does nothing is not mistaken for one that does.
+    applies_when: tuple[tuple[str, str], ...] = ()
 
     def coerce(self, value: object) -> object:
         """Convert and range-check one incoming value.

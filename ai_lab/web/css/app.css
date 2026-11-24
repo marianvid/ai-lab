@@ -422,3 +422,9 @@ a.action:hover { border-color: var(--accent); color: var(--accent); }
 }
 /* Room to scroll past the panel, so the last row is not stuck underneath it. */
 body:has(.logpane) main { padding-bottom: 44vh; }
+
+/* A setting another one switches off (form.js, applies_when): kept, greyed out. */
+.field.not-used { opacity: 0.45; }
+.field.not-used input, .field.not-used select { cursor: not-allowed; }
+/* The Access page: a client's caps, two small boxes and a button in one cell. */
+td.caps input { width: 7em; margin-right: 0.3em; }

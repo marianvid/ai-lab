@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from .caps import ClientCaps
 from .door import Door, DoorKeys
 from .errors import AccessDeniedError
 from .mailbox import OWNER, Mailbox, check_client_name, party_of
@@ -20,6 +21,7 @@ from .sessions import SessionBook, cookie_header, session_of
 
 CLIENTS_FILE = "clients.json"
 MAILBOX_FILE = "mailbox.jsonl"
+CAPS_FILE = "client_caps.json"
 SECURITY_FILE = "security.json"
 POWER_FILE = "power.json"
 ENDED = 0
@@ -32,6 +34,8 @@ class Access:
                  power: Power, log: Callable[[str], None] = print,
                  mailbox: Mailbox | None = None) -> None:
         self.registry = registry
+        # Caps on a client's calls (`caps.py`); set by `in_folder`, absent in a test that needs none.
+        self.caps: ClientCaps | None = None
         self.security = security
         self.power = power
         self.log = log
@@ -45,17 +49,22 @@ class Access:
         """The access kept in `state_dir` (clients.json, security.json, power.json)."""
         state_dir = Path(state_dir)
         security = SecuritySettings(state_dir / SECURITY_FILE)
-        return cls(ClientRegistry(state_dir / CLIENTS_FILE), security,
-                   Power(state_dir / POWER_FILE), log=log,
-                   mailbox=Mailbox(state_dir / MAILBOX_FILE, security.mailbox_limits))
+        access = cls(ClientRegistry(state_dir / CLIENTS_FILE), security,
+                     Power(state_dir / POWER_FILE), log=log,
+                     mailbox=Mailbox(state_dir / MAILBOX_FILE, security.mailbox_limits))
+        access.caps = ClientCaps(state_dir / CAPS_FILE)
+        return access
 
     # -- clients ------------------------------------------------------------
 
     def clients(self) -> dict:
-        """Every registered client, with its last call and its last heartbeat."""
+        """Every registered client, with its last call, its last heartbeat and its caps."""
         rows = self.registry.names()
         seen = {row["name"]: row for row in self.presence.view([r["name"] for r in rows])}
-        return {"clients": [{**row, **seen[row["name"]]} for row in rows]}
+        caps = self.caps
+        return {"clients": [{**row, **seen[row["name"]],
+                             **(caps.view(row["name"]) if caps is not None else {})}
+                            for row in rows]}
 
     def register(self, name: str) -> dict:
         """A new client and its token, shown this once."""
@@ -64,8 +73,24 @@ class Access:
                 "note": "Keep this token: AI-Lab shows it only now."}
 
     def remove(self, name: str) -> None:
-        """Forget a client."""
+        """Forget a client, and its caps."""
         self.registry.remove(name)
+        if self.caps is not None:
+            self.caps.forget(name)
+
+    def set_caps(self, name: str, changes: dict) -> dict:
+        """The owner sets or clears a registered client's caps (`clients/caps.py`)."""
+        if self.caps is None:
+            raise RuntimeError("This AI-Lab was built without client caps")
+        if name not in {row["name"] for row in self.registry.names()}:
+            raise KeyError(f"Unknown client: {name}")
+        return {"name": name, **self.caps.set(name, dict(changes))}
+
+    def admit_call(self, headers, path: str, payload, default_cap: int):
+        """Count a capped client's text call, or refuse it; the function that gives it back."""
+        if self.caps is None:
+            return lambda: None
+        return self.caps.admit(self.door.caller(headers), path, payload, default_cap)
 
     def heartbeat(self, headers) -> float:
         """Note the calling client's heartbeat; the time received is returned.

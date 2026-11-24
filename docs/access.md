@@ -69,6 +69,33 @@ on his VM can write to each other without him carrying every message.
   kept (Settings → Security, default 2 000); the oldest are dropped when the file
   holds a fifth more.
 
+## Caps on a client's calls
+
+Asked by the owner on 2026-11-24, for sqwad.ai on `qwen38-nvfp4`: the model's
+context pool and its places are shared with Radio-lab, and Radio-lab's normal
+work must never be harmed by an external client's mistakes.
+
+- **Who:** any registered client can be given caps on the Access page (the
+  client's row: tokens, calls, Save caps), or with
+  `PATCH /api/clients/<name>/caps {"max_tokens_in_flight": n, "max_calls_at_once": n}`.
+  `null` or 0 clears a cap. A client without caps is not counted at all;
+  Radio-lab's scheduler keeps its own budget.
+- **What is counted:** the client's text calls to a card model
+  (`/v1/chat/completions`, `/v1/completions`, `/v1/messages`), each as its
+  prompt plus its answer limit (`max_tokens`, else the gateway's default cap),
+  because that is the most room it can come to hold in the pool. The prompt is
+  estimated from its characters, three to a token: no extra round trip, and on
+  the safe side (English runs about four, code about three).
+- **Over a cap:** the call is refused at once with **429** and
+  `Retry-After: 5`, never held in a queue. sqwad gives up on a call after 60 s,
+  so a queue would only turn into a failure on its side. `ai_lab` in the answer
+  says what is in flight and what the call counted. One call larger than the
+  whole token cap gets **400** (`call_over_client_cap`): no retry helps it.
+- **Given back** when the answer closes, with the card place.
+- The caps are kept in a private file of their own in AI-Lab's state folder;
+  what is in flight is in memory, and a restart of the manager ends every call
+  anyway. The client list shows each client's caps and what it has in flight now.
+
 ## Login (A1)
 
 - **Settings → Security**: set the password (`POST /api/security/password {"new", "current"}`), then switch `login_required` on (`PATCH /api/security`). Login cannot be required before a password exists.

@@ -534,6 +534,67 @@ describe('what a setting explains about itself', () => {
   });
 });
 
+describe('a setting another one switches off, and the pool it makes', () => {
+  // The owner found the 16-bit share next to the 8-bit one confusing: two card
+  // shares, only one of them used. The unused one is greyed out and says why.
+  const SHARES = {
+    ...ENGINE,
+    params: [
+      { key: 'cache_bits', label: 'Cache bits (16 or 8)', kind: 'choice', default: '16',
+        minimum: null, maximum: null, choices: ['16', '8'], group: 'memory', help: '',
+        applies_when: [] },
+      { key: 'eight_bit_memory_fraction', label: 'Card share (8-bit cache)', kind: 'float',
+        default: 0.9, minimum: 0.1, maximum: 0.98, choices: [], group: 'memory',
+        help: 'At 8 bits.', applies_when: [['cache_bits', '8']] },
+      { key: 'gpu_memory_fraction', label: 'Card share (16-bit cache)', kind: 'float',
+        default: 0.9, minimum: 0.1, maximum: 0.98, choices: [], group: 'memory',
+        help: 'At 16 bits.', applies_when: [['cache_bits', '16']] },
+    ],
+  };
+
+  async function openShares() {
+    const instance = { ...INSTANCE, params: { cache_bits: '8', eight_bit_memory_fraction: 0.91,
+                                              gpu_memory_fraction: 0.93 } };
+    const { view } = await renderPage({
+      '/api/instances': [instance],
+      '/api/settings': { title: 'AI-Lab', engines: [SHARES], repositories: [],
+                         accelerator: {}, host: {} },
+      '/v1/models/qwen-coder': { id: 'qwen-coder', ai_lab: { live: { kv_cache_tokens: 207530 } } },
+    });
+    button(view, 'Settings').click();
+    await settle();
+    return view;
+  }
+
+  const fieldOf = (view, text) => [...view.querySelectorAll('label.field')]
+    .find((node) => node.textContent.includes(text));
+
+  it('greys out the share that is not used, keeps its value and says why', async () => {
+    const view = await openShares();
+    const unused = fieldOf(view, 'Card share (16-bit cache)');
+    assert.ok(unused.classList.contains('not-used'));
+    assert.equal(unused.querySelector('input').disabled, true);
+    assert.equal(unused.querySelector('input').value, '0.93');
+    assert.match(unused.getAttribute('title'), /Not used now: applies only when Cache bits \(16 or 8\) is 16/);
+    assert.equal(fieldOf(view, 'Card share (8-bit cache)').classList.contains('not-used'), false);
+  });
+
+  it('switches which share is greyed out when Cache bits changes', async () => {
+    const view = await openShares();
+    const bits = view.querySelector('[data-key="cache_bits"]');
+    bits.value = '16';
+    bits.dispatchEvent(new view.ownerDocument.defaultView.Event('change', { bubbles: true }));
+    assert.ok(fieldOf(view, 'Card share (8-bit cache)').classList.contains('not-used'));
+    assert.equal(fieldOf(view, 'Card share (16-bit cache)').classList.contains('not-used'), false);
+  });
+
+  it('shows the context pool the running engine reports', async () => {
+    const view = await openShares();
+    await settle();
+    assert.match(view.textContent, /Context pool now: 207,530 tokens, shared by all calls running at once/);
+  });
+});
+
 describe('a model started differently from how it is configured', () => {
   // A request can ask for a bigger context than the entry was set up for. The
   // settings are not saved, so the row would otherwise show a number the

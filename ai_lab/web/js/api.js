@@ -148,6 +148,11 @@ export const api = {
   clients: () => request('GET', '/api/clients'),
   registerClient: (name) => request('POST', '/api/clients', { name }),
   removeClient: (name) => request('DELETE', `/api/clients/${encodeURIComponent(name)}`),
+  // One model's details, with the running engine's own report (`live`: the
+  // context pool's size for vLLM).
+  model: (name) => request('GET', `/v1/models/${encodeURIComponent(name)}`),
+  setClientCaps: (name, caps) =>
+    request('PATCH', `/api/clients/${encodeURIComponent(name)}/caps`, caps),
   power: () => request('GET', '/api/power'),
   switchPower: (on) => request('POST', '/api/power', { on }),
   journal: (after) => request('GET', `/api/journal?after=${after || 0}`),

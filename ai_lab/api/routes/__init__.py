@@ -56,7 +56,7 @@ def register_all(router, operations, parts: RouteParts | None = None) -> None:
         module.register(router, operations)
     runtime.register(router, operations, parts.gateway)
     if parts.gateway is not None:
-        gateway.register(router, operations, parts.gateway, parts.lanes)
+        gateway.register(router, operations, parts.gateway, parts.lanes, parts.access)
     if parts.images is not None:
         images.register(router, parts.images)
     if parts.gpu_health is not None:
