@@ -158,6 +158,24 @@ sleep 30
         self.assertTrue(outcome.cancelled)
         self.assertLess(time.monotonic() - started, 5)
 
+    def test_a_cli_that_leaves_a_child_holding_its_output_still_ends_in_time(self):
+        marker = self.root / "left.pid"
+        leaves = f"""#!/bin/sh
+cat > /dev/null
+sleep 30 &
+echo $! > {marker}
+echo hi
+"""
+        vendor = Vendor(id="v", dialect="claude", binary=self.script("claude", leaves),
+                        limits=VendorLimits(timeout_s=20, client_check_s=0.1, stop_grace_s=0.5))
+        started = time.monotonic()
+        outcome = run_ask(ClaudeCli(), vendor, Ask("opus", "x", still_wanted=lambda: True))
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertTrue(outcome.succeeded)
+        self.assertEqual(outcome.answer, "hi")
+        self.assertIn("ended processes the CLI left running", outcome.errors)
+        self.assertFalse(_running(int(marker.read_text())))
+
     def test_a_long_prompt_still_goes_in_whole_while_the_client_is_watched(self):
         vendor = Vendor(id="v", dialect="claude", binary=self.script("claude", FAKE_CLAUDE),
                         limits=VendorLimits(timeout_s=30, client_check_s=0.01))

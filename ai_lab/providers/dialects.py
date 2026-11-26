@@ -264,13 +264,21 @@ def _wait(child: subprocess.Popen, prompt: str, limits: VendorLimits,
     """
     pipes = _Pipes(child, prompt)
     deadline = time.monotonic() + limits.timeout_s
+    exited_at: float | None = None
     while True:
         wait_s = max(0.01, min(limits.client_check_s, deadline - time.monotonic()))
-        try:
-            child.wait(timeout=wait_s)
-            return (*pipes.collected(), "done")
-        except subprocess.TimeoutExpired:
-            pass
+        if exited_at is None:
+            try:
+                child.wait(timeout=wait_s)
+                exited_at = time.monotonic()
+            except subprocess.TimeoutExpired:
+                pass
+        if exited_at is not None:
+            # The CLI has gone; its pipes close when whatever it left has gone too.
+            if pipes.join(wait_s):
+                return (*pipes.collected(), "done")
+            if time.monotonic() - exited_at >= limits.stop_grace_s:
+                return _end_leftovers(child, pipes, limits.stop_grace_s)
         if time.monotonic() >= deadline:
             _end(child, limits.stop_grace_s)
             return "", "", "timeout"
@@ -292,11 +300,32 @@ class _Pipes:
         for thread in self._threads:
             thread.start()
 
-    def collected(self) -> tuple[str, str]:
-        """Everything the CLI wrote, once its pipes have closed."""
+    def join(self, timeout_s: float) -> bool:
+        """Wait up to `timeout_s` in all for the pipes to close; whether they all have."""
+        until = time.monotonic() + timeout_s
         for thread in self._threads:
-            thread.join()
+            thread.join(max(0.0, until - time.monotonic()))
+        return not any(thread.is_alive() for thread in self._threads)
+
+    def collected(self) -> tuple[str, str]:
+        """Everything the CLI wrote so far."""
         return "".join(self._out), "".join(self._err)
+
+
+def _end_leftovers(child: subprocess.Popen, pipes: _Pipes,
+                   grace_s: float) -> tuple[str, str, str]:
+    """The CLI exited but something it started still holds its output open: end them.
+
+    Its process group outlives it while any member is left, and its id is the
+    CLI's own (`start_new_session`), so the whole group is killed. What was
+    read is kept: the CLI's answer came before it exited.
+    """
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(child.pid, signal.SIGKILL)
+    pipes.join(max(grace_s, 1.0))
+    stdout, stderr = pipes.collected()
+    note = "ai-lab ended processes the CLI left running"
+    return stdout, f"{stderr}\n{note}" if stderr else note, "done"
 
 
 def _feed(stream, prompt: str) -> None:
@@ -308,8 +337,10 @@ def _feed(stream, prompt: str) -> None:
 
 
 def _drain(stream, into: list[str]) -> None:
+    """Keep each line as it arrives, so what was written is there even if the pipe never closes."""
     with contextlib.suppress(OSError, ValueError):
-        into.append(stream.read())
+        for line in stream:
+            into.append(line)
 
 
 def _end(child: subprocess.Popen, grace_s: float) -> None:
