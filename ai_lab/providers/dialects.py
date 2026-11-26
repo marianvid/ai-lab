@@ -18,6 +18,7 @@ import os
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -255,18 +256,21 @@ def _wait(child: subprocess.Popen, prompt: str, limits: VendorLimits,
     """Feed the prompt and wait for the CLI, looking around between waits.
 
     Returns its output and how it ended: `done`, `timeout` or `cancelled`.
-    A wait that runs out loses nothing: the next one goes on reading where it
-    stopped, and goes on writing the prompt if it was not all taken yet.
+    The prompt is written and the output read by threads of their own, and
+    this thread only waits for the process. Not `communicate(timeout=...)`
+    retried: on Python 3.11 a retry stops writing the rest of a long prompt,
+    so the CLI waits for it for ever (measured on the Mac, 2026-11-26; 3.13
+    does resume).
     """
+    pipes = _Pipes(child, prompt)
     deadline = time.monotonic() + limits.timeout_s
-    sent: str | None = prompt
     while True:
         wait_s = max(0.01, min(limits.client_check_s, deadline - time.monotonic()))
         try:
-            stdout, stderr = child.communicate(sent, timeout=wait_s)
-            return stdout or "", stderr or "", "done"
+            child.wait(timeout=wait_s)
+            return (*pipes.collected(), "done")
         except subprocess.TimeoutExpired:
-            sent = None  # handed over with the first wait; never given twice
+            pass
         if time.monotonic() >= deadline:
             _end(child, limits.stop_grace_s)
             return "", "", "timeout"
@@ -275,13 +279,46 @@ def _wait(child: subprocess.Popen, prompt: str, limits: VendorLimits,
             return "", "", "cancelled"
 
 
+class _Pipes:
+    """The CLI's three pipes, each served by a thread: the prompt in, the output out."""
+
+    def __init__(self, child: subprocess.Popen, prompt: str) -> None:
+        self._out: list[str] = []
+        self._err: list[str] = []
+        self._threads = [
+            threading.Thread(target=_feed, args=(child.stdin, prompt), daemon=True),
+            threading.Thread(target=_drain, args=(child.stdout, self._out), daemon=True),
+            threading.Thread(target=_drain, args=(child.stderr, self._err), daemon=True)]
+        for thread in self._threads:
+            thread.start()
+
+    def collected(self) -> tuple[str, str]:
+        """Everything the CLI wrote, once its pipes have closed."""
+        for thread in self._threads:
+            thread.join()
+        return "".join(self._out), "".join(self._err)
+
+
+def _feed(stream, prompt: str) -> None:
+    """Hand over the prompt and close standard input; a CLI that left early is no error."""
+    with contextlib.suppress(OSError, ValueError):
+        stream.write(prompt)
+    with contextlib.suppress(OSError, ValueError):
+        stream.close()
+
+
+def _drain(stream, into: list[str]) -> None:
+    with contextlib.suppress(OSError, ValueError):
+        into.append(stream.read())
+
+
 def _end(child: subprocess.Popen, grace_s: float) -> None:
     """Ask the CLI's whole group to stop; kill it if it is still there after `grace_s`."""
     for signal_number, wait_s in ((signal.SIGTERM, grace_s), (signal.SIGKILL, None)):
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(child.pid, signal_number)
         try:
-            child.communicate(timeout=wait_s)
+            child.wait(timeout=wait_s)
             return
         except subprocess.TimeoutExpired:
             continue
