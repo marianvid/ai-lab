@@ -34,6 +34,7 @@ from ..gateway.errors import (
 from ..multipart import MultipartBody
 from ..operations import Operations
 from ..providers import (
+    ProviderCallCancelledError,
     ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
@@ -213,7 +214,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _answer_error(self, error: Exception) -> None:
         """Say what went wrong, unless the client is no longer there to hear it."""
-        if isinstance(error, ClientGoneError):
+        if isinstance(error, ProviderCallCancelledError) and self._client_alive():
+            # Still there: the call was stopped because AI-Lab was switched Off.
+            error = self._cut() or error
+        if isinstance(error, (ClientGoneError, ProviderCallCancelledError)):
             self.close_connection = True
             return
         try:

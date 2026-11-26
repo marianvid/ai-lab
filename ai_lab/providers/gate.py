@@ -18,7 +18,14 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from .errors import ProviderCallCancelledError
 from .settings import VendorLimits
+
+
+def _check(still_wanted: Callable[[], bool] | None) -> None:
+    """Leave the queue when the client has gone."""
+    if still_wanted is not None and not still_wanted():
+        raise ProviderCallCancelledError("the client left while its call waited")
 
 
 class VendorGate:
@@ -38,10 +45,16 @@ class VendorGate:
         self._in_flight = 0
 
     @contextmanager
-    def slot(self) -> Iterator[None]:
-        """Hold one of the vendor's places for the length of a call."""
-        with self._slots:
-            self._wait_for_turn()
+    def slot(self, still_wanted: Callable[[], bool] | None = None) -> Iterator[None]:
+        """Hold one of the vendor's places for the length of a call.
+
+        A call that waits (for a place, a pause or the launch spacing) looks
+        every `client_check_s` whether it is still wanted; one that is not
+        leaves the queue without starting (`ProviderCallCancelledError`).
+        """
+        self._take_place(still_wanted)
+        try:
+            self._wait_for_turn(still_wanted)
             with self._lock:
                 self._in_flight += 1
             try:
@@ -49,10 +62,20 @@ class VendorGate:
             finally:
                 with self._lock:
                     self._in_flight -= 1
+        finally:
+            self._slots.release()
 
-    def _wait_for_turn(self) -> None:
+    def _take_place(self, still_wanted: Callable[[], bool] | None) -> None:
+        if still_wanted is None:
+            self._slots.acquire()
+            return
+        while not self._slots.acquire(timeout=self.limits.client_check_s):
+            _check(still_wanted)
+
+    def _wait_for_turn(self, still_wanted: Callable[[], bool] | None = None) -> None:
         """Sleep through a pause and the launch spacing, then claim the launch."""
         while True:
+            _check(still_wanted)
             with self._lock:
                 now = self._clock()
                 ready_at = max(self._paused_until,
@@ -60,7 +83,9 @@ class VendorGate:
                 if ready_at <= now:
                     self._last_launch = now
                     return
-            self._sleep(ready_at - now)
+            wait_s = ready_at - now
+            self._sleep(wait_s if still_wanted is None
+                        else min(wait_s, self.limits.client_check_s))
 
     def rate_limited(self) -> float:
         """Pause the whole vendor after a rate limit; returns the pause in seconds."""

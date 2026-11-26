@@ -51,6 +51,10 @@ class VendorLimits:
     rate_limit_retries: int = 3
     network_waits_s: tuple[float, ...] = (5.0, 15.0)
     timeout_s: float = 600.0
+    # A call whose client has gone: how often AI-Lab looks, and how long the
+    # CLI gets to end after it is asked before it is killed.
+    client_check_s: float = 1.0
+    stop_grace_s: float = 5.0
 
     @classmethod
     def from_mapping(cls, name: str, raw: dict) -> VendorLimits:
@@ -69,9 +73,14 @@ class VendorLimits:
                                               default.rate_limit_retries), minimum=0),
             network_waits_s=_waits(name, "network_waits_s",
                                    raw.get("network_waits_s", default.network_waits_s)),
-            timeout_s=_seconds(name, "timeout_s", raw.get("timeout_s", default.timeout_s)))
-        if limits.timeout_s <= 0:
-            raise ValueError(f"providers.vendors.{name}.timeout_s must be above 0")
+            timeout_s=_seconds(name, "timeout_s", raw.get("timeout_s", default.timeout_s)),
+            client_check_s=_seconds(name, "client_check_s",
+                                    raw.get("client_check_s", default.client_check_s)),
+            stop_grace_s=_seconds(name, "stop_grace_s",
+                                  raw.get("stop_grace_s", default.stop_grace_s)))
+        for key in ("timeout_s", "client_check_s"):
+            if getattr(limits, key) <= 0:
+                raise ValueError(f"providers.vendors.{name}.{key} must be above 0")
         return limits
 
 

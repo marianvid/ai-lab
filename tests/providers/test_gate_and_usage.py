@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ai_lab.providers import ProviderCallCancelledError
 from ai_lab.providers.gate import VendorGate
 from ai_lab.providers.settings import VendorLimits
 from ai_lab.providers.usage import DAYS_KEPT, FILE_NAME, UsageLog
@@ -56,6 +57,27 @@ class VendorGateTests(unittest.TestCase):
         self.assertEqual((state["in_flight"], state["concurrency"]), (0, 2))
         self.assertEqual(state["paused_for_s"], 10.0)
         self.assertEqual(state["rate_limit_strikes"], 1)
+
+    def test_a_call_whose_client_leaves_during_a_pause_never_starts(self):
+        self.gate.rate_limited()  # 30 s pause
+        answers = iter([True, True, True, False])
+        with self.assertRaises(ProviderCallCancelledError), self.gate.slot(lambda: next(answers)):
+            self.fail("the call started")
+        # It looked once a second, not after the whole pause.
+        self.assertEqual(self.clock.slept, [1.0, 1.0, 1.0])
+        self.assertEqual(self.gate.state()["in_flight"], 0)
+        # Its place was given back: two more calls get in.
+        with self.gate.slot(), self.gate.slot():
+            pass
+
+    def test_a_call_whose_client_leaves_while_the_places_are_full_never_starts(self):
+        gate = VendorGate(VendorLimits(concurrency=1, launch_spacing_s=0, client_check_s=0.05))
+        answers = iter([True, False])
+        with gate.slot(), self.assertRaises(ProviderCallCancelledError), \
+                gate.slot(lambda: next(answers)):
+            self.fail("the call started")
+        with gate.slot():
+            pass
 
     def test_no_more_than_the_concurrency_is_in_flight(self):
         gate = VendorGate(VendorLimits(concurrency=2, launch_spacing_s=0))

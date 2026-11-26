@@ -185,7 +185,7 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
         wanted = _model_name(payload)
         if path in TOKENIZE_PATHS:
             return _count_tokens(gateway, path, payload, wanted)
-        side = _side_lane(lanes, path, payload, wanted)
+        side = _side_lane(lanes, path, payload, wanted, alive)
         if side is not None:
             return side
         if path in MUSIC_WINDOW_PATHS and windows is not None:
@@ -272,15 +272,25 @@ class _Call:
                                   model=instance_id, replaced_by=by)
 
 
-def _side_lane(lanes: SideLanes, path: str, payload, wanted: str) -> dict | None:
-    """The answer from a lane beside the card, or None when the card serves this name."""
-    for lane, method, what in ((lanes.providers, "complete", "subscription"),
-                               (lanes.cpu, "embed", "processor")):
-        if lane is not None and lane.serves(wanted):
-            if isinstance(payload, MultipartBody):
-                raise ValueError(f"{what} models take a JSON request")
-            return getattr(lane, method)(path, payload)
+def _side_lane(lanes: SideLanes, path: str, payload, wanted: str,
+               alive: StillWanted | None = None) -> dict | None:
+    """The answer from a lane beside the card, or None when the card serves this name.
+
+    A subscription call gets `alive`, so a client that leaves (a cancelled
+    lot) ends its CLI instead of letting it spend the vendor's allowance.
+    """
+    if lanes.providers is not None and lanes.providers.serves(wanted):
+        _json_only(payload, "subscription")
+        return lanes.providers.complete(path, payload, still_wanted=alive)
+    if lanes.cpu is not None and lanes.cpu.serves(wanted):
+        _json_only(payload, "processor")
+        return lanes.cpu.embed(path, payload)
     return None
+
+
+def _json_only(payload, what: str) -> None:
+    if isinstance(payload, MultipartBody):
+        raise ValueError(f"{what} models take a JSON request")
 
 
 def _model_name(payload) -> str:

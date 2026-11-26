@@ -23,8 +23,9 @@ class FakePool:
     def serves(self, name):
         return name.startswith("claude/")
 
-    def complete(self, path, payload):
+    def complete(self, path, payload, still_wanted=None):
         self.asked.append((path, payload["model"]))
+        self.still_wanted = still_wanted
         return {"object": "chat.completion"}
 
     def catalogue(self):
@@ -87,6 +88,12 @@ class FrontDoorTests(unittest.TestCase):
         self.assertEqual(answer, {"object": "chat.completion"})
         self.assertEqual(self.pool.asked, [("/v1/chat/completions", "claude/sonnet")])
         self.assertEqual(self.gateway.acquired, [])
+
+    def test_a_subscription_call_is_told_whether_its_client_is_still_there(self):
+        handle = _forwarder(self.gateway, "/v1/chat/completions", self.lanes)
+        alive = lambda: True  # noqa: E731
+        handle(body={"model": "claude/sonnet", "messages": []}, alive=alive)
+        self.assertIs(self.pool.still_wanted, alive)
 
     def test_a_processor_name_never_touches_the_card(self):
         handle = _forwarder(self.gateway, "/v1/embeddings", self.lanes)

@@ -57,6 +57,18 @@ vendor will be refused too.
    inside. Measured on 2026-10-11: a small model did it in 3 of 49 answers,
    and a client expecting plain JSON could not read them. Any other answer is
    passed on unchanged.
+10. A client's cancel is the server's cancel (owner, 2026-11-26: "Daca
+    clientul (news) face cancel atunci si serverul (ai-lab) face cancel daca
+    acest lucru mai este posibil"). The cancel travels as the client closing
+    its connection, as the CT 109 scheduler does for the running calls of a
+    cancelled lot. While a call waits (for a place, a vendor's pause, a retry)
+    or its CLI runs, the gateway looks every `client_check_s` (1 s) at the
+    client's socket without reading it. Client gone: a waiting call leaves
+    without starting; a running CLI's whole process group gets `SIGTERM`,
+    then `SIGKILL` after `stop_grace_s` (5 s); the place is freed at once.
+    The call is counted `cancelled` beside the failures, and the vendor's
+    pause never hears of it. What the vendor had already used is spent.
+    Before this, a started call ran on up to `timeout_s` (600 s) for nobody.
 
 ## Consequences
 

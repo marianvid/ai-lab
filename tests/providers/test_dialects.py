@@ -2,6 +2,7 @@
 
 import os
 import stat
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,10 +12,12 @@ from ai_lab.providers.dialects import (
     CLAUDE_NOT_THE_PLAN,
     environment,
     OPENCODE_NO_TOOLS,
+    Ask,
     ClaudeCli,
     CodexCli,
     OpencodeCli,
     run,
+    run_ask,
     user_names,
 )
 from ai_lab.providers.settings import Vendor, VendorLimits
@@ -44,6 +47,22 @@ echo "args=$* config=$OPENCODE_CONFIG_CONTENT prompt=$prompt"
 SLOW = """#!/bin/sh
 sleep 5
 """
+
+
+def _running(pid):
+    """Whether a process is still there (a zombie left for init counts as gone)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        time.sleep(0.05)
+    return True
 
 
 class DialectTests(unittest.TestCase):
@@ -103,6 +122,50 @@ class DialectTests(unittest.TestCase):
         outcome = run(ClaudeCli(), vendor, "opus", "x")
         self.assertTrue(outcome.timed_out)
         self.assertFalse(outcome.succeeded)
+
+    def test_a_cli_whose_client_leaves_is_ended_with_what_it_started(self):
+        marker = self.root / "child.pid"
+        busy = f"""#!/bin/sh
+cat > /dev/null
+sleep 30 &
+echo $! > {marker}
+wait
+"""
+        vendor = Vendor(id="v", dialect="claude", binary=self.script("claude", busy),
+                        limits=VendorLimits(timeout_s=30, client_check_s=0.05, stop_grace_s=2))
+        answers = iter([True] * 10)  # half a second: the CLI has started its child
+        started = time.monotonic()
+        outcome = run_ask(ClaudeCli(), vendor,
+                          Ask("opus", "x", still_wanted=lambda: next(answers, False)))
+        self.assertTrue(outcome.cancelled)
+        self.assertFalse(outcome.succeeded)
+        self.assertLess(time.monotonic() - started, 5)
+        # The CLI's own child went with it: nothing is left spending for nobody.
+        child = int(marker.read_text())
+        self.assertFalse(_running(child))
+
+    def test_a_cli_that_ignores_the_stop_is_killed_after_the_grace(self):
+        stubborn = """#!/bin/sh
+trap '' TERM
+cat > /dev/null
+sleep 30
+"""
+        vendor = Vendor(id="v", dialect="claude", binary=self.script("claude", stubborn),
+                        limits=VendorLimits(timeout_s=30, client_check_s=0.05,
+                                            stop_grace_s=0.3))
+        started = time.monotonic()
+        outcome = run_ask(ClaudeCli(), vendor, Ask("opus", "x", still_wanted=lambda: False))
+        self.assertTrue(outcome.cancelled)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_a_long_prompt_still_goes_in_whole_while_the_client_is_watched(self):
+        vendor = Vendor(id="v", dialect="claude", binary=self.script("claude", FAKE_CLAUDE),
+                        limits=VendorLimits(timeout_s=30, client_check_s=0.01))
+        prompt = "word " * 200_000
+        outcome = run_ask(ClaudeCli(), vendor, Ask("opus", prompt, still_wanted=lambda: True))
+        self.assertTrue(outcome.succeeded)
+        self.assertIn("prompt=" + prompt.strip(), outcome.answer)
+        self.assertEqual(outcome.answer.count("word"), 200_000)
 
     def test_a_missing_binary_cannot_start(self):
         outcome = run(ClaudeCli(), self.vendor(str(self.root / "absent")), "opus", "x")

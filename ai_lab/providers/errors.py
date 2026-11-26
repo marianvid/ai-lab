@@ -108,6 +108,15 @@ class ProviderUnavailableError(ProviderError):
     """Signed out, unknown model, or a failure that outlasted its retries."""
 
 
+class ProviderCallCancelledError(ConnectionAbortedError):
+    """The client left before its answer was ready; its CLI was ended, or never started.
+
+    Not a `ProviderError`: nobody is left to answer, so the front door closes
+    the connection and says nothing (as for a local call whose client left).
+    Not a refusal either: the vendor's pause never hears of it.
+    """
+
+
 class ProviderLoginExpiredError(ProviderError):
     """The vendor said its sign-in on this machine is dead: no retry helps.
 

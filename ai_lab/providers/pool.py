@@ -21,9 +21,10 @@ from pathlib import Path
 from . import credentials
 from . import dialects
 from . import prompt
-from .dialects import DIALECTS, Dialect, Outcome
+from .dialects import DIALECTS, Ask, Dialect, Outcome
 from .errors import (
     ErrorKind,
+    ProviderCallCancelledError,
     ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
@@ -35,15 +36,17 @@ from .logins import LoginBook
 from .settings import ProviderModel, ProvidersConfig, Vendor
 from .usage import UsageLog
 
-Runner = Callable[[Dialect, Vendor, str, str, str], Outcome]
+Runner = Callable[[Dialect, Vendor, Ask], Outcome]
 CHAT_PATH = "/v1/chat/completions"
+# The label a call ended by its client is counted under, beside the failures.
+CANCELLED = "cancelled"
 
 
 class ProviderPool:
     """Every configured subscription model, each vendor behind its own gate."""
 
     def __init__(self, config: ProvidersConfig, usage: UsageLog,
-                 runner: Runner = dialects.run,
+                 runner: Runner = dialects.run_ask,
                  sleep: Callable[[float], None] = time.sleep,
                  logins: LoginBook | None = None) -> None:
         self.config = config
@@ -93,8 +96,14 @@ class ProviderPool:
             params["max_output_tokens"] = item.max_output_tokens
         return {"params": params}
 
-    def complete(self, path: str, payload: dict) -> dict:
-        """Answer one chat request through the vendor's CLI."""
+    def complete(self, path: str, payload: dict,
+                 still_wanted: Callable[[], bool] | None = None) -> dict:
+        """Answer one chat request through the vendor's CLI.
+
+        `still_wanted` turns False once the client has gone (its connection
+        closed): a call still waiting leaves without starting, a running CLI
+        is ended, and `ProviderCallCancelledError` says so to the front door.
+        """
         if path != CHAT_PATH:
             raise ValueError(f"subscription models answer only {CHAT_PATH}")
         if payload.get("stream"):
@@ -105,19 +114,26 @@ class ProviderPool:
         vendor = self.config.vendors[model.vendor]
         effort = str(payload.get("reasoning_effort") or vendor.default_effort)
         _check_effort(model.name, vendor, effort)
-        answer = self._answer(model, text, effort)
+        answer = self._answer(model, text, effort, still_wanted)
         if prompt.wants_json(payload):
             answer = prompt.unfence(answer)
         return prompt.completion(model.name, answer)
 
-    def _answer(self, model: ProviderModel, text: str, effort: str) -> str:
+    def _answer(self, model: ProviderModel, text: str, effort: str,
+                still_wanted: Callable[[], bool] | None = None) -> str:
         vendor = self.config.vendors[model.vendor]
         gate = self._gates[vendor.id]
         dialect = DIALECTS[vendor.dialect]
         rate_limits = transient = 0
         while True:
-            with gate.slot():
-                outcome = self._run(dialect, vendor, model.model, text, effort)
+            with gate.slot(still_wanted):
+                outcome = self._run(dialect, vendor,
+                                    Ask(model.model, text, effort, still_wanted))
+            if outcome.cancelled:
+                # Counted apart: not a failure of the vendor, so no pause, no retry.
+                self.usage.record(vendor.id, model.model, failure=CANCELLED)
+                raise ProviderCallCancelledError(
+                    f"{model.name}: the client left; its CLI was ended")
             if outcome.succeeded:
                 gate.succeeded()
                 self.usage.record(vendor.id, model.model)
@@ -141,8 +157,21 @@ class ProviderPool:
                 continue
             if transient >= len(vendor.limits.network_waits_s):
                 raise ProviderUnavailableError(f"{model.name}: {_tail(outcome.errors)}")
-            self._sleep(vendor.limits.network_waits_s[transient])
+            self._rest(vendor.limits.network_waits_s[transient], vendor, still_wanted)
             transient += 1
+
+    def _rest(self, seconds: float, vendor: Vendor,
+              still_wanted: Callable[[], bool] | None) -> None:
+        """Wait before a retry, leaving early if the client goes meanwhile."""
+        if still_wanted is None:
+            self._sleep(seconds)
+            return
+        while seconds > 0:
+            if not still_wanted():
+                raise ProviderCallCancelledError("the client left before the retry")
+            step = min(seconds, vendor.limits.client_check_s)
+            self._sleep(step)
+            seconds -= step
 
     def stats(self) -> dict:
         """Per vendor: places, any pause, and today's counts."""

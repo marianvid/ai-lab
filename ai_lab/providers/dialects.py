@@ -11,17 +11,21 @@ would pass Linux's limit on the length of one argument (128 KiB).
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import json
 import os
+import signal
 import subprocess
 import tempfile
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 from . import credentials
-from .settings import Vendor
+from .settings import Vendor, VendorLimits
 
 # Where Codex writes its final message. Read back from the scratch directory.
 CODEX_ANSWER_FILE = "answer.txt"
@@ -56,11 +60,14 @@ class Outcome:
     answer: str
     errors: str
     timed_out: bool = False
+    # The client left while the CLI ran, and the CLI was ended for it.
+    cancelled: bool = False
 
     @property
     def succeeded(self) -> bool:
         """Exit code 0 and something to hand back."""
-        return self.returncode == 0 and bool(self.answer.strip()) and not self.timed_out
+        return (self.returncode == 0 and bool(self.answer.strip())
+                and not self.timed_out and not self.cancelled)
 
 
 class Dialect(Protocol):
@@ -189,22 +196,92 @@ DIALECTS: dict[str, Dialect] = {"claude": ClaudeCli(), "codex": CodexCli(),
                                 "opencode": OpencodeCli()}
 
 
+@dataclass(frozen=True)
+class Ask:
+    """One question for a CLI, and whether its caller still wants the answer.
+
+    `still_wanted` turns False once the client has gone (its connection
+    closed); None means nobody is watching.
+    """
+
+    model: str
+    prompt: str
+    effort: str = ""
+    still_wanted: Callable[[], bool] | None = None
+
+
 def run(dialect: Dialect, vendor: Vendor, model: str, prompt: str,
         effort: str = "") -> Outcome:
-    """Run one call in a fresh scratch directory and read what it left."""
+    """Run one call with nobody watching its client (see `run_ask`)."""
+    return run_ask(dialect, vendor, Ask(model, prompt, effort))
+
+
+def run_ask(dialect: Dialect, vendor: Vendor, ask: Ask) -> Outcome:
+    """Run one call in a fresh scratch directory and read what it left.
+
+    While the CLI works, AI-Lab looks every `client_check_s` whether the call
+    is still wanted (`ask.still_wanted`). When it is not — the caller
+    cancelled, as the scheduler does for a cancelled lot — the CLI is ended
+    at once rather than left to spend the vendor's allowance for nobody
+    (owner, 2026-11-26: a client's cancel is the server's cancel, "daca acest
+    lucru mai este posibil"). What the vendor already used before that is
+    spent.
+    """
+    still_wanted = ask.still_wanted
     with tempfile.TemporaryDirectory(prefix="ai-lab-cli-") as scratch:
         workdir = Path(scratch)
-        call = dialect.invocation(vendor, model, prompt, effort, workdir)
+        call = dialect.invocation(vendor, ask.model, ask.prompt, ask.effort, workdir)
         try:
-            completed = subprocess.run(
-                call.argv, input=call.prompt, capture_output=True, text=True,
-                timeout=vendor.limits.timeout_s, cwd=workdir, check=False,
-                env=environment(dict(os.environ), call, vendor))
-        except subprocess.TimeoutExpired:
-            return Outcome(returncode=-1, answer="", errors="timeout", timed_out=True)
+            # Its own process group, so ending it ends whatever it started.
+            child = subprocess.Popen(
+                call.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, cwd=workdir,
+                env=environment(dict(os.environ), call, vendor), start_new_session=True)
         except OSError as error:
             return Outcome(returncode=-1, answer="", errors=f"cannot start the CLI: {error}")
-        return Outcome(returncode=completed.returncode,
-                       answer=dialect.answer(completed.stdout, workdir),
-                       errors="\n".join(part for part in (completed.stderr, completed.stdout)
-                                        if part))
+        stdout, stderr, ended = _wait(child, call.prompt, vendor.limits, still_wanted)
+        if ended == "timeout":
+            return Outcome(returncode=-1, answer="", errors="timeout", timed_out=True)
+        if ended == "cancelled":
+            return Outcome(returncode=-1, answer="", errors="cancelled: the client left",
+                           cancelled=True)
+        return Outcome(returncode=child.returncode,
+                       answer=dialect.answer(stdout, workdir),
+                       errors="\n".join(part for part in (stderr, stdout) if part))
+
+
+def _wait(child: subprocess.Popen, prompt: str, limits: VendorLimits,
+          still_wanted: Callable[[], bool] | None) -> tuple[str, str, str]:
+    """Feed the prompt and wait for the CLI, looking around between waits.
+
+    Returns its output and how it ended: `done`, `timeout` or `cancelled`.
+    A wait that runs out loses nothing: the next one goes on reading where it
+    stopped, and goes on writing the prompt if it was not all taken yet.
+    """
+    deadline = time.monotonic() + limits.timeout_s
+    sent: str | None = prompt
+    while True:
+        wait_s = max(0.01, min(limits.client_check_s, deadline - time.monotonic()))
+        try:
+            stdout, stderr = child.communicate(sent, timeout=wait_s)
+            return stdout or "", stderr or "", "done"
+        except subprocess.TimeoutExpired:
+            sent = None  # handed over with the first wait; never given twice
+        if time.monotonic() >= deadline:
+            _end(child, limits.stop_grace_s)
+            return "", "", "timeout"
+        if still_wanted is not None and not still_wanted():
+            _end(child, limits.stop_grace_s)
+            return "", "", "cancelled"
+
+
+def _end(child: subprocess.Popen, grace_s: float) -> None:
+    """Ask the CLI's whole group to stop; kill it if it is still there after `grace_s`."""
+    for signal_number, wait_s in ((signal.SIGTERM, grace_s), (signal.SIGKILL, None)):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(child.pid, signal_number)
+        try:
+            child.communicate(timeout=wait_s)
+            return
+        except subprocess.TimeoutExpired:
+            continue

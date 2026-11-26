@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ai_lab.providers import (
+    ProviderCallCancelledError,
     ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
@@ -43,8 +44,9 @@ class ScriptedRunner:
         self.outcomes = list(outcomes)
         self.calls = []
 
-    def __call__(self, dialect, vendor, model, prompt, effort):
-        self.calls.append((type(dialect).__name__, vendor.id, model, prompt, effort))
+    def __call__(self, dialect, vendor, ask):
+        self.calls.append((type(dialect).__name__, vendor.id, ask.model, ask.prompt, ask.effort))
+        self.still_wanted = ask.still_wanted
         return self.outcomes.pop(0)
 
 
@@ -128,6 +130,33 @@ class ProviderPoolTests(unittest.TestCase):
             first.complete(CHAT, REQUEST)
         again = self.pool()
         self.assertEqual(again.stats()["anthropic"]["login"]["state"], "expired")
+
+    def test_a_call_whose_client_left_is_counted_cancelled_and_not_retried(self):
+        cancelled = Outcome(returncode=-1, answer="", errors="cancelled: the client left",
+                            cancelled=True)
+        pool = self.pool(cancelled, ok())
+        with self.assertRaises(ProviderCallCancelledError):
+            pool.complete(CHAT, REQUEST, still_wanted=lambda: True)
+        self.assertEqual(len(self.runner.calls), 1)
+        stats = pool.stats()["anthropic"]
+        self.assertEqual(stats["today"]["failures"], {"cancelled": 1})
+        self.assertEqual(stats["paused_for_s"], 0)
+        self.assertEqual(stats["rate_limit_strikes"], 0)
+
+    def test_the_client_check_reaches_the_cli(self):
+        pool = self.pool(ok())
+        wanted = lambda: True  # noqa: E731
+        pool.complete(CHAT, REQUEST, still_wanted=wanted)
+        self.assertIs(self.runner.still_wanted, wanted)
+
+    def test_a_client_that_leaves_during_a_retry_wait_is_not_retried(self):
+        network = failed("error sending request for url")
+        answers = iter([True, True, False])
+        pool = self.pool(network, ok())
+        with self.assertRaises(ProviderCallCancelledError):
+            pool.complete(CHAT, REQUEST, still_wanted=lambda: next(answers, False))
+        self.assertEqual(len(self.runner.calls), 1)
+        self.assertEqual(sum(self.slept), 1.0)
 
     def test_network_failures_are_retried_after_each_wait(self):
         network = failed("error sending request for url")

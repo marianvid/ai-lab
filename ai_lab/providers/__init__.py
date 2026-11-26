@@ -5,6 +5,7 @@ its own beside the card's scheduler, and `pool.py` for how a call goes.
 """
 
 from .errors import (
+    ProviderCallCancelledError,
     ProviderError,
     ProviderLoginExpiredError,
     ProviderRateLimitError,
@@ -14,6 +15,7 @@ from .pool import ProviderPool
 from .settings import ProvidersConfig
 
 __all__ = [
+           "ProviderCallCancelledError",
            "ProviderError",
            "ProviderLoginExpiredError",
            "ProviderPool",

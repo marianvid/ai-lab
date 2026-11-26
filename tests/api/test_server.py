@@ -5,7 +5,9 @@ run anywhere, including alongside a real AI-Lab.
 """
 
 import json
+import socket
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -25,6 +27,7 @@ from ai_lab.gateway.core import CardBusyError, NotConfiguredError
 from ai_lab.gateway.limits import Patience
 from ai_lab.multipart import MultipartBody
 from ai_lab.api.passthrough import Passthrough
+from ai_lab.providers import ProviderCallCancelledError
 
 
 class FakeOperations:
@@ -122,6 +125,42 @@ class LiveServer(unittest.TestCase):
                 return response.status, json.loads(response.read())
         except urllib.error.HTTPError as error:
             return error.code, json.loads(error.read())
+
+
+class ClientLeavesTests(LiveServer):
+    """A non-streamed call whose client closes its connection (a cancelled lot)."""
+
+    seen: ClassVar[threading.Event]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.seen = threading.Event()
+        router = Router()
+
+        def slow_call(alive=None, **_):
+            # Stands in for a subscription call: it works until its client goes.
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if not alive():
+                    cls.seen.set()
+                    raise ProviderCallCancelledError("the client left")
+                time.sleep(0.05)
+            return {"too": "late"}
+
+        router.add("POST", "/v1/chat/completions", slow_call)
+        cls.start(router)
+
+    def test_the_call_learns_within_a_second_that_its_client_closed(self):
+        port = self.server.server_address[1]
+        body = b'{"model": "claude/sonnet"}'
+        with socket.create_connection(("127.0.0.1", port)) as client:
+            client.sendall(b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\n"
+                           b"Content-Type: application/json\r\n"
+                           b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+            time.sleep(0.3)
+        closed_at = time.monotonic()
+        self.assertTrue(self.seen.wait(2))
+        self.assertLess(time.monotonic() - closed_at, 2)
 
 
 class ServerTests(LiveServer):
