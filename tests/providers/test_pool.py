@@ -7,6 +7,7 @@ from ai_lab.providers import (
     ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
+    ProviderVendorLimitedError,
 )
 from ai_lab.providers.dialects import Outcome
 from ai_lab.providers.pool import ProviderPool
@@ -157,6 +158,64 @@ class ProviderPoolTests(unittest.TestCase):
             pool.complete(CHAT, REQUEST, still_wanted=lambda: next(answers, False))
         self.assertEqual(len(self.runner.calls), 1)
         self.assertEqual(sum(self.slept), 1.0)
+
+    def test_a_usage_limit_is_shown_at_once_and_cleared_by_an_answer(self):
+        pool = self.pool(failed("Claude AI usage limit reached|1764158400"), ok())
+        self.assertEqual(pool.stats()["anthropic"]["limit"], {"state": "unknown"})
+        pool.complete(CHAT, REQUEST)
+        # The retry answered: no band any more.
+        self.assertEqual(pool.stats()["anthropic"]["limit"]["state"], "ok")
+        again = self.pool(failed("Claude AI usage limit reached|1764158400"),
+                          *[failed("Claude AI usage limit reached|1764158400")] * 2)
+        with self.assertRaises(ProviderRateLimitError):
+            again.complete(CHAT, REQUEST)
+        limit = again.stats()["anthropic"]["limit"]
+        self.assertEqual((limit["state"], limit["kind"], limit["model"]),
+                         ("limited", "usage", "sonnet"))
+        self.assertEqual(limit["resets_at"], "2025-11-26T12:00:00Z")
+        self.assertIn("usage limit reached", limit["said"])
+
+    def test_one_short_rate_refusal_does_not_light_the_band_two_do(self):
+        pool = self.pool(failed("429 Too Many Requests"), ok())
+        pool.complete(CHAT, REQUEST)
+        self.assertNotEqual(pool.stats()["anthropic"]["limit"].get("state"), "limited")
+        pool = self.pool(*[failed("429 Too Many Requests")] * 3)
+        with self.assertRaises(ProviderRateLimitError):
+            pool.complete(CHAT, REQUEST)
+        limit = pool.stats()["anthropic"]["limit"]
+        self.assertEqual((limit["state"], limit["kind"]), ("limited", "rate"))
+
+    def test_a_call_that_may_not_be_held_is_refused_at_the_first_limit(self):
+        pool = self.pool(failed("Claude AI usage limit reached|1764158400"), ok())
+        with self.assertRaises(ProviderVendorLimitedError) as caught:
+            pool.complete(CHAT, {**REQUEST, "ai_lab": {"hold": False}})
+        self.assertEqual(len(self.runner.calls), 1)
+        error = caught.exception
+        self.assertEqual((error.kind, error.code), ("rate_limit_error", "vendor_limited"))
+        detail = error.detail["ai_lab"]
+        self.assertEqual(detail["reason"], "vendor_limited")
+        self.assertEqual({key: detail["detail"][key] for key in ("vendor", "machine", "kind")},
+                         {"vendor": "anthropic", "machine": "ai-lab-test", "kind": "usage"})
+        self.assertEqual(detail["detail"]["resets_at"], "2025-11-26T12:00:00Z")
+        self.assertIn("anthropic is at its usage limit on ai-lab-test", str(error))
+
+    def test_a_call_that_may_not_be_held_never_waits_through_a_pause(self):
+        raw = {**RAW, "vendors": {"anthropic": {**ANTHROPIC, "rate_limit_waits_s": [300]}}}
+        self.runner = ScriptedRunner(ok())
+        pool = ProviderPool(ProvidersConfig.from_mapping(raw),
+                            UsageLog(Path(self._temporary.name)), runner=self.runner)
+        pool._gates["anthropic"].rate_limited()
+        with self.assertRaises(ProviderVendorLimitedError) as caught:
+            pool.complete(CHAT, {**REQUEST, "ai_lab": {"hold": False}})
+        self.assertEqual(self.runner.calls, [])
+        self.assertTrue(caught.exception.detail["ai_lab"]["detail"]["retry_at"])
+
+    def test_hold_must_be_true_or_false(self):
+        pool = self.pool(ok())
+        with self.assertRaisesRegex(ValueError, "ai_lab.hold"):
+            pool.complete(CHAT, {**REQUEST, "ai_lab": {"hold": "no"}})
+        with self.assertRaisesRegex(ValueError, "ai_lab must be an object"):
+            pool.complete(CHAT, {**REQUEST, "ai_lab": "no"})
 
     def test_network_failures_are_retried_after_each_wait(self):
         network = failed("error sending request for url")

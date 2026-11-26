@@ -69,6 +69,24 @@ vendor will be refused too.
     The call is counted `cancelled` beside the failures, and the vendor's
     pause never hears of it. What the vendor had already used is spent.
     Before this, a started call ran on up to `timeout_s` (600 s) for nobody.
+11. A vendor at its limit is said, and a call may refuse to wait for it
+    (owner, 2026-11-26: "banda din consola - da, construieste-o"; "construieste
+    acel nu ma tine in loc").
+    - `GET /api/gateway` gives `providers.<vendor>.limit`: `state`
+      (`ok` / `limited` / `unknown`), `kind` (`usage`: the subscription's
+      allowance; `rate`: a short refusal), `since`, `retry_at` (AI-Lab's own
+      next try, the end of the vendor's pause), `resets_at` (the vendor's own
+      reset time, only when its words carry one AI-Lab can read: an ISO time or
+      Claude Code's `|<epoch>`), `model`, `said`. Learned from real calls only,
+      kept in the state directory beside the logins. A usage refusal is
+      `limited` at once; a rate refusal from the `limited_after_strikes`-th in
+      a row (2), so one short pause does not show.
+    - A call with `"ai_lab": {"hold": false}` in its body is never held through
+      a vendor's pause: refused at once with 503 `vendor_limited` (`ai_lab.detail`:
+      `vendor`, `machine`, `kind`, `retry_at`, `resets_at`), when it arrives
+      during a pause, when a pause begins while it waits for a place, or when
+      the vendor refuses it for a limit (no retry). Waiting for a free place
+      alone is not a refusal. Without the field nothing changes.
 
 ## Consequences
 

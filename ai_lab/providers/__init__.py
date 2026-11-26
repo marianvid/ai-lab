@@ -10,6 +10,7 @@ from .errors import (
     ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
+    ProviderVendorLimitedError,
 )
 from .pool import ProviderPool
 from .settings import ProvidersConfig
@@ -21,5 +22,6 @@ __all__ = [
            "ProviderPool",
            "ProviderRateLimitError",
            "ProviderUnavailableError",
+           "ProviderVendorLimitedError",
            "ProvidersConfig",
 ]

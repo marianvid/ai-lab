@@ -22,6 +22,14 @@ from .errors import ProviderCallCancelledError
 from .settings import VendorLimits
 
 
+class VendorPausedError(Exception):
+    """A call that may not be held met the vendor's pause; `retry_in_s` is what is left of it."""
+
+    def __init__(self, retry_in_s: float) -> None:
+        super().__init__(f"the vendor is paused for {retry_in_s:.0f} s")
+        self.retry_in_s = retry_in_s
+
+
 def _check(still_wanted: Callable[[], bool] | None) -> None:
     """Leave the queue when the client has gone."""
     if still_wanted is not None and not still_wanted():
@@ -45,16 +53,20 @@ class VendorGate:
         self._in_flight = 0
 
     @contextmanager
-    def slot(self, still_wanted: Callable[[], bool] | None = None) -> Iterator[None]:
+    def slot(self, still_wanted: Callable[[], bool] | None = None,
+             hold: bool = True) -> Iterator[None]:
         """Hold one of the vendor's places for the length of a call.
 
         A call that waits (for a place, a pause or the launch spacing) looks
         every `client_check_s` whether it is still wanted; one that is not
         leaves the queue without starting (`ProviderCallCancelledError`).
+        A call with `hold` False never waits through a vendor's pause: it
+        leaves at once with `VendorPausedError`, also when the pause begins
+        while it waits for a place. Waiting for a place alone is not a pause.
         """
-        self._take_place(still_wanted)
+        self._take_place(still_wanted, hold)
         try:
-            self._wait_for_turn(still_wanted)
+            self._wait_for_turn(still_wanted, hold)
             with self._lock:
                 self._in_flight += 1
             try:
@@ -65,17 +77,34 @@ class VendorGate:
         finally:
             self._slots.release()
 
-    def _take_place(self, still_wanted: Callable[[], bool] | None) -> None:
-        if still_wanted is None:
+    def paused_for(self) -> float:
+        """Seconds left of the vendor's pause, 0 when there is none."""
+        with self._lock:
+            return max(0.0, self._paused_until - self._clock())
+
+    def _take_place(self, still_wanted: Callable[[], bool] | None, hold: bool) -> None:
+        if still_wanted is None and hold:
             self._slots.acquire()
             return
-        while not self._slots.acquire(timeout=self.limits.client_check_s):
+        while True:
+            self._refuse_if_paused(hold)
+            if self._slots.acquire(timeout=self.limits.client_check_s):
+                return
             _check(still_wanted)
 
-    def _wait_for_turn(self, still_wanted: Callable[[], bool] | None = None) -> None:
+    def _refuse_if_paused(self, hold: bool) -> None:
+        if hold:
+            return
+        left = self.paused_for()
+        if left > 0:
+            raise VendorPausedError(left)
+
+    def _wait_for_turn(self, still_wanted: Callable[[], bool] | None = None,
+                       hold: bool = True) -> None:
         """Sleep through a pause and the launch spacing, then claim the launch."""
         while True:
             _check(still_wanted)
+            self._refuse_if_paused(hold)
             with self._lock:
                 now = self._clock()
                 ready_at = max(self._paused_until,

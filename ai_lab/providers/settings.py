@@ -55,6 +55,9 @@ class VendorLimits:
     # CLI gets to end after it is asked before it is killed.
     client_check_s: float = 1.0
     stop_grace_s: float = 5.0
+    # A short rate refusal counts as `limited` (the console's band) only from
+    # this many in a row; a usage-limit refusal counts at once.
+    limited_after_strikes: int = 2
 
     @classmethod
     def from_mapping(cls, name: str, raw: dict) -> VendorLimits:
@@ -77,7 +80,10 @@ class VendorLimits:
             client_check_s=_seconds(name, "client_check_s",
                                     raw.get("client_check_s", default.client_check_s)),
             stop_grace_s=_seconds(name, "stop_grace_s",
-                                  raw.get("stop_grace_s", default.stop_grace_s)))
+                                  raw.get("stop_grace_s", default.stop_grace_s)),
+            limited_after_strikes=_whole(name, "limited_after_strikes",
+                                         raw.get("limited_after_strikes",
+                                                 default.limited_after_strikes)))
         for key in ("timeout_s", "client_check_s"):
             if getattr(limits, key) <= 0:
                 raise ValueError(f"providers.vendors.{name}.{key} must be above 0")

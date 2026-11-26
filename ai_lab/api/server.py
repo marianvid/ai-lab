@@ -38,6 +38,7 @@ from ..providers import (
     ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
+    ProviderVendorLimitedError,
 )
 from . import sse
 from .passthrough import ClientGoneError, Passthrough
@@ -78,6 +79,8 @@ STATUS = {
     ProviderRateLimitError: HTTPStatus.TOO_MANY_REQUESTS,
     # The vendor's CLI could not answer: the caller's fallback should take over.
     ProviderUnavailableError: HTTPStatus.BAD_GATEWAY,
+    # A call that asked not to be held met a limited vendor: its fallback now.
+    ProviderVendorLimitedError: HTTPStatus.SERVICE_UNAVAILABLE,
 }
 TIMEOUT_MESSAGE = "the engine did not answer within the gateway's time limit"
 # A client that is no longer there: nothing can be written to it.

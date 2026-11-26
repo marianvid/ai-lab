@@ -23,15 +23,20 @@ from . import dialects
 from . import prompt
 from .dialects import DIALECTS, Ask, Dialect, Outcome
 from .errors import (
+    RATE,
+    USAGE,
     ErrorKind,
     ProviderCallCancelledError,
     ProviderLoginExpiredError,
     ProviderRateLimitError,
     ProviderUnavailableError,
+    ProviderVendorLimitedError,
     classify,
+    limit_kind,
     said,
 )
-from .gate import VendorGate
+from .gate import VendorGate, VendorPausedError
+from .limit_book import LimitBook, resets_at, utc
 from .logins import LoginBook
 from .settings import ProviderModel, ProvidersConfig, Vendor
 from .usage import UsageLog
@@ -53,6 +58,7 @@ class ProviderPool:
         self.usage = usage
         # Beside the usage counters, so it survives a restart with them.
         self.logins = logins or LoginBook(usage.path.parent)
+        self.limits = LimitBook(usage.path.parent)
         self._run = runner
         self._sleep = sleep
         self._gates = {name: VendorGate(vendor.limits)
@@ -103,6 +109,12 @@ class ProviderPool:
         `still_wanted` turns False once the client has gone (its connection
         closed): a call still waiting leaves without starting, a running CLI
         is ended, and `ProviderCallCancelledError` says so to the front door.
+
+        `"ai_lab": {"hold": false}` in the body asks not to be held while the
+        vendor is limited: such a call is refused at once with
+        `ProviderVendorLimitedError` (503 `vendor_limited`) instead of
+        waiting through the vendor's pause, so the caller's local model can
+        answer on the spot. Without it a call is held as before.
         """
         if path != CHAT_PATH:
             raise ValueError(f"subscription models answer only {CHAT_PATH}")
@@ -110,34 +122,27 @@ class ProviderPool:
             raise NotImplementedError("subscription models do not stream; "
                                       "send the request without stream")
         model = self.config.models[payload["model"]]
-        text = prompt.render(payload)
         vendor = self.config.vendors[model.vendor]
         effort = str(payload.get("reasoning_effort") or vendor.default_effort)
         _check_effort(model.name, vendor, effort)
-        answer = self._answer(model, text, effort, still_wanted)
+        ask = Ask(model.model, prompt.render(payload), effort, still_wanted)
+        answer = self._answer(model, ask, _hold(payload))
         if prompt.wants_json(payload):
             answer = prompt.unfence(answer)
         return prompt.completion(model.name, answer)
 
-    def _answer(self, model: ProviderModel, text: str, effort: str,
-                still_wanted: Callable[[], bool] | None = None) -> str:
+    def _answer(self, model: ProviderModel, ask: Ask, hold: bool = True) -> str:
         vendor = self.config.vendors[model.vendor]
         gate = self._gates[vendor.id]
         dialect = DIALECTS[vendor.dialect]
         rate_limits = transient = 0
         while True:
-            with gate.slot(still_wanted):
-                outcome = self._run(dialect, vendor,
-                                    Ask(model.model, text, effort, still_wanted))
-            if outcome.cancelled:
-                # Counted apart: not a failure of the vendor, so no pause, no retry.
-                self.usage.record(vendor.id, model.model, failure=CANCELLED)
-                raise ProviderCallCancelledError(
-                    f"{model.name}: the client left; its CLI was ended")
-            if outcome.succeeded:
-                gate.succeeded()
-                self.usage.record(vendor.id, model.model)
-                self.logins.answered(vendor.id, model.model)
+            try:
+                with gate.slot(ask.still_wanted, hold):
+                    outcome = self._run(dialect, vendor, ask)
+            except VendorPausedError as paused:
+                raise self._refusal(vendor, paused.retry_in_s) from None
+            if self._settled(vendor, model, outcome):
                 return outcome.answer
             kind, label = classify(outcome.errors)
             self.usage.record(vendor.id, model.model, failure=label)
@@ -149,16 +154,54 @@ class ProviderPool:
                 raise ProviderUnavailableError(f"{model.name}: {_tail(outcome.errors)}")
             if kind is ErrorKind.RATE_LIMIT:
                 rate_limits += 1
+                self._limited(vendor, model, label, outcome.errors, hold)
                 if rate_limits > vendor.limits.rate_limit_retries:
                     raise ProviderRateLimitError(
                         f"{model.name}: the {vendor.id} allowance is spent for now "
                         f"({_tail(outcome.errors)})")
-                gate.rate_limited()
                 continue
             if transient >= len(vendor.limits.network_waits_s):
                 raise ProviderUnavailableError(f"{model.name}: {_tail(outcome.errors)}")
-            self._rest(vendor.limits.network_waits_s[transient], vendor, still_wanted)
+            self._rest(vendor.limits.network_waits_s[transient], vendor, ask.still_wanted)
             transient += 1
+
+    def _settled(self, vendor: Vendor, model: ProviderModel, outcome: Outcome) -> bool:
+        """True for an answer (counted, login and limit cleared); raises for a cancel."""
+        if outcome.cancelled:
+            # Counted apart: not a failure of the vendor, so no pause, no retry.
+            self.usage.record(vendor.id, model.model, failure=CANCELLED)
+            raise ProviderCallCancelledError(
+                f"{model.name}: the client left; its CLI was ended")
+        if not outcome.succeeded:
+            return False
+        self._gates[vendor.id].succeeded()
+        self.usage.record(vendor.id, model.model)
+        self.logins.answered(vendor.id, model.model)
+        self.limits.answered(vendor.id, model.model)
+        return True
+
+    def _limited(self, vendor: Vendor, model: ProviderModel, label: str, errors: str,
+                 hold: bool) -> None:
+        """A refusal for a limit: pause the vendor, tell the console, refuse at once if asked."""
+        pause = self._gates[vendor.id].rate_limited()
+        kind = limit_kind(label)
+        words = said(errors)
+        strikes = self._gates[vendor.id].state()["rate_limit_strikes"]
+        if kind == USAGE or strikes >= vendor.limits.limited_after_strikes:
+            limit = self.limits.limited(vendor.id, model.model, kind, words, pause)
+        else:
+            limit = {"kind": kind, "said": words, "resets_at": resets_at(words),
+                     "retry_at": utc(time.time() + pause) if pause > 0 else ""}
+        if not hold:
+            raise ProviderVendorLimitedError(vendor.id, self.config.machine, limit)
+
+    def _refusal(self, vendor: Vendor, retry_in_s: float) -> ProviderVendorLimitedError:
+        """The refusal for a call that may not wait through the vendor's pause."""
+        limit = self.limits.state(vendor.id)
+        if limit.get("state") != "limited":
+            limit = {"kind": RATE, "said": ""}
+        limit = {**limit, "retry_at": utc(time.time() + retry_in_s)}
+        return ProviderVendorLimitedError(vendor.id, self.config.machine, limit)
 
     def _rest(self, seconds: float, vendor: Vendor,
               still_wanted: Callable[[], bool] | None) -> None:
@@ -180,6 +223,7 @@ class ProviderPool:
                        "default_effort": self.config.vendors[name].default_effort,
                        "sign_in": _sign_in(self.config.vendors[name]),
                        "login": self.logins.state(name),
+                       "limit": self.limits.state(name),
                        "models": sorted(item.name for item in self.config.models.values()
                                         if item.vendor == name)}
                 for name, gate in self._gates.items()}
@@ -189,6 +233,17 @@ def _sign_in(vendor: Vendor) -> dict:
     """How the vendor's CLI signs in, for the page; never a value."""
     return credentials.describe(vendor.env_file, vendor.token_warn_after_days,
                                 DIALECTS[vendor.dialect].refused_env)
+
+
+def _hold(payload: dict) -> bool:
+    """Whether the call may be held through a vendor's pause (`"ai_lab": {"hold": ...}`)."""
+    options = payload.get("ai_lab") or {}
+    if not isinstance(options, dict):
+        raise ValueError("ai_lab must be an object of settings")
+    hold = options.get("hold", True)
+    if not isinstance(hold, bool):
+        raise ValueError("ai_lab.hold must be true or false")
+    return hold
 
 
 def _check_effort(where: str, vendor: Vendor, effort: str) -> None:

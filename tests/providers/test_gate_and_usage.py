@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ai_lab.providers import ProviderCallCancelledError
-from ai_lab.providers.gate import VendorGate
+from ai_lab.providers.gate import VendorGate, VendorPausedError
 from ai_lab.providers.settings import VendorLimits
 from ai_lab.providers.usage import DAYS_KEPT, FILE_NAME, UsageLog
 
@@ -78,6 +78,26 @@ class VendorGateTests(unittest.TestCase):
             self.fail("the call started")
         with gate.slot():
             pass
+
+    def test_a_call_that_may_not_be_held_leaves_at_a_pause(self):
+        self.gate.rate_limited()  # 30 s pause
+        with self.assertRaises(VendorPausedError) as caught, self.gate.slot(hold=False):
+            self.fail("the call started")
+        self.assertEqual(caught.exception.retry_in_s, 30)
+        self.assertEqual(self.clock.slept, [])
+
+    def test_a_call_that_may_not_be_held_waits_for_a_place_but_not_for_a_pause(self):
+        gate = VendorGate(VendorLimits(concurrency=1, launch_spacing_s=0, client_check_s=0.05,
+                                       rate_limit_waits_s=(300,)))
+        with gate.slot():
+            # Only a full place: it waits. The vendor is paused meanwhile: it leaves.
+            def pause_soon():
+                gate.rate_limited()
+            timer = threading.Timer(0.2, pause_soon)
+            timer.start()
+            with self.assertRaises(VendorPausedError), gate.slot(hold=False):
+                self.fail("the call started")
+            timer.join()
 
     def test_no_more_than_the_concurrency_is_in_flight(self):
         gate = VendorGate(VendorLimits(concurrency=2, launch_spacing_s=0))

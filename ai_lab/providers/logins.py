@@ -12,11 +12,12 @@ an expired login.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+
+from . import state_file
 
 FILE_NAME = "logins.json"
 
@@ -62,19 +63,8 @@ class LoginBook:
                 self._write()
 
     def _read(self) -> dict[str, dict]:
-        try:
-            data = json.loads(self._path.read_text())
-        except (OSError, ValueError):
-            return {}
-        return {key: value for key, value in data.items() if isinstance(value, dict)} \
-            if isinstance(data, dict) else {}
+        return state_file.read(self._path)
 
     def _write(self) -> None:
         """Only when the state changes: an answered call does not write the file."""
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            spare = self._path.with_suffix(".tmp")
-            spare.write_text(json.dumps(self._states, indent=1, sort_keys=True))
-            spare.replace(self._path)
-        except OSError:
-            pass
+        state_file.write(self._path, self._states)

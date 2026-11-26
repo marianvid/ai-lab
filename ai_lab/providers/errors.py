@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import Any
 
 # Long enough to recognise a message again, short enough for a counter name.
 LABEL_LENGTH = 60
@@ -60,6 +61,20 @@ RATE_LIMIT_MARKERS = (
     "quota", "try again later", "resets at", "resets in", "overloaded",
     "capacity", "session limit",
 )
+# Of those, the ones that mean the subscription's allowance (hours, a week),
+# not a short refusal of a few seconds: the owner must know of these at once.
+USAGE_LIMIT_MARKERS = (
+    "credits out", "usage limit", "quota", "resets at", "resets in", "session limit",
+)
+USAGE = "usage"
+RATE = "rate"
+
+
+def limit_kind(label: str) -> str:
+    """`usage` for the subscription's allowance, `rate` for a short refusal."""
+    return USAGE if label in USAGE_LIMIT_MARKERS else RATE
+
+
 FATAL_MARKERS = (
     "unauthorized", "invalid api key", "no such model",
     "unknown model", "permission denied", "forbidden",
@@ -106,6 +121,29 @@ class ProviderRateLimitError(ProviderError):
 
 class ProviderUnavailableError(ProviderError):
     """Signed out, unknown model, or a failure that outlasted its retries."""
+
+
+class ProviderVendorLimitedError(ProviderError):
+    """A call that asked not to be held (`"ai_lab": {"hold": false}`) met a limited vendor.
+
+    Answered at once, so the caller's own fallback (a local model) takes over
+    instead of waiting for the vendor's pause. 503 `vendor_limited`, with the
+    vendor, the machine, the kind of limit and the times AI-Lab knows.
+    """
+
+    kind = "rate_limit_error"
+    code = "vendor_limited"
+
+    def __init__(self, vendor: str, machine: str, limit: dict) -> None:
+        where = machine or "this machine"
+        words = limit.get("said") or "no words from the vendor"
+        what = "usage limit" if limit.get("kind") == USAGE else "rate limit"
+        super().__init__(f"{vendor} is at its {what} on {where}: {words}")
+        about: dict[str, str] = {
+            "vendor": vendor, "machine": machine, "kind": limit.get("kind", ""),
+            "retry_at": limit.get("retry_at", ""), "resets_at": limit.get("resets_at", "")}
+        self.detail: dict[str, dict[str, Any]] = {
+            "ai_lab": {"reason": "vendor_limited", "detail": about}}
 
 
 class ProviderCallCancelledError(ConnectionAbortedError):
