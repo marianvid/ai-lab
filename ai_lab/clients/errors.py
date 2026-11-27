@@ -37,6 +37,12 @@ class AccessDeniedError(RefusalError):
     code = "access_denied"
 
 
+class ManagementNeedsLoginError(AccessDeniedError):
+    """A client's token on a route that is for the page (403): log in there."""
+
+    code = "management_needs_login"
+
+
 class AiLabOffError(RefusalError):
     """AI-Lab was switched Off: it serves nothing until it is switched On."""
 

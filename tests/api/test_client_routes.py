@@ -80,10 +80,17 @@ class ClientRoutesTest(unittest.TestCase):
         self.assertTrue(beat["on"])
         status, _, _ = self.call("POST", "/api/clients/heartbeat", {"map": {"cards": []}}, auth)
         self.assertEqual(status, 200, "an older scheduler's map is accepted and ignored")
-        _, listed, _ = self.call("GET", "/api/clients", headers=auth)
+        # The clients are management: the page's, not a token's (radio-lab, 2026-11-27).
+        status, refused, _ = self.call("GET", "/api/clients", headers=auth)
+        self.assertEqual((status, refused["ai_lab"]["reason"]), (403, "management_needs_login"))
+        _, _, headers = self.call("POST", "/api/login", {"password": "a long password"})
+        page = {"Cookie": headers["Set-Cookie"].split(";")[0]}
+        _, listed, _ = self.call("GET", "/api/clients", headers=page)
         self.assertIsNotNone(listed["clients"][0]["heartbeat_at"])
         self.assertNotIn("map", listed["clients"][0])
         status, _, _ = self.call("DELETE", "/api/clients/scheduler-linux", headers=auth)
+        self.assertEqual(status, 403)
+        status, _, _ = self.call("DELETE", "/api/clients/scheduler-linux", headers=page)
         self.assertEqual(status, 200)
 
     def test_login_sets_the_cookie_and_the_session_lets_the_page_in(self):

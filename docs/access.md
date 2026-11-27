@@ -11,6 +11,7 @@ The approved list of 2026-10-25 (`claude/requests/2026-10-25-simplify-ai-lab/lis
   - off (the switch-over, step 1): a call without a valid token is still served; the door writes one line in the journal per caller kind and route;
   - on (step 4): it is refused with `401`.
 - The web interface is let in by its session cookie, not a token.
+- **A token reaches the model API only** (`clients/route_classes.py`): everything under `/v1/`, `POST /tokenize`, the caller's own `POST /api/clients/heartbeat` and `/api/mailbox`, and `GET /api/gateway`. Everything else is management (Security, clients and their tokens, settings, entries and their loads, engines, downloads, the library, storage, On/Off, the journal, the card's health): it is for the page, its session with login off, a logged-in one with login on. A token there gets `403 management_needs_login` (radio-lab, 2026-11-27). `tests/clients/test_route_classes.py` fails when a new route opens to a token without being listed.
 - **The token requirement holds only with login on.** With `require_token` on and login off, `GET /` hands any visitor a session cookie that is admitted as `web`. Saving that combination is refused, with the reason. A machine already in it is not changed: it works as before, every page shows a warning until login is on, and the journal names, once per route and address, each call let in by a page session without a token (those are the callers login would stop).
 
 ## Refusals (A7)
@@ -23,6 +24,7 @@ OpenAI-shaped on `/v1/...`, a sentence elsewhere; the code is in both:
 |---|---|---|
 | 401 | `token_missing` | no token, and tokens are required |
 | 401 | `token_invalid` | a token no registered client has |
+| 403 | `management_needs_login` | a client's token on a route that is for the page |
 | 503 | `ai_lab_off` | AI-Lab is switched Off |
 | 409 | `model_replaced` | the call's model was replaced for another call |
 

@@ -40,6 +40,10 @@ class Router:
         """Route `method` requests matching `pattern` to `handler`."""
         self._routes.append(Route(method.upper(), _split(pattern), handler))
 
+    def patterns(self) -> list[tuple[str, str]]:
+        """Every route as (method, pattern), in the order they were added."""
+        return [(route.method, "/" + "/".join(route.parts)) for route in self._routes]
+
     def match(self, method: str, path: str) -> tuple[Callable, dict] | None:
         """The handler and the captured segments for this request, or None."""
         parts = _split(path)

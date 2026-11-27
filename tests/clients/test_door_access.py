@@ -7,7 +7,8 @@ from pathlib import Path
 
 from ai_lab.clients.access import Access
 from ai_lab.clients.door import ANONYMOUS, WEB, bearer, route_key
-from ai_lab.clients.errors import AccessDeniedError, TokenInvalidError, TokenMissingError
+from ai_lab.clients.errors import (AccessDeniedError, ManagementNeedsLoginError, TokenInvalidError,
+                                   TokenMissingError)
 from ai_lab.clients.sessions import COOKIE
 
 
@@ -35,6 +36,25 @@ class DoorTest(unittest.TestCase):
         self.assertEqual(caller, "scheduler-linux")
         row = self.access.clients()["clients"][0]
         self.assertIsNotNone(row["last_call_at"])
+
+    def test_a_token_reaches_the_model_api_and_not_management(self):
+        # radio-lab, 2026-11-27: with login on, a token must not change Security.
+        auth = {"Authorization": f"Bearer {self.token}"}
+        for method, path in (("GET", "/v1/models"), ("POST", "/tokenize"),
+                             ("POST", "/api/clients/heartbeat"), ("GET", "/api/gateway")):
+            self.assertEqual(self.door.admit(method, path, auth), "scheduler-linux")
+        for method, path in (("PATCH", "/api/security"), ("GET", "/api/clients"),
+                             ("POST", "/api/instances/qwen/load")):
+            with self.subTest(path), self.assertRaises(ManagementNeedsLoginError) as refused:
+                self.door.admit(method, path, auth)
+            self.assertEqual(refused.exception.detail["ai_lab"]["reason"], "management_needs_login")
+
+    def test_the_page_session_reaches_management_with_login_off_and_on(self):
+        page = {"Cookie": f"{COOKIE}={self.access.sessions.start(kept=False)}"}
+        self.assertEqual(self.door.admit("PATCH", "/api/security", page), WEB)
+        require_token(self.access)
+        page = cookie(self.access.login("a long password"))
+        self.assertEqual(self.door.admit("PATCH", "/api/security", page), WEB)
 
     def test_log_mode_serves_and_logs_once_per_route(self):
         for _ in range(3):

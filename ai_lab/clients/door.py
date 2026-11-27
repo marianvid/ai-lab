@@ -8,6 +8,9 @@ Two modes, switched in Settings → Security (`require_token`):
 
 A token that belongs to nobody is the same in both modes as a missing one: it
 is logged, or refused. The web interface is let in by its session cookie.
+
+A client's token reaches the model API only (`route_classes`); management is
+for the page, so a token there is refused with 403 `management_needs_login`.
 """
 
 from __future__ import annotations
@@ -15,11 +18,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .errors import AccessDeniedError, AiLabOffError, TokenInvalidError, TokenMissingError
+from .errors import (AccessDeniedError, AiLabOffError, ManagementNeedsLoginError, TokenInvalidError,
+                     TokenMissingError)
 from .mailbox import PREFIX as MAILBOX_PREFIX
 from .power import Power, uses_a_model
 from .presence import Presence
 from .registry import ClientRegistry
+from .route_classes import model_api
 from .security import SecuritySettings
 from .sessions import SessionBook, session_of
 
@@ -77,6 +82,10 @@ class Door:
         # model, change a setting or register a client.
         if caller.startswith(MAILBOX_PREFIX) and route_key(path) != MAILBOX_ROUTE:
             raise AccessDeniedError("A mailbox token opens the mailbox only")
+        if caller not in (WEB, ANONYMOUS) and not model_api(method, path):
+            raise ManagementNeedsLoginError(
+                f"{method.upper()} {path} is for AI-Lab's page, not for a client's token: "
+                "log in on the page to use it")
         if self.power is not None and not self.power.on and uses_a_model(method, path):
             raise AiLabOffError("AI-Lab is switched Off: it serves no model until it is "
                                 "switched On", since=self.power.view()["since"])
