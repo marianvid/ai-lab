@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from ..shared.unexpected import READING_FAILED, note
+
 # How far back to read when a load fails. The sentence naming the cause sits a
 # long way above the end of a Python traceback — measured on the container, 99
 # lines for a context that would not fit and 163 for a missing package.
@@ -84,7 +86,10 @@ class RuntimeDiagnostics:
         """
         try:
             lines = self.host.logs(instance_id, lines=LOG_LINES_FOR_CAUSE)
-        except Exception:
+        except READING_FAILED:
+            lines = []
+        except Exception as error:
+            note("reading an engine's log", error)
             lines = []
         if not lines:
             return ("The engine stopped while loading, and its output could not "

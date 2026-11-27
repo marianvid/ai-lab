@@ -43,6 +43,7 @@ from .providers.settings import ProvidersConfig
 from .runtime.core import Runtime
 from .settings import Settings
 from .storage import Storage
+from .shared.unexpected import READING_FAILED, note
 
 
 
@@ -126,7 +127,10 @@ def card_free_mb(host: Host) -> float | None:
     """Free memory on a card of its own, or None (no card, or unified memory)."""
     try:
         snapshot = host.accelerator()
-    except Exception:
+    except READING_FAILED:
+        return None
+    except Exception as error:
+        note("the card's free memory, for the embeddings lane", error)
         return None
     if snapshot.memory_kind != "dedicated" or not snapshot.memory_total_mb:
         return None

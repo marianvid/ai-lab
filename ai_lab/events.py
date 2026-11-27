@@ -6,11 +6,13 @@ open browser tab.
 Each subscriber gets its own bounded queue. That bound is the important part:
 a browser that stops reading must never be able to slow down or stall a model
 load, so when a queue fills, that subscriber's oldest event is dropped rather
-than the publisher being made to wait.
+than the publisher being made to wait. What a subscriber lost is counted, and
+said in the service log when it stops watching.
 """
 
 from __future__ import annotations
 
+import sys
 from dataclasses import asdict
 from queue import Empty, Full, Queue
 from threading import RLock
@@ -25,6 +27,8 @@ class Subscription:
     def __init__(self, bus: EventBus, queue: Queue) -> None:
         self._bus = bus
         self._queue = queue
+        # Events this watcher lost because it read too slowly (kept by the bus).
+        self.dropped = 0
 
     def events(self, timeout: float = 15.0):
         """Yield events as they arrive; yield None when idle.
@@ -60,19 +64,27 @@ class EventBus:
         return subscription
 
     def unsubscribe(self, subscription: Subscription) -> None:
-        """Forget a watcher; events stop reaching it."""
+        """Forget a watcher; events stop reaching it. What it lost is said once, now."""
         with self._lock:
             self._subscribers = [item for item in self._subscribers
                                  if item[0] is not subscription]
+            lost, subscription.dropped = subscription.dropped, 0
+        if lost:
+            print(f"AI-Lab: a page that read the progress stream too slowly lost {lost} "
+                  "events", file=sys.stderr, flush=True)
 
     def publish(self, event) -> None:
         """Never blocks. A full queue loses its oldest event, not the newest."""
         with self._lock:
             subscribers = list(self._subscribers)
-        for _, queue in subscribers:
+        for subscription, queue in subscribers:
             try:
                 queue.put_nowait(event)
             except Full:
+                # At least one event is lost: the oldest, and this one too when
+                # another publisher filled the freed place first.
+                with self._lock:
+                    subscription.dropped += 1
                 try:
                     queue.get_nowait()
                     queue.put_nowait(event)

@@ -2,19 +2,19 @@
 
 So the settings screen is already right when it is opened, rather than only
 after someone presses a button. Shared by the source builds (`builds.py`) and
-the package installs (`installs.py`). A failure is ignored: being offline, or
-upstream being unreachable, is not worth a message on a page nobody is
-looking at.
+the package installs (`installs.py`). An expected failure is ignored: being
+offline, or upstream being unreachable, is not worth a message on a page
+nobody is looking at. Any other is said once in the service log (`unexpected`).
 """
 
 from __future__ import annotations
 
-import contextlib
 import threading
 from collections.abc import Callable, Iterable
 from typing import Protocol
 
 from ..config.policy import UPDATE_CHECK_EVERY_S
+from ..shared.unexpected import UPSTREAM_FAILED, note
 
 
 class Checkable(Protocol):
@@ -62,7 +62,11 @@ class UpdateWatcher:
             for item in self._items():
                 if self._stop.is_set():
                     return
-                with contextlib.suppress(Exception):
+                try:
                     item.check()
+                except UPSTREAM_FAILED:
+                    pass
+                except Exception as error:
+                    note(f"the update check ({self._name})", error)
             if self._stop.wait(interval_s):
                 return

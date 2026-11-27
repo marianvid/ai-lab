@@ -21,6 +21,7 @@ from typing import Protocol
 
 from ..config.policy import INSTALL_S, SYSTEM_PATH
 from ..disk import free_bytes
+from ..shared.unexpected import CALL_FAILED, note
 from ..events import EventBus
 from .background_job import BackgroundJob, fail_and_clean
 from .install_log import Command, Elapsed, InstallLog, since
@@ -299,7 +300,10 @@ class PackageInstall:
                     address("pypi_package").format(package=self.package),
                     timeout=INDEX_TIMEOUT_S) as answer:
                 return (json.loads(answer.read()).get("info", {}).get("version") or "")
-        except Exception:
+        except CALL_FAILED:
+            return ""
+        except Exception as error:
+            note(f"asking the index for {self.package}'s newest version", error)
             return ""
 
     def _verify(self, environment: Path, elapsed: Elapsed) -> None:

@@ -41,7 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 
 from ..disk import sha256_of
 from ..events import EventBus
@@ -186,7 +186,7 @@ class DownloadManager:
         while True:
             try:
                 transfer_id = self._queue.get(timeout=2.0)
-            except Exception:
+            except Empty:
                 return
             transfer = self._transfers.get(transfer_id)
             plan = self._plans.get(transfer_id)

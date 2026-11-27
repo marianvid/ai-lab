@@ -31,8 +31,10 @@ instance, read `engines/base.py` for the list of request paths.
 Three kinds of file sit outside the line:
 
 - **Shared files** that anything may import: `types.py`, the `config*.py`
-  files, `catalog/naming.py`, `events.py`, `budget.py`, `gateway/eviction.py`, `multipart.py`
-  and `uploads.py`. They hold
+  files, `catalog/naming.py`, `events.py`, `budget.py`, `gateway/eviction.py`, `multipart.py`,
+  `uploads.py`, and everything in `shared/` — today `shared/unexpected.py`
+  (the failures each reading expects, and the one line said when another one
+  happens). They hold
   data shapes, rules or arithmetic, and decide nothing about what to do.
 - **The image calls** `media/images.py`. They are handed the gateway when the
   application is built, so they sit beside `api/`, above the gateway, and send

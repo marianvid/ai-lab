@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from ...shared.unexpected import note
 from .parts import AbandonedError, Waiting, WillNotFitError
 
 # A switch to perform once the lock is dropped: the shape to load, what to take
@@ -246,7 +247,10 @@ class Planner:
         try:
             if entry.still_wanted():
                 return False
-        except Exception:
+        except OSError:
             return False                        # cannot tell: serve it
+        except Exception as error:
+            note("asking whether a waiting client is still there", error)
+            return False
         entry.fail(AbandonedError("the client closed the connection while waiting"))
         return True

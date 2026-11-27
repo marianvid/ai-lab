@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from .. import budget
+from ..shared.unexpected import LOOKUP_FAILED, READING_FAILED, note
 from .card_sharing import CardNeighbours, NoNeighbours
 from .errors import CouldNotLoadError
 
@@ -20,7 +21,8 @@ def ask_engine(operations, shape, question: Callable[[Any, dict], Answer],
 
     The settings are the entry's own merged with the shape's. Any failure —
     an entry deleted meanwhile, an engine that cannot be found, an estimate
-    that raises — gives `default`: the gateway must keep deciding with a safe
+    that raises — gives `default` (an unexpected one is also said once,
+    `unexpected.note`): the gateway must keep deciding with a safe
     answer rather than fail a request over a figure. The one place that does
     this, for the places a shape serves and the memory it needs.
     """
@@ -28,7 +30,10 @@ def ask_engine(operations, shape, question: Callable[[Any, dict], Answer],
         instance = operations.instance(shape.instance_id)
         engine = operations.engine(instance["engine"])
         return question(engine, {**instance["params"], **shape.as_dict()})
-    except Exception:
+    except LOOKUP_FAILED:
+        return default
+    except Exception as error:
+        note("asking an engine about a request shape", error)
         return default
 
 
@@ -55,7 +60,10 @@ class GatewayResources:
         """The card's whole memory, or 0 when it cannot be read."""
         try:
             return float(self.operations.accelerator().memory_total_mb)
-        except Exception:
+        except READING_FAILED:
+            return 0.0
+        except Exception as error:
+            note("the card's total memory", error)
             return 0.0
 
     @staticmethod

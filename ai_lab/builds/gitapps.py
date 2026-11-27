@@ -14,6 +14,7 @@ from pathlib import Path
 from ..disk import free_bytes, tree_size
 from ..config.policy import BuildLimits, SYSTEM_PATH
 from ..events import EventBus
+from ..shared.unexpected import UPSTREAM_FAILED, note
 from .background_job import BackgroundJob, fail_and_clean
 from .install_log import Command, Elapsed, InstallLog, since
 from .package_environments import replace_link
@@ -132,7 +133,10 @@ class GitApplicationInstall:
             try:
                 self._component_latest[row["name"]] = self._remote_commit(
                     row["repository"], "HEAD")[:SHORT]
-            except Exception:
+            except UPSTREAM_FAILED:
+                self._component_latest[row["name"]] = ""
+            except Exception as error:
+                note(f"asking {row['name']}'s repository for its newest commit", error)
                 self._component_latest[row["name"]] = ""
         self._announce()
         return self.status()

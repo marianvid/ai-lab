@@ -14,6 +14,7 @@ from ..engines.base import live_state, progress_reader, refused, withheld
 from .errors import NotConfiguredError, ShapeNotServedError
 from .card_operations import CardOperations
 from ..types import Task
+from ..shared.unexpected import LOOKUP_FAILED, note
 
 
 class Catalogue:
@@ -90,7 +91,10 @@ class Catalogue:
         """
         try:
             able = set(self.operations.model_for(instance["id"]).capabilities)
-        except Exception:
+        except LOOKUP_FAILED:
+            return []
+        except Exception as error:
+            note("a model's capabilities", error)
             return []
         try:
             engine = self.operations.engine(instance["engine"])
@@ -197,5 +201,8 @@ class Catalogue:
         try:
             entry = self.operations.instance(shape.instance_id)
             return self.operations.engine(entry["engine"]).display_name
-        except Exception:
+        except KeyError:
+            return ""
+        except Exception as error:
+            note("an entry's engine name", error)
             return ""

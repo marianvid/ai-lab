@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..types import Task
+from ..shared.unexpected import LOOKUP_FAILED, READING_FAILED, note
 
 
 @dataclass(slots=True)
@@ -220,11 +221,17 @@ class GatewayStats:
         """
         try:
             card = self.operations.accelerator()
-        except Exception:
+        except READING_FAILED:
+            return {"memory": {}, "card": {}}
+        except Exception as error:
+            note("the Gateway page's card reading", error)
             return {"memory": {}, "card": {}}
         try:
             memory = self.operations.machine_budget(card=card).json()
-        except Exception:
+        except READING_FAILED:
+            memory = {}
+        except Exception as error:
+            note("the Gateway page's memory figures", error)
             memory = {}
         # Unified memory has no temperature to read, and that comes back empty
         # rather than as a number meaning something else.
@@ -281,7 +288,10 @@ def shapes_offered(operations) -> list[dict]:
             engine = operations.engine(entry["engine"])
             task = Task(entry.get("task", Task.TEXT_GENERATION.value))
             paths = engine.api_paths(task)
-        except Exception:
+        except LOOKUP_FAILED:
+            continue
+        except Exception as error:
+            note("the request paths an entry answers", error)
             continue
         for path in paths:
             answers.setdefault(path, []).append(entry["id"])

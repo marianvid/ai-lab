@@ -37,6 +37,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .shared.unexpected import READING_FAILED, note
+
 # What to leave for the machine itself, when nothing says otherwise. Enough for
 # an operating system, a browser and an editor to stay comfortable; small
 # enough not to waste a third of a small machine.
@@ -206,7 +208,10 @@ def _card(host):
     """The accelerator reading, or None when it cannot be taken."""
     try:
         return host.accelerator()
-    except Exception:
+    except READING_FAILED:
+        return None
+    except Exception as error:
+        note("the accelerator reading", error)
         return None
 
 
@@ -214,7 +219,10 @@ def _machine(host) -> tuple[float, float]:
     """(used, total) of the machine's own memory; zeros when it cannot be read."""
     try:
         return host.system_memory()
-    except Exception:
+    except READING_FAILED:
+        return 0.0, 0.0
+    except Exception as error:
+        note("the machine's memory reading", error)
         return 0.0, 0.0
 
 

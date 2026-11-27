@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..types import Format, ModelSet, Task
+from ..shared.unexpected import CALL_FAILED, note
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,7 +260,10 @@ def live_state(engine, port: int) -> dict:
         return {}
     try:
         return dict(ask(port))
-    except Exception:
+    except CALL_FAILED:
+        return {}
+    except Exception as error:
+        note(f"{type(engine).__name__}.live", error)
         return {}
 
 
@@ -278,7 +282,10 @@ def progress_reader(engine, port: int) -> Callable[[], dict] | None:
     def read() -> dict:
         try:
             return dict(ask(port))
-        except Exception:
+        except CALL_FAILED:
+            return {}
+        except Exception as error:
+            note(f"{type(engine).__name__}.progress", error)
             return {}
     return read
 
@@ -297,7 +304,10 @@ def refused(engine, params: dict | None) -> frozenset[str]:
         return frozenset()
     try:
         return frozenset(ask(params or {}))
-    except Exception:
+    except ValueError:
+        return frozenset()
+    except Exception as error:
+        note(f"{type(engine).__name__}.refuses", error)
         return frozenset()
 
 
@@ -314,5 +324,8 @@ def withheld(engine, params: dict | None) -> frozenset[str]:
         return frozenset()
     try:
         return frozenset(ask(params or {}))
-    except Exception:
+    except ValueError:
+        return frozenset()
+    except Exception as error:
+        note(f"{type(engine).__name__}.withholds", error)
         return frozenset()

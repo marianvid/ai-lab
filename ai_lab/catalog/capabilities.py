@@ -32,6 +32,8 @@ import struct
 from collections.abc import Callable
 from pathlib import Path
 
+from ..shared.unexpected import LOOKUP_FAILED, note
+
 IMAGES = "images"
 TOOLS = "tools"
 
@@ -99,7 +101,10 @@ class Known:
             return frozenset(remembered)
         try:
             found = self._read(path, is_gguf, companions)
-        except Exception:
+        except (*LOOKUP_FAILED, struct.error):
+            found = frozenset()
+        except Exception as error:
+            note(f"reading what {path.name} can do", error)
             found = frozenset()
         self._known[key] = sorted(found)
         self._save()

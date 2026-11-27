@@ -16,13 +16,13 @@ in through the `CardMemory` interface, built by the gateway by default.
 
 from __future__ import annotations
 
-import contextlib
 import threading
 import time
 from collections.abc import Callable
 from typing import Protocol
 
 from .. import budget
+from ..shared.unexpected import READING_FAILED, note
 from .errors import CouldNotLoadError
 from .eviction import EvictionPlanner
 from .state import Shape
@@ -176,8 +176,12 @@ class CardLoader:
         """Refresh the memory reading, keeping the last good one if the probe fails."""
         # Never called while holding the scheduler lock. Keep the last good
         # reading if the host probe fails during a model transition.
-        with contextlib.suppress(Exception):
+        try:
             self._pools = self._memory.read_pools()
+        except READING_FAILED:
+            pass
+        except Exception as error:
+            note("the card's memory reading", error)
 
     def put_on_card(self, shape: Shape, victims: tuple = ()) -> None:
         """Take those off, wait for the card to go quiet, then load this.
