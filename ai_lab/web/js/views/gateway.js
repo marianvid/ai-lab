@@ -242,16 +242,46 @@ function limits(stats, redraw) {
     ]);
   });
 
+  // The per-task waits: one row per kind of request that has its own, the two
+  // waits side by side. A task without a row takes the two above.
+  const saved = stats.task_timeouts || {};
+  const waits = new Map();
+  const taskRows = Object.keys(saved).sort().map((task) => {
+    const box = (key) => element('input', {
+      type: 'number', value: String(saved[task][key] ?? ''), min: '1', size: 6 });
+    const pair = { first_byte_s: box('first_byte_s'), between_bytes_s: box('between_bytes_s') };
+    waits.set(task, pair);
+    return element('label', { class: 'field explained', title:
+      `How long a ${task} request may wait: for its first byte, then between two bytes `
+      + '(seconds, as Max TTFT and Max idle time above, for this kind of request only). '
+      + 'Too small: a slow but working engine is cut off. Too large: a stuck one is '
+      + 'waited on that long.' }, [
+      element('span', {}, element('span', { text: `${task} (s)` })),
+      element('span', {}, [pair.first_byte_s, ' / ', pair.between_bytes_s]),
+    ]);
+  });
+
   // Nothing to save until something is different. A button that is always
   // ready invites a press that does nothing, and then you cannot tell whether
   // the last press took.
   const asShown = () => {
     const now = {};
     inputs.forEach((input, key) => { now[key] = Number(input.value); });
+    if (waits.size) {
+      now.task_timeouts = {};
+      waits.forEach((pair, task) => {
+        now.task_timeouts[task] = { first_byte_s: Number(pair.first_byte_s.value),
+                                    between_bytes_s: Number(pair.between_bytes_s.value) };
+      });
+    }
     return now;
   };
-  const unchanged = () => fields.every(([key, , value]) =>
-    Number(asShown()[key]) === Number(value));
+  const unchanged = () => {
+    const now = asShown();
+    return fields.every(([key, , value]) => Number(now[key]) === Number(value))
+      && [...waits.keys()].every((task) => ['first_byte_s', 'between_bytes_s'].every(
+        (key) => now.task_timeouts[task][key] === Number(saved[task][key])));
+  };
 
   const save = element('button', {
     class: 'action', text: 'Save', disabled: 'disabled',
@@ -273,12 +303,15 @@ function limits(stats, redraw) {
     },
   });
 
-  inputs.forEach((input) => {
-    input.addEventListener('input', () => { save.disabled = unchanged(); });
-  });
+  [...inputs.values(), ...[...waits.values()].flatMap((pair) => Object.values(pair))]
+    .forEach((input) => {
+      input.addEventListener('input', () => { save.disabled = unchanged(); });
+    });
 
   return section('Limits', [
     ...rows,
+    ...(taskRows.length ? [element('p', { class: 'muted', text: 'Per kind of request: '
+      + 'first byte / between bytes' }), ...taskRows] : []),
     element('div', { class: 'row' }, [element('span', {}), save]),
   ]);
 }

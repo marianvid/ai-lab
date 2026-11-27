@@ -60,8 +60,12 @@ models*, *Engine updates*, *Embeddings lane* and *Client caps*; each says,
 when pointed at, what it means, its default and what too small or too large
 does. Beside them, *Uploaded images* holds the gateway's three upload caps
 (`gateway.max_upload_*`, [the gateway](gateway.md)) and the four *GPU
-health* sections every setting of the card's monitor but `channel`
-([GPU health](gpu-health.md)). All but the first port take effect at the next
+health* sections every setting of the card's monitor
+([GPU health](gpu-health.md)); its `channel`, which has one value (`log`),
+is shown, not changed. *This AI-Lab*, under Machine, holds the `title`
+(changed here, at once) and shows `host` and `port`: those are changed only
+in `config.json`, because a wrong one saved from the page would lock the
+page out. All but the first port and the title take effect at the next
 start of AI-Lab. Every value may be left out; then the default below holds,
 which is what the code did before they became settings. A wrong value stops
 AI-Lab at start with a message naming it.

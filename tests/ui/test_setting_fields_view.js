@@ -34,9 +34,14 @@ const XIDS = {
   help: 'The serious ones.', restart_note: 'Takes effect when AI-Lab is next started.',
   value: [48, 63], saved: false,
 };
+const ADDRESS = {
+  key: 'port', group: 'gpu_alarms', label: 'Port', unit: '', default: 8090, low: null,
+  high: null, kind: 'fixed', restart: true, help: 'Change it in config.json.',
+  restart_note: 'Takes effect when AI-Lab is next started.', value: 8091, saved: true,
+};
 const FIELDS = {
   groups: { loading: 'Loading models', updates: 'Engine updates', gpu_alarms: 'GPU health: alarms' },
-  fields: [LOAD, PORT, PATH, ON, XIDS],
+  fields: [LOAD, PORT, PATH, ON, XIDS, ADDRESS],
 };
 
 async function renderPage(overrides = {}) {
@@ -98,6 +103,15 @@ describe('the settings from the configuration file', () => {
     await settle();
     const sent = calls.find((call) => call.method === 'PATCH');
     assert.deepEqual(JSON.parse(sent.body), { 'limits.runtime.load_s': 1800 });
+  });
+
+  it('shows a fixed setting as plain text, never as a field to change', async () => {
+    const { view } = await renderPage();
+    const row = [...namedSection(view, 'GPU health: alarms').querySelectorAll('label.field')]
+      .find((item) => item.textContent.includes('Port'));
+    assert.equal(row.querySelector('input'), null);
+    assert.match(row.textContent, /8091/);
+    assert.match(row.title, /config.json/);
   });
 
   it('keeps what was typed when the server refuses it', async () => {

@@ -1491,6 +1491,22 @@ class GatewaySettingsTests(unittest.TestCase):
         self.assertEqual(saved["first_byte_s"], 300.0)
         self.assertEqual(saved["max_waiting"], 40)
 
+    def test_a_task_wait_is_changed_alone_and_checked_by_the_section(self):
+        self.operations.update_gateway({"task_timeouts": {
+            "ocr": {"first_byte_s": 60, "between_bytes_s": 30}}})
+        self.operations.update_gateway({"task_timeouts": {"ocr": {"first_byte_s": 90}},
+                                        "max_waiting": 40})
+        saved = self.operations.gateway_settings()
+        self.assertEqual(saved["task_timeouts"], {"ocr": {"first_byte_s": 90,
+                                                          "between_bytes_s": 30}})
+        self.assertEqual(saved["max_waiting"], 40)
+        for wrong in ({"poetry": {"first_byte_s": 60}}, {"ocr": {"first_byte_s": 0}},
+                      {"ocr": {"patience": 5}}, ["ocr"]):
+            with self.subTest(wrong), self.assertRaises(ValueError):
+                self.operations.update_gateway({"task_timeouts": wrong})
+        self.assertEqual(self.operations.gateway_settings()["task_timeouts"]["ocr"]["first_byte_s"],
+                         90)
+
     def test_a_setting_that_does_not_exist_is_refused(self):
         with self.assertRaises(ValueError) as caught:
             self.operations.update_gateway({"patience": 10})

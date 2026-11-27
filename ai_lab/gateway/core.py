@@ -332,4 +332,5 @@ class Gateway:
             operations=self._operations, scheduler=self._scheduler, counters=self._counters,
             waits=(self.first_byte_s, self.between_bytes_s), adopt=self.adopt_what_is_there,
             holder=self.busy, engine_name_of=self.engine_name_of)).snapshot()
-        return {**snapshot, **self.patience.as_dict()}
+        # The per-task waits too, so the page shows (and changes) each one.
+        return {**snapshot, **self.patience.as_dict(), "task_timeouts": dict(self.task_timeouts)}

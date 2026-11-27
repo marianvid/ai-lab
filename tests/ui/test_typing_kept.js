@@ -72,6 +72,33 @@ describe('the Gateway page', () => {
     }
   });
 
+  it('shows the own waits of each task and sends a changed one', async () => {
+    const context = installDom({
+      '/api/gateway': { ...GATEWAY, task_timeouts: {
+        ocr: { first_byte_s: 60, between_bytes_s: 30 },
+        'music-generation': { first_byte_s: 1800, between_bytes_s: 60 } } },
+      'PATCH /api/gateway': GATEWAY,
+    });
+    const view = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    await view.render(context.view);
+    await settle();
+    view.stopRefreshing();
+    const row = [...context.view.querySelectorAll('label.field')]
+      .find((item) => item.textContent.includes('ocr (s)'));
+    assert.ok(row, 'a row for ocr');
+    assert.match(row.title, /first byte, then between two bytes/);
+    const [first] = row.querySelectorAll('input');
+    first.value = '90';
+    first.dispatchEvent(new context.window.Event('input'));
+    const save = button(context.view, 'Save');
+    assert.equal(save.disabled, false);
+    save.click();
+    await settle();
+    const sent = JSON.parse(context.calls.find((call) => call.method === 'PATCH').body);
+    assert.deepEqual(sent.task_timeouts.ocr, { first_byte_s: 90, between_bytes_s: 30 });
+    context.window.close();
+  });
+
   it('keeps what was typed when the save is refused', async () => {
     const context = installDom({
       '/api/gateway': GATEWAY,

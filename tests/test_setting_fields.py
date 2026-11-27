@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ai_lab.application.setting_fields import BY_KEY, FIELDS, GROUPS, SettingFields
 from ai_lab.config.policy import GatewayPolicy, MachineLimits
-from ai_lab.config.store import ConfigStore
+from ai_lab.config.store import Config, ConfigStore
 from ai_lab.gpu_health.settings import GpuHealthSettings
 
 
@@ -44,7 +44,7 @@ class SettingFieldsTests(unittest.TestCase):
         for field in FIELDS:
             with self.subTest(field.key):
                 section, *path = field.key.split(".")
-                value = defaults[section]
+                value = defaults.get(section) or getattr(Config(), section)
                 for part in path:
                     value = getattr(value, part)
                 self.assertEqual(field.default, list(value) if isinstance(value, tuple) else value)
@@ -56,8 +56,8 @@ class SettingFieldsTests(unittest.TestCase):
         self.assertIn("limits.first_port", BY_KEY)
         self.assertIn("limits.editor_port_offset", BY_KEY)
         self.assertEqual(sum(1 for key in BY_KEY if key.startswith("gateway.max_upload_")), 3)
-        # Every monitor setting but `channel`, which has one possible value today.
-        monitor = {field.name for field in dataclass_fields(GpuHealthSettings)} - {"channel"}
+        # Every monitor setting, `channel` among them (shown, it has one value).
+        monitor = {field.name for field in dataclass_fields(GpuHealthSettings)}
         self.assertEqual({key.split(".", 1)[1] for key in BY_KEY if key.startswith("gpu_health.")},
                          monitor)
 
@@ -88,6 +88,17 @@ class SettingFieldsTests(unittest.TestCase):
                          40_000_000)
         with self.assertRaisesRegex(ValueError, "Longest side must be at most 100000"):
             self.fields.update({"gateway.max_upload_dimension": 100001})
+
+    def test_the_name_is_changed_here_and_the_address_only_shown(self):
+        self.fields.update({"title": " Lab Linux "})
+        self.assertEqual(ConfigStore(self.path).load().title, "Lab Linux")
+        self.assertEqual(self.field("title")["restart_note"], "")
+        self.assertEqual((self.field("port")["value"], self.field("port")["kind"]), (8090, "fixed"))
+        self.assertIn("next started", self.field("host")["restart_note"])
+        for key in ("host", "port", "gpu_health.channel"):
+            with self.subTest(key), self.assertRaisesRegex(ValueError, "change it in config.json"):
+                self.fields.update({key: "x"})
+        self.assertEqual(json.loads(self.path.read_text()).get("port", 8090), 8090)
 
     def test_an_offset_that_puts_a_page_on_a_taken_port_is_refused(self):
         self.path.write_text(json.dumps({"instances": [

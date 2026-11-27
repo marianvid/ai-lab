@@ -14,6 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .. import budget
+from ..config.policy import GatewayPolicy
 from ..config.store import ConfigStore, ModelRoot, validate_distinct_roots
 from ..hosts.base import Host
 from ..settings import Settings
@@ -55,11 +56,19 @@ class SettingsChanges:
         Checked here rather than in the gateway, for the same reason every
         other setting is checked outside the thing it configures.
         """
+        changes = dict(changes)
+        timeouts = changes.pop("task_timeouts", None)
         _refuse_unknown(changes, set(GATEWAY_SETTINGS))
         cleaned = {key: _in_range(key, value, *GATEWAY_SETTINGS[key])
                    for key, value in changes.items()}
         with self.store.mutate() as config:
-            config.gateway = {**config.gateway, **cleaned}
+            merged = {**config.gateway, **cleaned}
+            if timeouts is not None:
+                merged["task_timeouts"] = _with_task_waits(merged.get("task_timeouts", {}),
+                                                           timeouts)
+            # The section's own parser, as at start: a wrong task or wait leaves the file.
+            GatewayPolicy.from_mapping(merged)
+            config.gateway = merged
         self._changed("settings")
         return self.gateway_settings()
 
@@ -177,6 +186,22 @@ class SettingsChanges:
                 setattr(repository, key, value)
         self._changed("models")
         return asdict(self.store.load().repository(repository_id))
+
+
+def _with_task_waits(saved: dict, changes) -> dict:
+    """The per-task waits with `changes` laid over them, task by task.
+
+    Each task in `changes` gives one or both of its two waits; the other is
+    kept. Checked afterwards by `GatewayPolicy`, which names a wrong task.
+    """
+    if not isinstance(changes, dict):
+        raise ValueError("task_timeouts must be an object, by task")
+    merged = {task: dict(values) for task, values in saved.items()}
+    for task, values in changes.items():
+        if not isinstance(values, dict) or set(values) - {"first_byte_s", "between_bytes_s"}:
+            raise ValueError(f"task_timeouts {task}: give first_byte_s and between_bytes_s")
+        merged[task] = {**merged.get(task, {}), **values}
+    return merged
 
 
 def _refuse_unknown(changes: dict, known: set[str]) -> None:

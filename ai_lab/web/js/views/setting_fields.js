@@ -27,6 +27,8 @@ function explanation(field) {
 }
 
 function input(field) {
+  // Shown, not changed here: its value as plain text, never a field.
+  if (field.kind === 'fixed') return element('span', { class: 'fixed', text: shown(field, field.value) });
   if (field.kind === 'boolean') {
     return element('input', { type: 'checkbox', ...(field.value ? { checked: 'checked' } : {}) });
   }
@@ -55,7 +57,7 @@ export function settingFieldsSection(view, group, refresh) {
   const inputs = new Map();
   const rows = fields.map((field) => {
     const box = input(field);
-    inputs.set(field.key, { box, field });
+    if (field.kind !== 'fixed') inputs.set(field.key, { box, field });
     return element('label', { class: 'field explained', title: explanation(field) },
                    [label(field), box]);
   });

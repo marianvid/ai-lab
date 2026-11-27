@@ -65,6 +65,7 @@ export async function render(container) {
     ].filter(Boolean)),
     element('div', {}, [
       machine(settings, refresh),
+      settingFieldsSection(fields, 'manager', refresh),
       settingFieldsSection(fields, 'loading', refresh),
       paths(settings, refresh),
       settingFieldsSection(fields, 'clients', refresh),

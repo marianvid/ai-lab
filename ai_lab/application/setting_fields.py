@@ -22,12 +22,18 @@ from typing import cast
 from ..config import policy
 from ..config.store import Config, ConfigStore
 from ..config.validation import editor_port_problems
+from ..network import ALL_INTERFACES, LOOPBACK
 from ..gpu_health.settings import BOUNDS as MONITOR_BOUNDS
 from ..gpu_health.settings import ORDERED as MONITOR_ORDER
 from ..gpu_health.settings import GpuHealthSettings
 
+# The top of the file's own defaults (`title`, `host`, `port`).
+_FILE = Config()
+FIXED = "{label} is shown, not changed, here: change it in config.json"
+
 # The groups the page shows, in order: the section title of each.
 GROUPS = {
+    "manager": "This AI-Lab",
     "loading": "Loading models",
     "updates": "Engine updates",
     "embeddings": "Embeddings lane",
@@ -53,7 +59,9 @@ class Field:
     low: float | None
     high: float | None
     help: str
-    kind: str = "number"            # "number", "integer", "text", "boolean" or "list"
+    # "number", "integer", "text", "boolean", "list", or "fixed": shown, not
+    # changed here (a value that, saved wrong from the page, would lock it out).
+    kind: str = "number"
     restart: bool = True
     empty: bool = False             # a text that may be left empty
 
@@ -81,6 +89,18 @@ def _gpu(name: str, shown: tuple[str, str, str], help_text: str,
 
 
 FIELDS: tuple[Field, ...] = (
+    Field("title", "manager", "Name", "", _FILE.title, None, None,
+          "The name in the browser tab, beside the machine's own (Linux, macOS), so two "
+          "AI-Labs open side by side are told apart. Any short text; too long a name "
+          "crowds the tab. Taken at once.", kind="text", restart=False),
+    Field("host", "manager", "Listens on", "", _FILE.host, None, None,
+          f"The network address AI-Lab answers on: {ALL_INTERFACES} is every interface of "
+          f"this machine, {LOOPBACK} only itself. Change it in config.json, not here: a wrong "
+          "value saved from this page would lock this page out.", kind="fixed"),
+    Field("port", "manager", "Port", "", _FILE.port, None, None,
+          "The port of this page and of every API call (the gateway). Change it in "
+          "config.json, not here: a wrong value would lock this page out, and every "
+          "client would need the new port.", kind="fixed"),
     _seconds("limits.runtime.start_s", "loading", "Process start", policy.START_S,
              "How long a model's engine process may take to appear after it is started. "
              "Too small: an engine that starts slowly is given up on and the load fails. "
@@ -323,6 +343,10 @@ FIELDS: tuple[Field, ...] = (
           "comma-separated: reported as critical, any other Xid as a warning. Fewer: a "
           "serious error is only a warning. More: a harmless one is critical.",
           kind="list"),
+    Field("gpu_health.channel", "gpu_alarms", "Alarms go to", "", _MONITOR.channel, None, None,
+          "Where an alarm is said. Only \u201clog\u201d exists: the event list on the GPU "
+          "health page and the manager's service log (journalctl -u ai-lab-manager). "
+          "A second channel would be a change of AI-Lab, not of this setting.", kind="fixed"),
     _gpu("repeat_s", ("gpu_alarms", "Repeat an alarm every", "s"),
          "How often an alarm whose condition lasts is said again. Too small: the log fills "
          "with the same alarm. Too large: a lasting problem is said once and forgotten."),
@@ -334,7 +358,10 @@ BY_KEY = {field.key: field for field in FIELDS}
 
 
 def _read(config: Config, key: str):
-    """The value saved at `key`, or None when the file does not set it."""
+    """The value saved at `key`, or None when the file does not set it.
+
+    A key without a dot is the top of the file (`title`): it always has a value.
+    """
     section, *path = key.split(".")
     value = getattr(config, section)
     for part in path:
@@ -347,6 +374,9 @@ def _read(config: Config, key: str):
 def _write(config: Config, key: str, value) -> None:
     """Set `key` in the configuration, creating the sections on the way."""
     section, *path = key.split(".")
+    if not path:
+        setattr(config, section, value)
+        return
     holder = getattr(config, section)
     for part in path[:-1]:
         holder = holder.setdefault(part, {})
@@ -372,9 +402,14 @@ def _whole_numbers(field: Field, value):
     return value
 
 
+def _fixed(field: Field, _value):
+    raise ValueError(FIXED.format(label=field.label))
+
+
 def _checked(field: Field, value):
     """The value as the field takes it; ValueError naming the field otherwise."""
-    other = {"text": _text, "boolean": _on_off, "list": _whole_numbers}.get(field.kind)
+    other = {"text": _text, "boolean": _on_off, "list": _whole_numbers,
+             "fixed": _fixed}.get(field.kind)
     if other is not None:
         return other(field, value)
     if isinstance(value, bool) or not isinstance(value, int | float):
