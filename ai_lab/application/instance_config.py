@@ -16,7 +16,7 @@ from typing import Any
 
 from ..catalog.core import Catalog
 from ..config.store import INSTANCE_ID, ConfigStore, Instance
-from ..config.validation import editor_port_problems
+from ..config.validation import MAX_PORT, editor_port_problems
 from ..engines.base import validate
 from ..hosts.base import Host
 from ..runtime.core import Runtime
@@ -118,7 +118,7 @@ class InstanceConfiguration:
         instance = Instance(
             id=identifier, engine=payload["engine"],
             model_id=payload["model_id"],
-            port=int(payload["port"]), params=params,
+            port=_port(payload["port"]), params=params,
         )
         with self.store.mutate() as config:
             if any(item.id == instance.id for item in config.instances):
@@ -153,12 +153,14 @@ class InstanceConfiguration:
             model = self.catalog.find(config.repositories, target_model_id)
             if hasattr(engine, "supports") and not engine.supports(model):
                 raise ValueError(f"{engine.display_name} is not configured for {model.name}")
-            if "params" in changes:
-                instance.params = validate(engine.params(model.task), changes["params"])
+            if "params" in changes or "model_id" in changes:
+                # A new model keeps its settings only if they fit its task (L6).
+                instance.params = validate(engine.params(model.task),
+                                           changes.get("params", instance.params))
             if "model_id" in changes:
                 instance.model_id = str(changes["model_id"])
             if "port" in changes:
-                instance.port = _free_port(config, instance_id, int(changes["port"]))
+                instance.port = _free_port(config, instance_id, _port(changes["port"]))
                 _refuse_page_clashes(config, self.engines, self._sections)
         self._changed("instances")
         running = self.host.status(instance_id).running
@@ -200,6 +202,14 @@ def _refuse_page_clashes(config, engines, sections=None) -> None:
     problems = editor_port_problems(config, page_engines, sections)
     if problems:
         raise ValueError("; ".join(problems))
+
+
+def _port(value) -> int:
+    """A port typed on the page; refused outside 1..65535, as the start refuses it (audit m21)."""
+    port = int(value)
+    if not 1 <= port <= MAX_PORT:
+        raise ValueError(f"A port is between 1 and {MAX_PORT}, not {port}")
+    return port
 
 
 def _free_port(config, instance_id: str, port: int) -> int:

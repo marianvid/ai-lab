@@ -244,6 +244,20 @@ class OperationsTests(unittest.TestCase):
         self.operations.update_instance("qwen", {"port": 8095})
         self.assertEqual(self.store.load().instance("qwen").port, 8095)
 
+    def test_a_new_model_without_new_settings_checks_the_old_ones_against_it(self):
+        # Audit L6: the old settings were kept unchecked against the new model.
+        with mock.patch("ai_lab.application.instance_config.validate",
+                        side_effect=ValueError("not for this model")) as checked, \
+                self.assertRaisesRegex(ValueError, "not for this model"):
+            self.operations.update_instance("qwen", {"model_id": "gguf/gemma/gemma"})
+        checked.assert_called_once()
+
+    def test_a_port_that_does_not_exist_is_refused_on_save(self):
+        # Audit m21: saved, it stopped the next start of AI-Lab.
+        for port in (0, 70000):
+            with self.subTest(port=port), self.assertRaisesRegex(ValueError, "between 1 and 65535"):
+                self.operations.update_instance("qwen", {"port": port})
+
     def test_a_port_another_model_holds_is_refused(self):
         self.operations.create_instance({"id": "second", "engine": "llamacpp",
                                          "model_id": "gguf/gemma/gemma", "port": 8081})
@@ -1335,6 +1349,9 @@ class RepositoryEditingTests(unittest.TestCase):
                          str(self.root / "old" / "gguf"))
 
     def test_the_name_can_be_changed(self):
+        for wrong in ({"writable": "no"}, {"name": ""}, {"name": 5}):
+            with self.subTest(wrong=wrong), self.assertRaises(ValueError):
+                self.operations.update_repository("gguf", wrong)        # audit L5
         self.operations.update_repository("gguf", {"name": "My models"})
         self.assertEqual(self.store.load().repository("gguf").name, "My models")
 
@@ -1580,6 +1597,12 @@ class GatewaySettingsTests(unittest.TestCase):
             self.operations.update_gateway({"between_bytes_s": 0})
         with self.assertRaises(ValueError):
             self.operations.update_gateway({"max_waiting": 0})
+
+    def test_a_wait_the_file_may_hold_can_be_saved_from_the_page(self):
+        # Audit m20: the page capped at 3600 what the start takes up to 86400.
+        self.operations.update_gateway({"first_byte_s": 7200, "between_bytes_s": 5000})
+        with self.assertRaises(ValueError):
+            self.operations.update_gateway({"first_byte_s": 86401})
 
     def test_something_that_is_not_a_number_is_refused(self):
         with self.assertRaises(ValueError) as caught:

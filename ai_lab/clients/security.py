@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 
 from .errors import AccessDeniedError
+from ..shared.numbers import whole_number
 from .registry import write_private
 
 SALT_BYTES = 16
@@ -95,7 +96,7 @@ class SecuritySettings:
                                                    "login_required": self.login_required, **values})
         for key, (_default, low, high) in NUMBERS.items():
             if key in changes:
-                number = int(changes[key])
+                number = whole_number(changes[key], key)
                 if not low <= number <= high:
                     raise ValueError(f"{key} must be between {low} and {high}")
                 values[key] = number

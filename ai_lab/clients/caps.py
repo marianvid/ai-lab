@@ -30,6 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..config.policy import CHARS_PER_TOKEN, ClientCapLimits
+from ..shared.numbers import whole_number
 from .errors import RefusalError
 from .registry import write_private
 
@@ -110,7 +111,7 @@ class ClientCaps:
                     caps.pop(key, None)
                     continue
                 low, high = LIMITS[key]
-                number = int(value)
+                number = whole_number(value, key)
                 if not low <= number <= high:
                     raise ValueError(f"{key} must be between {low} and {high}")
                 caps[key] = number

@@ -14,21 +14,16 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .. import budget
-from ..config.policy import GatewayPolicy
+from ..config.policy import GATEWAY_BOUNDS, GatewayPolicy
 from ..config.store import ConfigStore, ModelRoot, validate_distinct_roots
 from ..hosts.base import Host
 from ..settings import Settings
 
-# The front door's own settings, with the range each may take.
-GATEWAY_SETTINGS: dict[str, tuple[float, float]] = {
-    "first_byte_s": (1.0, 3600.0),
-    "between_bytes_s": (1.0, 3600.0),
-    "max_waiting": (1, 10000),
-    # For engines that report their progress (vLLM): `gateway.limits.Patience`.
-    "stall_s": (5.0, 3600.0),
-    "safety_s": (60.0, 86400.0),
-    "default_max_tokens": (0, 1_000_000),
-}
+# The front door's own settings, with the range each may take: the ones the
+# start uses (`config.policy`). The page capped two waits at 3600 while the
+# file took 86400, so a valid file value made every save fail (audit m20).
+# `stall_s` and `safety_s` are for engines that report progress (vLLM).
+GATEWAY_SETTINGS: dict[str, tuple[float, float]] = dict(GATEWAY_BOUNDS)
 # The most that may be held back for the machine itself: 1 TB, in MB.
 MAX_RESERVE_MB = 1024 * 1024
 MODEL_ROOT_FIELDS = frozenset({"path", "enabled", "writable", "download_default"})
@@ -180,6 +175,11 @@ class SettingsChanges:
                 f"Cannot change: {', '.join(sorted(unknown))}"
                 + (". Every repository sits under the models root; set that "
                    "instead." if "path" in unknown else ""))
+        # Typed (audit L5): "writable": "no" was truthy and saved as text.
+        if "writable" in changes and not isinstance(changes["writable"], bool):
+            raise ValueError("writable must be true or false")
+        if "name" in changes and not (isinstance(changes["name"], str) and changes["name"].strip()):
+            raise ValueError("A repository's name must be some text")
         with self.store.mutate() as config:
             repository = config.repository(repository_id)
             for key, value in changes.items():

@@ -32,6 +32,12 @@ UPDATE_CHECK_EVERY_S = 3600.0
 BUILDS_FIRST_CHECK_S = 20.0
 INSTALLS_FIRST_CHECK_S = 25.0
 SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
+# The range each of the gateway's own settings may take: one owner, read by the
+# start and by the Gateway page's save alike (audit m20).
+GATEWAY_BOUNDS: dict[str, tuple[int, int]] = {
+    "first_byte_s": (1, 86400), "between_bytes_s": (1, 86400), "max_waiting": (1, 10000),
+    "stall_s": (5, 3600), "safety_s": (60, 86400), "default_max_tokens": (0, 1_000_000),
+}
 EMBEDDINGS_START_S = 120.0
 EMBEDDINGS_STOP_S = 30.0
 EMBEDDINGS_DRAIN_S = 60.0
@@ -94,8 +100,9 @@ class GatewayPolicy:
         raw = {} if raw is None else raw
         if not isinstance(raw, Mapping):
             raise ValueError("Gateway settings must be an object")
-        first = _number(raw, "first_byte_s", FIRST_BYTE_S, bounds=(1, 86400))
-        between = _number(raw, "between_bytes_s", BETWEEN_BYTES_S, bounds=(1, 86400))
+        first = _number(raw, "first_byte_s", FIRST_BYTE_S, bounds=GATEWAY_BOUNDS["first_byte_s"])
+        between = _number(raw, "between_bytes_s", BETWEEN_BYTES_S,
+                          bounds=GATEWAY_BOUNDS["between_bytes_s"])
         timeouts = raw.get("task_timeouts", {})
         if not isinstance(timeouts, dict):
             raise ValueError("Gateway task_timeouts must be an object")
@@ -106,15 +113,15 @@ class GatewayPolicy:
                 raise ValueError(f"Gateway task_timeouts has invalid task {task!r}")
             by_task[task] = TaskTimeout(
                 first_byte_s=_number(values, "first_byte_s", first,
-                                     bounds=(1, 86400)),
+                                     bounds=GATEWAY_BOUNDS["first_byte_s"]),
                 between_bytes_s=_number(values, "between_bytes_s", between,
-                                        bounds=(1, 86400)),
+                                        bounds=GATEWAY_BOUNDS["between_bytes_s"]),
             )
         return cls(
             first_byte_s=first,
             between_bytes_s=between,
-            max_waiting=_integer(raw, "max_waiting", MAX_WAITING, bounds=(1, 10000),
-                                 section="Gateway"),
+            max_waiting=_integer(raw, "max_waiting", MAX_WAITING,
+                                 bounds=GATEWAY_BOUNDS["max_waiting"], section="Gateway"),
             task_timeouts=by_task,
             max_upload_bytes=_integer(raw, "max_upload_bytes", 0, bounds=(0, 1024 ** 3),
                                       section="Gateway"),
@@ -122,10 +129,11 @@ class GatewayPolicy:
                                        section="Gateway"),
             max_upload_dimension=_integer(raw, "max_upload_dimension", 0,
                                           bounds=(0, 100000), section="Gateway"),
-            stall_s=_number(raw, "stall_s", STALL_S, bounds=(5, 3600)),
-            safety_s=_number(raw, "safety_s", SAFETY_S, bounds=(60, 86400)),
+            stall_s=_number(raw, "stall_s", STALL_S, bounds=GATEWAY_BOUNDS["stall_s"]),
+            safety_s=_number(raw, "safety_s", SAFETY_S, bounds=GATEWAY_BOUNDS["safety_s"]),
             default_max_tokens=_integer(raw, "default_max_tokens", DEFAULT_MAX_TOKENS,
-                                        bounds=(0, 1_000_000), section="Gateway"),
+                                        bounds=GATEWAY_BOUNDS["default_max_tokens"],
+                                        section="Gateway"),
         )
 
     def timeout_mapping(self) -> dict[str, dict[str, float]]:

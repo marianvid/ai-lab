@@ -296,7 +296,12 @@ def _check_image_profile(report: _Report, profile_id: str, profile: dict,
 
 def _check_profile_task(report: _Report, profile_id: str, model_id: str, task: str) -> None:
     instance = report.config.instance(model_id)
-    repository = report.config.repository(instance.model_id.split("/", 1)[0])
+    # An unknown repository is a line of the report (`_check_placement`), never
+    # a bare KeyError that stops the start before the rest is said (audit L43).
+    try:
+        repository = report.config.repository(instance.model_id.split("/", 1)[0])
+    except KeyError:
+        return          # `_check_placement` already names the unknown repository
     expected = (Task.IMAGE_EDIT if task == "edit" else Task.IMAGE_GENERATION).value
     if repository.task != expected:
         report.add(f"Image profile {profile_id}: {model_id} is configured "
@@ -347,6 +352,8 @@ def editor_port_problems(config: Config, page_engines: Iterable[str],
     pages = set(page_engines)
     taken = section_ports(config, sections or {})
     taken.update({item.port: item.id for item in config.instances})
+    # A Higgs worker's own port counts too (audit L44).
+    taken.update({port: f"{who}'s worker" for who, port in _worker_ports(config)})
     taken.setdefault(config.port, "the manager")
     problems = []
     for item in config.instances:
@@ -360,6 +367,18 @@ def editor_port_problems(config: Config, page_engines: Iterable[str],
             problems.append(f"{item.id}: its page would be on port {page} (port {item.port} plus "
                             f"the editor offset {offset}), which is {taken[page]}'s port")
     return problems
+
+
+def _worker_ports(config: Config) -> list[tuple[str, int]]:
+    """(entry, port) of each Higgs entry's second process, where its options name one."""
+    found = []
+    field_name = MODEL_MAP_FIELDS.get("higgs")
+    configured = config.engines.get("higgs", {}).get(field_name, {}) if field_name else {}
+    for item in config.instances:
+        options = configured.get(item.model_id.rsplit("/", 1)[-1]) if item.engine == "higgs" else None
+        if isinstance(options, dict) and isinstance(options.get("worker_port"), int):
+            found.append((item.id, options["worker_port"]))
+    return found
 
 
 def _check_editor_ports(report: _Report) -> None:

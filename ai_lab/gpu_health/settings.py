@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 
+from ..shared.numbers import whole_number
+
 # Xid codes that mean the card or its memory may be failing (NVIDIA's list of
 # serious Xids): reported as critical. Every other Xid is a warning.
 CRITICAL_XIDS = (48, 63, 64, 74, 79, 92, 94, 95)
@@ -137,6 +139,9 @@ def _checked(name: str, value, default):
         return value
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
         raise ValueError(f"gpu_health {name} must be a number, not negative")
+    if isinstance(default, int):
+        # 1.9 for a count was cut to 1, silently (audit L35).
+        value = whole_number(value, f"gpu_health {name}")
     return type(default)(_within(name, value))
 
 

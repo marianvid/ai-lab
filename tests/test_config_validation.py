@@ -43,6 +43,23 @@ class ConfigurationValidationTests(unittest.TestCase):
         config.port = 9100
         self.assertIn("the manager's port", editor_port_problems(config, {"comfyui"})[0])
 
+    def test_an_image_profile_on_an_unknown_repository_is_a_line_of_the_report(self):
+        # Audit L43: it was a bare KeyError that hid every other problem.
+        config = self.base()
+        config.instances.append(Instance('drawn', 'comfyui', 'nowhere/drawn', 8101))
+        config.images = {"profiles": {"draw": {"model": "drawn", "task": "generation",
+                                               "workflow": "draw.json"}}}
+        with self.assertRaisesRegex(ValueError, "unknown repository nowhere"):
+            validate_configuration(config, {'comfyui'}, sections={})
+
+    def test_a_higgs_worker_port_counts_against_the_pages(self):
+        # Audit L44: a worker and another entry's page could share a port.
+        config = self.base()
+        config.instances.append(Instance('voice', 'higgs', 'images/voice', 9000))
+        config.engines = {"higgs": {"model_options": {"voice": {"worker_port": 18100}}}}
+        problems = editor_port_problems(config, {"comfyui"})
+        self.assertTrue(any("voice's worker" in item for item in problems), problems)
+
     def test_a_page_on_a_port_a_section_claims_is_refused_too(self):
         config = self.base()
         embeddings = Section(lambda raw: raw, ports=lambda parsed: [("cpu model bge-m3", 18100)])
