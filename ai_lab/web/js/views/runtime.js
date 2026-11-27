@@ -15,6 +15,7 @@ import { createCard } from './runtime_card.js';
 
 const open = new Set();         // rows with their settings expanded
 let adding = false;
+let addShown = null;          // the Add form while it is open, kept through redraws
 let redraw = () => {};
 const { progress, paint, paintFromState, subscribe } = createProgress();
 const card = createCard({ progress, open, paint, paintFromState, run, removeInstance,
@@ -60,19 +61,24 @@ async function askThenForce(label, work, busy) {
 }
 
 // `work` takes one argument: whether to go ahead despite a busy card.
+// True when the work was done; false when it was refused (said in a notice).
 async function run(label, work) {
+  let done = false;
   try {
     await report(label, await work(false));
+    done = true;
   } catch (error) {
     if (error.busy) {
       try {
         await askThenForce(label, work, error.busy);
+        done = true;
       } catch (again) {
         await failed(label, again.message);
       }
     } else await failed(label, error.message);
   }
   redraw();
+  return done;
 }
 
 async function removeInstance(instance) {
@@ -113,10 +119,14 @@ export async function render(container) {
     }),
   ]);
 
-  let addSection = null;
-  if (adding) addSection = addCard(await api.newInstanceForm(), {
-    run, close: () => { adding = false; redraw(); },
-  });
+  // The Add form is built once and kept through redraws, so what was typed
+  // survives a refused add or an event (audit L62).
+  if (adding && !addShown) {
+    addShown = addCard(await api.newInstanceForm(), {
+      run, close: () => { adding = false; addShown = null; redraw(); },
+    });
+  }
+  const addSection = adding ? addShown : null;
 
   container.replaceChildren(...[
     header,

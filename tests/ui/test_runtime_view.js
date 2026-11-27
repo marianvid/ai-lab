@@ -353,6 +353,26 @@ describe('the Models page', () => {
     assert.equal(view.textContent.includes('Add a model'), false);
   });
 
+  it('keeps the Add form and what was typed when the add is refused', async () => {
+    // Audit L62: the form closed even when the add was refused.
+    const { view } = await renderPage({
+      '/api/instances/new': { port: 8081, engines: [ENGINE], models: [MODEL] },
+      'POST /api/instances': { __status: 400, error: 'Port 8081 is already in use' },
+    });
+    button(view, '+ Add model').click();
+    await settle();
+    const port = [...view.querySelectorAll('input[type="number"]')]
+      .find((item) => item.value === '8081');
+    port.value = '8099';
+    button(view, 'Add').click();
+    await settle();
+    document.querySelectorAll('dialog').forEach((dialog) => dialog.close());
+    await settle();
+    assert.match(view.textContent, /Add a model/, 'the form closed after a refusal');
+    assert.ok([...view.querySelectorAll('input[type="number"]')]
+      .some((item) => item.value === '8099'), 'what was typed was lost');
+  });
+
   it('says so plainly when nothing is configured yet', async () => {
     const { view } = await renderPage({ '/api/instances': [] });
     assert.match(view.textContent, /Nothing configured yet/);

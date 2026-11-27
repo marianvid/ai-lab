@@ -5,7 +5,7 @@
 // like the Gateway page.
 
 import { api } from '../api.js';
-import { element } from '../format.js';
+import { beingEdited, element } from '../format.js';
 import { showNotice } from '../confirm.js';
 
 const EVERY_MS = 5000;
@@ -30,13 +30,17 @@ function when(stamp) {
   return Number.isFinite(value) && value > 0 ? new Date(value * 1000).toLocaleString() : '—';
 }
 
+// A refused change leaves the page as it is, so what was typed stays to be
+// corrected (audit L62); a change that was taken redraws it.
 async function act(title, work, refresh) {
   try {
     await work();
   } catch (error) {
     await showNotice({ title, body: error.message });
+    return false;
   }
   refresh();
+  return true;
 }
 
 function powerSection(power, refresh) {
@@ -128,8 +132,11 @@ function journalSection(journal) {
 function securitySection(security, refresh) {
   const toggle = (key, label, title) => {
     const box = element('input', { type: 'checkbox', ...(security[key] ? { checked: 'checked' } : {}) });
-    box.addEventListener('change', () =>
-      act('Could not change the setting', () => api.updateSecurity({ [key]: box.checked }), refresh));
+    box.addEventListener('change', async () => {
+      // Refused: the switch goes back to what is saved.
+      if (!await act('Could not change the setting',
+                     () => api.updateSecurity({ [key]: box.checked }), refresh)) box.checked = !box.checked;
+    });
     return element('label', { class: 'row', title }, [box, element('span', { text: label })]);
   };
   const current = element('input', { type: 'password', placeholder: 'current password' });
@@ -208,9 +215,13 @@ export async function render(target) {
     journalSection(journal),
     securitySection(security, refresh));
   stopRefreshing();
-  timer = setTimeout(() => {
-    if (!document.activeElement || !target.contains(document.activeElement)) refresh();
-  }, EVERY_MS);
+  // Not while something on the page is typed and not saved (`beingEdited`):
+  // a cap, a client name or a new password used to be erased (audit L62).
+  const look = () => {
+    if (beingEdited(target)) timer = setTimeout(look, EVERY_MS);
+    else refresh();
+  };
+  timer = setTimeout(look, EVERY_MS);
 }
 
 export function stopRefreshing() {

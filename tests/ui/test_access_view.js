@@ -118,6 +118,21 @@ describe('the Access page', () => {
     assert.deepEqual(JSON.parse(sent.body), { mailbox_keep: 500 });
   });
 
+  it('keeps what is typed when a save is refused', async () => {
+    // Audit L62: a refused save redrew the page and erased the field.
+    const security = { ...BASE['/api/security'], token_holds: true, mailbox_keep: 2000 };
+    const { view, calls } = await renderPage({ ...BASE, '/api/security': security,
+      'PATCH /api/security': { __status: 400, error: 'mailbox_keep must be between 10 and 100000' } });
+    const keep = view.querySelector('input[data-security="mailbox_keep"]');
+    keep.value = '5';
+    [...keep.parentElement.querySelectorAll('button')][0].click();
+    await settle();
+    document.querySelectorAll('dialog').forEach((dialog) => dialog.close());
+    await settle();
+    assert.ok(calls.some((call) => call.method === 'PATCH'));
+    assert.equal(view.querySelector('input[data-security="mailbox_keep"]').value, '5');
+  });
+
   it('says when AI-Lab is Off', async () => {
     const { view } = await renderPage({ ...BASE, '/api/power': { on: false, since: 1760700000 },
                                         '/api/clients': { clients: [] } });

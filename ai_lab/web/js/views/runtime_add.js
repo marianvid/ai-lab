@@ -84,14 +84,15 @@ export function addCard(form, { run, close }) {
           onclick: async () => {
             if (chooser.disabled) return;
             const chosen = name.value.trim();
-            await run(`Adding ${chosen || 'a model'}`, () => api.createInstance({
+            const added = await run(`Adding ${chosen || 'a model'}`, () => api.createInstance({
               id: chosen,
               engine: engineFor(chooser.value).id,
               model_id: chooser.value,
               port: parseInt(port.value, 10),
               params: settings.read(),
             }));
-            close();
+            // Refused: the form stays open with what was typed (audit L62).
+            if (added) close();
           },
         }),
       ]),

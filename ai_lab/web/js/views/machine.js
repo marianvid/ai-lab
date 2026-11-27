@@ -143,7 +143,9 @@ function memoryField({ key, value, label, title, failed }, refresh) {
       try {
         await api.updateMemory({ [key]: Number(field.value) });
       } catch (error) {
+        // Refused: the typed value stays to be corrected (audit L62).
         await showNotice({ title: failed, body: error.message });
+        return;
       }
       refresh();
     }),
