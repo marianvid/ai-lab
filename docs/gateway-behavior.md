@@ -191,7 +191,9 @@ configuration can also override the two waits per kind of request, under
 A task not named there uses the two defaults. Each task that has its own
 waits gets a row on the Gateway page, under Limits (first byte / between
 bytes), changed there at once like the waits above; a task is added in the
-file. The clock starts when the call
+file. A task whose file names only one of its two waits shows the other as
+it is used, the matching default; the first Save from the page writes both,
+and from then on that second wait no longer follows the default. The clock starts when the call
 is sent to the engine, after its wait in the queue and any model load.
 
 There is no HTTP in the gateway module. It decides which entry serves a name and makes

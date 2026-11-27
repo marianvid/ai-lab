@@ -244,11 +244,16 @@ function limits(stats, redraw) {
 
   // The per-task waits: one row per kind of request that has its own, the two
   // waits side by side. A task without a row takes the two above.
-  const saved = stats.task_timeouts || {};
+  // A task that names only one of its two waits takes the other from the two
+  // above, as the gateway does: shown so, never as an empty box (that would send 0).
+  const saved = Object.fromEntries(Object.entries(stats.task_timeouts || {}).map(
+    ([task, waits]) => [task, {
+      first_byte_s: waits.first_byte_s ?? stats.first_byte_s,
+      between_bytes_s: waits.between_bytes_s ?? stats.between_bytes_s }]));
   const waits = new Map();
   const taskRows = Object.keys(saved).sort().map((task) => {
     const box = (key) => element('input', {
-      type: 'number', value: String(saved[task][key] ?? ''), min: '1', size: 6 });
+      type: 'number', value: String(saved[task][key]), min: '1', size: 6 });
     const pair = { first_byte_s: box('first_byte_s'), between_bytes_s: box('between_bytes_s') };
     waits.set(task, pair);
     return element('label', { class: 'field explained', title:

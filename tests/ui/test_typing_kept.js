@@ -99,6 +99,21 @@ describe('the Gateway page', () => {
     context.window.close();
   });
 
+  it('shows a task with one wait of its own with the other taken from above', async () => {
+    const context = installDom({ '/api/gateway': { ...GATEWAY, task_timeouts: {
+      ocr: { first_byte_s: 60 } } } });
+    const view = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    await view.render(context.view);
+    await settle();
+    view.stopRefreshing();
+    const row = [...context.view.querySelectorAll('label.field')]
+      .find((item) => item.textContent.includes('ocr (s)'));
+    const [first, between] = row.querySelectorAll('input');
+    assert.deepEqual([first.value, between.value], ['60', '30']);
+    assert.equal(button(context.view, 'Save').disabled, true);
+    context.window.close();
+  });
+
   it('keeps what was typed when the save is refused', async () => {
     const context = installDom({
       '/api/gateway': GATEWAY,
