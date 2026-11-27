@@ -134,7 +134,7 @@ there is exactly one place to look.
 | `application/instance_config.py`, `application/model_listing.py`, `application/paths.py`, `application/settings_changes.py` | An entry's settings (`InstanceConfiguration`, held by `InstanceService` as its `configuration`); the model listing; browsing and creating folders; changing the machine-wide settings | HTTP |
 | `application/downloads.py` | Finding download candidates and safe destinations | Model scheduling and HTTP |
 | `application/engine_maintenance.py` | Engine updates, version switches and package installs, refused while a model is running | HTTP |
-| `operations.py`, `operations_services.py` | The single object the routes and the gateway talk to: a façade handing each action to an `application/` service. The services are built in `wiring.py` and handed to it (`OperationsParts`, `OperationsServices`) | Building its own services; anything a single service could do alone |
+| `operations.py`, `operations_services.py` | The single object the routes and the gateway talk to: a façade handing each action to an `application/` service, grouped in one view per group of routes (below). The services are built in `wiring.py` and handed to it (`OperationsParts`, `OperationsServices`) | Building its own services; anything a single service could do alone |
 | `gateway/core.py`, `gateway/catalogue.py`, `gateway/loading.py`, `gateway/limits.py` | One address for an agent. `Gateway` holds its collaborators: the `Catalogue` (which entry serves a name, the listing, request shapes; no state), the `CardLoader` (making room and loading; it owns the memory reading and the sweep flag, and reads memory through the `CardMemory` interface, `GatewayResources` by default) and the `Scheduler`; plus the limits it runs with | HTTP of any kind — forwarding is the web layer's job |
 | `gateway/state.py`, `gateway/control.py`, `gateway/resources.py`, `gateway/stats.py`, `gateway/errors.py` | The gateway's parts: a held place and a model-plus-settings shape; the guard for the page's buttons; memory readings and waiting for the card to empty; the read-only report the Gateway page shows; the refusals the web layer turns into HTTP answers | HTTP |
 | `gateway/admission/`: `scheduler.py`, `planning.py`, `parts.py`, `replaced.py` | Who gets the card next: the queue and its rules (`Scheduler`, the one owner of the lock and of the `QueueState` it guards), the decisions taken on that state (`Planner`: which run a switch is for, who is let in after a load — called only under the scheduler's lock, holding none itself), its errors and one waiting request. A waiting request is asked `still_wanted` at the head of the queue, before anything is unloaded. `replaced.py` remembers which model was taken off for which, so a call cut that way ends with `409 model_replaced` | Anything about models, engines or ports — a shape is an opaque key |
@@ -183,6 +183,22 @@ routes and the gateway are given, but a call like `load` or `move_model` now
 passes straight through to the service for that family of actions. What is
 left in `operations.py` is the handful of small actions that need no service
 of their own, such as changing where a storage tier lives.
+
+The sentences are grouped in views, one per group of routes (owner, 2026-11-27:
+`Operations` split). Each view binds only the services it uses, each route
+module is typed with its own view, so mypy refuses a route that reaches past
+it, and `Operations` is the union of the views, built one way only
+(`Operations.assemble`, called by `wiring` and by the tests):
+
+| View | Its sentences | Taken by |
+|---|---|---|
+| `CardView` | `configured`, `instances`, `instance`, `model_for`, `engine`, `accelerator`, `machine_budget`, `load`, `effective_params`, `unload`, `restore_last`, `instance_service` | the gateway (as `gateway.card_operations.CardOperations`), the music windows' files, `main` |
+| `EntriesView` (`CardView` and more) | `logs`, `suggest_port`, `new_instance_form`, `create_instance`, `update_instance`, `apply_and_reload`, `delete_instance` | `api/routes/runtime.py` |
+| `LibraryView` | `models`, `supported_formats`, `delete_model`, `move_model`, `move_jobs`, `recover_moves`, `cancel_move` | `api/routes/catalog.py`, `main` |
+| `DownloadsView` | `search`, `remote_sets`, `transfers`, `download`, `cancel_download` | `api/routes/downloads.py`, `api/routes/huggingface.py` |
+| `EngineUpdatesView` | the source builds and package installs (`build_status` … `update_engine`) | `api/routes/settings.py`, its installs and builds |
+| `MachineSettingsView` | `settings_view`, the front door's, memory's and paths' changes, `browse`, `create_directory`, `setting_fields` | `api/routes/settings.py`, its paths, fields and folders; `api/routes/gateway.py` |
+| `StorageView` | `storage_view`, `clear_storage` | `api/routes/storage.py` |
 
 ### Why `gateway/core.py` exists
 

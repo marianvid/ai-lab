@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def register(router, operations) -> None:
+if TYPE_CHECKING:
+    from ...operations import EngineUpdatesView, MachineSettingsView, Operations
+
+
+def register(router, operations: Operations) -> None:
     """The settings screen's routes: paths, memory, engine installs and builds, folders."""
     router.add("GET", "/api/settings", lambda **_: operations.settings_view())
     _register_paths(router, operations)
@@ -12,7 +17,7 @@ def register(router, operations) -> None:
     _register_folders(router, operations)
 
 
-def _register_paths(router, operations) -> None:
+def _register_paths(router, operations: MachineSettingsView) -> None:
     """Where engines and models live, and how much memory is held back for the machine.
 
     The memory GET reads the machine, not the file: what is held back, and what
@@ -35,7 +40,7 @@ def _register_paths(router, operations) -> None:
                lambda body=None, **_: operations.update_memory(body or {}))
 
 
-def _register_installs(router, operations) -> None:
+def _register_installs(router, operations: EngineUpdatesView) -> None:
     """Engines that arrive as packages.
 
     A new version is installed beside the one in use, so these read and choose
@@ -55,7 +60,7 @@ def _register_installs(router, operations) -> None:
                lambda engine, name, **_: operations.update_install_component(engine, name))
 
 
-def _register_builds(router, operations) -> None:
+def _register_builds(router, operations: EngineUpdatesView) -> None:
     """Engines built from source: what an update would bring, updating, choosing a build.
 
     What an update would bring is a GET because it changes nothing: it reads a
@@ -75,7 +80,7 @@ def _register_builds(router, operations) -> None:
                lambda engine, name, **_: operations.remove_build(engine, name))
 
 
-def _register_folders(router, operations) -> None:
+def _register_folders(router, operations: MachineSettingsView) -> None:
     """Picking and creating folders, and editing a model repository.
 
     A web page cannot open a dialog on the server's machine, so the server

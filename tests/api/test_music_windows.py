@@ -6,6 +6,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any, cast
 
 from ai_lab.api.passthrough import Passthrough
 from ai_lab.api.router import Router
@@ -177,7 +178,7 @@ class GenerationFilesTests(unittest.TestCase):
         self.router = Router()
         self.windows = WindowCalls()
         self.gateway = Gateway()
-        register_files(self.router, GenerationFiles(self.gateway, Operations(self.folder), self.windows),
+        register_files(self.router, GenerationFiles(self.gateway, cast(Any, Operations(self.folder)), self.windows),
                        self.windows)
 
     def tearDown(self):

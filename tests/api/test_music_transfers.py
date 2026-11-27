@@ -8,7 +8,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ai_lab.api.router import Router
 from ai_lab.api.routes.music_transfers import register_transfers, run_id_of
@@ -233,7 +233,8 @@ class PullTests(unittest.TestCase):
             "scheduler": f"http://127.0.0.1:{self.door.server_port}", "peers": ["ai-lab-linux"]})
         self.windows = WindowCalls()
         self.gateway = Gateway()
-        self.files = GenerationFiles(self.gateway, Operations(Engine(self.here, transfer)), self.windows)
+        self.files = GenerationFiles(self.gateway, cast(Any, Operations(Engine(self.here, transfer))),
+                                self.windows)
         self.router = Router()
         register_transfers(self.router, self.files)
         FakeDoor.served = {"song-a": bundle_bytes(song(self.root / "linux"))}
@@ -331,7 +332,8 @@ class PullTests(unittest.TestCase):
         self.door = serving(FakeDoor)                                # tearDown closes this one
         transfer = TransferSettings.from_mapping({"scheduler": f"http://127.0.0.1:{port}",
                                                   "peers": ["ai-lab-linux"], "timeout_s": 2})
-        files = GenerationFiles(self.gateway, Operations(Engine(self.here, transfer)), self.windows)
+        files = GenerationFiles(self.gateway, cast(Any, Operations(Engine(self.here, transfer))),
+                                self.windows)
         router = Router()
         register_transfers(router, files)
         matched = router.match("POST", "/v1/audio/music/generations/song-a/pull")

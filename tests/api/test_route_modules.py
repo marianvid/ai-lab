@@ -1,6 +1,7 @@
 """Each small route module sends its paths to the right operation."""
 
 import unittest
+from typing import Any, cast
 
 from ai_lab.api.router import Router
 from ai_lab.api.routes import (RouteParts, catalog, downloads, huggingface, images, runtime,
@@ -100,7 +101,7 @@ class RuntimeRouteTests(unittest.TestCase):
     def setUp(self):
         self.router = Router()
         self.card = Card()
-        runtime.register(self.router, Engines(), self.card)
+        runtime.register(self.router, cast(Any, Engines()), self.card)
 
     def test_load_is_guarded_and_the_card_is_told(self):
         loaded = call(self.router, "POST", "/api/instances/qwen/load", body={})
@@ -115,7 +116,7 @@ class RuntimeRouteTests(unittest.TestCase):
 
     def test_without_a_gateway_nothing_is_guarded(self):
         router = Router()
-        runtime.register(router, Engines())
+        runtime.register(router, cast(Any, Engines()))
         self.assertEqual(call(router, "POST", "/api/instances/qwen/unload")["called"], "unload")
 
 

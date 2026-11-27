@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 from ai_lab.api.router import Router
 from ai_lab.api.routes.music_transfers import register_transfers
@@ -42,7 +43,8 @@ class StudioTests(unittest.TestCase):
             {"machine": "ai-lab-mac", "chunk_bytes": CHUNK, "list_most": 2,
              "put_back_most_bytes": 1 << 20})
         self.windows = WindowCalls()
-        self.files = GenerationFiles(Gateway(), Operations(Engine(self.here, self.transfer)), self.windows)
+        self.files = GenerationFiles(Gateway(), cast(Any, Operations(Engine(self.here, self.transfer))),
+                                     self.windows)
         self.router = Router()
         register_transfers(self.router, self.files)
 

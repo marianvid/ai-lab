@@ -23,6 +23,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from ...engines.base import MUSIC_WINDOW_PATHS
@@ -31,6 +32,9 @@ from ...shared.song_names import REQUEST_ID, check_generation_id
 from ...network import LOOPBACK
 from ..passthrough import Passthrough
 from .music_transfers import register_transfers
+
+if TYPE_CHECKING:
+    from ...operations import CardView
 
 WINDOW_PATH = MUSIC_WINDOW_PATHS[0]
 # How long the engine may take to say it is cancelling.
@@ -190,7 +194,7 @@ def ended_with(answer: Passthrough, done) -> Passthrough:
 class GenerationFiles:
     """A YuE2 entry's songs, read and removed in its engine's folder."""
 
-    def __init__(self, gateway, operations, windows: WindowCalls | None = None) -> None:
+    def __init__(self, gateway, operations: CardView, windows: WindowCalls | None = None) -> None:
         self.gateway = gateway
         self.operations = operations
         self.windows = windows or WindowCalls()

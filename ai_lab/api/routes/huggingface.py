@@ -12,8 +12,13 @@ them apart.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def register(router, operations) -> None:
+if TYPE_CHECKING:
+    from ...operations import DownloadsView
+
+
+def register(router, operations: DownloadsView) -> None:
     """Search Hugging Face, and list the files of one repository."""
     router.add("GET", "/api/hf/search",
                lambda query=None, **_: operations.search((query or {}).get("q", "")))

@@ -10,6 +10,12 @@ Every method reads as the sentence a user would say: load this instance, swap
 it to that model, download this one. That is the test for whether something
 belongs in this file. The services themselves are built elsewhere
 (`operations_services.build_services`, called by `wiring.build`) and handed in.
+
+The sentences are grouped in views, one per group of routes (`CardView`,
+`EntriesView`, `LibraryView`, `DownloadsView`, `EngineUpdatesView`,
+`MachineSettingsView`, `StorageView`). Each binds only the services it uses,
+each route module takes only its own, and `Operations` is their union, built
+one way: `Operations.assemble`. ARCHITECTURE.md has the table.
 """
 
 from __future__ import annotations
@@ -26,62 +32,23 @@ if TYPE_CHECKING:
     from .types import Interests
 
 
-class Operations:
-    """What the routes can ask of this machine, each a sentence a person would say.
+class CardView:
+    """The entries and the card: what is configured, what is loaded, loading and stopping.
 
-    A façade: every method hands the request to the service that owns it, or
-    joins two of them (`settings_view`). What it was built from stays inside;
-    a caller that needs one of those parts is handed it by `wiring`.
+    Taken by the gateway (as `gateway.card_operations.CardOperations`), the music
+    windows' files (`configured`, `engine`) and `main` (`restore_last`).
     """
 
     def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
-        self._store = parts.store
-        self._settings = parts.settings
-        self._host = parts.host
-        self._engines = parts.engines
-        self._storage = parts.storage
         self._instances = services.instance_service
-        self._model_storage = services.model_storage
-        self._move_jobs = services.move_jobs
-        self._configuration = services.instance_configuration
-        self._listing = services.listing
-        self._downloads = services.model_downloads
-        self._maintenance = services.engine_maintenance
+        self._engines = parts.engines
+        self._host = parts.host
         self._settings_changes = services.settings_changes
-        # Every setting of the configuration file as a page field (`view`, `update`).
-        self.setting_fields = services.setting_fields
-
-    @classmethod
-    def assemble(cls, parts: OperationsParts) -> Operations:
-        """Built from its parts, with the standard services (see `build_services`).
-
-        How `wiring` builds it, and how the tests do: one way in.
-        """
-        return cls(parts, build_services(parts))
 
     @property
     def instance_service(self) -> InstanceService:
         """The configured entries' service, whose loads the side lanes guard (`guard_loads`)."""
         return self._instances
-
-    # -- reading -----------------------------------------------------------
-
-    def settings_view(self) -> dict:
-        """The settings screen, with each engine described in one piece.
-
-        Which engines exist and which source checkouts exist are answered by
-        two different modules, and joining them is this layer's job. Presenting
-        them separately made the reader correlate two blocks that were about
-        the same thing — the same engine, under two spellings, with two paths
-        and two badges.
-        """
-        view = self._settings.view()
-        sources = {item["engine"]: item for item in self.build_status(with_sizes=False)}
-        for engine in view["engines"]:
-            engine["source"] = sources.get(engine["id"])
-        return view
-
-    # -- the configured entries ------------------------------------------------
 
     def configured(self):
         """Every entry, without asking what any of them is doing."""
@@ -109,7 +76,7 @@ class Operations:
 
     def machine_budget(self, card=None) -> budget.Budget:
         """What this machine can offer models now, pool by pool (`card`: a reading already taken)."""
-        return budget.of(self._host, self.reserve_mb(), card=card,
+        return budget.of(self._host, self._settings_changes.reserve_mb(), card=card,
                          ceiling_mb=self._settings_changes.ceiling_mb())
 
     def load(self, instance_id: str, settings: dict | None = None):
@@ -127,6 +94,17 @@ class Operations:
     def restore_last(self):
         """Put back whatever was on the card before the manager stopped."""
         return self._instances.restore_last()
+
+
+class EntriesView(CardView):
+    """The Models page: the card's view, and adding, changing and removing entries.
+
+    Taken by `api/routes/runtime.py`.
+    """
+
+    def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
+        CardView.__init__(self, parts, services)
+        self._configuration = services.instance_configuration
 
     def logs(self, instance_id: str, lines: int = 200):
         """What the engine has printed about itself."""
@@ -156,41 +134,87 @@ class Operations:
         """Remove an entry that is not running."""
         return self._configuration.delete_instance(instance_id)
 
-    # -- this machine's settings -----------------------------------------------
 
-    def gateway_settings(self) -> dict:
-        """How long the front door waits and how many it holds, as saved."""
-        return self._settings_changes.gateway_settings()
+class LibraryView:
+    """The library: the models on disk, deleting them and moving them between roots.
 
-    def update_gateway(self, changes: dict) -> dict:
-        """Change the front door's limits, checked before they are saved."""
-        return self._settings_changes.update_gateway(changes)
+    Taken by `api/routes/catalog.py` and `main` (`recover_moves`).
+    """
 
-    def reserve_mb(self) -> float:
-        """How much of this machine is held back for the machine itself."""
-        return self._settings_changes.reserve_mb()
+    def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
+        self._listing = services.listing
+        self._downloads = services.model_downloads
+        self._model_storage = services.model_storage
+        self._move_jobs = services.move_jobs
 
-    def memory_budget(self) -> dict:
-        """What is available for models right now, pool by pool."""
-        return self._settings_changes.memory_budget()
+    def models(self, engine_id: str | None = None) -> list[dict]:
+        """Every model on disk, optionally only those an engine can load."""
+        return self._listing.models(engine_id)
 
-    def update_memory(self, changes: dict) -> dict:
-        """Change how much of the machine is held back for the machine."""
-        return self._settings_changes.update_memory(changes)
+    def supported_formats(self) -> list[str]:
+        """Formats something on this machine can actually run."""
+        return self._downloads.supported_formats()
 
-    def update_engine_binary(self, engine_id: str, path: str) -> dict:
-        """Point an engine at a different program."""
-        return self._settings_changes.update_engine_binary(engine_id, path)
+    def delete_model(self, model_id: str) -> dict:
+        """Remove a model's files from disk."""
+        return self._model_storage.delete_model(model_id)
 
-    def update_models_root(self, path: str) -> dict:
-        """Point every repository somewhere else, in one move."""
-        return self._settings_changes.update_models_root(path)
+    def move_model(self, model_id: str, target_root_id: str) -> dict:
+        """Copy, verify and only then remove a model from its current tier."""
+        return self._model_storage.move_model(model_id, target_root_id)
 
-    def update_repository(self, repository_id: str, changes: dict) -> dict:
-        """Rename a repository, or say whether it may be written to."""
-        return self._settings_changes.update_repository(repository_id, changes)
+    def move_jobs(self) -> list[dict]:
+        """Every move job on record, most recently updated first."""
+        return self._move_jobs.all()
 
-    # -- keeping the engines up to date ----------------------------------------
+    def recover_moves(self) -> list[dict]:
+        """Sweep move jobs left mid-flight by a process that did not exit cleanly."""
+        return self._move_jobs.recover()
+
+    def cancel_move(self, job_id: str) -> dict:
+        """Ask an in-progress move to stop at the next file or phase boundary."""
+        return self._move_jobs.cancel(job_id)
+
+
+class DownloadsView:
+    """Finding models on Hugging Face and fetching them.
+
+    Taken by `api/routes/downloads.py` and `api/routes/huggingface.py`.
+    """
+
+    def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
+        self._downloads = services.model_downloads
+
+    def search(self, query: str) -> dict:
+        """Repositories holding something this machine can run."""
+        return self._downloads.search(query)
+
+    def remote_sets(self, repo: str) -> list[dict]:
+        """What a repository holds that this machine can run."""
+        return self._downloads.remote_sets(repo)
+
+    def transfers(self) -> list[dict]:
+        """The downloads under way or recently finished."""
+        return self._downloads.transfers()
+
+    def download(self, repo: str, name: str, repository_id: str | None = None,
+                 storage_tier: str | None = None) -> dict:
+        """Queue a complete model, into the repository that holds its format."""
+        return self._downloads.download(repo, name, repository_id, storage_tier)
+
+    def cancel_download(self, transfer_id: str) -> None:
+        """Stop a download under way."""
+        self._downloads.cancel_download(transfer_id)
+
+
+class EngineUpdatesView:
+    """Keeping the engines up to date: source builds and package installs.
+
+    Taken by `api/routes/settings.py` (its installs and builds).
+    """
+
+    def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
+        self._maintenance = services.engine_maintenance
 
     def build_status(self, with_sizes: bool = True) -> list[dict]:
         """Every engine built from source: its checkout and compiled versions."""
@@ -244,54 +268,74 @@ class Operations:
         """Pull and recompile an engine from source."""
         return self._maintenance.update_engine(engine_id)
 
-    # -- the library -----------------------------------------------------------
 
-    def models(self, engine_id: str | None = None) -> list[dict]:
-        """Every model on disk, optionally only those an engine can load."""
-        return self._listing.models(engine_id)
+class MachineSettingsView:
+    """This machine's settings: paths, memory, the front door's limits, the file's fields.
 
-    def supported_formats(self) -> list[str]:
-        """Formats something on this machine can actually run."""
-        return self._downloads.supported_formats()
+    Taken by `api/routes/settings.py` (paths, memory, fields, folders) and
+    `api/routes/gateway.py` (`update_gateway`). It binds the engine maintenance
+    for one join only: `settings_view` shows each engine with its builds.
+    """
 
-    def delete_model(self, model_id: str) -> dict:
-        """Remove a model's files from disk."""
-        return self._model_storage.delete_model(model_id)
+    def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
+        self._store = parts.store
+        self._settings = parts.settings
+        self._settings_changes = services.settings_changes
+        self._maintenance = services.engine_maintenance
+        self.setting_fields = services.setting_fields
 
-    def move_model(self, model_id: str, target_root_id: str) -> dict:
-        """Copy, verify and only then remove a model from its current tier."""
-        return self._model_storage.move_model(model_id, target_root_id)
+    def settings_view(self) -> dict:
+        """The settings screen, with each engine described in one piece.
 
-    def move_jobs(self) -> list[dict]:
-        """Every move job on record, most recently updated first."""
-        return self._move_jobs.all()
+        Which engines exist and which source checkouts exist are answered by
+        two different modules, and joining them is this layer's job. Presenting
+        them separately made the reader correlate two blocks that were about
+        the same thing — the same engine, under two spellings, with two paths
+        and two badges.
+        """
+        view = self._settings.view()
+        builds = self._maintenance.build_status(with_sizes=False)
+        sources = {item["engine"]: item for item in builds}
+        for engine in view["engines"]:
+            engine["source"] = sources.get(engine["id"])
+        return view
 
-    def recover_moves(self) -> list[dict]:
-        """Sweep move jobs left mid-flight by a process that did not exit cleanly."""
-        return self._move_jobs.recover()
+    def gateway_settings(self) -> dict:
+        """How long the front door waits and how many it holds, as saved."""
+        return self._settings_changes.gateway_settings()
 
-    def cancel_move(self, job_id: str) -> dict:
-        """Ask an in-progress move to stop at the next file or phase boundary."""
-        return self._move_jobs.cancel(job_id)
+    def update_gateway(self, changes: dict) -> dict:
+        """Change the front door's limits, checked before they are saved."""
+        return self._settings_changes.update_gateway(changes)
 
-    # -- downloads -------------------------------------------------------------
+    def reserve_mb(self) -> float:
+        """How much of this machine is held back for the machine itself."""
+        return self._settings_changes.reserve_mb()
 
-    def search(self, query: str) -> dict:
-        """Repositories holding something this machine can run."""
-        return self._downloads.search(query)
+    def memory_budget(self) -> dict:
+        """What is available for models right now, pool by pool."""
+        return self._settings_changes.memory_budget()
 
-    def remote_sets(self, repo: str) -> list[dict]:
-        """What a repository holds that this machine can run."""
-        return self._downloads.remote_sets(repo)
+    def update_memory(self, changes: dict) -> dict:
+        """Change how much of the machine is held back for the machine."""
+        return self._settings_changes.update_memory(changes)
 
-    def transfers(self) -> list[dict]:
-        """The downloads under way or recently finished."""
-        return self._downloads.transfers()
+    def update_engine_binary(self, engine_id: str, path: str) -> dict:
+        """Point an engine at a different program."""
+        return self._settings_changes.update_engine_binary(engine_id, path)
+
+    def update_models_root(self, path: str) -> dict:
+        """Point every repository somewhere else, in one move."""
+        return self._settings_changes.update_models_root(path)
 
     def update_model_root(self, root_id: str, changes: dict) -> dict:
         """Change one model root; the settings screen as it is afterwards."""
         self._settings_changes.update_model_root(root_id, changes)
         return self.settings_view()
+
+    def update_repository(self, repository_id: str, changes: dict) -> dict:
+        """Rename a repository, or say whether it may be written to."""
+        return self._settings_changes.update_repository(repository_id, changes)
 
     def browse(self, path: str | None = None, programs: bool = False) -> dict:
         """List what is inside one directory, for picking a path (see `application.paths`)."""
@@ -303,7 +347,15 @@ class Operations:
         """Make a directory, so a repository can point at somewhere new."""
         return paths.create_directory(path)
 
-    # -- disk space that is not model storage ------------------------------
+
+class StorageView:
+    """Disk space that is not model storage: what can be reclaimed, and reclaiming it.
+
+    Taken by `api/routes/storage.py`.
+    """
+
+    def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
+        self._storage = parts.storage
 
     def storage_view(self) -> dict:
         """What can be reclaimed outside model storage, item by item."""
@@ -316,13 +368,25 @@ class Operations:
             raise KeyError("No reclaimable storage is configured")
         return self._storage.clear(item_id)
 
-    # -- downloads, continued ------------------------------------------------
 
-    def download(self, repo: str, name: str, repository_id: str | None = None,
-                 storage_tier: str | None = None) -> dict:
-        """Queue a complete model, into the repository that holds its format."""
-        return self._downloads.download(repo, name, repository_id, storage_tier)
+class Operations(EntriesView, LibraryView, DownloadsView, EngineUpdatesView,
+                 MachineSettingsView, StorageView):
+    """What the routes can ask of this machine: the union of the views above.
 
-    def cancel_download(self, transfer_id: str) -> None:
-        """Stop a download under way."""
-        self._downloads.cancel_download(transfer_id)
+    Each view binds only the services it uses, and each route module takes the
+    one it calls (mypy refuses a route that reaches past its view). This is the
+    one object `wiring` and the tests build, always through `assemble`.
+    """
+
+    def __init__(self, parts: OperationsParts, services: OperationsServices) -> None:
+        for view in (EntriesView, LibraryView, DownloadsView, EngineUpdatesView,
+                     MachineSettingsView, StorageView):
+            view.__init__(self, parts, services)
+
+    @classmethod
+    def assemble(cls, parts: OperationsParts) -> Operations:
+        """Built from its parts, with the standard services (see `build_services`).
+
+        How `wiring` builds it, and how the tests do: one way in.
+        """
+        return cls(parts, build_services(parts))

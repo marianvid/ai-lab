@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def register(router, operations) -> None:
+if TYPE_CHECKING:
+    from ...operations import LibraryView
+
+
+def register(router, operations: LibraryView) -> None:
     """The library's routes: list, formats, delete, move between storage tiers."""
     router.add("GET", "/api/models",
                lambda query=None, **_: operations.models((query or {}).get("engine")))

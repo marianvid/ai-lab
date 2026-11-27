@@ -13,8 +13,13 @@ first and sends `force` only if the person says so.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def register(router, operations, gateway=None) -> None:
+if TYPE_CHECKING:
+    from ...operations import EntriesView
+
+
+def register(router, operations: EntriesView, gateway=None) -> None:
     """The model list's routes; Load, Unload and Apply are guarded."""
     def guard(action: str, instance_id: str, body: dict) -> dict:
         """Refuse to interrupt work in progress unless forced; the body without `force`."""
@@ -46,7 +51,7 @@ def register(router, operations, gateway=None) -> None:
     router.add("POST", "/api/instances/{id}/apply", apply)
 
 
-def _register_list(router, operations) -> None:
+def _register_list(router, operations: EntriesView) -> None:
     """The unguarded routes: reading the list, adding, editing and deleting entries."""
     router.add("GET", "/api/instances", lambda **_: operations.instances())
     router.add("GET", "/api/instances/{id}/logs",
