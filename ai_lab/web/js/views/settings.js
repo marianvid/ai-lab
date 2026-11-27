@@ -60,12 +60,20 @@ export async function render(container) {
       settingFieldsSection(fields, 'updates', refresh),
       enginePaths(settings, refresh),
       settingFieldsSection(fields, 'embeddings', refresh),
+      settingFieldsSection(fields, 'gpu_readings', refresh),
+      settingFieldsSection(fields, 'gpu_windows', refresh),
     ].filter(Boolean)),
     element('div', {}, [
       machine(settings, refresh),
       settingFieldsSection(fields, 'loading', refresh),
       paths(settings, refresh),
       settingFieldsSection(fields, 'clients', refresh),
+      settingFieldsSection(fields, 'uploads', refresh),
+      settingFieldsSection(fields, 'gpu_trend', refresh),
+      settingFieldsSection(fields, 'gpu_alarms', refresh),
+      // Said rather than leaving the sections out without a word.
+      fields ? null : element('p', { class: 'error',
+        text: 'The settings kept in the configuration file could not be read; reload the page.' }),
     ].filter(Boolean)),
   ]));
 }

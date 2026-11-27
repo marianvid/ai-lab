@@ -192,8 +192,9 @@ can reach AI-Lab on the home network.
 
 ## Settings
 
-The `gpu_health` section of `config.json`. Every number above is a setting
-with that value as its default; an unknown key is refused, so a typo does not
+The `gpu_health` section of `config.json`, shown on the Settings page as the
+four *GPU health* sections (all but `channel`, which has one value today).
+Every number above is a setting with that value as its default; an unknown key is refused, so a typo does not
 silently keep a default. The ones you are most likely to touch:
 
 | Key | Default | What |

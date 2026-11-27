@@ -12,17 +12,27 @@ import { showNotice } from '../confirm.js';
 import { element } from '../format.js';
 import { section } from './settings_section.js';
 
+// A value as the page writes it: a list as "48, 63", on/off as words.
+function shown(field, value) {
+  if (field.kind === 'list') return (value || []).join(', ');
+  if (field.kind === 'boolean') return value ? 'on' : 'off';
+  return String(value);
+}
+
 // What a field says when pointed at: its meaning, then its default.
 function explanation(field) {
   const unit = field.unit ? ` ${field.unit}` : '';
-  return `${field.help}\n\nDefault: ${field.default}${unit}.`
+  return `${field.help}\n\nDefault: ${shown(field, field.default) || '(empty)'}${unit}.`
     + (field.restart_note ? `\n${field.restart_note}` : '');
 }
 
 function input(field) {
-  const text = field.kind === 'text';
+  if (field.kind === 'boolean') {
+    return element('input', { type: 'checkbox', ...(field.value ? { checked: 'checked' } : {}) });
+  }
+  const text = field.kind === 'text' || field.kind === 'list';
   return element('input', {
-    type: text ? 'text' : 'number', value: String(field.value),
+    type: text ? 'text' : 'number', value: shown(field, field.value),
     ...(text ? { size: 28 } : { size: 8, step: field.kind === 'integer' ? '1' : 'any' }),
     ...(field.low !== null && !text ? { min: String(field.low) } : {}),
     ...(field.high !== null && !text ? { max: String(field.high) } : {}),
@@ -49,11 +59,22 @@ export function settingFieldsSection(view, group, refresh) {
     return element('label', { class: 'field explained', title: explanation(field) },
                    [label(field), box]);
   });
-  const valueOf = ({ box, field }) => (field.kind === 'text' ? box.value : Number(box.value));
+  const valueOf = ({ box, field }) => {
+    if (field.kind === 'boolean') return box.checked;
+    if (field.kind === 'text') return box.value;
+    // A list is sent as numbers; anything that is not one is sent as typed,
+    // so the server refuses it by name rather than the page dropping it.
+    if (field.kind === 'list') {
+      return box.value.split(',').map((part) => part.trim()).filter(Boolean)
+        .map((part) => (/^\d+$/.test(part) ? Number(part) : part));
+    }
+    return Number(box.value);
+  };
   const changes = () => {
     const now = {};
     inputs.forEach((entry, key) => {
-      if (String(valueOf(entry)) !== String(entry.field.value)) now[key] = valueOf(entry);
+      const value = valueOf(entry);
+      if (shown(entry.field, value) !== shown(entry.field, entry.field.value)) now[key] = value;
     });
     return now;
   };
@@ -64,14 +85,19 @@ export function settingFieldsSection(view, group, refresh) {
       try {
         await api.updateSettingFields(changes());
       } catch (error) {
+        // What was typed stays, so it can be corrected rather than typed again.
         await showNotice({ title: `Could not save ${view.groups[group].toLowerCase()}`,
                            body: error.message });
+        save.disabled = !Object.keys(changes()).length;
+        return;
       }
       refresh();
     },
   });
   inputs.forEach(({ box }) => {
-    box.addEventListener('input', () => { save.disabled = !Object.keys(changes()).length; });
+    const wake = () => { save.disabled = !Object.keys(changes()).length; };
+    box.addEventListener('input', wake);
+    box.addEventListener('change', wake);
   });
   return section(view.groups[group], [
     ...rows, element('div', { class: 'row' }, [element('span', {}), save]),

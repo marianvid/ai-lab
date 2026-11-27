@@ -22,17 +22,30 @@ const PORT = {
   default: 8080, low: 1, high: 65535, kind: 'integer', restart: false,
   help: 'The first port suggested.', restart_note: '', value: 8080, saved: false,
 };
+const ON = {
+  key: 'gpu_health.enabled', group: 'gpu_alarms', label: 'Monitor on', unit: '',
+  default: true, low: null, high: null, kind: 'boolean', restart: true,
+  help: 'Whether the card is watched.', restart_note: 'Takes effect when AI-Lab is next started.',
+  value: true, saved: false,
+};
+const XIDS = {
+  key: 'gpu_health.xid_critical', group: 'gpu_alarms', label: 'Critical Xid numbers', unit: '',
+  default: [48, 63], low: null, high: null, kind: 'list', restart: true,
+  help: 'The serious ones.', restart_note: 'Takes effect when AI-Lab is next started.',
+  value: [48, 63], saved: false,
+};
 const FIELDS = {
-  groups: { loading: 'Loading models', updates: 'Engine updates' },
-  fields: [LOAD, PORT, PATH],
+  groups: { loading: 'Loading models', updates: 'Engine updates', gpu_alarms: 'GPU health: alarms' },
+  fields: [LOAD, PORT, PATH, ON, XIDS],
 };
 
-async function renderPage() {
+async function renderPage(overrides = {}) {
   const context = installDom({
     '/api/settings': { title: 'AI-Lab', host: {}, accelerator: {}, repositories: [],
                        engines: [], models_root: '/models' },
     '/api/setting-fields': FIELDS,
     'PATCH /api/setting-fields': FIELDS,
+    ...overrides,
   });
   const { render } = await import(`../../ai_lab/web/js/views/settings.js?${Math.random()}`);
   await render(context.view);
@@ -85,5 +98,43 @@ describe('the settings from the configuration file', () => {
     await settle();
     const sent = calls.find((call) => call.method === 'PATCH');
     assert.deepEqual(JSON.parse(sent.body), { 'limits.runtime.load_s': 1800 });
+  });
+
+  it('keeps what was typed when the server refuses it', async () => {
+    const { view, window } = await renderPage({
+      'PATCH /api/setting-fields': { __status: 400, error: 'Model load must be at least 1' },
+    });
+    const loading = namedSection(view, 'Loading models');
+    const box = loading.querySelector('input[type=number]');
+    box.value = '0';
+    box.dispatchEvent(new window.Event('input'));
+    button(loading, 'Save').click();
+    await settle();
+    assert.equal(namedSection(view, 'Loading models').querySelector('input[type=number]').value, '0');
+  });
+
+  it('says so when the fields could not be read, rather than leaving them out', async () => {
+    const { view } = await renderPage({ '/api/setting-fields': { __status: 500, error: 'down' } });
+    assert.equal(namedSection(view, 'Loading models'), undefined);
+    assert.match(view.textContent, /could not be read/);
+  });
+
+  it('shows on/off as a box and a list as numbers, and sends them as such', async () => {
+    const { view, calls, window } = await renderPage();
+    const alarms = namedSection(view, 'GPU health: alarms');
+    const on = alarms.querySelector('input[type=checkbox]');
+    const list = alarms.querySelector('input[type=text]');
+    assert.equal(list.value, '48, 63');
+    assert.equal(on.checked, true);
+    assert.match(alarms.querySelector('label.field').title, /Default: on\./);
+    on.checked = false;
+    on.dispatchEvent(new window.Event('change'));
+    list.value = '48, 63, 79';
+    list.dispatchEvent(new window.Event('input'));
+    button(alarms, 'Save').click();
+    await settle();
+    const sent = calls.find((call) => call.method === 'PATCH');
+    assert.deepEqual(JSON.parse(sent.body),
+                     { 'gpu_health.enabled': false, 'gpu_health.xid_critical': [48, 63, 79] });
   });
 });
