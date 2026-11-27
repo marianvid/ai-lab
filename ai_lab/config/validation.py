@@ -311,21 +311,42 @@ def _check_profile_workflow(report: _Report, profile_id: str, workflow: str,
         report.add(f"Image profile {profile_id}: workflow file is absent")
 
 
-def editor_port_problems(config: Config, page_engines: Iterable[str]) -> list[str]:
+def section_ports(config: Config, sections: Mapping[str, Section]) -> dict[int, str]:
+    """The ports the other packages' sections claim (an embeddings model's), by who claims them.
+
+    A section that does not parse claims nothing here: `_check_policies` reports it.
+    """
+    claimed: dict[int, str] = {}
+    for name, section in sections.items():
+        if section.ports is None:
+            continue
+        try:
+            parsed = section.parse(getattr(config, name))
+        except ValueError:
+            continue
+        for who, port in section.ports(parsed):
+            claimed.setdefault(port, who)
+    return claimed
+
+
+def editor_port_problems(config: Config, page_engines: Iterable[str],
+                         sections: Mapping[str, Section] | None = None) -> list[str]:
     """What is wrong with the ports the engines' own pages would take.
 
     An engine in `page_engines` (one that serves a page of its own, ComfyUI or a
     speech editor) opens it on its entry's port plus `limits.editor_port_offset`.
-    That port must exist (65535 at most) and must not be another entry's port
-    or the manager's, or one of the two fails to start. With the offset itself
-    wrong, `_check_policies` says so and this has nothing to add.
+    That port must exist (65535 at most) and must not be another entry's port,
+    the manager's, or one a section claims (`sections`: an embeddings model's),
+    or one of the two fails to start. With the offset itself wrong,
+    `_check_policies` says so and this has nothing to add.
     """
     try:
         offset = config.machine_limits.editor_port_offset
     except ValueError:
         return []
     pages = set(page_engines)
-    taken = {item.port: item.id for item in config.instances}
+    taken = section_ports(config, sections or {})
+    taken.update({item.port: item.id for item in config.instances})
     taken.setdefault(config.port, "the manager")
     problems = []
     for item in config.instances:
@@ -342,7 +363,7 @@ def editor_port_problems(config: Config, page_engines: Iterable[str]) -> list[st
 
 
 def _check_editor_ports(report: _Report) -> None:
-    for problem in editor_port_problems(report.config, report.page_engines):
+    for problem in editor_port_problems(report.config, report.page_engines, report.sections):
         report.add(problem)
 
 

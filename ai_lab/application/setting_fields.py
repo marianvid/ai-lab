@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import cast
+from typing import Any, cast
 
 from ..config import policy
 from ..config.store import Config, ConfigStore
@@ -457,12 +457,13 @@ class SettingFields:
     """The fields, with their saved values, and the change of some of them."""
 
     def __init__(self, store: ConfigStore, changed: Callable[[str], None],
-                 page_engines: frozenset[str] = frozenset()) -> None:
-        """`page_engines`: the engines that serve a page of their own, whose page
-        ports a new `limits.editor_port_offset` must leave free."""
+                 pages: tuple[frozenset[str], Any] = (frozenset(), None)) -> None:
+        """`pages`: the engines that serve a page of their own, and the other
+        packages' sections (`wiring.CONFIG_SECTIONS`) whose ports those pages
+        may not take, for a new `limits.editor_port_offset`."""
         self.store = store
         self._changed = changed
-        self._page_engines = page_engines
+        self._page_engines, self._sections = pages
 
     def view(self) -> dict:
         """Every field with its value now (its default when the file sets none), by group."""
@@ -491,7 +492,7 @@ class SettingFields:
             # The pairs first: the page names them by their labels.
             _check_order(config)
             GpuHealthSettings.from_mapping(config.gpu_health)
-            problems = editor_port_problems(config, self._page_engines)
+            problems = editor_port_problems(config, self._page_engines, self._sections)
             if problems:
                 raise ValueError("; ".join(problems))
         self._changed("settings")

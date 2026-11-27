@@ -220,7 +220,7 @@ def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry
         built[0].models()
 
     parts = OperationsParts(
-        store=store,
+        store=store, sections=CONFIG_SECTIONS,
         # What each model's files say it can do, read once and kept beside the
         # rest of the state: a quarter of a second per GGUF model otherwise, on
         # every scan of the library.

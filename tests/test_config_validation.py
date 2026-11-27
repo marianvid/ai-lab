@@ -43,6 +43,17 @@ class ConfigurationValidationTests(unittest.TestCase):
         config.port = 9100
         self.assertIn("the manager's port", editor_port_problems(config, {"comfyui"})[0])
 
+    def test_a_page_on_a_port_a_section_claims_is_refused_too(self):
+        config = self.base()
+        embeddings = Section(lambda raw: raw, ports=lambda parsed: [("cpu model bge-m3", 18100)])
+        self.assertEqual(editor_port_problems(config, {"comfyui"}), [])
+        problems = editor_port_problems(config, {"comfyui"}, {"cpu_models": embeddings})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("which is cpu model bge-m3's port", problems[0])
+        with self.assertRaisesRegex(ValueError, "cpu model bge-m3's port"):
+            validate_configuration(config, {'comfyui'}, sections={"cpu_models": embeddings},
+                                   page_engines={'comfyui'})
+
     def test_saving_an_entry_whose_page_lands_on_a_taken_port_is_refused(self):
         from ai_lab.application.instance_config import _refuse_page_clashes
         config = self.base()

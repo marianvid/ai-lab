@@ -69,6 +69,9 @@ class OperationsParts:
     move_jobs: MoveJobsFactory = MoveJobStore
     # How a move copies, checks and publishes; a test hands in a failing one.
     move_mechanics: MoveMechanics = MoveMechanics()
+    # The sections other packages own (`wiring.CONFIG_SECTIONS`): their ports
+    # count as taken when an engine's page port is checked on a save.
+    sections: Any = None
 
 
 @dataclass(frozen=True)
@@ -108,7 +111,11 @@ class ChangeNotifier:
 
 
 def _page_engines(engines) -> frozenset[str]:
-    """The engines that serve a page of their own (a stand-in registry may not say)."""
+    """The engines that serve a page of their own.
+
+    A test's stand-in registry may not have `page_engines`; then none is
+    checked, on purpose: the page-port check is only for the real registry.
+    """
     return getattr(engines, "page_engines", frozenset)()
 
 
@@ -123,7 +130,8 @@ def build_services(parts: OperationsParts) -> OperationsServices:
                                                parts.move_mechanics))
     instances = InstanceService(InstanceParts(
         parts.store, parts.catalog, parts.runtime, parts.host, parts.engines, changed,
-        listing.models, bus=parts.bus, last_loaded=parts.last_loaded))
+        listing.models, bus=parts.bus, last_loaded=parts.last_loaded,
+        sections=parts.sections))
     maintenance = EngineMaintenanceService(
         MaintenanceParts(parts.store, parts.catalog, parts.host, parts.engines,
                          parts.builds, parts.installs), instances.instances)
@@ -132,4 +140,5 @@ def build_services(parts: OperationsParts) -> OperationsServices:
         move_jobs=storage.jobs, instance_service=instances,
         instance_configuration=instances.configuration, engine_maintenance=maintenance,
         settings_changes=SettingsChanges(parts.store, parts.host, parts.settings, changed),
-        setting_fields=SettingFields(parts.store, changed, _page_engines(parts.engines)))
+        setting_fields=SettingFields(parts.store, changed,
+                                     (_page_engines(parts.engines), parts.sections)))

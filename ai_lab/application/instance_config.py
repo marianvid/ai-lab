@@ -43,6 +43,8 @@ class InstanceParts:
     models: Callable[[], list[dict]]
     bus: Any = None
     last_loaded: Any = None
+    # The other packages' sections, whose ports an engine's page may not take.
+    sections: Any = None
 
 
 class InstanceConfiguration:
@@ -55,6 +57,7 @@ class InstanceConfiguration:
         self.engines = parts.engines
         self.models = parts.models
         self._changed = parts.changed
+        self._sections = parts.sections
 
     def suggest_port(self) -> int:
         """The first free port at or above the machine's `limits.first_port` (8080).
@@ -125,7 +128,7 @@ class InstanceConfiguration:
             if any(item.port == instance.port for item in config.instances):
                 raise ValueError(f"Port {instance.port} is already in use")
             config.instances.append(instance)
-            _refuse_page_clashes(config, self.engines)
+            _refuse_page_clashes(config, self.engines, self._sections)
         self._changed("instances")
         return asdict(instance)
 
@@ -156,7 +159,7 @@ class InstanceConfiguration:
                 instance.model_id = str(changes["model_id"])
             if "port" in changes:
                 instance.port = _free_port(config, instance_id, int(changes["port"]))
-                _refuse_page_clashes(config, self.engines)
+                _refuse_page_clashes(config, self.engines, self._sections)
         self._changed("instances")
         running = self.host.status(instance_id).running
         return {"id": instance_id, "applied": not running,
@@ -187,10 +190,14 @@ def _supported_model_ids(engine, description: dict, models: list[dict]) -> list[
             and model["task"] in description["tasks"]]
 
 
-def _refuse_page_clashes(config, engines) -> None:
-    """ValueError when an engine's own page would land on a taken or absent port."""
+def _refuse_page_clashes(config, engines, sections=None) -> None:
+    """ValueError when an engine's own page would land on a taken or absent port.
+
+    A test's stand-in registry may not have `page_engines`; then none is
+    checked, on purpose: the page-port check is only for the real registry.
+    """
     page_engines: frozenset[str] = getattr(engines, "page_engines", frozenset)()
-    problems = editor_port_problems(config, page_engines)
+    problems = editor_port_problems(config, page_engines, sections)
     if problems:
         raise ValueError("; ".join(problems))
 

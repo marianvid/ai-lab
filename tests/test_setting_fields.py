@@ -105,7 +105,7 @@ class SettingFieldsTests(unittest.TestCase):
             {"id": "studio", "engine": "yue2", "model_id": "music/yue2", "port": 8124},
             {"id": "chat", "engine": "llamacpp", "model_id": "gguf/chat", "port": 9124}]}))
         fields = SettingFields(ConfigStore(self.path), self.told.append,
-                               frozenset({"yue2"}))
+                               (frozenset({"yue2"}), None))
         before = self.path.read_text()
         with self.assertRaisesRegex(ValueError, "studio: its page would be on port 9124"):
             fields.update({"limits.editor_port_offset": 1000})
