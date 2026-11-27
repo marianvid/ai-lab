@@ -24,8 +24,7 @@ from __future__ import annotations
 import json
 import re
 
-from ...catalog.capabilities import IMAGES
-from ...types import Format, ModelSet, Task
+from ...types import IMAGES, Format, ModelSet, Task
 from ...hosts.command import which
 from ...hosts.launch import PATH_PREPEND
 from ..base import (ANTHROPIC_PATHS, OPENAI_PATHS, TOKENIZE_PATHS, TRANSCRIPTION_PATHS,

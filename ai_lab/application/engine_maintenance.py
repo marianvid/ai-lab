@@ -6,9 +6,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..catalog.capabilities import IMAGES, TOOLS
 from ..changes import Reader, counted
-from ..types import Interests
+from ..types import IMAGES, TOOLS, Interests
 
 if TYPE_CHECKING:
     from ..builds.core import Builds

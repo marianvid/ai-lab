@@ -50,7 +50,13 @@ class Catalog:
         self.known = known
 
     def scan(self, repositories: list[Repository]) -> list[ModelSet]:
-        """Every model in these repositories, sorted by id; missing folders are skipped."""
+        """Every model in these repositories, sorted by id; missing folders are skipped.
+
+        A companion file (a tokenizer, a config) is listed in every model of
+        its directory: one file may belong to several of the sets returned,
+        so a caller that removes a model's files must keep those another set
+        still lists (`application/model_storage.py` does).
+        """
         models: list[ModelSet] = []
         for repository in repositories:
             root = Path(repository.path)

@@ -72,6 +72,14 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("config.json", names)
         self.assertEqual(len(models[0].files), 5)
 
+    def test_a_companion_is_listed_in_every_model_of_its_directory(self):
+        """The contract a move relies on to keep a file a sibling still needs."""
+        make_files(self.root / "pair", "alpha.gguf", "beta.gguf", "tokenizer.json")
+        lists = {item.name: sorted(Path(file.path).name for file in item.files)
+                 for item in self.scan()}
+        self.assertEqual(lists, {"alpha": ["alpha.gguf", "tokenizer.json"],
+                                 "beta": ["beta.gguf", "tokenizer.json"]})
+
     def test_unrelated_files_are_ignored(self):
         make_files(self.root / "qwen", "model.gguf", "README.md", "notes.txt")
         self.assertEqual(len(self.scan()[0].files), 1)

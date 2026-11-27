@@ -27,7 +27,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
-from ..builds.public_services import address
+from ..shared.public_services import address
 
 TIMEOUT_S = 20
 

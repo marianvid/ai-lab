@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 
-from ...catalog.capabilities import IMAGES
+from ...types import IMAGES
 from ..base import ParamSpec
 from ..probe import http_ok
 from .text_launch import SAMPLING, MlxTextEngine, flag_argv, sampling_argv

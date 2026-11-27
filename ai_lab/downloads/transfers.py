@@ -99,6 +99,15 @@ class Transfer:
             return 0.0
         return min(100.0, self.received_bytes * 100.0 / self.total_bytes)
 
+    def cancel(self) -> None:
+        """Ask the download to stop; it stops at its next piece."""
+        self._cancel.set()
+
+    @property
+    def cancelled(self) -> bool:
+        """Whether it was asked to stop."""
+        return self._cancel.is_set()
+
     def json(self) -> dict:
         """The transfer as the download page shows it."""
         return {"id": self.id, "repo": self.repo, "name": self.name,
@@ -162,7 +171,7 @@ class DownloadManager:
             transfer = self._transfers.get(transfer_id)
         if transfer is None:
             raise KeyError(transfer_id)
-        transfer._cancel.set()
+        transfer.cancel()
         if transfer.state in (State.QUEUED, State.RUNNING):
             transfer.state = State.CANCELLED
             self._announce(force=True)
@@ -208,7 +217,7 @@ class DownloadManager:
         try:
             self._fetch_all(transfer, remote, destination)
         except Exception as error:
-            if transfer._cancel.is_set():
+            if transfer.cancelled:
                 transfer.state = State.CANCELLED
                 transfer.error = ""
             else:
@@ -228,7 +237,7 @@ class DownloadManager:
         os.chmod(working, 0o700)
         staged = []
         for item in remote.files:
-            if transfer._cancel.is_set():
+            if transfer.cancelled:
                 transfer.state = State.CANCELLED
                 return
             # A file already sitting at its final name, the right size, is
@@ -278,7 +287,7 @@ class DownloadManager:
         with self._open(item.url(repo), resume_from) as response, \
                 partial.open("ab" if resume_from else "wb") as handle:
             while True:
-                if transfer._cancel.is_set():
+                if transfer.cancelled:
                     raise RuntimeError("cancelled")
                 chunk = response.read(CHUNK)
                 if not chunk:

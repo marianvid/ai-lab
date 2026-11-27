@@ -33,9 +33,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..shared.unexpected import LOOKUP_FAILED, note
+from ..types import IMAGES, TOOLS
 
-IMAGES = "images"
-TOOLS = "tools"
 
 # What a chat template says when it has been taught to ask for tools. Both
 # engines look for the same thing, in the same place, so this is not a guess

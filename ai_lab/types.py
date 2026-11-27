@@ -56,6 +56,12 @@ class ModelFile:
     size_bytes: int
 
 
+# What a model's weights can do (`ModelSet.capabilities`), as the catalog
+# reads it (`catalog/capabilities.py`) and an engine takes it away (`withholds`).
+IMAGES = "images"
+TOOLS = "tools"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelSet:
     """A complete model: every file needed to load it, as one unit.

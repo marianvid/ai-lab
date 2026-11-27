@@ -32,9 +32,9 @@ Three kinds of file sit outside the line:
 
 - **Shared files** that anything may import: `types.py`, the `config*.py`
   files, `catalog/naming.py`, `events.py`, `budget.py`, `gateway/eviction.py`, `multipart.py`,
-  `uploads.py`, and everything in `shared/` — today `shared/unexpected.py`
-  (the failures each reading expects, and the one line said when another one
-  happens). They hold
+  `uploads.py`, and everything in `shared/`: `shared/unexpected.py` (the
+  failures each reading expects, and the one line said when another one
+  happens) and `shared/public_services.py` (the public addresses). They hold
   data shapes, rules or arithmetic, and decide nothing about what to do.
 - **The image calls** `media/images.py`. They are handed the gateway when the
   application is built, so they sit beside `api/`, above the gateway, and send
@@ -118,7 +118,8 @@ there is exactly one place to look.
 | `storage.py` | Files that can be deleted to free space and are not models, chosen by id from a configured list | Model files, or any path the browser sends |
 | `builds/core.py` | The engines compiled from source, and a timer that checks upstream for new versions | The build itself |
 | `builds/source_build.py`, `builds/source_checkout.py`, `builds/source_compiled.py`, `builds/build_commands.py`, `builds/source_versions.py` | One source checkout: update, compile into a new folder, check it, switch to it. `SourceBuild` holds a `GitCheckout` (the git side, git itself behind `GitCommands`), a `CompiledVersions` (the compiled versions and the `current` link) and a `CommandStream` (the long commands), all given through `BuildTools` and real by default; it alone owns the lock | Choosing when to update |
-| `builds/update_watch.py`, `builds/install_log.py`, `builds/package_environments.py`, `disk.py`, `builds/public_services.py` | What builds and installs share: the timer that checks upstream, the streamed log of a command, the side-by-side environment folders (`EnvironmentFolders`, held by `PackageInstall`, which runs its commands and start check through `InstallTools`), folder sizes and checksums, the public addresses (PyPI, Hugging Face, GitHub) read from `builds/public_services.json` | Deciding anything |
+| `builds/update_watch.py`, `builds/install_log.py`, `builds/package_environments.py`, `disk.py` | What builds and installs share: the timer that checks upstream, the streamed log of a command, the side-by-side environment folders (`EnvironmentFolders`, held by `PackageInstall`, which runs its commands and start check through `InstallTools`), folder sizes and checksums | Deciding anything |
+| `shared/public_services.py` | The public addresses (PyPI, Hugging Face, GitHub) read from `shared/public_services.json`; a shared file, read by the installs, the downloads and the change notes | Deciding anything |
 | `changes/` | What an update would bring, read before anything is pressed: commits waiting (`fromgit.py`), notes written upstream (`fromgithub.py`), packages that would be replaced (`frompackages.py`), and which of it matters here (`sifting.py`) | Doing the update — it only reads |
 | `builds/installs.py` | The engines installed as packages, and a timer that checks for new versions | The install itself |
 | `builds/package_install.py` | One package-installed engine: add a version beside the others, check it imports, switch to it, drop one | Compiling anything, or deciding when an old version stops being needed |

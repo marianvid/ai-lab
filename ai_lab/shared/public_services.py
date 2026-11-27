@@ -3,7 +3,8 @@
 The addresses are configuration, not code (golden rule 5), so they are kept in
 `public_services.json` beside this module and read once. They are the same on
 every machine, which is why they ship with AI-Lab rather than in a machine's
-own configuration file. Each is a template: `{package}`, `{repo}`, `{path}`
+own configuration file. A shared file: the builds, the installs, the
+downloads and the change notes all read it. Each is a template: `{package}`, `{repo}`, `{path}`
 and `{count}` are filled in by the caller.
 """
 

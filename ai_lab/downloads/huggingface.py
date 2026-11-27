@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 from ..catalog.naming import (WEIGHT_SUFFIXES, base_name, is_companion, is_weight,
                       missing_shards)
-from ..builds.public_services import address
+from ..shared.public_services import address
 from .bundles import Bundle
 
 USER_AGENT = "AI-Lab/0.2"

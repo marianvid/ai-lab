@@ -21,12 +21,12 @@ from typing import Protocol
 
 from ..config.policy import INSTALL_S, SYSTEM_PATH
 from ..disk import free_bytes
+from ..shared.public_services import address
 from ..shared.unexpected import CALL_FAILED, note
 from ..events import EventBus
 from .background_job import BackgroundJob, fail_and_clean
 from .install_log import Command, Elapsed, InstallLog, since
 from .package_environments import CURRENT, PREFIX, Environment, EnvironmentFolders, version_in
-from .public_services import address
 
 __all__ = ["CURRENT", "PackageInstall", "PackageOptions"]
 

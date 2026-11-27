@@ -12,7 +12,7 @@ from ai_lab.disk import free_bytes, tree_size
 from ai_lab.events import EventBus
 from ai_lab.builds.install_log import Command, InstallLog, since
 from ai_lab.builds.package_environments import replace_link
-from ai_lab.builds.public_services import address
+from ai_lab.shared.public_services import address
 from ai_lab.types import LogEvent
 from ai_lab.builds.update_watch import UpdateWatcher
 

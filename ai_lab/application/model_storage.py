@@ -280,7 +280,7 @@ class ModelStorageService:
         Only once every file is verified in the staging area and published
         does the source get touched. A companion file (e.g. a tokenizer)
         can belong to more than one GGUF model in the same directory — see
-        `Catalog._classify` — so one still needed by a sibling that has not
+        `Catalog.scan` — so one still needed by a sibling that has not
         moved is left where it is.
         """
         protected = self._companions_still_needed(config, plan.model, plan.sources)
@@ -315,11 +315,10 @@ class ModelStorageService:
     def _companions_still_needed(self, config, model, sources: list[Path]) -> set[Path]:
         """Companion files this move must not remove from the source.
 
-        A tokenizer or config file sitting in a GGUF directory is attached by
-        the catalog to *every* model in that directory, not just the one
-        being moved (`Catalog._classify` groups by directory, not by model).
-        Moving one model must not delete a file a sibling still needs to
-        load.
+        A tokenizer or config file sitting in a GGUF directory is listed by
+        the catalog in *every* model of that directory, not just the one
+        being moved (the contract of `Catalog.scan`). Moving one model must
+        not delete a file a sibling still needs to load.
         """
         siblings = [item for item in self.catalog.scan(config.repositories)
                     if item.id != model.id]
