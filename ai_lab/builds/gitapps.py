@@ -12,36 +12,34 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..disk import free_bytes, tree_size
+from ..config.policy import BuildLimits, SYSTEM_PATH
 from ..events import EventBus
 from .background_job import BackgroundJob, fail_and_clean
 from .install_log import Command, Elapsed, InstallLog, since
 from .package_environments import replace_link
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
-INSTALL_TIMEOUT_S = 3600
 # How long one git question, or the check that a release starts, may take.
 GIT_QUESTION_S = 60
 VERIFY_S = 180
 # A commit is shown and compared by its first 12 characters.
 SHORT = 12
-# The programs a release is built with are found on this search path.
-SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 RELEASE_PREFIX = ".release-"
 
 
-def remote_commit(repository: str, ref: str) -> str:
+def remote_commit(repository: str, ref: str, *, system_path: str = SYSTEM_PATH) -> str:
     """The commit `ref` names in `repository`, asked of the remote."""
     answer = subprocess.run(["git", "ls-remote", repository, ref], capture_output=True,
-                            text=True, timeout=GIT_QUESTION_S, env=_environment())
+                            text=True, timeout=GIT_QUESTION_S, env=_environment(system_path))
     if answer.returncode or not answer.stdout.strip():
         raise ValueError(answer.stderr.strip() or f"Could not resolve {ref}")
     return answer.stdout.split()[0]
 
 
-def git_output(checkout: Path, *args: str) -> str:
+def git_output(checkout: Path, *args: str, system_path: str = SYSTEM_PATH) -> str:
     """What one git question about `checkout` prints."""
     answer = subprocess.run(["git", "-C", str(checkout), *args], capture_output=True,
-                            text=True, timeout=GIT_QUESTION_S, env=_environment())
+                            text=True, timeout=GIT_QUESTION_S, env=_environment(system_path))
     if answer.returncode:
         raise ValueError(answer.stderr.strip() or "git failed")
     return answer.stdout
@@ -56,7 +54,7 @@ def run_logged(log: InstallLog, command: Command, elapsed: Elapsed) -> None:
 class GitCommands:
     """The commands an install runs; a test hands in its own."""
 
-    remote_commit: Callable[[str, str], str] = remote_commit
+    remote_commit: Callable[..., str] = remote_commit
     git: Callable[..., str] = git_output
     run: Callable[[InstallLog, Command, Elapsed], None] = run_logged
 
@@ -69,9 +67,12 @@ class GitApplicationInstall:
     """Build a full checkout and venv beside the active release, then switch."""
 
     def __init__(self, engine_id: str, settings: dict, bus: EventBus,
-                 commands: GitCommands = REAL_COMMANDS) -> None:
+                 commands: GitCommands = REAL_COMMANDS,
+                 limits: BuildLimits | None = None) -> None:
         source = settings.get("source") or {}
         self.engine_id, self.bus = engine_id, bus
+        # How long one install step may take, and where its programs are (`limits.builds`).
+        self.limits = limits or BuildLimits()
         self.root = Path(source["root"])
         self.repository = source["repository"]
         self.application = source.get("application", "ComfyUI")
@@ -291,14 +292,17 @@ class GitApplicationInstall:
         return self._git(checkout, "remote", "get-url", "origin").strip()
 
     def _remote_commit(self, repository: str, ref: str) -> str:
-        return self._commands.remote_commit(repository, ref)
+        return self._commands.remote_commit(repository, ref,
+                                            system_path=self.limits.system_path)
 
     def _git(self, checkout: Path, *args: str) -> str:
-        return self._commands.git(checkout, *args)
+        return self._commands.git(checkout, *args, system_path=self.limits.system_path)
 
-    def _stream(self, command: list[str], elapsed: Elapsed, timeout: int = INSTALL_TIMEOUT_S,
+    def _stream(self, command: list[str], elapsed: Elapsed, timeout: float | None = None,
                 cwd: Path | None = None) -> None:
-        self._commands.run(self.log, Command(command, cwd or self.root, _environment(), timeout),
+        limit = self.limits.install_s if timeout is None else timeout
+        environment = _environment(self.limits.system_path)
+        self._commands.run(self.log, Command(command, cwd or self.root, environment, limit),
                            elapsed)
 
     def _announce(self) -> None:
@@ -308,5 +312,5 @@ class GitApplicationInstall:
         self.log.say(stream, text, elapsed_ms)
 
 
-def _environment() -> dict[str, str]:
-    return {"PATH": SYSTEM_PATH, "HOME": str(Path.home()), "UV_NO_CONFIG": "1"}
+def _environment(system_path: str) -> dict[str, str]:
+    return {"PATH": system_path, "HOME": str(Path.home()), "UV_NO_CONFIG": "1"}

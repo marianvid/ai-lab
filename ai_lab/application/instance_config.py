@@ -20,7 +20,6 @@ from ..engines.base import validate
 from ..hosts.base import Host
 from ..runtime.core import Runtime
 
-FIRST_PORT = 8080
 CHANGEABLE = frozenset({"params", "model_id", "port"})
 # Where an engine lists which model names it is configured for, in order of preference.
 CONFIGURED_NAMES = ("model_configs", "model_modes", "model_options")
@@ -57,7 +56,7 @@ class InstanceConfiguration:
         self._changed = parts.changed
 
     def suggest_port(self) -> int:
-        """The first free port at or above 8080.
+        """The first free port at or above the machine's `limits.first_port` (8080).
 
         Offered when adding a model so there is one less thing to think about,
         and still editable, because a port sometimes has to match what a client
@@ -69,7 +68,7 @@ class InstanceConfiguration:
         # learn that the number was never free — and it is the number this
         # method hands out as soon as the instances reach it.
         taken = {item.port for item in config.instances} | {config.port}
-        port = FIRST_PORT
+        port = config.machine_limits.first_port
         while port in taken:
             port += 1
         return port

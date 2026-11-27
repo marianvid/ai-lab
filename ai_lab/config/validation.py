@@ -242,7 +242,7 @@ def _check_placement(report: _Report, item) -> None:
 
 
 def _check_policies(report: _Report) -> None:
-    for policy_name in ("gateway_policy",):
+    for policy_name in ("gateway_policy", "machine_limits"):
         try:
             getattr(report.config, policy_name)
         except ValueError as error:

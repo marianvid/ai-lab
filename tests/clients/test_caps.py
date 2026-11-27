@@ -17,8 +17,9 @@ from ai_lab.api.router import Router
 from ai_lab.api.routes import clients as client_routes
 from ai_lab.api.server import Handler
 from ai_lab.clients.access import Access
-from ai_lab.clients.caps import (CHARS_PER_TOKEN, CallOverClientCapError, ClientCaps,
+from ai_lab.clients.caps import (CallOverClientCapError, ClientCaps,
                                  OverClientCapError, answer_limit, prompt_estimate)
+from ai_lab.config.policy import CHARS_PER_TOKEN
 from ai_lab.events import EventBus
 from ai_lab.gateway.admission.replaced import Replacements
 from ai_lab.gateway.limits import Patience
@@ -237,7 +238,7 @@ class CapRoutesTest(unittest.TestCase):
         client_routes.register(router, self.access)
 
         def busy(**_):
-            raise OverClientCapError("vm-sqwad is at its cap", client="vm-sqwad")
+            raise OverClientCapError("vm-sqwad is at its cap", 5, client="vm-sqwad")
         router.add("POST", "/v1/busy", busy)
         handler = type("H", (Handler,), {"router": router, "bus": EventBus(), "access": self.access})
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)

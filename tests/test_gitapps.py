@@ -49,7 +49,7 @@ class GitApplicationInstallTests(unittest.TestCase):
 
         def failing(*_args):
             raise ValueError("install failed")
-        self.install = self.installer(GitCommands(remote_commit=lambda *_: "b" * 40,
+        self.install = self.installer(GitCommands(remote_commit=lambda *_, **__: "b" * 40,
                                                   run=failing))
         self.install.install("HEAD")
         assert self.install.job.thread is not None
@@ -67,7 +67,7 @@ class GitApplicationInstallTests(unittest.TestCase):
         def hold(*_args, **_kwargs):
             started.set()
             release.wait(5)
-        self.install = self.installer(GitCommands(remote_commit=lambda *_: "b" * 40, run=hold))
+        self.install = self.installer(GitCommands(remote_commit=lambda *_, **__: "b" * 40, run=hold))
         self.install.install("HEAD")
         self.assertTrue(started.wait(5))
         try:
@@ -84,7 +84,7 @@ class GitApplicationInstallTests(unittest.TestCase):
         active = self.release(".release-first", "a" * 40)
         node = active / "ComfyUI" / "custom_nodes" / "example"
         (node / ".git").mkdir(parents=True)
-        self.install = self.installer(GitCommands(git=lambda *_: " M changed.py\n"))
+        self.install = self.installer(GitCommands(git=lambda *_, **__: " M changed.py\n"))
         self.install.point_at(active)
         with self.assertRaises(ValueError):
             self.install.update_component("example")

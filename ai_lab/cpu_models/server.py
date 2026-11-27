@@ -24,8 +24,6 @@ from ..engines.probe import http_ok
 from ..network import LOOPBACK
 from .settings import CpuModel
 
-STARTUP_LIMIT_S = 120.0
-STOP_LIMIT_S = 30.0
 POLL_S = 0.25
 CPU, CARD = "cpu", "card"
 ALL_LAYERS = "99"
@@ -70,6 +68,8 @@ class CpuServer:
     def __init__(self, binary: str, model: CpuModel, log_dir: Path,
                  tools: ProcessTools | None = None, device: str = CPU) -> None:
         tools = tools or ProcessTools()
+        # How long it may take to answer after a start, and to exit when asked.
+        self.limits = model.limits
         self.binary = binary
         self.model = model
         self.device = device
@@ -98,7 +98,7 @@ class CpuServer:
             self._process = self._tools.launch(
                 command(self.binary, self.model, self.device), env, self.log)
             self.started_at = self._tools.clock()
-            self._wait_until_ready(self.started_at + STARTUP_LIMIT_S)
+            self._wait_until_ready(self.started_at + self.limits.start_s)
 
     def _wait_until_ready(self, deadline: float) -> None:
         while not self._tools.probe(self.port):
@@ -109,7 +109,7 @@ class CpuServer:
             if self._tools.clock() > deadline:
                 self._stop_locked()
                 raise TimeoutError(f"{self.model.name} did not start within "
-                                   f"{STARTUP_LIMIT_S:.0f} s")
+                                   f"{self.limits.start_s:.0f} s")
             self._tools.sleep(POLL_S)
 
     def touch(self) -> None:
@@ -137,7 +137,7 @@ class CpuServer:
             return
         process.terminate()
         try:
-            process.wait(timeout=STOP_LIMIT_S)
+            process.wait(timeout=self.limits.stop_s)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.wait(timeout=STOP_LIMIT_S)
+            process.wait(timeout=self.limits.stop_s)

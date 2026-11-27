@@ -16,6 +16,7 @@ from typing import NamedTuple, cast
 from .builds.core import Builds
 from .catalog.capabilities import Known
 from .catalog.core import Catalog
+from .config.policy import BuildLimits
 from .config.store import Config, ConfigStore
 from .config.validation import Section, validate_configuration
 from .cpu_models import CpuLane
@@ -91,7 +92,7 @@ def build(config_path: Path) -> Manager:
     validate_configuration(config, set(engines.known()), check_workflows=True,
                            sections=CONFIG_SECTIONS)
     host = current_host(engine_settings)
-    operations, instances = _operations(store, bus, host, engines, engine_settings)
+    operations, instances = _operations(store, bus, host, engines, config)
     lanes = side_lanes(config, host, instances)
     limits = gateway_limits(config)
     memory = GatewayResources(operations, limits.quiet_mb, limits.quiet_timeout_s,
@@ -112,7 +113,8 @@ def side_lanes(config: Config, host: Host, instances: InstanceService) -> SideLa
     """
     state_dir = host.state_dir()
     cpu = CpuLane.from_config(config.cpu_models, state_dir,
-                              card_free_mb=lambda: card_free_mb(host))
+                              card_free_mb=lambda: card_free_mb(host),
+                              limits=config.machine_limits.embeddings)
     lanes = SideLanes(providers=ProviderPool.from_config(config.providers, state_dir), cpu=cpu)
     if cpu.placements:
         cpu.start_reaper()
@@ -176,17 +178,31 @@ def gateway_limits(config: Config) -> GatewayLimits:
                           default_max_tokens=front_door.default_max_tokens))
 
 
-def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry,
-                engine_settings: dict) -> tuple[Operations, InstanceService]:
-    """The operations the routes call, and the instance service the side lanes guard."""
-    builds = Builds(engine_settings, bus)
-    # Engines that arrive as packages rather than as source. A new
-    # version is installed beside the one that works, never over it.
-    installs = Installs(engine_settings, bus)
-    # The page knows what is waiting as soon as it opens (no button that only
-    # asks), and the version figures stay current without anyone pressing.
+def engine_updates(engine_settings: dict, bus: EventBus,
+                   limits: BuildLimits) -> tuple[Builds, Installs]:
+    """The engines built from source and those installed as packages, both watching upstream.
+
+    A new version of a package-installed engine is installed beside the one
+    that works, never over it. The page knows what is waiting as soon as it
+    opens (no button that only asks), and the version figures stay current
+    without anyone pressing.
+    """
+    builds = Builds(engine_settings, bus, limits)
+    installs = Installs(engine_settings, bus, limits)
     installs.watch()
     builds.watch()
+    return builds, installs
+
+
+def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry,
+                config: Config) -> tuple[Operations, InstanceService]:
+    """The operations the routes call, and the instance service the side lanes guard.
+
+    The machine's waits for loads, builds and installs come from the
+    configuration's `limits`.
+    """
+    limits = config.machine_limits
+    builds, installs = engine_updates(engine_settings_of(config), bus, limits.builds)
     built: list[Operations] = []
 
     def learn_about_new_models(_destination) -> None:
@@ -204,7 +220,7 @@ def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry
         # rest of the state: a quarter of a second per GGUF model otherwise, on
         # every scan of the library.
         catalog=Catalog(Known(host.state_dir())),
-        runtime=Runtime(host, bus),
+        runtime=Runtime(host, bus, limits=limits.runtime),
         settings=Settings(store, host, engines),
         downloads=DownloadManager(bus=bus, arrived=learn_about_new_models),
         huggingface=HuggingFaceClient(),

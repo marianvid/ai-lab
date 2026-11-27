@@ -27,17 +27,16 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
+from ..config.policy import EMBEDDINGS_CALL_S, EmbeddingsLimits
 from ..network import LOOPBACK
 from .placement import CardRoom, Placement
 from .server import CARD, CPU, CpuServer
 from .settings import CpuModel, CpuModelsConfig
 
 EMBEDDINGS_PATH = "/v1/embeddings"
-# A batch of long texts on a busy processor can take a while; the queue wait
-# is not counted here, only the call to the server.
-CALL_LIMIT_S = 600.0
 REAP_EVERY_S = 30.0
 
 Poster = Callable[[int, dict], dict]
@@ -54,13 +53,17 @@ def _no_card() -> float | None:
     return None
 
 
-def _post(port: int, payload: dict) -> dict:
-    """POST to the model's own server and return its JSON answer."""
+def _post(port: int, payload: dict, timeout_s: float = EMBEDDINGS_CALL_S) -> dict:
+    """POST to the model's own server and return its JSON answer.
+
+    A batch of long texts on a busy processor can take a while: `timeout_s`
+    (`limits.embeddings.call_s`) counts only this call, not the queue wait.
+    """
     request = urllib.request.Request(
         f"http://{LOOPBACK}:{port}{EMBEDDINGS_PATH}", data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=CALL_LIMIT_S) as response:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
         # The server refused the request itself (a text too long, say): the
@@ -120,10 +123,16 @@ class CpuLane:
 
     @classmethod
     def from_config(cls, raw: dict | None, log_dir: Path,
-                    card_free_mb: CardRoom = _no_card) -> CpuLane:
-        """Built from the `cpu_models` section, logging into `log_dir`."""
-        return cls(CpuModelsConfig.from_mapping(raw), log_dir,
-                   LaneTools(card_free_mb=card_free_mb))
+                    card_free_mb: CardRoom = _no_card,
+                    limits: EmbeddingsLimits | None = None) -> CpuLane:
+        """Built from the `cpu_models` section, logging into `log_dir`.
+
+        `limits`: the machine's waits for the lane (`limits.embeddings`).
+        """
+        limits = limits or EmbeddingsLimits()
+        tools = LaneTools(poster=partial(_post, timeout_s=limits.call_s),
+                          card_free_mb=card_free_mb)
+        return cls(CpuModelsConfig.from_mapping(raw, limits), log_dir, tools)
 
     def serves(self, name: str) -> bool:
         """Whether this name is one of these models."""

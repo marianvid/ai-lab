@@ -8,10 +8,12 @@ client without caps is not counted here at all.
 - **What a call costs.** Its prompt plus its answer limit (`max_tokens`, else
   the gateway's default answer cap), because that is the most room the call can
   come to hold in the pool. The prompt is estimated from its characters (one
-  token per `CHARS_PER_TOKEN`), before the model sees it: no extra round trip,
+  token per `limits.clients.chars_per_token`, 3), before the model sees it: no extra round trip,
   and on the safe side, since English runs about four characters a token and
   code about three.
-- **Over a cap the call is refused at once**, with 429 and `Retry-After`, never
+- **Over a cap the call is refused at once**, with 429 and `Retry-After`
+  (`limits.clients.retry_after_s`, 5: calls on the card end in seconds to a
+  minute, and a client that retries sooner is only refused again), never
   held in a queue: sqwad gives up on a call after 60 s, so a wait in AI-Lab
   would only turn into a failure on its side. A call that alone is larger than
   the client's cap is refused with 400: no retry can help it.
@@ -27,18 +29,15 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from ..config.policy import CHARS_PER_TOKEN, ClientCapLimits
 from .errors import RefusalError
 from .registry import write_private
 
 # The OpenAI and Anthropic shapes of a text call that goes to the card.
 TEXT_PATHS = frozenset({"/v1/chat/completions", "/v1/completions", "/v1/messages"})
 ANSWER_FIELDS = ("max_tokens", "max_completion_tokens")
-CHARS_PER_TOKEN = 3.0
 CAPS = ("max_tokens_in_flight", "max_calls_at_once")
 LIMITS = {"max_tokens_in_flight": (1, 10_000_000), "max_calls_at_once": (1, 1024)}
-# How long a refused client is told to wait. Calls on this card end in seconds
-# to a minute; a client that retries sooner is only refused again.
-RETRY_AFTER_S = 5
 
 
 class OverClientCapError(RefusalError):
@@ -48,9 +47,9 @@ class OverClientCapError(RefusalError):
     # Read by the server (`api.server.status_for`) before its own table.
     http_status = 429
 
-    def __init__(self, message: str, **facts) -> None:
-        super().__init__(message, retry_after_s=RETRY_AFTER_S, **facts)
-        self.headers = {"Retry-After": str(RETRY_AFTER_S)}
+    def __init__(self, message: str, retry_after_s: int, **facts) -> None:
+        super().__init__(message, retry_after_s=retry_after_s, **facts)
+        self.headers = {"Retry-After": str(retry_after_s)}
 
 
 class CallOverClientCapError(RefusalError):
@@ -59,12 +58,12 @@ class CallOverClientCapError(RefusalError):
     code = "call_over_client_cap"
 
 
-def prompt_estimate(payload: dict) -> int:
+def prompt_estimate(payload: dict, chars_per_token: float = CHARS_PER_TOKEN) -> int:
     """The prompt's tokens, estimated from the characters of everything but the answer limit."""
     sent = {key: value for key, value in payload.items()
             if key not in ANSWER_FIELDS and key != "model"}
     text = json.dumps(sent, ensure_ascii=False, separators=(",", ":"))
-    return int(len(text) / CHARS_PER_TOKEN) + 1
+    return int(len(text) / chars_per_token) + 1
 
 
 def answer_limit(payload: dict, default_cap: int) -> int:
@@ -79,8 +78,10 @@ def answer_limit(payload: dict, default_cap: int) -> int:
 class ClientCaps:
     """The caps per client (the owner's settings), and what each capped client has in flight."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, limits: ClientCapLimits | None = None) -> None:
         self.path = Path(path)
+        # How a prompt's tokens are estimated, and how long a refused client waits.
+        self.limits = limits or ClientCapLimits()
         self._lock = threading.Lock()
         data = json.loads(self.path.read_text() or "{}") if self.path.is_file() else {}
         self._caps: dict[str, dict[str, int]] = dict(data.get("clients", {}))
@@ -144,7 +145,7 @@ class ClientCaps:
         caps = self.of(name)
         if not name or not caps or path not in TEXT_PATHS or not isinstance(payload, dict):
             return _nothing
-        prompt = prompt_estimate(payload)
+        prompt = prompt_estimate(payload, self.limits.chars_per_token)
         answer = answer_limit(payload, default_cap)
         token_cap = caps.get("max_tokens_in_flight")
         facts = {"client": name, "call_tokens": prompt + answer, "prompt_estimate": prompt,
@@ -167,8 +168,9 @@ class ClientCaps:
             if over_tokens or (call_cap is not None and held[1] + 1 > call_cap):
                 why = (f"{held[0]} tokens in flight + {cost} > {token_cap}" if over_tokens
                        else f"{held[1]} calls in flight = cap {call_cap}")
+                retry = self.limits.retry_after_s
                 raise OverClientCapError(
-                    f"{name} is at its cap ({why}); retry after {RETRY_AFTER_S} s",
+                    f"{name} is at its cap ({why}); retry after {retry} s", retry,
                     tokens_in_flight=held[0], calls_in_flight=held[1], **facts)
             held[0] += cost
             held[1] += 1

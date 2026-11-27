@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from ..config.policy import INSTALL_S, SYSTEM_PATH
 from ..disk import free_bytes
 from ..events import EventBus
 from .background_job import BackgroundJob, fail_and_clean
@@ -28,12 +29,9 @@ from .public_services import address
 
 __all__ = ["CURRENT", "PackageInstall", "PackageOptions"]
 
-INSTALL_TIMEOUT_S = 3600
 CHECK_TIMEOUT_S = 180
 UV_TIMEOUT_S = 60
 INDEX_TIMEOUT_S = 20
-# The programs a new environment is built with are found on this search path.
-SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 
 
 class InstallCommands(Protocol):
@@ -95,19 +93,25 @@ class PackageOptions:
     requires_cuda: bool = False
     pip_args: list[str] = field(default_factory=list)
     minimum_versions: dict[str, str] = field(default_factory=dict)
+    # Not from `source` but the machine's (`limits.builds`): how long one install
+    # command may take, and where the programs a new environment is built with are.
+    timeout_s: float = INSTALL_S
+    system_path: str = SYSTEM_PATH
     # Not configuration: the collaborators that run the commands and the check.
     tools: InstallTools = field(default_factory=InstallTools)
 
     @classmethod
-    def from_source(cls, source: dict) -> PackageOptions:
-        """Read from an engine's `source` section."""
+    def from_source(cls, source: dict, timeout_s: float = INSTALL_S,
+                    system_path: str = SYSTEM_PATH) -> PackageOptions:
+        """Read from an engine's `source` section; the rest from the machine's limits."""
         return cls(uv=source.get("uv", "uv"), python=source.get("python", ""),
                    install=source.get("install", ""),
                    modules=list(source.get("modules") or []),
                    requirements=list(source.get("requirements") or []),
                    requires_cuda=bool(source.get("requires_cuda", False)),
                    pip_args=list(source.get("pip_args") or []),
-                   minimum_versions=dict(source.get("minimum_versions") or {}))
+                   minimum_versions=dict(source.get("minimum_versions") or {}),
+                   timeout_s=timeout_s, system_path=system_path)
 
 
 class PackageInstall:
@@ -131,6 +135,8 @@ class PackageInstall:
         self.requires_cuda = options.requires_cuda
         self.pip_args = list(options.pip_args)
         self.minimum_versions = dict(options.minimum_versions)
+        self.install_timeout_s = options.timeout_s
+        self.system_path = options.system_path
         self.bus = bus
         self.uv = options.uv
         self.python = options.python
@@ -276,7 +282,7 @@ class PackageInstall:
         wanted = f"{self.install_spec}=={landed}"
         self._say("status", f"Installing {wanted}. This downloads gigabytes.", elapsed())
         self._stream([self.uv, "pip", "install", wanted, *self.requirements, *self.pip_args],
-                     elapsed, INSTALL_TIMEOUT_S, venv=target)
+                     elapsed, self.install_timeout_s, venv=target)
         installed = version_in(target, self.package)
         if not installed:
             raise ValueError(f"{self.package} is not in the new environment after installing")
@@ -324,9 +330,9 @@ class PackageInstall:
 
     # -- running things ----------------------------------------------------
 
-    def _stream(self, command: list[str], elapsed: Elapsed, timeout: int,
+    def _stream(self, command: list[str], elapsed: Elapsed, timeout: float,
                 venv: Path | None = None) -> None:
-        environment = {"PATH": SYSTEM_PATH, "HOME": str(Path.home())}
+        environment = {"PATH": self.system_path, "HOME": str(Path.home())}
         if venv is not None:
             environment["VIRTUAL_ENV"] = str(venv)
         self.commands.run(Command(command, self.root, environment, timeout), elapsed)

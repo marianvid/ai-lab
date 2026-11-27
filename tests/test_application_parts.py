@@ -18,6 +18,7 @@ from ai_lab.application.instance_config import (
 from ai_lab.application.instances import InstanceParts, InstanceService
 from ai_lab.application.move_jobs import MoveCancelledError, MoveJobStore
 from ai_lab.changes.frompackages import Move, venv_of
+from ai_lab.config.policy import MachineLimits
 from ai_lab.changes.sifting import UNSORTED, area_of, sift
 from ai_lab.hosts import detect
 from ai_lab.runtime.checks import StartChecks
@@ -105,11 +106,19 @@ class Store:
 
 class InstancesTests(unittest.TestCase):
     def test_the_first_free_port_is_suggested(self):
-        config = SimpleNamespace(port=8081, instances=[SimpleNamespace(port=8080)])
+        config = SimpleNamespace(port=8081, instances=[SimpleNamespace(port=8080)],
+                                 machine_limits=MachineLimits())
         parts = InstanceParts(cast(Any, Store(config)), cast(Any, None), cast(Any, None),
                               cast(Any, None), None, print, list)
         self.assertEqual(InstanceService(parts).configuration.suggest_port(), 8082)
         self.assertEqual(InstanceConfiguration(parts).suggest_port(), 8082)
+
+    def test_the_machine_says_where_ports_start(self):
+        config = SimpleNamespace(port=8090, instances=[SimpleNamespace(port=9000)],
+                                 machine_limits=MachineLimits.from_mapping({"first_port": 9000}))
+        parts = InstanceParts(cast(Any, Store(config)), cast(Any, None), cast(Any, None),
+                              cast(Any, None), None, print, list)
+        self.assertEqual(InstanceConfiguration(parts).suggest_port(), 9001)
 
 
 class Host:

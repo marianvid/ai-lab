@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..config.policy import BETWEEN_BYTES_S, FIRST_BYTE_S, SAFETY_S, STALL_S
 from .upstream import END, FAILED, HEAD, Upstream
 
 # Headers worth copying from the engine's answer. Content-Length is deliberately
@@ -44,11 +45,9 @@ KEEP = ("content-type", "cache-control")
 # nothing until it has finished, so the limit covered the whole answer; with
 # streaming it covered the gap between chunks. One number for two jobs whose
 # sane values are four orders of magnitude apart.
-FIRST_BYTE_S = 120.0
-BETWEEN_BYTES_S = 30.0
-# For an engine that reports its progress (`gateway/limits.Patience`).
-STALL_S = 60.0
-SAFETY_S = 1800.0
+#
+# The defaults below (`FIRST_BYTE_S`, `BETWEEN_BYTES_S`, and for an engine
+# that reports its progress `STALL_S`, `SAFETY_S`) are owned by `config/policy.py`.
 # How often the gateway looks around while it waits.
 TICK_S = 1.0
 # A read on the engine's connection may outlast the gateway's own limits by

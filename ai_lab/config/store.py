@@ -34,7 +34,7 @@ from pathlib import Path
 from threading import RLock
 
 from .migrations import SCHEMA_VERSION, migrate
-from .policy import GatewayPolicy
+from .policy import GatewayPolicy, MachineLimits
 from ..network import ALL_INTERFACES
 
 
@@ -132,6 +132,9 @@ class Config:
     # in under a second are not the right numbers on a Mac running a 70 GB
     # model at 17 tokens a second — so they are configured, not sent.
     gateway: dict = field(default_factory=dict)
+    # This machine's other waits and its first port (`policy.MachineLimits`):
+    # loads, builds, the embeddings lane, the client caps. Each has a default.
+    limits: dict = field(default_factory=dict)
     # How much of this machine's memory to leave for the machine. See
     # `budget.py` for why it is a reserve rather than an allowance.
     memory: dict = field(default_factory=dict)
@@ -180,6 +183,11 @@ class Config:
     def gateway_policy(self) -> GatewayPolicy:
         """The front door's limits, checked."""
         return GatewayPolicy.from_mapping(self.gateway)
+
+    @property
+    def machine_limits(self) -> MachineLimits:
+        """This machine's waits and first port, checked."""
+        return MachineLimits.from_mapping(self.limits)
 
     def repository(self, repository_id: str) -> Repository:
         """One repository by id; KeyError when there is none."""
@@ -256,6 +264,7 @@ class ConfigStore:
             instances=_instances(raw.get("instances", [])),
             engines=raw.get("engines", {}),
             gateway=raw.get("gateway", {}),
+            limits=raw.get("limits", {}),
             memory=raw.get("memory", {}),
             storage=raw.get("storage", {}),
             images=raw.get("images", {}),

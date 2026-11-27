@@ -21,7 +21,7 @@ class CommandStream(Protocol):
     """Running one command, handing on each line of its output as it appears."""
 
     def run(self, command: list[str], cwd: Path, on_line: Callable[[str], None],
-            timeout: int) -> None:
+            timeout: float) -> None:
         """Run to the end; raise if it fails or takes longer than `timeout` seconds."""
         ...
 
@@ -34,7 +34,7 @@ class SubprocessStream:
     """
 
     def run(self, command: list[str], cwd: Path, on_line: Callable[[str], None],
-            timeout: int) -> None:
+            timeout: float) -> None:
         """Run to the end; raise if it fails or takes longer than `timeout` seconds."""
         process = subprocess.Popen(
             command, cwd=cwd, stdout=subprocess.PIPE,
@@ -46,7 +46,7 @@ class SubprocessStream:
             on_line(line.rstrip("\n"))
             if time.monotonic() > deadline:
                 process.kill()
-                raise TimeoutError(f"{command[0]} exceeded {timeout}s")
+                raise TimeoutError(f"{command[0]} exceeded {timeout:g}s")
         code = process.wait()
         if code != 0:
             raise RuntimeError(f"{' '.join(command)} failed with exit code {code}")

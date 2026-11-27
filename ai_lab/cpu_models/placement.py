@@ -27,12 +27,6 @@ from .server import CARD, CPU, CpuServer
 
 # How long a "no room" answer is trusted before the card is read again.
 RECHECK_S = 30.0
-# How long requests already on the card may take to finish before the card
-# server is stopped anyway. A call of 300 sentences takes half a second there.
-DRAIN_LIMIT_S = 60.0
-# A safety net: if a card load never reports back, the card is offered again
-# after this long rather than never.
-HOLD_LIMIT_S = 900.0
 POLL_S = 0.05
 
 CardRoom = Callable[[], "float | None"]
@@ -45,6 +39,11 @@ class Placement:
                  clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep) -> None:
         self.cpu = cpu
+        # `drain_s`: how long requests already on the card may take to finish
+        # before the card server is stopped anyway (a call of 300 sentences
+        # takes half a second there). `hold_s`: a safety net; if a card load
+        # never reports back, the card is offered again after this long.
+        self.limits = cpu.model.limits
         self.card = card
         self.model = cpu.model
         self._card_free_mb = card_free_mb
@@ -81,9 +80,9 @@ class Placement:
         if self.card is None:
             return
         with self._state:
-            self._held_until = self._clock() + HOLD_LIMIT_S
+            self._held_until = self._clock() + self.limits.hold_s
         with self._card_turn:
-            deadline = self._clock() + DRAIN_LIMIT_S
+            deadline = self._clock() + self.limits.drain_s
             while self._card_busy() and self._clock() < deadline:
                 self._sleep(POLL_S)
             self.card.stop()

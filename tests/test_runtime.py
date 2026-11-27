@@ -2,6 +2,7 @@ import time
 import unittest
 from typing import cast
 
+from ai_lab.config.policy import RuntimeLimits
 from ai_lab.config.store import Instance
 from ai_lab.events import EventBus
 from ai_lab.engines.text.llamacpp import LlamaCppEngine
@@ -291,7 +292,7 @@ class ModelThatDoesNotFitTests(unittest.TestCase):
         host.log_lines = ["load_model: failed to load model, out of memory"]
         started = time.monotonic()
         runtime = Runtime(host, self.bus, sample_interval_s=0,
-                          start_timeout_s=0.5, load_timeout_s=0.5)
+                          limits=RuntimeLimits(start_s=0.5, load_s=0.5))
         operation = runtime.load(instance(), model(), FakeEngine(host=host))
         self.assertFalse(operation.ok)
         self.assertLess(time.monotonic() - started, 5, "should not wait out the timeout")
@@ -330,7 +331,7 @@ class TimeoutTests(unittest.TestCase):
         host.log_lines = ["unit failed to execute: no such file"]
         started = time.monotonic()
         operation = Runtime(host, EventBus(), sample_interval_s=0,
-                            start_timeout_s=0.3).load(
+                            limits=RuntimeLimits(start_s=0.3)).load(
             instance(), model(), FakeEngine(host=host))
         self.assertFalse(operation.ok)
         self.assertLess(time.monotonic() - started, 3)

@@ -31,7 +31,7 @@ class Command:
     argv: list[str]
     cwd: Path
     environment: dict[str, str]
-    timeout_s: int
+    timeout_s: float
 
 
 class InstallLog:
@@ -75,7 +75,7 @@ class InstallLog:
             self.say("out", line.rstrip(), elapsed())
             if time.monotonic() > deadline:
                 process.kill()
-                raise ValueError(f"{command.argv[0]} took longer than {command.timeout_s}s")
+                raise ValueError(f"{command.argv[0]} took longer than {command.timeout_s:g}s")
         if process.wait() != 0:
             raise ValueError(f"{' '.join(command.argv[:3])} failed")
 

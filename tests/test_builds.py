@@ -8,6 +8,7 @@ from ai_lab.builds.build_commands import BuildTools
 from ai_lab.builds.core import Builds
 from ai_lab.builds.source_build import BuildOptions, SourceBuild
 from ai_lab.builds.source_versions import Version, mark_version
+from ai_lab.config.policy import BuildLimits
 from ai_lab.events import EventBus
 from ai_lab.types import LogEvent
 
@@ -406,16 +407,14 @@ class WatchTests(unittest.TestCase):
         self.addCleanup(self._temporary.cleanup)
         (self.path / ".git").mkdir()
 
-    def builds(self):
-        return Builds({"llamacpp": {"source": {"path": str(self.path)}}}, EventBus())
+    def builds(self, limits=None):
+        return Builds({"llamacpp": {"source": {"path": str(self.path)}}}, EventBus(), limits)
 
     def test_it_checks_every_build_on_the_timer(self):
-        import ai_lab.builds.core as module
-        builds = self.builds()
+        builds = self.builds(BuildLimits(builds_first_check_s=0.01))
         self.addCleanup(builds.stop)
         checked = []
-        with patch.object(SourceBuild, "check", lambda self: checked.append(self.engine_id)), \
-             patch.object(module, "STARTUP_DELAY_S", 0.01):
+        with patch.object(SourceBuild, "check", lambda self: checked.append(self.engine_id)):
             builds.watch(interval_s=0.05)
             deadline = __import__("time").monotonic() + 3
             while not checked and __import__("time").monotonic() < deadline:
@@ -424,11 +423,9 @@ class WatchTests(unittest.TestCase):
 
     def test_a_failure_is_swallowed_rather_than_shouted_about(self):
         """Being offline is not worth a message on a page nobody is reading."""
-        import ai_lab.builds.core as module
-        builds = self.builds()
+        builds = self.builds(BuildLimits(builds_first_check_s=0.01))
         self.addCleanup(builds.stop)
-        with patch.object(SourceBuild, "check", side_effect=ValueError("no network")), \
-             patch.object(module, "STARTUP_DELAY_S", 0.01):
+        with patch.object(SourceBuild, "check", side_effect=ValueError("no network")):
             builds.watch(interval_s=0.05)
             __import__("time").sleep(0.2)
         self.assertEqual(builds.all()[0]["state"], "idle")

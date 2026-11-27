@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
+from ..config.policy import EmbeddingsLimits
+
 POOLINGS = ("cls", "mean", "last")
 # Measured on CT 102 (12 cores) with bge-m3: 4 requests at once gave 3.0
 # texts of about 300 tokens a second, against 2.4 in batches of 16 from one.
@@ -78,10 +80,14 @@ class CpuModel:
     idle_stop_s: float = DEFAULT_IDLE_STOP_S
     kv_unified: bool = False
     card: CardUse | None = None
+    # Not from this section: the machine's waits (`limits.embeddings`) for
+    # starting, stopping and calling this model's servers.
+    limits: EmbeddingsLimits = field(default_factory=EmbeddingsLimits)
 
     @classmethod
-    def from_mapping(cls, name: str, raw: dict) -> CpuModel:
-        """One entry of `cpu_models.models`."""
+    def from_mapping(cls, name: str, raw: dict,
+                     limits: EmbeddingsLimits | None = None) -> CpuModel:
+        """One entry of `cpu_models.models`; `limits` from the machine's `limits.embeddings`."""
         if not isinstance(raw, dict):
             raise ValueError(f"cpu_models.models.{name} must be an object")
         path = raw.get("path")
@@ -97,7 +103,8 @@ class CpuModel:
                    context=_whole(name, "context", raw.get("context", DEFAULT_CONTEXT), 512, 131072),
                    idle_stop_s=_seconds(name, raw.get("idle_stop_s", DEFAULT_IDLE_STOP_S)),
                    kv_unified=_flag(name, "kv_unified", raw.get("kv_unified", False)),
-                   card=_card(name, raw.get("card"), port))
+                   card=_card(name, raw.get("card"), port),
+                   limits=limits or EmbeddingsLimits())
 
     @property
     def ports(self) -> tuple[int, ...]:
@@ -113,13 +120,17 @@ class CpuModelsConfig:
     models: dict[str, CpuModel] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, raw: dict | None) -> CpuModelsConfig:
-        """The whole section; empty or absent means no processor models."""
+    def from_mapping(cls, raw: dict | None,
+                     limits: EmbeddingsLimits | None = None) -> CpuModelsConfig:
+        """The whole section; empty or absent means no processor models.
+
+        `limits`: the machine's waits for these models (`limits.embeddings`).
+        """
         if not raw:
             return cls()
         if not isinstance(raw, dict):
             raise ValueError("cpu_models must be an object")
-        models = {name: CpuModel.from_mapping(name, item)
+        models = {name: CpuModel.from_mapping(name, item, limits)
                   for name, item in (raw.get("models") or {}).items()}
         binary = raw.get("binary", "")
         if models and (not isinstance(binary, str) or not PurePosixPath(binary).is_absolute()):

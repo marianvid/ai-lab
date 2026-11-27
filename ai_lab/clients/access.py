@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from ..config.policy import ClientCapLimits
 from .caps import ClientCaps
 from .door import Door, DoorKeys
 from .errors import AccessDeniedError
@@ -45,14 +46,18 @@ class Access:
         self.door = Door(DoorKeys(registry, self.presence, security, self.sessions), log, power)
 
     @classmethod
-    def in_folder(cls, state_dir: Path, log: Callable[[str], None] = print) -> Access:
-        """The access kept in `state_dir` (clients.json, security.json, power.json)."""
+    def in_folder(cls, state_dir: Path, log: Callable[[str], None] = print,
+                  caps: ClientCapLimits | None = None) -> Access:
+        """The access kept in `state_dir` (clients.json, security.json, power.json).
+
+        `caps`: how the client caps count and refuse (`limits.clients`).
+        """
         state_dir = Path(state_dir)
         security = SecuritySettings(state_dir / SECURITY_FILE)
         access = cls(ClientRegistry(state_dir / CLIENTS_FILE), security,
                      Power(state_dir / POWER_FILE), log=log,
                      mailbox=Mailbox(state_dir / MAILBOX_FILE, security.mailbox_limits))
-        access.caps = ClientCaps(state_dir / CAPS_FILE)
+        access.caps = ClientCaps(state_dir / CAPS_FILE, caps)
         return access
 
     # -- clients ------------------------------------------------------------

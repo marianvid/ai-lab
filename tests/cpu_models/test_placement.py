@@ -4,7 +4,8 @@ import threading
 import unittest
 from typing import Any, cast
 
-from ai_lab.cpu_models.placement import DRAIN_LIMIT_S, HOLD_LIMIT_S, RECHECK_S, Placement
+from ai_lab.config.policy import EMBEDDINGS_DRAIN_S, EMBEDDINGS_HOLD_S
+from ai_lab.cpu_models.placement import RECHECK_S, Placement
 from ai_lab.cpu_models.settings import CardUse, CpuModel
 
 MODEL = CpuModel(name="bge-m3", path="/m/bge.gguf", port=8390, idle_stop_s=1800.0,
@@ -117,7 +118,7 @@ class PlacementTests(unittest.TestCase):
     def test_a_request_that_never_finishes_does_not_block_the_card(self):
         self.place.take()
         self.place.make_way()
-        self.assertGreaterEqual(self.clock.now, 1000.0 + DRAIN_LIMIT_S)
+        self.assertGreaterEqual(self.clock.now, 1000.0 + EMBEDDINGS_DRAIN_S)
         self.assertFalse(self.card.running)
 
     def test_after_the_load_it_comes_back_if_it_was_in_use(self):
@@ -139,7 +140,7 @@ class PlacementTests(unittest.TestCase):
     def test_a_load_that_never_reports_back_frees_the_card_after_the_hold(self):
         self.place.make_way()
         self.assertIs(self.place.take(), self.cpu)
-        self.clock.now += HOLD_LIMIT_S + 1
+        self.clock.now += EMBEDDINGS_HOLD_S + 1
         self.assertIs(self.place.take(), self.card)
 
     def test_by_hand_and_when_idle(self):

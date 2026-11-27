@@ -27,6 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from threading import RLock
 
+from ..config.policy import RuntimeLimits
 from ..config.store import Instance
 from ..engines.base import Engine, withheld
 from ..events import EventBus
@@ -56,11 +57,8 @@ __all__ = ["EngineDiedError", "LoadTimeoutError", "Operation", "Runtime"]
 
 SAMPLE_INTERVAL_S = 0.2
 # Starting a process takes seconds; loading weights can take minutes. They get
-# separate limits so a process that never appears is not waited on for a
-# quarter of an hour.
-START_TIMEOUT_S = 60.0
-LOAD_TIMEOUT_S = 900.0
-UNLOAD_TIMEOUT_S = 120.0
+# separate limits (`RuntimeLimits`, the configuration's `limits.runtime`) so a
+# process that never appears is not waited on for a quarter of an hour.
 # Memory is considered released once it has stopped falling for this many
 # consecutive samples. Drivers free asynchronously, so the process exiting is
 # not the same moment as the memory coming back.
@@ -95,15 +93,13 @@ class Runtime:
 
     def __init__(self, host: Host, bus: EventBus,
                  sample_interval_s: float = SAMPLE_INTERVAL_S,
-                 start_timeout_s: float = START_TIMEOUT_S,
-                 load_timeout_s: float = LOAD_TIMEOUT_S) -> None:
+                 limits: RuntimeLimits | None = None) -> None:
         self.host = host
         self.checks = StartChecks(host)
         self.diagnostics = RuntimeDiagnostics(host)
         self.bus = bus
         self.sample_interval_s = sample_interval_s
-        self.start_timeout_s = start_timeout_s
-        self.load_timeout_s = load_timeout_s
+        self.limits = limits or RuntimeLimits()
         self._locks: dict[str, RLock] = {}
         self._guard = RLock()
         self._last: dict[str, Operation] = {}
@@ -235,7 +231,7 @@ class Runtime:
         self.host.start(ProcessSpec(instance.id, plan.argv, plan.env))
 
         self._await(lambda: self.host.status(instance.id).running, instance.id, clock,
-                    _Wait(Phase.STARTING, self.start_timeout_s,
+                    _Wait(Phase.STARTING, self.limits.start_s,
                           "waiting for the process to start"))
         # From here on the samples can be attributed to this process, which is
         # what makes the bar mean something when another model is resident.
@@ -243,7 +239,7 @@ class Runtime:
         self._mark(operation, clock, Phase.PROCESS_UP, "Process running")
 
         self._await(lambda: engine.ready(instance.port), instance.id, clock,
-                    _Wait(Phase.WEIGHTS_LOADING, self.load_timeout_s,
+                    _Wait(Phase.WEIGHTS_LOADING, self.limits.load_s,
                           "waiting for the weights to load"),
                     alive=lambda: self.host.status(instance.id).running)
         self._mark(operation, clock, Phase.READY, f"{model.name} ready")
@@ -256,10 +252,10 @@ class Runtime:
         self.host.stop(instance_id)
 
         self._await(lambda: not self.host.status(instance_id).running, instance_id, clock,
-                    _Wait(Phase.STOPPING, UNLOAD_TIMEOUT_S, "waiting for the process to exit"))
+                    _Wait(Phase.STOPPING, self.limits.unload_s, "waiting for the process to exit"))
         self._mark(operation, clock, Phase.PROCESS_GONE, "Process gone")
 
-        self._await_settled(instance_id, clock, UNLOAD_TIMEOUT_S)
+        self._await_settled(instance_id, clock, self.limits.unload_s)
         self._pids.pop(instance_id, None)
         self._active.pop(instance_id, None)
         self._mark(operation, clock, Phase.MEMORY_RELEASED, "Memory released")

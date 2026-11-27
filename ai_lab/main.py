@@ -11,6 +11,7 @@ from pathlib import Path
 from .api.routes import RouteParts
 from .api.server import build_router, serve
 from .clients.access import Access
+from .config.policy import ClientCapLimits
 from .gpu_health.service import GpuHealth
 from .runtime.journal import OperationJournal, PhaseFollower
 from .lanes import SideLanes
@@ -51,7 +52,7 @@ def main() -> None:
     _restore_last_model(operations)
 
     journal = _journal(state_dir, manager)
-    access = _access(state_dir, manager.gateway, journal)
+    access = _access(state_dir, manager.gateway, journal, config.machine_limits.clients)
 
     print(f"AI-Lab listening on http://{host}:{port}", flush=True)
     try:
@@ -71,7 +72,8 @@ def _journal(state_dir: Path, manager) -> OperationJournal:
     return journal
 
 
-def _access(state_dir: Path, gateway, journal: OperationJournal) -> Access:
+def _access(state_dir: Path, gateway, journal: OperationJournal,
+            caps: ClientCapLimits) -> Access:
     """Who may call (A1, A2) and the On/Off switch (A6), kept with the host's state.
 
     Switching Off turns away everyone waiting; the calls running end by
@@ -81,7 +83,7 @@ def _access(state_dir: Path, gateway, journal: OperationJournal) -> Access:
         print(line, flush=True)
         journal.write(line)
 
-    access = Access.in_folder(state_dir, log=log)
+    access = Access.in_folder(state_dir, log=log, caps=caps)
     access.power.when_off(lambda: gateway.reset("AI-Lab was switched Off"))
     return access
 

@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..config.policy import BUILD_S
 from ..disk import free_bytes
 from ..events import EventBus
 from .background_job import BackgroundJob
@@ -27,7 +28,6 @@ from .source_compiled import CHECKOUT_S, CompiledVersions
 from .source_versions import DEFAULT_LINE, LINES, Version, mark_version, marked_version
 from ..types import ChangeEvent, LogEvent
 
-BUILD_TIMEOUT = 3600
 VERIFY_TIMEOUT = 60
 
 Elapsed = Callable[[], int]
@@ -46,14 +46,16 @@ class BuildOptions:
     builds: str = ""
     legacy_build: str = ""
     cmake_args: list[str] = field(default_factory=list)
+    # Not from `source`: how long one compile step may take (`limits.builds.build_s`).
+    timeout_s: float = BUILD_S
 
     @classmethod
-    def from_source(cls, source: dict) -> BuildOptions:
-        """Read from an engine's `source` section."""
+    def from_source(cls, source: dict, timeout_s: float = BUILD_S) -> BuildOptions:
+        """Read from an engine's `source` section; `timeout_s` from the machine's limits."""
         return cls(jobs=source.get("jobs"), line=source.get("line", DEFAULT_LINE),
                    builds=source.get("builds", ""),
                    legacy_build=source.get("legacy_build", ""),
-                   cmake_args=list(source.get("cmake_args") or []))
+                   cmake_args=list(source.get("cmake_args") or []), timeout_s=timeout_s)
 
 
 @dataclass
@@ -89,6 +91,7 @@ class SourceBuild:
         self.bus = bus
         self.jobs = options.jobs
         self.cmake_args = list(options.cmake_args)
+        self.build_timeout_s = options.timeout_s
         self.checkout = GitCheckout(self.path, tools.git)
         self.compiled = CompiledVersions(
             Path(options.builds) if options.builds else None,
@@ -274,13 +277,13 @@ class SourceBuild:
             self._say("status", f"Configuring {target_dir.name}", attempt.elapsed())
             self._stream(["cmake", "-S", ".", "-B", str(target_dir),
                           "-DCMAKE_BUILD_TYPE=Release", *self.cmake_args],
-                         attempt.elapsed, BUILD_TIMEOUT)
+                         attempt.elapsed, self.build_timeout_s)
             build_path = str(target_dir)
         command = ["cmake", "--build", build_path, "--config", "Release"]
         if self.jobs:
             command += ["-j", str(self.jobs)]
         self._say("status", "Compiling. This takes a while.", attempt.elapsed())
-        self._stream(command, attempt.elapsed, BUILD_TIMEOUT)
+        self._stream(command, attempt.elapsed, self.build_timeout_s)
 
     def _verify_and_select(self, target_dir: Path, source: Version, attempt: _Attempt) -> None:
         """Check that the new llama-server starts, record its version, and switch to it."""
@@ -314,7 +317,7 @@ class SourceBuild:
         self.job.failed(error)
         self._announce()
 
-    def _stream(self, command: list[str], elapsed: Elapsed, timeout: int) -> None:
+    def _stream(self, command: list[str], elapsed: Elapsed, timeout: float) -> None:
         """Run a command in the checkout, forwarding each line as it appears."""
         self._say("status", "$ " + " ".join(command), elapsed())
         self.commands.run(command, self.path,
