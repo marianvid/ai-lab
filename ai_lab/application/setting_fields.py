@@ -21,6 +21,8 @@ from typing import cast
 
 from ..config import policy
 from ..config.store import Config, ConfigStore
+from ..gpu_health.settings import BOUNDS as MONITOR_BOUNDS
+from ..gpu_health.settings import ORDERED as MONITOR_ORDER
 from ..gpu_health.settings import GpuHealthSettings
 
 # The groups the page shows, in order: the section title of each.
@@ -64,16 +66,15 @@ def _seconds(key: str, group: str, label: str, default: float, help_text: str) -
 _MONITOR = GpuHealthSettings()
 
 
-def _gpu(name: str, shown: tuple[str, str, str], bounds: tuple[float, float | None],
-         help_text: str, kind: str = "number") -> Field:
+def _gpu(name: str, shown: tuple[str, str, str], help_text: str,
+         kind: str = "number") -> Field:
     """One number of the card's health monitor, shown as (group, label, unit).
 
-    Its parser takes any number that is not negative. `bounds` are the page's
-    own: below them the value breaks the monitor (0 s between readings is a
-    busy loop), so the page refuses it even where a file would be taken.
+    Its range is the monitor's own (`gpu_health.settings.BOUNDS`), so the page
+    and the start refuse the same values.
     """
     group, label, unit = shown
-    low, high = bounds
+    low, high = MONITOR_BOUNDS[name]
     return Field(f"gpu_health.{name}", group, label, unit, getattr(_MONITOR, name), low, high,
                  help_text, kind=kind)
 
@@ -181,19 +182,19 @@ FIELDS: tuple[Field, ...] = (
           "Whether the card's health is watched at all. Off: no readings, no alarms, and "
           "the page says nobody is watching the card. Only a machine without an NVIDIA "
           "card has no use for it.", kind="boolean"),
-    _gpu("sample_s", ("gpu_readings", "Read every", "s"), (1, 3600),
+    _gpu("sample_s", ("gpu_readings", "Read every", "s"),
          "How often the card is read (temperature, power, fan, clocks). Too small: many "
          "readings and a busier history for nothing. Too large: a short overheat or "
          "slowdown happens between two readings and is missed."),
-    _gpu("slow_s", ("gpu_readings", "Slow readings every", "s"), (1, None),
+    _gpu("slow_s", ("gpu_readings", "Slow readings every", "s"),
          "How often the memory error counters and the driver's state are read. Too small: "
          "reads that change only rarely, repeated. Too large: a new memory error is "
          "noticed that much later."),
-    _gpu("nvml_silent_s", ("gpu_readings", "Card silent alarm after", "s"), (1, None),
+    _gpu("nvml_silent_s", ("gpu_readings", "Card silent alarm after", "s"),
          "How long the driver may not answer before that is an alarm. Too small: a "
          "short hiccup alarms. Too large: a card that stopped answering goes unnoticed "
          "that long."),
-    _gpu("raw_keep_days", ("gpu_readings", "Keep raw readings", "days"), (1, None),
+    _gpu("raw_keep_days", ("gpu_readings", "Keep raw readings", "days"),
          "How long every 15-second reading is kept before it is folded into 5-minute "
          "rows. Too small: the detail of a past problem is gone when you look. Too "
          "large: the history file grows.", kind="integer"),
@@ -208,111 +209,111 @@ FIELDS: tuple[Field, ...] = (
           "container sees it. Empty: no helper, and the Xid and PCIe error alarms say "
           "they are not watched. A wrong path: the helper's heartbeat alarm.",
           kind="text", empty=True),
-    _gpu("helper_heartbeat_s", ("gpu_readings", "Helper silent alarm after", "s"), (1, None),
+    _gpu("helper_heartbeat_s", ("gpu_readings", "Helper silent alarm after", "s"),
          "How long the host helper may write nothing (it writes a heartbeat every hour) "
          "before that is a warning. Too small: a late heartbeat warns. Too large: a "
          "stopped helper goes unnoticed that long."),
-    _gpu("stable_min_s", ("gpu_windows", "Stable window, shortest", "s"), (1, None),
+    _gpu("stable_min_s", ("gpu_windows", "Stable window, shortest", "s"),
          "How long the card must work at an even power for a stable window, the kind the "
          "thermal resistance is measured in. Too small: the chip has not yet warmed up and "
          "R reads low. Too large: few windows, and the reference takes longer."),
-    _gpu("stable_max_s", ("gpu_windows", "Stable window, longest", "s"), (1, None),
+    _gpu("stable_max_s", ("gpu_windows", "Stable window, longest", "s"),
          "A long even load is cut into windows of at most this. Too small: windows too "
          "short to have warmed up. Too large: one long job counts as only a few windows."),
-    _gpu("stable_band", ("gpu_windows", "Stable power band", "×"), (0.01, 1),
+    _gpu("stable_band", ("gpu_windows", "Stable power band", "×"),
          "How far (as a fraction of the window's average) the power may wander and still "
          "be even: 0.10 is ±10 %. Too small: hardly any window is stable. Too large: "
          "uneven work is measured as if even, and R is noisy."),
-    _gpu("stable_min_w", ("gpu_windows", "Stable window, least power", "W"), (0, None),
+    _gpu("stable_min_w", ("gpu_windows", "Stable window, least power", "W"),
          "A stable window must draw at least this. Too small: light work, where R says "
          "little, is measured. Too large: only the heaviest jobs count."),
-    _gpu("idle_max_w", ("gpu_windows", "Idle, most power", "W"), (0, None),
+    _gpu("idle_max_w", ("gpu_windows", "Idle, most power", "W"),
          "Below this power (and the use below) the card is resting, for the day's resting "
          "temperature. Too small: a resting card is not seen as resting. Too large: a card "
          "doing light work is taken for resting and the room reads warm."),
-    _gpu("idle_max_util", ("gpu_windows", "Idle, most use", "%"), (0, 100),
+    _gpu("idle_max_util", ("gpu_windows", "Idle, most use", "%"),
          "Below this use (and the power above) the card is resting. Too small: background "
          "use of a few percent keeps every rest from counting. Too large: light work "
          "counts as rest."),
-    _gpu("idle_min_s", ("gpu_windows", "Idle window, shortest", "s"), (1, None),
+    _gpu("idle_min_s", ("gpu_windows", "Idle window, shortest", "s"),
          "How long a rest must last to give a resting temperature. Too small: a card still "
          "cooling from work is taken as resting. Too large: a busy day gives no rest."),
-    _gpu("idle_max_s", ("gpu_windows", "Idle window, longest", "s"), (1, None),
+    _gpu("idle_max_s", ("gpu_windows", "Idle window, longest", "s"),
          "A long rest is cut into windows of at most this, so a quiet day still gives its "
          "temperature that day. Too small: many short windows. Too large: a day-long rest "
          "gives one window, late."),
-    _gpu("idle_fallback_days", ("gpu_windows", "Borrow a resting temperature for", "days"), (1, None),
+    _gpu("idle_fallback_days", ("gpu_windows", "Borrow a resting temperature for", "days"),
          "A day with no rest uses the last day that had one, up to this many days back; "
          "after that the day has no reference. Too small: busy days go unmeasured. Too "
          "large: a weeks-old room temperature is used.", kind="integer"),
-    _gpu("baseline_days", ("gpu_trend", "Reference over", "days"), (1, None),
+    _gpu("baseline_days", ("gpu_trend", "Reference over", "days"),
          "The reference R is the median of the first this-many days (with at least the "
          "windows below). Too small: one unusual week becomes the reference. Too large: "
          "no comparison for that long.", kind="integer"),
-    _gpu("baseline_min_windows", ("gpu_trend", "Reference, fewest windows", ""), (1, None),
+    _gpu("baseline_min_windows", ("gpu_trend", "Reference, fewest windows", ""),
          "The reference waits for at least this many stable windows. Too small: a "
          "reference from a handful of jobs. Too large: on a quiet machine it never forms.",
          kind="integer"),
-    _gpu("trend_days", ("gpu_trend", "Trend over", "days"), (1, None),
+    _gpu("trend_days", ("gpu_trend", "Trend over", "days"),
          "The trend is the median R of the last this-many days, compared with the "
          "reference. Too small: a noisy trend that alarms on one hot week. Too large: a "
          "real worsening shows late.", kind="integer"),
-    _gpu("r_warn", ("gpu_trend", "R warning above reference", "×"), (0.01, 1),
+    _gpu("r_warn", ("gpu_trend", "R warning above reference", "×"),
          "The trend this much above the reference is a warning: 0.15 is 15 %. Too small: "
          "ordinary variation warns. Too large: cooling that is getting worse is not "
          "flagged."),
-    _gpu("r_alarm", ("gpu_trend", "R alarm above reference", "×"), (0.01, 1),
+    _gpu("r_alarm", ("gpu_trend", "R alarm above reference", "×"),
          "The trend this much above the reference is an alarm: 0.25 is 25 %. Too small: "
          "alarms for what is still a warning. Too large: bad cooling alarms late."),
-    _gpu("fan_warn_points", ("gpu_trend", "Fan warning above reference", "points"), (1, 100),
+    _gpu("fan_warn_points", ("gpu_trend", "Fan warning above reference", "points"),
          "The fan this many percentage points faster than in the reference, at the same "
          "power, is a warning. Too small: normal fan changes warn. Too large: a fan "
          "working harder to cool the same load is not flagged."),
-    _gpu("fan_band_w", ("gpu_trend", "Fan power band", "W"), (1, None),
+    _gpu("fan_band_w", ("gpu_trend", "Fan power band", "W"),
          "Windows are grouped in power bands this wide; the fan is compared only within "
          "one. Too small: too few windows in each band. Too large: different loads are "
          "compared."),
-    _gpu("fan_std_factor", ("gpu_trend", "Fan spread warning", "×"), (1, None),
+    _gpu("fan_std_factor", ("gpu_trend", "Fan spread warning", "×"),
          "The fan's spread (standard deviation) more than this many times the reference's "
          "is a warning. Too small: ordinary unevenness warns. Too large: a fan hunting up "
          "and down is not flagged."),
-    _gpu("hotspot_delta_c", ("gpu_trend", "Hotspot above chip", "°C"), (1, None),
+    _gpu("hotspot_delta_c", ("gpu_trend", "Hotspot above chip", "°C"),
          "The hotspot this much above the chip temperature is a warning (a card that "
          "reports a hotspot; this one does not). Too small: warns at normal spreads. Too "
          "large: bad paste contact is not flagged."),
-    _gpu("ecc_corrected_week", ("gpu_trend", "Corrected memory errors per week", ""), (0, None),
+    _gpu("ecc_corrected_week", ("gpu_trend", "Corrected memory errors per week", ""),
          "More corrected memory errors than this in a week is a warning. Too small: warns "
          "on the odd error every card has. Too large: memory that is starting to fail is "
          "not flagged.", kind="integer"),
-    _gpu("idle_rise_days", ("gpu_trend", "Resting rise over", "days"), (1, None),
+    _gpu("idle_rise_days", ("gpu_trend", "Resting rise over", "days"),
          "The resting temperature is watched for a rise over this many days (for "
          "information only). Too small: the seasons look like a fault. Too large: a rise "
          "shows late.", kind="integer"),
-    _gpu("idle_rise_c", ("gpu_trend", "Resting rise of at least", "°C"), (0.1, None),
+    _gpu("idle_rise_c", ("gpu_trend", "Resting rise of at least", "°C"),
          "A rise of the resting temperature by at least this over those days is noted. "
          "Too small: noise is noted. Too large: a real rise is not."),
-    _gpu("temp_gpu_c", ("gpu_alarms", "Chip too hot", "°C"), (30, 120),
+    _gpu("temp_gpu_c", ("gpu_alarms", "Chip too hot", "°C"),
          "The chip above this for the time below is an alarm. Too small: ordinary heavy "
          "work alarms. Too large: the card is near its own slowdown before anyone hears."),
-    _gpu("temp_mem_c", ("gpu_alarms", "Memory too hot", "°C"), (30, 130),
+    _gpu("temp_mem_c", ("gpu_alarms", "Memory too hot", "°C"),
          "The memory above this for the time below is an alarm. Too small: heavy work "
          "alarms. Too large: memory near its limit is not flagged."),
-    _gpu("temp_hold_s", ("gpu_alarms", "Too hot for", "s"), (1, None),
+    _gpu("temp_hold_s", ("gpu_alarms", "Too hot for", "s"),
          "How long a temperature must stay above its limit to alarm. Too small: a short "
          "peak alarms. Too large: a real overheat alarms late."),
-    _gpu("throttle_hold_s", ("gpu_alarms", "Heat slowdown for", "s"), (1, None),
+    _gpu("throttle_hold_s", ("gpu_alarms", "Heat slowdown for", "s"),
          "How long the card may slow itself for heat or a hardware signal before that is "
          "an alarm (a power-cap slowdown never is). Too small: a blip alarms. Too large: a "
          "card held back by heat alarms late."),
-    _gpu("link_hold_s", ("gpu_alarms", "Slow PCIe link for", "s"), (1, None),
+    _gpu("link_hold_s", ("gpu_alarms", "Slow PCIe link for", "s"),
          "How long the PCIe link may run below its normal speed, under load, before that "
          "is an alarm. Too small: a moment of renegotiation alarms. Too large: a "
          "degraded link alarms late."),
-    _gpu("link_load_w", ("gpu_alarms", "PCIe link checked above", "W"), (0, None),
+    _gpu("link_load_w", ("gpu_alarms", "PCIe link checked above", "W"),
          "The link speed is judged only when the card draws at least this (a resting "
          "card lowers its link on purpose). Too small: a resting card's slow link alarms. "
          "Too large: a bad link under light work is missed."),
-    _gpu("replays_per_hour", ("gpu_alarms", "PCIe replays per hour", ""), (1, None),
+    _gpu("replays_per_hour", ("gpu_alarms", "PCIe replays per hour", ""),
          "More packets sent again than this within an hour is a warning. Too small: the "
          "few replays every link has warn. Too large: a failing riser or slot is not "
          "flagged.", kind="integer"),
@@ -322,10 +323,10 @@ FIELDS: tuple[Field, ...] = (
           "comma-separated: reported as critical, any other Xid as a warning. Fewer: a "
           "serious error is only a warning. More: a harmless one is critical.",
           kind="list"),
-    _gpu("repeat_s", ("gpu_alarms", "Repeat an alarm every", "s"), (60, None),
+    _gpu("repeat_s", ("gpu_alarms", "Repeat an alarm every", "s"),
          "How often an alarm whose condition lasts is said again. Too small: the log fills "
          "with the same alarm. Too large: a lasting problem is said once and forgotten."),
-    _gpu("critical_repeat_s", ("gpu_alarms", "Repeat a critical alarm every", "s"), (60, None),
+    _gpu("critical_repeat_s", ("gpu_alarms", "Repeat a critical alarm every", "s"),
          "The same, for a critical alarm. Too small: floods the log. Too large: a "
          "critical state is easy to miss."),
 )
@@ -396,9 +397,9 @@ def _within(field: Field, value: float) -> float:
 
 # Pairs whose first value must stay under the second (`True`: strictly), checked on
 # the whole saved section, so two separate saves cannot put them out of order.
-ORDERED = (("gpu_health.stable_min_s", "gpu_health.stable_max_s", False),
-           ("gpu_health.idle_min_s", "gpu_health.idle_max_s", False),
-           ("gpu_health.r_warn", "gpu_health.r_alarm", True))
+# The monitor's own pairs (`gpu_health.settings.ORDERED`), named by the page's keys.
+ORDERED = tuple((f"gpu_health.{first}", f"gpu_health.{second}", strict)
+                for first, second, strict in MONITOR_ORDER)
 
 
 def _number_now(config: Config, field: Field) -> float:
@@ -448,7 +449,8 @@ class SettingFields:
             # The sections' own parsers, as at start: ValueError leaves the file as it was.
             policy.MachineLimits.from_mapping(config.limits)
             policy.GatewayPolicy.from_mapping(config.gateway)
-            GpuHealthSettings.from_mapping(config.gpu_health)
+            # The pairs first: the page names them by their labels.
             _check_order(config)
+            GpuHealthSettings.from_mapping(config.gpu_health)
         self._changed("settings")
         return self.view()

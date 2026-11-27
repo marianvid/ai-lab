@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from ai_lab.gpu_health.nvml import NOT_SUPPORTED, Nvml
@@ -97,8 +98,13 @@ def card(**values) -> Nvml:
 
 
 def settings(**changes) -> GpuHealthSettings:
-    """The default settings with some changed."""
-    return GpuHealthSettings.from_mapping(changes)
+    """The default settings with some changed.
+
+    A reading faster than the parser allows (`sample_s` under 1 s) is set
+    afterwards, so the tests' threads turn in hundredths of a second.
+    """
+    fast = {name: changes.pop(name) for name in ("sample_s",) if name in changes}
+    return replace(GpuHealthSettings.from_mapping(changes), **fast)
 
 
 def temporary_store(test) -> Store:

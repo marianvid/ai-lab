@@ -3,7 +3,9 @@
 import unittest
 from typing import Any
 
-from ai_lab.gpu_health.settings import CRITICAL_XIDS, GpuHealthSettings
+from dataclasses import fields
+
+from ai_lab.gpu_health.settings import BOUNDS, CRITICAL_XIDS, GpuHealthSettings
 
 
 class Settings(unittest.TestCase):
@@ -38,4 +40,29 @@ class Settings(unittest.TestCase):
                     {"helper_events_path": 3}, {"channel": "telegram"}, ["sample_s"]]
         for raw in mistakes:
             with self.subTest(raw=raw), self.assertRaises(ValueError):
+                GpuHealthSettings.from_mapping(raw)
+
+    def test_a_value_that_breaks_the_monitor_is_refused_at_start(self):
+        breaking = {"sample_s": 0, "repeat_s": 0, "critical_repeat_s": 59, "raw_keep_days": 0,
+                    "r_alarm": 1.5, "temp_gpu_c": 200}
+        for name, value in breaking.items():
+            with self.subTest(name), self.assertRaisesRegex(ValueError, f"gpu_health {name}"):
+                GpuHealthSettings.from_mapping({name: value})
+
+    def test_every_number_has_a_range_that_its_default_is_in(self):
+        defaults = GpuHealthSettings()
+        numbers = {item.name for item in fields(GpuHealthSettings)
+                   if type(getattr(defaults, item.name)) in (int, float)}
+        self.assertEqual(set(BOUNDS), numbers)
+        for name, (low, high) in BOUNDS.items():
+            with self.subTest(name):
+                self.assertGreaterEqual(getattr(defaults, name), low)
+                if high is not None:
+                    self.assertLessEqual(getattr(defaults, name), high)
+
+    def test_a_pair_out_of_order_is_refused(self):
+        for raw, words in (({"stable_min_s": 900, "stable_max_s": 10}, "stable_min_s .900."),
+                           ({"idle_max_s": 300}, "idle_min_s .600. must be at most"),
+                           ({"r_warn": 0.25}, "r_warn .0.25. must be below r_alarm")):
+            with self.subTest(raw), self.assertRaisesRegex(ValueError, words):
                 GpuHealthSettings.from_mapping(raw)

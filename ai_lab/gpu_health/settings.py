@@ -16,6 +16,29 @@ CRITICAL_XIDS = (48, 63, 64, 74, 79, 92, 94, 95)
 # Where alarms can go. Only the log exists: no other channel was set up in
 # AI-Lab or home-lab, and the requirement says not to invent one.
 CHANNELS = ("log",)
+# The range each number may take, (least, most); None: no top. Below these the
+# monitor breaks: 0 s between readings is a busy loop, 0 s between repeats
+# floods the log, 0 days of raw readings folds the history at once. The
+# Settings page shows and refuses the same ranges (`application/setting_fields.py`).
+BOUNDS: dict[str, tuple[float, float | None]] = {
+    "sample_s": (1, 3600), "slow_s": (1, None), "stable_min_s": (1, None),
+    "stable_max_s": (1, None), "stable_band": (0.01, 1), "stable_min_w": (0, None),
+    "idle_max_w": (0, None), "idle_max_util": (0, 100), "idle_min_s": (1, None),
+    "idle_max_s": (1, None), "idle_fallback_days": (1, None), "baseline_days": (1, None),
+    "baseline_min_windows": (1, None), "trend_days": (1, None), "r_warn": (0.01, 1),
+    "r_alarm": (0.01, 1), "fan_warn_points": (1, 100), "fan_band_w": (1, None),
+    "fan_std_factor": (1, None), "hotspot_delta_c": (1, None), "ecc_corrected_week": (0, None),
+    "idle_rise_days": (1, None), "idle_rise_c": (0.1, None), "temp_gpu_c": (30, 120),
+    "temp_mem_c": (30, 130), "temp_hold_s": (1, None), "throttle_hold_s": (1, None),
+    "link_hold_s": (1, None), "link_load_w": (0, None), "replays_per_hour": (1, None),
+    "nvml_silent_s": (1, None), "helper_heartbeat_s": (1, None), "repeat_s": (60, None),
+    "critical_repeat_s": (60, None), "raw_keep_days": (1, None),
+}
+# Pairs whose first must stay under the second (True: strictly): a window
+# whose shortest is longer than its longest never forms, and a warning at or
+# above its alarm comes after it.
+ORDERED = (("stable_min_s", "stable_max_s", False), ("idle_min_s", "idle_max_s", False),
+           ("r_warn", "r_alarm", True))
 
 
 @dataclass(frozen=True)
@@ -91,7 +114,9 @@ class GpuHealthSettings:
         values = {name: _checked(name, raw[name], getattr(defaults, name)) for name in raw}
         if values.get("channel", defaults.channel) not in CHANNELS:
             raise ValueError("gpu_health channel must be one of: " + ", ".join(CHANNELS))
-        return cls(**values)
+        settings = cls(**values)
+        _check_order(settings)
+        return settings
 
     def json(self) -> dict:
         """The settings as plain values, for the page."""
@@ -112,7 +137,25 @@ def _checked(name: str, value, default):
         return value
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
         raise ValueError(f"gpu_health {name} must be a number, not negative")
-    return type(default)(value)
+    return type(default)(_within(name, value))
+
+
+def _within(name: str, value: float) -> float:
+    """`value`, refused outside its range in `BOUNDS`, naming it."""
+    low, high = BOUNDS[name]
+    if value < low or (high is not None and value > high):
+        top = f" and at most {high:g}" if high is not None else ""
+        raise ValueError(f"gpu_health {name} must be at least {low:g}{top}")
+    return value
+
+
+def _check_order(settings: GpuHealthSettings) -> None:
+    """ValueError naming both settings when a pair of `ORDERED` is out of order."""
+    for first, second, strict in ORDERED:
+        low, high = getattr(settings, first), getattr(settings, second)
+        if low > high or (strict and low == high):
+            word = "below" if strict else "at most"
+            raise ValueError(f"gpu_health {first} ({low:g}) must be {word} {second} ({high:g})")
 
 
 def _flag(name: str, value) -> bool:

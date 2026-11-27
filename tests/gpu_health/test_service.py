@@ -40,7 +40,7 @@ class Service(unittest.TestCase):
 
     def test_with_a_card_every_call_answers(self):
         library = FakeLibrary()
-        health = GpuHealth.start({"sample_s": 0.01}, self.folder, lambda: ("", False),
+        health = GpuHealth.start({"sample_s": 1}, self.folder, lambda: ("", False),
                                  load=lambda: Nvml(library))
         self.assertTrue(health.status()["available"])
         self.assertIn("points", health.history(1))

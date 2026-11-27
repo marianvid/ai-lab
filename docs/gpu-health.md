@@ -194,7 +194,13 @@ can reach AI-Lab on the home network.
 
 The `gpu_health` section of `config.json`, shown on the Settings page as the
 four *GPU health* sections (all but `channel`, which has one value today).
-Every number above is a setting with that value as its default; an unknown key is refused, so a typo does not
+Every number above is a setting with that value as its default, and each
+has a range (`BOUNDS` in `ai_lab/gpu_health/settings.py`) below which it
+would break the monitor: at least 1 s between readings, at least 60 s
+between repeats of an alarm, at least 1 day of raw readings, fractions from
+0.01 to 1. A value outside its range, or a pair out of order (a window's
+shortest longer than its longest, the R warning not below the R alarm),
+stops AI-Lab at start with its name, and the Settings page refuses the same; an unknown key is refused, so a typo does not
 silently keep a default. The ones you are most likely to touch:
 
 | Key | Default | What |
