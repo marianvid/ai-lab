@@ -38,6 +38,17 @@ class GatewayLimitsTests(unittest.TestCase):
         self.assertEqual((limits.first_byte_s, limits.max_waiting), (60, 12))
 
 
+class QuietCardTests(unittest.TestCase):
+    def test_how_quiet_the_card_must_be_comes_from_limits_runtime(self):
+        # Audit m23: fixed in code before, in no file and on no page.
+        limits = gateway_limits(Config(limits={"runtime": {"quiet_mb": 100, "quiet_s": 90,
+                                                           "quiet_poll_s": 0.25}}))
+        self.assertEqual((limits.quiet_mb, limits.quiet_timeout_s, limits.poll_s), (100, 90, 0.25))
+        self.assertEqual(gateway_limits(Config()).quiet_mb, 512)
+        with self.assertRaises(ValueError):
+            gateway_limits(Config(limits={"runtime": {"quiet_poll_s": 0}}))
+
+
 class SectionsTests(unittest.TestCase):
     def test_the_sections_other_packages_own_are_checked_by_their_parsers(self):
         self.assertEqual(sorted(CONFIG_SECTIONS),

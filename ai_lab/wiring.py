@@ -171,7 +171,10 @@ def gateway_limits(config: Config) -> GatewayLimits:
     `Gateway.timeouts_for`).
     """
     front_door = config.gateway_policy
+    runtime = config.machine_limits.runtime
     return GatewayLimits(
+        # How quiet the card must be before a load (`limits.runtime`, audit m23).
+        quiet_mb=runtime.quiet_mb, quiet_timeout_s=runtime.quiet_s, poll_s=runtime.quiet_poll_s,
         first_byte_s=front_door.first_byte_s,
         between_bytes_s=front_door.between_bytes_s,
         max_waiting=front_door.max_waiting,

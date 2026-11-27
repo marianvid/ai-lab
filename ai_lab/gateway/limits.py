@@ -12,14 +12,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from ..config.policy import (BETWEEN_BYTES_S, DEFAULT_MAX_TOKENS, FIRST_BYTE_S,
-                             MAX_WAITING, SAFETY_S, STALL_S)
+                             MAX_WAITING, QUIET_MB, QUIET_POLL_S, QUIET_TIMEOUT_S,
+                             SAFETY_S, STALL_S)
 
-# How quiet the card has to be before a new model is loaded, and how long to
-# wait for that. The threshold is not zero because a driver keeps a small
-# allocation of its own; on this machine an idle card reads about 2 MiB.
-QUIET_MB = 512.0
-QUIET_TIMEOUT_S = 60.0
-QUIET_POLL_S = 0.5
 
 # How long to wait for an engine and how many requests to hold, and for an
 # engine that reports its own progress (vLLM): a request is cut only when the

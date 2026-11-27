@@ -26,6 +26,13 @@ DEFAULT_MAX_TOKENS = 4096
 START_S = 60.0
 LOAD_S = 900.0
 UNLOAD_S = 120.0
+# How quiet the card has to be before a new model is loaded, how long to wait
+# for that, and how often to look (audit m23: machine values, now settings).
+# Not zero: a driver keeps a small allocation of its own; on CT 102 an idle
+# card reads about 2 MiB.
+QUIET_MB = 512.0
+QUIET_TIMEOUT_S = 60.0
+QUIET_POLL_S = 0.5
 INSTALL_S = 3600.0
 BUILD_S = 3600.0
 UPDATE_CHECK_EVERY_S = 3600.0
@@ -50,6 +57,8 @@ CHARS_PER_TOKEN = 3.0
 RETRY_AFTER_S = 5
 # The longest any of those waits may be set to: a week.
 LONGEST_S = 7 * 86400.0
+QUIET_MB_BOUNDS = (0, 65536)          # up to 64 GB "still in use" counts as quiet
+QUIET_POLL_BOUNDS = (0.05, 10)
 
 
 def _number(raw: Mapping, name: str, default: float, *, bounds: tuple[float, float],
@@ -167,6 +176,9 @@ class RuntimeLimits:
     start_s: float = START_S
     load_s: float = LOAD_S
     unload_s: float = UNLOAD_S
+    quiet_mb: float = QUIET_MB
+    quiet_s: float = QUIET_TIMEOUT_S
+    quiet_poll_s: float = QUIET_POLL_S
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> RuntimeLimits:
@@ -174,7 +186,12 @@ class RuntimeLimits:
         section = "Limits runtime"
         return cls(start_s=_seconds(raw, "start_s", START_S, section),
                    load_s=_seconds(raw, "load_s", LOAD_S, section),
-                   unload_s=_seconds(raw, "unload_s", UNLOAD_S, section))
+                   unload_s=_seconds(raw, "unload_s", UNLOAD_S, section),
+                   quiet_mb=_number(raw, "quiet_mb", QUIET_MB, bounds=QUIET_MB_BOUNDS,
+                                    section=section),
+                   quiet_s=_seconds(raw, "quiet_s", QUIET_TIMEOUT_S, section),
+                   quiet_poll_s=_number(raw, "quiet_poll_s", QUIET_POLL_S,
+                                        bounds=QUIET_POLL_BOUNDS, section=section))
 
 
 @dataclass(frozen=True, slots=True)

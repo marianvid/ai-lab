@@ -6,7 +6,8 @@ import unittest
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
-from ai_lab.application.setting_fields import BY_KEY, FIELDS, GROUPS, SettingFields
+from ai_lab.application.field_list import BY_KEY, FIELDS, GROUPS
+from ai_lab.application.setting_fields import SettingFields
 from ai_lab.config.policy import GatewayPolicy, MachineLimits
 from ai_lab.config.store import Config, ConfigStore
 from ai_lab.gpu_health.settings import GpuHealthSettings
@@ -49,7 +50,7 @@ class SettingFieldsTests(unittest.TestCase):
                     value = getattr(value, part)
                 self.assertEqual(field.default, list(value) if isinstance(value, tuple) else value)
                 self.assertIn(field.group, GROUPS)
-        listed = {"runtime": 3, "builds": 6, "embeddings": 5, "clients": 2}
+        listed = {"runtime": 6, "builds": 6, "embeddings": 5, "clients": 2}
         for part, count in listed.items():
             self.assertEqual(sum(1 for key in BY_KEY if key.startswith(f"limits.{part}.")),
                              count, part)
