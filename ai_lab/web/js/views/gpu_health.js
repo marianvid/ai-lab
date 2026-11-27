@@ -5,7 +5,7 @@
 // shows what it found, and refreshes itself on a timer like the Gateway page.
 
 import { api } from '../api.js';
-import { element } from '../format.js';
+import { beingEdited, element } from '../format.js';
 import { showNotice } from '../confirm.js';
 
 const EVERY_MS = 15000;
@@ -183,7 +183,9 @@ function actionsSection(redraw) {
     try {
       await run();
     } catch (error) {
+      // The note stays as typed, so it can be sent again.
       await showNotice({ title: `Could not ${label.toLowerCase()}`, body: error.message });
+      return;
     }
     redraw();
   } });
@@ -228,6 +230,8 @@ export async function render(container) {
     actionsSection(redraw),
   ]));
   timer = window.setInterval(() => {
-    if (!container.contains(document.activeElement)) redraw();
+    // Not while the note is being typed, even with the focus elsewhere: the
+    // redraw would throw the typed note away.
+    if (!beingEdited(container)) redraw();
   }, EVERY_MS);
 }

@@ -30,6 +30,23 @@ export function element(tag, attributes = {}, children = []) {
 }
 
 
+// Whether someone is in the middle of typing in `container`: a field there has
+// the focus, or holds a value that differs from the one it was drawn with
+// (typed and not saved). A page that redraws itself on a timer skips the
+// redraw while this is true, so what was typed is never thrown away. A field's
+// drawn value is its `value` attribute (`element` sets it), so `defaultValue`
+// and `defaultChecked` are what was saved.
+export function beingEdited(container) {
+  const active = document.activeElement;
+  if (active && container.contains(active)
+      && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;
+  return [...container.querySelectorAll('input, textarea')].some((field) => (
+    field.type === 'checkbox' || field.type === 'radio'
+      ? field.checked !== field.defaultChecked
+      : field.value !== field.defaultValue));
+}
+
+
 // What goes in the browser tab.
 //
 // The machine is part of it, because there is usually more than one of these

@@ -14,7 +14,7 @@
 // the tab was opened.
 
 import { api } from '../api.js';
-import { element, seconds } from '../format.js';
+import { beingEdited, element, seconds } from '../format.js';
 import { showNotice } from '../confirm.js';
 
 // Slower than it looks like it should be, on purpose. Reading these numbers
@@ -263,8 +263,11 @@ function limits(stats, redraw) {
         // Nothing is said on success: the fields keep the saved values and
         // Save goes back to sleep, which is the confirmation.
       } catch (error) {
+        // What was typed stays, so it can be corrected rather than typed again.
         await showNotice({ title: 'Could not save the gateway limits',
                            body: error.message });
+        save.disabled = unchanged();
+        return;
       }
       redraw();
     },
@@ -374,6 +377,8 @@ export async function render(container) {
   const mine = container.firstChild;
   timer = window.setInterval(() => {
     if (container.firstChild !== mine) { window.clearInterval(timer); timer = null; return; }
+    // Not while a limit is being typed: the redraw would put the saved value back.
+    if (beingEdited(container)) return;
     render(container).catch(() => {});
   }, EVERY_MS);
 }
