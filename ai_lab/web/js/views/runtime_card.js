@@ -305,7 +305,9 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     const yue2 = instance.engine === 'yue2' && task === 'music-generation';
     const heartmula = instance.engine === 'heartmula' && task === 'music-generation';
     const llama = instance.engine === 'llamacpp' && task === 'text-generation';
-    if (!comfy && !qwenTts && !higgs && !voxcpm && !kokoro && !yue2 && !heartmula && !llama) return null;
+    // Linked when the engine says it serves a page (`has_page`), or llama.cpp's chat.
+    if (!(instance.has_page && (comfy || qwenTts || higgs || voxcpm || kokoro || yue2 || heartmula))
+        && !llama) return null;
     const label = comfy ? ({ 'image-generation': 'Create', 'image-edit': 'Edit',
       'music-generation': 'Music' }[task] || 'ComfyUI')
       : yue2 || heartmula ? 'Music' : qwenTts || higgs || voxcpm || kokoro ? 'Speak' : 'Chat';

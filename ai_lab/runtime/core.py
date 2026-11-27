@@ -192,11 +192,11 @@ class Runtime:
             "pid": process.pid,
             "ready": engine.ready(instance.port) if process.running else False,
             "web_ui": bool(getattr(engine, "web_ui", lambda: None)()),
-            # Where the engine's own page listens: the API port plus the
-            # machine's `limits.editor_port_offset` for AI-Lab's own server
-            # engines (the page links it only for those that serve a page), the
-            # API port itself for the others (llama.cpp's chat).
+            # Where the engine's own page listens (the API port plus
+            # `limits.editor_port_offset`, or the API port itself for llama.cpp's
+            # chat), and whether it serves one there (its `has_editor_page`).
             "editor_port": getattr(engine, "editor_port", lambda port: port)(instance.port),
+            "has_page": bool(getattr(engine, "has_editor_page", False)),
             # What the engine will not do with these settings, whatever the
             # weights can — pictures on mlx-lm, or on vLLM "text only". The
             # page takes those icons off the row.

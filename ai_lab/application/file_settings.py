@@ -27,13 +27,13 @@ EDITABLE, READ_ONLY_KIND, FIELDS = "editable", "read-only", "fields"
 
 # Every top-level key of `Config`: the page that shows it, and how.
 SCHEMA: dict[str, tuple[str, str]] = {
-    "schema_version": ("Settings → This AI-Lab", READ_ONLY_KIND),
+    "schema_version": ("Settings → read-only sections at the foot of the left column (File format version)", READ_ONLY_KIND),
     "title": ("Settings → This AI-Lab", EDITABLE),
     "host": ("Settings → This AI-Lab", READ_ONLY_KIND),
     "port": ("Settings → This AI-Lab", READ_ONLY_KIND),
     "repositories": ("Settings → model paths; Library", EDITABLE),
     "instances": ("Models", EDITABLE),
-    "engines": ("Settings → Engines (binary editable, the rest read-only)", READ_ONLY_KIND),
+    "engines": ("Settings → Engines (binary editable); the rest in read-only sections at the foot of the left column", READ_ONLY_KIND),
     "gateway": ("Gateway → Limits; Settings → Uploaded images", FIELDS),
     "limits": ("Settings (Loading models, Engine updates, Embeddings lane, Client caps)",
                FIELDS),
@@ -48,7 +48,7 @@ SCHEMA: dict[str, tuple[str, str]] = {
     "models_root": ("Settings → model paths", EDITABLE),
     "model_roots": ("Settings → model paths", EDITABLE),
     "download_root": ("Settings → model paths (a root's \u201cdownload default\u201d)", EDITABLE),
-    "extra_fields": ("Settings → This AI-Lab", READ_ONLY_KIND),
+    "extra_fields": ("Settings → read-only sections at the foot of the left column", READ_ONLY_KIND),
 }
 
 RESTART = "Read when AI-Lab starts: a change in the file takes effect at the next start."

@@ -11,7 +11,7 @@ import { installDom, button, settle } from './support/dom.js';
 
 const INSTANCE = {
   id: 'qwen-coder', engine: 'llamacpp',
-  model_id: 'gguf/qwen/qwen', port: 8080, editor_port: 18080,
+  model_id: 'gguf/qwen/qwen', port: 8080, editor_port: 18080, has_page: true,
   params: { context_size: 32768, parallel: 1, temperature: 0.8 },
   running: true, enabled: true, pid: 4541, ready: true, web_ui: true,
   last_operation: null,
@@ -222,6 +222,13 @@ describe('the Models page', () => {
     const voxcpm = { ...INSTANCE, engine: 'voxcpm', task: 'speech-synthesis', editor_port: 10080 };
     const { view } = await renderPage({ '/api/instances': [voxcpm] });
     assert.equal(view.querySelector('.chat-link').getAttribute('href'), 'http://localhost:10080/');
+  });
+
+  it('links an engine page only when the gateway says the engine serves one', async () => {
+    // `has_page` comes from the engine (has_editor_page); the page keeps no list of its own.
+    const voxcpm = { ...INSTANCE, engine: 'voxcpm', task: 'speech-synthesis', has_page: false };
+    const { view } = await renderPage({ '/api/instances': [voxcpm] });
+    assert.equal(view.querySelector('.chat-link'), null);
   });
 
   it('opens the official VoxCPM editor only while VoxCPM is ready', async () => {

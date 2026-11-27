@@ -623,3 +623,8 @@ class EditorPortTests(unittest.TestCase):
 
     def test_any_other_engine_is_its_own_port(self):
         self.assertEqual(self.row(FakeEngine(host=FakeHost()))["editor_port"], 8093)
+
+    def test_the_row_says_whether_the_engine_serves_a_page(self):
+        from ai_lab.engines.images.comfyui import ComfyUiEngine
+        self.assertTrue(self.row(ComfyUiEngine())["has_page"])
+        self.assertFalse(self.row(FakeEngine(host=FakeHost()))["has_page"])
