@@ -16,7 +16,7 @@ const INSTANCE = {
   last_operation: null,
 };
 
-async function boot() {
+async function boot(beforeImport = () => {}) {
   const context = installDom({
     '/api/instances': [INSTANCE],
     '/api/models': [],
@@ -31,6 +31,7 @@ async function boot() {
     close() {}
   };
 
+  beforeImport(context);
   const { onChange, startEventStream } = await import(
     `../../ai_lab/web/js/events.js?${Math.random()}`);
   startEventStream();
@@ -40,11 +41,27 @@ async function boot() {
 describe('refreshing', () => {
   it('does nothing at all while the machine is quiet', async () => {
     // The whole point: a page nobody is changing stays exactly as it is.
-    const context = await boot();
+    // The old timer redrew every few seconds, so waiting a moment could not
+    // see it come back (the reviewer's item 6): no repeating timer may be set.
+    const intervals = [];
+    const spied = [];
+    const context = await boot(({ window }) => {
+      for (const host of [globalThis, window]) {
+        const real = host.setInterval;
+        spied.push([host, real]);
+        host.setInterval = (callback, ms, ...rest) => {
+          intervals.push(ms);
+          return real.call(host, callback, ms, ...rest);
+        };
+      }
+    });
     let called = 0;
     context.onChange(() => { called += 1; });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await settle();
+    for (const [host, real] of spied) host.setInterval = real;
+    assert.deepEqual(intervals, [], 'a repeating timer was set');
     assert.equal(called, 0, 'something redrew without being told to');
+    context.window.close();
   });
 
   it('reacts when the server says something moved', async () => {

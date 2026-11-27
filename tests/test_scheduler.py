@@ -71,7 +71,7 @@ class TogetherTests(unittest.TestCase):
         time.sleep(0.05)
         self.assertEqual(s.state()["in_flight"], 2)
         self.assertEqual(len(s.state()["waiting"]), 1)
-        s.leave()
+        s.leave("a")
         third.join(timeout=2)
         self.assertEqual(s.state()["in_flight"], 2)
 
@@ -116,10 +116,16 @@ class DoorClosesTests(unittest.TestCase):
         time.sleep(0.05)
         self.assertEqual(s.state()["in_flight"], 1)
         self.assertEqual([w["shape"] for w in s.state()["waiting"]], ["b", "a"])
-        s.leave()
+        s.leave("a")
         wants_b.join(timeout=2)
         self.assertEqual(card.switches, ["a", "b"])
-        self.assertFalse(later_a.is_alive() is False and False)
+        # The later "a" did not walk in behind the door: it still waits while b holds
+        # the card, and goes in once b is done (the reviewer's item 3).
+        self.assertTrue(later_a.is_alive(), "the later request for a walked in past b")
+        s.leave("b")
+        later_a.join(timeout=2)
+        self.assertFalse(later_a.is_alive())
+        self.assertEqual(card.switches, ["a", "b", "a"])
 
     def test_continuous_load_does_not_starve_the_other_model(self):
         # The scenario the rule exists for: requests for "a" keep arriving
@@ -132,7 +138,7 @@ class DoorClosesTests(unittest.TestCase):
         for _ in range(20):
             run(s.enter, "a")
         time.sleep(0.05)
-        s.leave()                               # the only one in flight ends
+        s.leave("a")                               # the only one in flight ends
         wants_b.join(timeout=2)
         self.assertFalse(wants_b.is_alive(), "b never got in")
         self.assertEqual(card.switches, ["a", "b"])
@@ -147,7 +153,7 @@ class PhotographTests(unittest.TestCase):
         s.enter("a")
         waiters = [run(s.enter, "b") for _ in range(3)]
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         for thread in waiters:
             thread.join(timeout=2)
         self.assertEqual(s.state()["in_flight"], 3)
@@ -162,7 +168,7 @@ class PhotographTests(unittest.TestCase):
         run(s.enter, "b")
         run(s.enter, "c")
         time.sleep(0.05)
-        s.leave()                               # the switch to b begins
+        s.leave("a")                               # the switch to b begins
         time.sleep(0.1)                         # still loading
         late_b = run(s.enter, "b")
         time.sleep(0.05)
@@ -175,7 +181,7 @@ class PhotographTests(unittest.TestCase):
         for _ in range(5):
             run(s.enter, "b")
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         time.sleep(0.1)
         self.assertEqual(s.state()["in_flight"], 2)
         self.assertEqual(len(s.state()["waiting"]), 3)
@@ -191,7 +197,7 @@ class OldestWinsTests(unittest.TestCase):
         for _ in range(5):
             run(s.enter, "c")                   # newer, and more of them
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         time.sleep(0.2)
         self.assertEqual(card.switches, ["a", "b"],
                          "the crowd won over the older request")
@@ -204,9 +210,9 @@ class OldestWinsTests(unittest.TestCase):
         time.sleep(0.03)
         run(s.enter, "c")
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         time.sleep(0.1)
-        s.leave()                               # b finishes
+        s.leave("b")                               # b finishes
         time.sleep(0.2)
         self.assertEqual(card.switches, ["a", "b", "c"])
 
@@ -227,7 +233,7 @@ class FailedLoadTests(unittest.TestCase):
 
         threads = [run(wants_b) for _ in range(3)]
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         for thread in threads:
             thread.join(timeout=2)
         self.assertEqual(failures, ["it would not fit"] * 3)
@@ -242,7 +248,7 @@ class FailedLoadTests(unittest.TestCase):
         wants_c = run(s.enter, "c")
         time.sleep(0.05)
         card.refuses["b"] = RuntimeError("no")   # c is fine
-        s.leave()
+        s.leave("a")
         wants_c.join(timeout=2)
         self.assertFalse(wants_c.is_alive(), "c never got its turn")
         self.assertEqual(card.switches, ["a", "c"])
@@ -270,7 +276,7 @@ class AbandonedTests(unittest.TestCase):
 
         thread = run(leaves)
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         thread.join(timeout=2)
         self.assertEqual(gone, [True])
 
@@ -280,7 +286,7 @@ class AbandonedTests(unittest.TestCase):
         s.enter("a")
         run(lambda: _swallow(s.enter, "b", still_wanted=lambda: False))
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         time.sleep(0.1)
         self.assertEqual(card.switches, ["a"],
                          "it swapped for a client that had gone")
@@ -291,7 +297,7 @@ class AbandonedTests(unittest.TestCase):
         s.enter("a")
         thread = run(lambda: s.enter("b", still_wanted=lambda: True))
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         thread.join(timeout=2)
         self.assertEqual(card.switches, ["a", "b"])
 
@@ -305,7 +311,7 @@ class AbandonedTests(unittest.TestCase):
 
         thread = run(lambda: s.enter("b", still_wanted=cannot_tell))
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         thread.join(timeout=2)
         self.assertEqual(card.switches, ["a", "b"])
 
@@ -372,7 +378,7 @@ class OutsideInterferenceTests(unittest.TestCase):
         card = Card(places=4)
         s = scheduler(card)
         s.enter("a")
-        s.leave()
+        s.leave("a")
         s.forget_current()                      # somebody pressed Unload
         s.enter("a")
         self.assertEqual(card.switches, ["a", "a"])
@@ -421,7 +427,7 @@ class OverflowTests(unittest.TestCase):
         time.sleep(0.05)
         run(_hold, s, "c", 0.05)                # newer than all four
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         time.sleep(1.2)
         self.assertEqual(card.switches, ["a", "b", "c"],
                          "it swapped away mid-round and back again")
@@ -433,11 +439,11 @@ class OverflowTests(unittest.TestCase):
         for _ in range(5):
             run(lambda: _swallow(s.enter, "b"))
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         time.sleep(0.1)
         self.assertEqual(s.state()["in_flight"], 2)
         self.assertEqual(len(s.state()["waiting"]), 3)
-        s.leave()
+        s.leave("b")
         time.sleep(0.1)
         self.assertEqual(len(s.state()["waiting"]), 2, "nobody took the free place")
 
@@ -450,10 +456,10 @@ class OverflowTests(unittest.TestCase):
             run(_record, s, "b", served, index)
             time.sleep(0.02)
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         for _ in range(4):
             time.sleep(0.15)
-            s.leave()
+            s.leave("b")
         self.assertEqual(served, [0, 1, 2])
 
 
@@ -463,7 +469,7 @@ def _hold(s, shape, seconds):
     except Exception:
         return
     time.sleep(seconds)
-    s.leave()
+    s.leave(shape)
 
 
 def _record(s, shape, served, index):
@@ -489,7 +495,7 @@ class InOrderTests(unittest.TestCase):
         card = Card(places=places)
         s = scheduler(card)
         s.enter("start")
-        s.leave()
+        s.leave("start")
         threads = []
         for shape in queue:
             threads.append(run(_hold, s, shape, 0.05))
@@ -521,7 +527,7 @@ class InOrderTests(unittest.TestCase):
             run(_hold, s, shape, 0.4)
             time.sleep(0.03)
         time.sleep(0.05)
-        s.leave()
+        s.leave("a")
         time.sleep(0.25)
         self.assertEqual(s.state()["in_flight"], 2,
                          "it swept up the two behind the request for c")
@@ -545,7 +551,7 @@ class ResetDuringALoadTests(unittest.TestCase):
     def test_the_waiting_request_is_turned_away_not_admitted(self):
         s, card = self.scheduler_that_loads_slowly()
         s.enter("a")
-        s.leave()
+        s.leave("a")
         outcome = []
 
         def waits():
@@ -565,7 +571,7 @@ class ResetDuringALoadTests(unittest.TestCase):
         # Whatever is on it now, the next request unloads before it loads.
         s, card = self.scheduler_that_loads_slowly()
         s.enter("a")
-        s.leave()
+        s.leave("a")
         run(lambda: _swallow(s.enter, "b"))
         time.sleep(0.1)
         s.reset("stopped by hand")
@@ -577,7 +583,7 @@ class ResetDuringALoadTests(unittest.TestCase):
     def test_the_next_request_loads_again(self):
         s, card = self.scheduler_that_loads_slowly()
         s.enter("a")
-        s.leave()
+        s.leave("a")
         run(lambda: _swallow(s.enter, "b"))
         time.sleep(0.1)
         s.reset("stopped by hand")

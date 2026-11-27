@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, ClassVar, cast
 from unittest import mock
 
@@ -236,8 +237,20 @@ class ServerTests(LiveServer):
         self.assertIn("<title>AI-Lab</title>", body)
 
     def test_static_files_cannot_escape_the_web_directory(self):
-        status, _ = self.call("GET", "/../config.json")
-        self.assertEqual(status, 404)
+        # Files that exist outside web/ (the reviewer's item 1: the old path
+        # named no file, so it was a 404 with or without the guard). Two levels
+        # up is the checkout, where opts/ (the secrets) sits.
+        package = Path(__file__).resolve().parents[2] / "ai_lab"
+        for path, there in (("/../wiring.py", package / "wiring.py"),
+                            ("/../../pyproject.toml", package.parent / "pyproject.toml")):
+            with self.subTest(path):
+                self.assertTrue(there.is_file(), f"{there} must exist for this test to mean anything")
+                try:
+                    with urllib.request.urlopen(self.base + path, timeout=5) as response:
+                        status = response.status
+                except urllib.error.HTTPError as error:
+                    status = error.code
+                self.assertEqual(status, 404, f"{path} was served")
 
     def test_the_event_stream_announces_itself_correctly(self):
         request = urllib.request.Request(self.base + "/api/events")

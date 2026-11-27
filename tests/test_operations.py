@@ -744,19 +744,29 @@ class MoveModelTests(unittest.TestCase):
 
         self.operations = self.assembled(Inspecting)
         self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        self.assertNotIn("benchmark-gguf/.ai-lab-staging", "".join(seen.get("ids", [])))
-        for model_id in seen.get("ids", []):
+        # The catalog was really looked at mid-copy (the reviewer's item 7):
+        # without this, a move that never checks for a cancel passes on nothing.
+        self.assertIn("ids", seen, "the catalog was never inspected during the copy")
+        self.assertIn("gguf/qwen/qwen", seen["ids"], "the source is still listed mid-copy")
+        for model_id in seen["ids"]:
             self.assertNotIn(".ai-lab-staging", model_id)
 
     def test_staging_root_is_created_privately(self):
+        # The modes AI-Lab gives the staging root and the job's folder, read
+        # while the copy runs (the reviewer's item 2: the old test set them itself).
         self.operations.delete_instance("qwen")
+        modes: dict[str, str] = {}
+
+        class Reading(MoveJobStore):
+            def check_cancelled(self, job):
+                staging = Path(job["staging"])
+                modes["root"] = oct(staging.parent.stat().st_mode)[-3:]
+                modes["job"] = oct(staging.stat().st_mode)[-3:]
+                super().check_cancelled(job)
+
+        self.operations = self.assembled(Reading)
         self.operations.move_model("gguf/qwen/qwen", "benchmark")
-        staging_root = self.benchmark / "gguf" / ".ai-lab-staging"
-        # Removed after a clean move, so recreate it the same way to check
-        # the mode a live one would have had.
-        staging_root.mkdir(parents=True, exist_ok=True)
-        os.chmod(staging_root, 0o700)
-        self.assertEqual(oct(staging_root.stat().st_mode)[-3:], "700")
+        self.assertEqual(modes, {"root": "700", "job": "700"})
 
     def test_recover_moves_fails_jobs_left_mid_flight_and_cleans_their_staging(self):
         """What `recover_moves()` finds at startup after a crash."""
@@ -1021,11 +1031,21 @@ class DownloadDestinationTests(unittest.TestCase):
         }))
         store = ConfigStore(self.path)
         host = FakeHost()
+        self.sent_to: list[Path] = []
+        sent_to = self.sent_to
+
+        class Recording(DownloadManager):
+            """Where each transfer is told to write (the page's view does not say)."""
+
+            def enqueue(self, remote, destination, *args, **kwargs):
+                sent_to.append(Path(destination).resolve())
+                return super().enqueue(remote, destination, *args, **kwargs)
+
         self.operations = Operations.assemble(OperationsParts(
             store=store, catalog=Catalog(),
             runtime=Runtime(host, EventBus(), sample_interval_s=0),
             settings=Settings(store, host, Registry()),
-            downloads=DownloadManager(opener=lambda url, resume: None),
+            downloads=Recording(opener=lambda url, resume: None),
             huggingface=HuggingFaceClient(opener=lambda url: [
                 {"type": "file", "path": "thing-Q4_K_M.gguf", "size": 8},
                 {"type": "file", "path": "weights.safetensors", "size": 8},
@@ -1034,16 +1054,22 @@ class DownloadDestinationTests(unittest.TestCase):
         ))
         self.addCleanup(drain, self.operations)
 
+    def written_under(self, name: str) -> bool:
+        """Whether the one transfer writes inside this repository (the reviewer's item 8)."""
+        self.assertEqual(len(self.sent_to), 1)
+        return self.sent_to[0].is_relative_to((self.root / name).resolve())
+
     def test_a_gguf_model_goes_to_the_gguf_repository(self):
         transfer = self.operations.download("org/model", "thing-Q4_K_M")
         self.assertTrue(transfer["id"])
-        self.assertTrue((self.root / "gguf").exists())
+        self.assertTrue(self.written_under("gguf"), self.sent_to)
 
     def test_a_safetensors_model_goes_to_the_safetensors_repository(self):
         self.operations.download("org/model", "weights")
         # The destination was chosen by format, not by position in the list.
-        self.assertEqual(
-            self.operations.transfers()[0]["name"], "weights")
+        transfer = self.operations.transfers()[0]
+        self.assertEqual(transfer["name"], "weights")
+        self.assertTrue(self.written_under("safetensors"), self.sent_to)
 
     def test_a_format_with_no_repository_says_so(self):
         with self.store_without_gguf(), self.assertRaises(ValueError) as caught:
@@ -1052,7 +1078,9 @@ class DownloadDestinationTests(unittest.TestCase):
 
     def test_an_explicit_destination_still_wins(self):
         self.operations.download("org/model", "thing-Q4_K_M", "st")
-        self.assertEqual(len(self.operations.transfers()), 1)
+        transfers = self.operations.transfers()
+        self.assertEqual(len(transfers), 1)
+        self.assertTrue(self.written_under("safetensors"), self.sent_to)
 
     def store_without_gguf(self):
         from contextlib import contextmanager

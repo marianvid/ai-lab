@@ -138,8 +138,9 @@ describe('the Gateway page', () => {
   });
 
   it('says the card is idle when nothing is running on it', async () => {
+    // The status itself: "idle" alone also matches the label "Max idle time".
     const { view } = await renderPage();
-    assert.match(view.textContent, /idle/);
+    assert.match(view.textContent, /Status\s*idle/);
   });
 
   it('does not repeat the status in the lines below it', async () => {
@@ -631,8 +632,12 @@ describe('what the machine says about its memory', () => {
   });
 
   it('says nothing at all when there is no accelerator', async () => {
-    const { view } = await renderPage({ card: {} });
-    assert.equal(view.textContent.includes('GPU mem'), false);
+    // No card: no temperature and no card pool, only the machine's memory.
+    const machine = STATS.memory.pools[1];
+    const { view } = await renderPage({ card: {}, memory: { unified: false, pools: [machine] } });
+    assert.equal(view.textContent.includes('GPU temp'), false);
+    assert.equal(view.textContent.includes('Card mem'), false);
+    assert.match(view.textContent, /System mem/);
   });
 });
 
