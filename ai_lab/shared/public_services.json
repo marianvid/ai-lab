@@ -1,5 +1,5 @@
 {
-  "_comment": "Addresses of the public services AI-Lab reads from, the same on every machine. Read by ai_lab/public_services.py.",
+  "_comment": "Addresses of the public services AI-Lab reads from, the same on every machine. Read by ai_lab/shared/public_services.py.",
   "pypi_package": "https://pypi.org/pypi/{package}/json",
   "huggingface_api": "https://huggingface.co/api",
   "huggingface_file": "https://huggingface.co/{repo}/resolve/main/{path}",

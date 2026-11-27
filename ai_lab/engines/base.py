@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..types import Format, ModelSet, Task
+from ..shared.numbers import whole_number
 from ..shared.unexpected import CALL_FAILED, note
 
 # What `needs_mb` answers for an engine that needs nothing of the card (it runs
@@ -72,19 +73,23 @@ class ParamSpec:
         raise ValueError(f"{self.label} must be true or false")
 
     def _number(self, value: object) -> float:
-        whole = self.kind == "int"
-        noun = "whole number" if whole else "number"
-        if not isinstance(value, (str, int, float)):
-            raise ValueError(f"{self.label} must be a {noun}")
-        try:
-            number: float = int(value) if whole else float(value)
-        except ValueError:
-            raise ValueError(f"{self.label} must be a {noun}") from None
+        number = self._read_number(value)
         if self.minimum is not None and number < self.minimum:
             raise ValueError(f"{self.label} must be at least {self.minimum}")
         if self.maximum is not None and number > self.maximum:
             raise ValueError(f"{self.label} must be at most {self.maximum}")
         return number
+
+    def _read_number(self, value: object) -> float:
+        if self.kind == "int":
+            # 3.7 was cut to 3 and true taken as 1, silently (audit L12).
+            return whole_number(value, self.label)
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            raise ValueError(f"{self.label} must be a number")
+        try:
+            return float(value)
+        except ValueError:
+            raise ValueError(f"{self.label} must be a number") from None
 
     def _identifier(self, value: object) -> str:
         if not isinstance(value, str):

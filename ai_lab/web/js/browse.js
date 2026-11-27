@@ -9,7 +9,6 @@
 // one you mean. A **program** is chosen by clicking it, because clicking a file
 // cannot mean "go inside". One walker, two endings.
 
-import { confirmDestructive } from './confirm.js';
 import { element } from './format.js';
 
 async function listing(path, programs) {

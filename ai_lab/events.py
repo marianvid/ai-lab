@@ -105,8 +105,8 @@ class EventBus:
 def to_json(event) -> dict:
     """Tag each event with its kind so the browser can route it.
 
-    Two kinds share the stream: progress through a model load, and lines of
-    output from a build.
+    Three kinds share the stream: progress through a model load (runtime),
+    a change a page should redraw for (change), and lines of output (log).
     """
     payload = asdict(event)
     if isinstance(event, RuntimeEvent):

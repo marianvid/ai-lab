@@ -1,6 +1,7 @@
 // Settings: the machine, its engines, and where models are kept.
-// What is set here is the machine's; every setting AI-Lab reads from its
-// configuration file has a field (`setting_fields.js`).
+// What is set here is the machine's: editable fields (`setting_fields.js`),
+// read-only sections for what is kept only in the file, and the values still
+// fixed in code (`in_code`).
 
 import { api } from '../api.js';
 import { machine } from './machine.js';

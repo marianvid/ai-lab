@@ -14,8 +14,29 @@ function systemPrefersDark() {
     && window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
+// Where storage is refused (a private window, blocked site data) this throws;
+// the page must still start, only without remembering (audit L65).
+let chosenHere = null;
+
+function read() {
+  try {
+    return localStorage.getItem(KEY);
+  } catch {
+    return chosenHere;
+  }
+}
+
+function keep(choice) {
+  chosenHere = choice;
+  try {
+    localStorage.setItem(KEY, choice);
+  } catch {
+    // Not remembered after a reload; the page goes on.
+  }
+}
+
 function stored() {
-  const value = localStorage.getItem(KEY);
+  const value = read();
   if (ORDER.includes(value)) return value;
   // Nothing chosen yet: start from what the system is already doing, so the
   // first click changes the page rather than confirming it.
@@ -41,7 +62,7 @@ export function installTheme(button) {
 
   button.addEventListener('click', () => {
     const next = stored() === 'dark' ? 'light' : 'dark';
-    localStorage.setItem(KEY, next);
+    keep(next);
     apply(next);
     draw();
   });

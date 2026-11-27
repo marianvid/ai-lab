@@ -90,16 +90,10 @@ export function createEngineSection(logs, byEngine) {
     return null;
   }
 
-  // The update line: what is waiting, and the way to read about it.
-  //
-  // **No button here updates anything.** Every one opens what the update would
-  // bring — what changes, what upstream wrote, which packages would be replaced
-  // — and the real Update sits at the foot of that. An update taken without
-  // reading it is a hope, and this machine runs one card.
-  //
   // "Check for updates" used to sit here and is gone. Upstream is asked on a
   // timer anyway, so the button did what was already being done, and its only
   // real effect was to make the page look like it needed pressing.
+  //
   // What is waiting, and the way to read about it. Nothing at all when there is
   // nothing waiting: an engine at the newest version has no update to review, so
   // a button offering to review one would open a page saying "no changes".

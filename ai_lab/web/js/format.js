@@ -54,9 +54,9 @@ export function beingEdited(container) {
 // reading "AI-Lab" are two tabs you have to click to tell apart, and the wrong
 // one is the one where a model gets unloaded.
 //
-// Worked out from what the machine reports rather than configured, so a second
-// machine is distinguishable the moment it is running rather than after
-// somebody remembers to give it a different name.
+// The configured `title` (Settings → This AI-Lab) beside what the machine
+// reports (Linux, macOS), so a second machine is told apart at once even
+// before somebody gives it a different name.
 export function pageTitle(settings) {
   const name = (settings && settings.title) || 'AI-Lab';
   const machine = settings && settings.host && settings.host.operating_system;

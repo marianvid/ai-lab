@@ -107,16 +107,23 @@ class DarwinHost:
         with self._lock:
             if self._alive(spec.instance_id):
                 raise RuntimeError(f"{spec.instance_id} is already running")
+            # A handle left by a process that ended on its own is closed
+            # first, and a start that fails closes its own (audit L16).
+            self._close_log(spec.instance_id)
             log_path = Path(tempfile.gettempdir()) / f"ai-lab-{spec.instance_id}.log"
             self._logs[spec.instance_id] = log_path
             handle = log_path.open("w")  # noqa: SIM115 - closed in _close_log
             self._handles[spec.instance_id] = handle
-            self._processes[spec.instance_id] = subprocess.Popen(
-                spec.argv,
-                env=merged_env(spec.env),
-                stdout=handle,
-                stderr=subprocess.STDOUT,
-            )
+            try:
+                self._processes[spec.instance_id] = subprocess.Popen(
+                    spec.argv,
+                    env=merged_env(spec.env),
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                )
+            except OSError:
+                self._close_log(spec.instance_id)
+                raise
 
     def stop(self, instance_id: str) -> None:
         """Ask politely, then insist.

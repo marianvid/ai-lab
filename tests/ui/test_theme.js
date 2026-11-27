@@ -78,4 +78,18 @@ describe('the theme control', () => {
     const module = await import(`../../ai_lab/web/js/theme.js?${Math.random()}`);
     assert.ok(['light', 'dark'].includes(module.currentTheme()));
   });
+
+  it('still starts, and still switches, where storage is refused', async () => {
+    // Audit L65: a throw at load left a blank page.
+    const context = installDom({});
+    const refused = () => { throw new Error('SecurityError: storage is disabled'); };
+    global.localStorage = { getItem: refused, setItem: refused, clear: refused };
+    const module = await import(`../../ai_lab/web/js/theme.js?${Math.random()}`);
+    const button = context.document.createElement('button');
+    context.document.body.append(button);
+    module.installTheme(button);
+    const before = context.document.documentElement.getAttribute('data-theme');
+    button.click();
+    assert.notEqual(context.document.documentElement.getAttribute('data-theme'), before);
+  });
 });

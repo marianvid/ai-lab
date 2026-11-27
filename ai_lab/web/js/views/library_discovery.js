@@ -322,8 +322,7 @@ export function createDiscovery() {
         sets.length
           ? sets.map(variantRow)
           : [element('p', { class: 'muted',
-                            text: 'Nothing here this machine can run. '
-                                  + 'Untick the filter to see every format.' })]));
+                            text: 'Nothing here this machine can run.' })]));
     }
     return element('div', {}, rows);
   }

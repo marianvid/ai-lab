@@ -79,11 +79,10 @@ def build(config_path: Path) -> Manager:
     """The whole manager, from the configuration at `config_path`.
 
     The operations the routes call, the event bus the page listens on, the
-    configuration store, the model gateway, the lanes beside the card and the
-    two job queues. The embeddings lane is built before the gateway: it
-    borrows the card, so the gateway's memory is built with it as the card's
-    neighbour. The job queues send their work through the gateway, so they
-    are built after it.
+    configuration store, the model gateway and the lanes beside the card. The
+    embeddings lane is built before the gateway: it borrows the card, so the
+    gateway's memory is built with it as the card's neighbour. The image
+    calls (`ImageCalls`) go through the gateway, so they are built after it.
     """
     store = ConfigStore(config_path)
     bus = EventBus()

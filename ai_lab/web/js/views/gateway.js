@@ -7,7 +7,7 @@
 // that steps using the same model sit together is worth more than any setting
 // on this page.
 //
-// This is the only view that redraws on a timer. Everywhere else a change
+// One of the views that redraw on a timer (see app.js). Elsewhere a change
 // comes from something the server did and arrives as an event; here the
 // traffic comes from outside the manager entirely and produces no events at
 // all, so a page that never redrew would sit at whatever the numbers were when

@@ -28,9 +28,10 @@ import { render as renderAccess, TOKEN_DOES_NOT_HOLD,
 // they share the Library page rather than making you know which tab a model is
 // on before you can act on it.
 //
-// Each view says which kinds of change concern it. Nothing is drawn on a
-// timer: a page where nothing is happening stays exactly as it is, including
-// whatever is half-typed in it.
+// Each view says which kinds of change concern it. Four views also redraw on
+// a timer (Gateway, Cloud & CPU, GPU health, Access): their numbers come from
+// outside the manager and arrive with no event. None redraws over something
+// typed and not saved (`beingEdited`).
 const VIEWS = [
   { id: 'runtime', label: 'Models', render: renderRuntime,
     topics: ['instances', 'models'] },
@@ -50,8 +51,8 @@ const VIEWS = [
   // readings arrive without events, so it refreshes on a timer of its own.
   { id: 'gpu-health', label: 'GPU health', render: renderGpuHealth,
     leave: stopGpuHealthRefreshing, topics: [] },
-  // Who may call: On/Off, the clients and their schedulers' maps, the
-  // operation log, and Security (docs/access.md). Refreshed on a timer.
+  // Who may call: On/Off, the clients, the operation log, and Security
+  // (docs/access.md). Refreshed on a timer.
   { id: 'access', label: 'Access', render: renderAccess,
     leave: stopAccessRefreshing, topics: [] },
   { id: 'storage', label: 'Storage', render: renderStorage,

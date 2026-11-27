@@ -311,8 +311,10 @@ def _runs(waiting: list[dict]) -> list[dict]:
 
     The queue is served in order and requests next to each other wanting the
     same model go in together, so it is not a list of requests — it is a list
-    of turns, each one a model and how many. Grouping them the same way the
-    scheduler does makes the page show the schedule rather than a number.
+    of turns, each one a model and how many. Grouped by entry (`instance_id`);
+    the scheduler groups by entry *and* settings (`Shape`), so two neighbours
+    for one entry with different settings are one row here and two runs there
+    (audit L3). Close enough for a page; not the scheduler's own plan.
     """
     runs: list[dict] = []
     for item in waiting:

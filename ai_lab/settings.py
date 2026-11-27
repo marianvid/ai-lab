@@ -7,8 +7,9 @@ and the host and holds no state of its own.
 Accelerator settings are read-only by decision rather than by omission: power
 limits and similar are changed deliberately elsewhere, not through a web page.
 
-Watch the naming, which is easy to trip over. `config.py` is the file store,
-what gets written to config.json. This module is the view assembled from it.
+Watch the naming, which is easy to trip over. `config/store.py` is the file
+store, what gets written to config.json. This module is the view assembled
+from it.
 """
 
 from __future__ import annotations

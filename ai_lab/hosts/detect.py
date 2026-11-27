@@ -14,9 +14,9 @@ from .base import Host
 def current_host(engines: dict | None = None) -> Host:
     """Build the host for this machine.
 
-    `engines` is the `engines` section of config.json. Only Linux needs it, and
-    only for vLLM: it is installed in a virtual environment, so PATH cannot be
-    used to tell whether it is there.
+    `engines` is the `engines` section of config.json: where each engine's
+    program is (on Linux vLLM's virtual environment, on the Mac the MLX and
+    ComfyUI programs), since PATH alone cannot tell whether one is there.
     """
     settings = engines or {}
     if sys.platform == "darwin":

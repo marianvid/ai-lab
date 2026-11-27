@@ -67,6 +67,15 @@ class DarwinHostTests(unittest.TestCase):
         stopping.join(10)
         self.assertFalse(self.host.status("deaf").running)
 
+    def test_a_start_that_cannot_run_leaves_no_open_log(self):
+        # Audit L16: the opened log handle leaked when Popen raised.
+        with self.assertRaises(OSError):
+            self.host.start(ProcessSpec("missing", ["/no/such/program"], {}))
+        self.assertFalse(self.host.status("missing").running)
+        self.host.start(ProcessSpec("missing", ["/bin/sleep", "30"], {}))
+        self.addCleanup(self.host.stop, "missing")
+        self.assertTrue(self.host.status("missing").running)
+
     def test_stopping_something_that_is_not_running_is_harmless(self):
         self.host.stop("never-started")
         self.assertFalse(self.host.status("never-started").running)

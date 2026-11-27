@@ -21,6 +21,14 @@ class ParamSpecTests(unittest.TestCase):
             spec.coerce("plenty")
         self.assertIn("whole number", str(caught.exception))
 
+    def test_int_refuses_a_fraction_and_a_bool_rather_than_cutting_them(self):
+        # Audit L12: 3.7 became 3 and true became 1, silently.
+        spec = ParamSpec("parallel", "Parallel", "int", 1)
+        for wrong in (3.7, True):
+            with self.subTest(wrong=wrong), self.assertRaisesRegex(ValueError, "whole number"):
+                spec.coerce(wrong)
+        self.assertEqual(spec.coerce(4.0), 4)
+
     def test_identifier_accepts_future_engine_options_but_rejects_paths(self):
         spec = ParamSpec("parser", "Parser", "identifier", "")
         self.assertEqual(spec.coerce("next_parser-2"), "next_parser-2")

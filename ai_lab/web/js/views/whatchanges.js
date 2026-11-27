@@ -9,7 +9,7 @@
 // That last one is the reason this exists. Release notes describe a version;
 // they say nothing about what will happen to this particular machine. Moving
 // vLLM from the installed nightly to 0.27.1 moves fifteen packages and takes
-// eight of them backwards, because the nightly had pulled newer kernel
+// five of them backwards (changes/frompackages.py), because the nightly had pulled newer kernel
 // libraries than the stable release pins. No release note anywhere says that.
 //
 // The real Update button is at the bottom, after all of it.
@@ -43,10 +43,10 @@ export async function reviewUpdate(engine, onConfirm) {
 
 
 function body(found, engine, onConfirm, close) {
-  // `onConfirm` is null for an engine this machine cannot update by itself —
-  // vLLM, which arrives as packages rather than as a checkout. Everything
-  // above still applies and is worth reading; there is simply nothing here to
-  // press, and pretending otherwise would be a button that lies.
+  // `onConfirm` is null when the page offers no update from here for this
+  // engine. Everything above still applies and is worth reading; there is
+  // simply nothing here to press, and pretending otherwise would be a button
+  // that lies. (vLLM is updated from the Engines section: settings_engines.js.)
   const nothing = !onConfirm || !found.latest || found.installed === found.latest;
   return [
     element('h3', { text: `${found.engine_name || engine.name}` }),
