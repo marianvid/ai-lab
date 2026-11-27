@@ -610,6 +610,51 @@ class SettingsFieldTests(unittest.TestCase):
         self.assertEqual(closed, [True])
         self.assertTrue(gone.close_connection)
 
+    def _broken_answer(self, content_type: str) -> tuple[bytes, Any, list]:
+        """An answer whose body raises a bug of ours after its first chunk."""
+        import io
+        closed: list = []
+
+        def chunks():
+            yield b"first"
+            raise KeyError("renamed")
+
+        answer = Passthrough(200, content_type, chunks(), {}, lambda: closed.append(True))
+
+        class Writer:
+            close_connection = False
+            wfile = io.BytesIO()
+            _closing_event = Handler._closing_event
+
+            def send_response(self, status):
+                self.wfile.write(b"HTTP/1.1 %d\r\n" % status)
+
+            def send_header(self, name, value):
+                pass
+
+            def end_headers(self):
+                pass
+
+        writer = Writer()
+        with mock.patch("ai_lab.api.passthrough.note"):
+            Handler._passthrough(cast(Any, writer), answer)
+        return writer.wfile.getvalue(), writer, closed
+
+    def test_a_stream_that_breaks_after_its_status_ends_with_one_error_event(self):
+        written, writer, closed = self._broken_answer("text/event-stream")
+        self.assertEqual(written.count(b"HTTP/1.1"), 1)
+        self.assertIn(b'"type": "server_error"', written)
+        self.assertTrue(written.endswith(b"0\r\n\r\n"))
+        self.assertTrue(writer.close_connection)
+        self.assertEqual(closed, [True])
+
+    def test_a_body_that_breaks_after_its_status_is_cut_short_and_closed(self):
+        written, writer, closed = self._broken_answer("application/json")
+        self.assertEqual(written.count(b"HTTP/1.1"), 1)
+        self.assertFalse(written.endswith(b"0\r\n\r\n"))
+        self.assertTrue(writer.close_connection)
+        self.assertEqual(closed, [True])
+
     def test_a_field_that_is_not_an_object_is_refused(self):
         from ai_lab.api.routes.gateway import SETTINGS_FIELD, _forwarder
         handle = _forwarder(cast(Any, self.Gateway()), "/v1/chat/completions")

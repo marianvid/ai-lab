@@ -58,5 +58,7 @@ def http_ok(port: int, path: str = "/health", timeout: float = 1.0) -> bool:
         payload = json.loads(body)
     except ValueError:
         return True          # a 200 with a non-JSON body still means it answered
+    if not isinstance(payload, dict):
+        return True          # a 200 with JSON that is not an object (audit L13)
     status = payload.get("status")
     return status in (None, "ok")

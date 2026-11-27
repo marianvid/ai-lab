@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..config.policy import BETWEEN_BYTES_S, FIRST_BYTE_S, SAFETY_S, STALL_S
+from ..shared.unexpected import note
 from .upstream import END, FAILED, HEAD, Upstream
 
 # Headers worth copying from the engine's answer. Content-Length is deliberately
@@ -139,6 +140,18 @@ class EngineStalledError(TimeoutError):
         super().__init__(f"engine stalled: it did no work for {idle_s:.0f} s "
                          "while it had requests")
         self.explanation = str(self)
+
+
+class AnswerBrokeError(RuntimeError):
+    """An answer that failed on our side after its status was sent (audit m4)."""
+
+    kind = "server_error"
+
+
+def broke(error: Exception) -> AnswerBrokeError:
+    """Log `error` once, and what the client is told in its place."""
+    note("writing an answer after its status", error)
+    return AnswerBrokeError(f"AI-Lab failed while answering ({type(error).__name__})")
 
 
 class ClientGoneError(ConnectionAbortedError):

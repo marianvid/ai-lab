@@ -147,6 +147,13 @@ class UsageLogTests(unittest.TestCase):
             log.record("openai", "terra")
         self.assertEqual(len(json.loads((self.state / FILE_NAME).read_text())), DAYS_KEPT)
 
+    def test_a_disk_that_refuses_the_write_does_not_fail_the_call(self):
+        # Audit L39: the answer was already given; counting it is best effort.
+        log = self.log()
+        (self.state / FILE_NAME).mkdir()
+        log.record("anthropic", "sonnet")
+        self.assertEqual(log.today()["anthropic"]["ok"], 1)
+
     def test_a_damaged_file_starts_empty(self):
         (self.state / FILE_NAME).write_text("{not json")
         self.assertEqual(self.log().today(), {})

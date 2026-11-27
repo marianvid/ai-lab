@@ -122,21 +122,25 @@ class DarwinHost:
         """Ask politely, then insist.
 
         A large model can take a while to release memory, so SIGTERM is given
-        a generous grace period before SIGKILL.
+        a generous grace period before SIGKILL. The wait happens outside the
+        lock (audit m6): the other engines' readings and starts go on meanwhile,
+        and this engine stays listed, so a second start of it is refused.
         """
         with self._lock:
             process = self._processes.get(instance_id)
-            if process is None or process.poll() is not None:
-                self._processes.pop(instance_id, None)
+            if process is None:
                 return
-            process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=TERMINATE_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-            self._processes.pop(instance_id, None)
-            self._close_log(instance_id)
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+        try:
+            process.wait(timeout=TERMINATE_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        with self._lock:
+            if self._processes.get(instance_id) is process:
+                self._processes.pop(instance_id)
+                self._close_log(instance_id)
 
     def system_memory(self) -> tuple[float, float]:
         """What the whole machine is using, and how much it has.

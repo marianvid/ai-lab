@@ -40,9 +40,7 @@ def unfence(text: str) -> str:
 
 def render(payload: dict) -> str:
     """The whole request as the text a CLI reads on standard input."""
-    messages = payload.get("messages")
-    if not isinstance(messages, list) or not messages:
-        raise ValueError("the request must carry messages")
+    messages = _messages(payload)
     system = [_text(item) for item in messages if item.get("role") in SYSTEM_ROLES]
     turns = [item for item in messages if item.get("role") not in SYSTEM_ROLES]
     if not turns:
@@ -50,6 +48,16 @@ def render(payload: dict) -> str:
     parts = [*system, NO_TOOLS, *_json_instruction(payload.get("response_format")),
              *_conversation(turns)]
     return "\n\n".join(part for part in parts if part)
+
+
+def _messages(payload: dict) -> list[dict]:
+    """The request's messages; refused unless a list of objects (audit L41)."""
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("the request must carry messages")
+    if not all(isinstance(item, dict) for item in messages):
+        raise ValueError("every message must be an object")
+    return messages
 
 
 def _conversation(turns: list[dict]) -> list[str]:

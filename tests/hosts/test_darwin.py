@@ -1,5 +1,8 @@
 import sys
+import threading
+import time
 import unittest
+from unittest import mock
 
 from ai_lab.hosts.darwin import DarwinHost
 from ai_lab.types import ProcessSpec
@@ -44,6 +47,25 @@ class DarwinHostTests(unittest.TestCase):
         self.addCleanup(self.host.stop, "sleeper")
         with self.assertRaises(RuntimeError):
             self.host.start(ProcessSpec("sleeper", ["/bin/sleep", "30"], {}))
+
+    @mock.patch("ai_lab.hosts.darwin.TERMINATE_GRACE_SECONDS", 2.0)
+    def test_a_slow_stop_does_not_hold_up_the_other_engines(self):
+        # Audit m6: the wait for an engine to end happens outside the lock.
+        deaf = ["/bin/sh", "-c", 'trap "" TERM; exec /bin/sleep 30']
+        self.host.start(ProcessSpec("deaf", deaf, {}))
+        self.addCleanup(self.host.stop, "deaf")
+        time.sleep(0.3)
+        stopping = threading.Thread(target=self.host.stop, args=("deaf",))
+        stopping.start()
+        time.sleep(0.3)
+        began = time.monotonic()
+        self.host.start(ProcessSpec("other", ["/bin/sleep", "30"], {}))
+        self.addCleanup(self.host.stop, "other")
+        self.assertLess(time.monotonic() - began, 1.0)
+        with self.assertRaises(RuntimeError):
+            self.host.start(ProcessSpec("deaf", deaf, {}))
+        stopping.join(10)
+        self.assertFalse(self.host.status("deaf").running)
 
     def test_stopping_something_that_is_not_running_is_harmless(self):
         self.host.stop("never-started")

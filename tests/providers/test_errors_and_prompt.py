@@ -31,6 +31,17 @@ class ClassifyTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(classify(text), (kind, label))
 
+    def test_a_number_or_a_word_inside_other_text_is_not_a_rate_limit(self):
+        # Audit L40: markers are whole words, and 429 only as a status.
+        for text in ("request id req_4291 failed", "wrote 429 bytes then the pipe broke",
+                     "cannot open /tmp/capacityplan.txt", "quotas.json: no such file"):
+            with self.subTest(text=text):
+                self.assertIsNot(classify(text)[0], ErrorKind.RATE_LIMIT)
+        for text in ("HTTP 429", "API Error: 429 {}", "status: 429", "429 Too Many Requests",
+                     "the model is at capacity", "quota exceeded"):
+            with self.subTest(text=text):
+                self.assertIs(classify(text)[0], ErrorKind.RATE_LIMIT)
+
     def test_a_dead_login_in_each_vendor_s_own_words(self):
         # Each text as the CLI printed it (see LOGIN_MARKERS for where and when).
         seen = [
@@ -100,7 +111,8 @@ class RenderTests(unittest.TestCase):
     def test_unusable_requests_are_refused(self):
         bad: list[Any] = [{}, {"messages": [{"role": "system", "content": "only rules"}]},
                {"messages": [{"role": "user", "content": [{"type": "image_url"}]}]},
-               {"messages": [{"role": "user", "content": None}]}]
+               {"messages": [{"role": "user", "content": None}]},
+               {"messages": ["just a string"]}]
         for payload in bad:
             with self.subTest(payload=payload), self.assertRaises(ValueError):
                 render(payload)

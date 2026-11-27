@@ -1,5 +1,6 @@
 """Telling a request parked in the engine from an engine that is stuck."""
 
+import threading
 import unittest
 
 from ai_lab.engines.base import progress_reader
@@ -35,6 +36,32 @@ class EngineProgressTests(unittest.TestCase):
         clock = Clock()
         progress = EngineProgress(Reports(*reports), clock, read_every_s=2.0)
         return progress, clock
+
+    def test_a_slow_engine_holds_up_only_the_caller_that_asked_it(self):
+        # Audit m5: the reading happens outside the lock.
+        asked, answer = threading.Event(), threading.Event()
+
+        def slow():
+            asked.set()
+            answer.wait(5)
+            return busy(100)
+
+        progress = EngineProgress(slow, Clock(), read_every_s=2.0)
+        first = threading.Thread(target=progress.idle_for)
+        first.start()
+        self.assertTrue(asked.wait(5))
+        done = threading.Event()
+
+        def second():
+            progress.idle_for()
+            done.set()
+
+        other = threading.Thread(target=second)
+        other.start()
+        self.assertTrue(done.wait(2), "a second caller waited for the first one's reading")
+        answer.set()
+        first.join(5)
+        other.join(5)
 
     def test_an_engine_that_keeps_working_is_never_idle(self):
         progress, clock = self.watch(busy(100), busy(200), busy(300), busy(400))

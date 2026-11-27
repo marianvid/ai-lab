@@ -59,9 +59,15 @@ class EngineProgress:
                 # Nobody was asking: what happened meanwhile is unknown, so
                 # the clock starts now rather than at the last look, hours ago.
                 self._last_progress = now
-            if now - self._last_read >= self._read_every_s:
-                self._last_read = now
-                self._look(self._read(), now)
+            due = now - self._last_read >= self._read_every_s
+            if not due:
+                return now - self._last_progress
+            self._last_read = now
+        # The engine is asked outside the lock (audit m5): a slow answer holds
+        # up only this caller; the others, already counted, answer at once.
+        report = self._read()
+        with self._lock:
+            self._look(report, now)
             return now - self._last_progress
 
     def _look(self, report: dict, now: float) -> None:

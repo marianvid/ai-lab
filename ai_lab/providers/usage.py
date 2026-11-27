@@ -18,6 +18,8 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
+from . import state_file
+
 FILE_NAME = "provider-usage.json"
 DAYS_KEPT = 31
 
@@ -61,7 +63,6 @@ class UsageLog:
         return loaded if isinstance(loaded, dict) else {}
 
     def _write(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(self._days, indent=1, sort_keys=True))
-        temporary.replace(self.path)
+        # Best effort, like the logins and limits (audit L39): a full or
+        # read-only disk must not turn an answer already paid for into an error.
+        state_file.write(self.path, self._days)

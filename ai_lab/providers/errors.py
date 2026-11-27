@@ -70,6 +70,16 @@ USAGE = "usage"
 RATE = "rate"
 
 
+# Each marker is matched as whole words, not as a bare substring (audit L40):
+# "capacity" in a file path or "429" in a request id is not a rate limit.
+# "429" counts only as a status: "HTTP 429", "error: 429", "429 Too Many…".
+_STATUS_429 = re.compile(
+    r"(?:^|\b(?:http|status|error|code)\b\W{0,3})429\b|\b429\s+too many", re.M)
+_RATE_PATTERNS = {marker: _STATUS_429 if marker == "429"
+                  else re.compile(rf"(?<!\w){re.escape(marker)}(?!\w)")
+                  for marker in RATE_LIMIT_MARKERS}
+
+
 def limit_kind(label: str) -> str:
     """`usage` for the subscription's allowance, `rate` for a short refusal."""
     return USAGE if label in USAGE_LIMIT_MARKERS else RATE
@@ -90,8 +100,8 @@ def classify(text: str) -> tuple[ErrorKind, str]:
     lowered = (text or "").lower()
     if any(marker in lowered for marker in LOGIN_MARKERS):
         return ErrorKind.LOGIN, LOGIN_LABEL
-    for marker in RATE_LIMIT_MARKERS:
-        if marker in lowered:
+    for marker, pattern in _RATE_PATTERNS.items():
+        if pattern.search(lowered):
             return ErrorKind.RATE_LIMIT, marker
     for marker in FATAL_MARKERS:
         if marker in lowered:

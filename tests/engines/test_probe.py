@@ -62,6 +62,10 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(http_json(self.port, "/list"), {})
         self.assertEqual(http_json(self.port, "/down"), {})
 
+    def test_a_200_whose_json_is_not_an_object_still_means_it_answered(self):
+        # Audit L13: this used to raise AttributeError out of the load's poll.
+        self.assertTrue(http_ok(self.port, "/list"))
+
 
 class TextTests(ProbeTests):
     def test_text_is_the_body_answered_or_nothing(self):

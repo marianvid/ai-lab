@@ -36,7 +36,7 @@ from ..providers import (
     ProviderVendorLimitedError,
 )
 from . import sse
-from .passthrough import ClientGoneError, Passthrough
+from .passthrough import ClientGoneError, Passthrough, broke
 from .raw_body import RawBody, is_raw
 from .router import Reply, Router
 from .routes import RouteParts, register_all
@@ -360,6 +360,12 @@ class Handler(BaseHTTPRequestHandler):
             # Cut by AI-Lab mid-answer (Off, the model replaced): the status is
             # sent, so a stream ends with one last event that says why (A7).
             self._closing_event(response, refusal)
+        except Exception as error:
+            # Our own fault after the status (a body that raised). A second
+            # status inside the body would corrupt it, so the answer ends
+            # here: a stream with one error event, any other body cut short,
+            # and the connection closed so the client sees it unfinished (m4).
+            self._closing_event(response, broke(error))
         finally:
             # However writing ended, the answer gives back what it holds: the
             # engine's connection and the card place. Leaving this to the
