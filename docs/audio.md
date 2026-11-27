@@ -81,6 +81,12 @@ many requests that worker is sent at once. On the Mac it runs through the
 transformers library inside AI-Lab's own adapter, because SGLang-Omni does not
 run there. There, requests that arrive within `batch_window_ms` of each other
 (default 100 ms) are grouped, up to `max_batch` (1–16), and decoded together.
+That batching reaches into the port's own code (private helpers of its model
+class and of its module). It was written against the port of `higgs-tts-3-4b`
+whose modeling file (modeling_higgs_multimodal_qwen3.py, beside the weights) has sha256 `5eab2e3f17a865ef…`,
+under transformers 5.17.0; the names are checked when the model loads, so a
+port that renamed one refuses to load and says which (`MODEL_NAMES`,
+`PORT_NAMES` in `speech/higgs_local_backend.py`).
 Both forms offer the upstream Higgs playground page for direct use on the
 instance port plus 10000 ([Use a loaded model directly](direct-use.md)).
 

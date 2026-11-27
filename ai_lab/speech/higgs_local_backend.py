@@ -25,6 +25,14 @@ from .batching import BatchQueue
 from .contract import validate_payload, wav_result
 
 SAMPLE_RATE = 24000
+# The port's own names this backend reaches into, and the port they were read
+# from: a newer port may rename them without a word, so they are checked when
+# the model loads (`check_port`), not found missing in the middle of a line.
+PORT_WRITTEN_AGAINST = ("modeling_higgs_multimodal_qwen3.py sha256 5eab2e3f17a865ef "
+                        "(higgs-tts-3-4b, measured 2026-11-27), transformers 5.17.0")
+MODEL_NAMES = ("_encode_reference", "_build_prompt_ids", "_prefill_embeds", "_decode_codes",
+               "get_audio_codec", "audio_embedding", "audio_head", "num_codebooks", "model")
+PORT_NAMES = ("BOC_ID", "EOC_ID", "_SamplerState", "apply_delay_pattern", "reverse_delay_pattern")
 FRAMES_PER_SECOND = 27  # measured on the M3 Max: 155 frames made 5.9 s
 TEMPERATURE, TOP_P, TOP_K = 1.0, 0.95, 50
 MAX_FRAMES = 2048  # the model's own ceiling on audio frames for one answer
@@ -98,6 +106,20 @@ def frame_limit(text: str) -> int:
     return max(MIN_FRAMES, min(MAX_FRAMES, int(seconds * FRAMES_PER_SECOND)))
 
 
+def missing_names(model, port) -> list[str]:
+    """The names this backend reaches into that the loaded port does not have."""
+    missing = [f"model.{name}" for name in MODEL_NAMES if not hasattr(model, name)]
+    return missing + [f"port.{name}" for name in PORT_NAMES if not hasattr(port, name)]
+
+
+def check_port(model, port) -> None:
+    """Refuse to start when the port no longer has a name this backend reaches into."""
+    missing = missing_names(model, port)
+    if missing:
+        raise RuntimeError(f"The Higgs transformers port lacks {', '.join(missing)}; "
+                           f"AI-Lab's backend was written against {PORT_WRITTEN_AGAINST}")
+
+
 class HiggsLocalBackend:
     """Higgs TTS 3 in this process, lines arriving together generated as one group."""
 
@@ -116,10 +138,11 @@ class HiggsLocalBackend:
             str(model_path), trust_remote_code=True, dtype=torch.bfloat16)
         model.config.audio_tokenizer_id = str(codec)
         self.model = model.to(self.device).eval()
-        self.model.get_audio_codec()  # load the codec now, not on first request
         # The port's helpers — delay pattern, sampler states, special ids —
         # live in its own module, loaded as remote code.
         self.port = sys.modules[type(self.model).__module__]
+        check_port(self.model, self.port)
+        self.model.get_audio_codec()  # load the codec now, not on first request
         self.model_name = model_path.name
         self._references: OrderedDict[str, tuple] = OrderedDict()
         self.queue = BatchQueue(self._run, max_batch, window_ms / 1000)

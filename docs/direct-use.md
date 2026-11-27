@@ -62,7 +62,11 @@ the checkpoint is not loaded twice.
 HeartMuLa launches HeartMuse with composition fields, variants, style
 reference, transcription, history and memory monitoring. HeartMuse receives
 AI-Lab's existing pipeline and shares its generation lock, so UI and API work
-are serialized around one checkpoint.
+are serialized around one checkpoint. That wiring sets and reads names inside
+HeartMuse's own modules; it was written against strnad/HeartMuse
+`a28600c5d6ba` (2026-03-09), and the adapter checks those names before it
+starts the page, so a HeartMuse that renamed one refuses to start and says
+which (`HEARTMUSE_NAMES` in `music/servers/heartmula_server.py`).
 
 Each loaded ComfyUI instance has one supervised ComfyUI child process on its
 AI-Lab port plus 10000. The link opens that process directly. Unloading the
