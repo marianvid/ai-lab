@@ -110,12 +110,23 @@ class ViewTests(unittest.TestCase):
                                               {"source": "https://(set)@github.com/x.git"}),
             "a flag inside one command line": ({"cli": "tool --password s14 --x y --token=s15"},
                                                {"cli": "tool --password (set) --x y --token=(set)"}),
+            # m19 of the line-by-line read: four more shapes.
+            "a URL query parameter": ({"url": "https://host/v1?api_key=s16&model=m"},
+                                      {"url": "https://host/v1?api_key=(set)&model=m"}),
+            "NAME=VALUE in a list": ({"env": ["OPENAI_API_KEY=s17", "HOME=/h"]},
+                                     {"env": ["OPENAI_API_KEY=(set)", "HOME=/h"]}),
+            "NAME=VALUE before a command": ({"cli": "HF_TOKEN=s18 python run.py"},
+                                            {"cli": "HF_TOKEN=(set) python run.py"}),
+            "a header line": ({"headers": ["Authorization: Bearer s19", "X-Api-Key: s20"]},
+                              {"headers": ["Authorization: (set)", "X-Api-Key: (set)"]}),
+            "Bearer inside a text": ({"note": "send it as Bearer s21 please"},
+                                     {"note": "send it as Bearer (set) please"}),
         }
         for name, (raw, expected) in shapes.items():
             with self.subTest(name):
                 self.assertEqual(masked(raw), expected)
         everything = json.dumps(masked({name: raw for name, (raw, _) in shapes.items()}))
-        for number in range(1, 16):
+        for number in range(1, 22):
             self.assertNotRegex(everything, rf"\bs{number}\b")
         self.assertEqual(masked({"token_warn_after_days": 30, "keep": "x", "keys_order": "y"}),
                          {"token_warn_after_days": 30, "keep": "x", "keys_order": "y"})

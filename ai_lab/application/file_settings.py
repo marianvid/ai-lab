@@ -60,7 +60,13 @@ SECRET = re.compile(r"token|secret|passw|(^|[_\-.])pass($|[_\-.])|api[_\-]?key|c
 # Credentials inside a URL, whatever their form (`https://user:PASS@host`,
 # `https://TOKEN@host`, a Git remote's), and a bearer header value.
 URL_USERINFO = re.compile(r"(\b[a-z][a-z0-9+.\-]*://)([^/@\s]+)@", re.I)
-BEARER = re.compile(r"^bearer\s+\S", re.I)
+BEARER = re.compile(r"\bbearer\s+[^\s,;]+", re.I)
+# A URL's query parameter (`?api_key=V`, `&token=V`), a `NAME=VALUE` word
+# (`OPENAI_API_KEY=V`, an environment item or a command's prefix), and a header
+# line (`X-Api-Key: V`): hidden when the name is a secret's.
+URL_QUERY = re.compile(r"([?&])([^=&#\s]+)=([^&#\s]*)")
+ASSIGNMENT = re.compile(r"^([A-Za-z_][\w\-.]*)=(.*)$", re.S)
+HEADER = re.compile(r"^([A-Za-z][\w\-]*)\s*:\s*(\S.*)$", re.S)
 # A command-line flag: `--api-key`, `-t`, `--token=VALUE`.
 FLAG = re.compile(r"^-{1,2}([A-Za-z][\w\-.]*)(=(.*))?$", re.S)
 
@@ -145,17 +151,29 @@ def _hidden_userinfo(match: re.Match) -> str:
     return f"{scheme}{user}:(set)@" if colon else f"{scheme}(set)@"
 
 
+def _hidden_query(match: re.Match) -> str:
+    mark, name, secret = match.group(1), match.group(2), match.group(3)
+    return f"{mark}{name}={_set(secret)}" if SECRET.search(name) else match.group(0)
+
+
 def _masked_text(value: str) -> str:
-    """A text with its secrets hidden: a bearer value, a URL's credentials, and in
-    a command line written as one string, the word after a secret's flag."""
-    if BEARER.match(value):
-        return "Bearer (set)"
+    """A text with its secrets hidden: a bearer value anywhere, a URL's
+    credentials and secret query values, a secret header line, and in a
+    command line written as one string, the word after a secret's flag and a
+    secret's `NAME=VALUE`."""
+    header = HEADER.match(value)
+    if header and SECRET.search(header.group(1)):
+        return f"{header.group(1)}: (set)"
+    value = BEARER.sub("Bearer (set)", value)
     value = URL_USERINFO.sub(_hidden_userinfo, value)
+    value = URL_QUERY.sub(_hidden_query, value)
     parts = re.split(r"(\s+)", value)
     if len(parts) == 1:
+        assignment = ASSIGNMENT.match(value)
+        if assignment and SECRET.search(assignment.group(1)):
+            return f"{assignment.group(1)}={_set(assignment.group(2))}"
         return value
-    words = _masked_arguments(parts[0::2])
-    parts[0::2] = words
+    parts[0::2] = _masked_arguments(parts[0::2])
     return "".join(parts)
 
 
