@@ -178,24 +178,18 @@ class Scheduler:
         if entry.failure is not None:
             raise entry.failure
 
-    def leave(self, shape=None) -> None:
-        """Give back a place, and let in whoever can go next.
+    def leave(self, shape) -> None:
+        """Give back a place on `shape`, and let in whoever can go next.
 
         `shape` says which model the request was on: only its count goes down.
         A shape no longer loaded (the card was cleared under it) gives back
-        nothing, rather than lowering another model's count. Without a shape
-        the place is taken from whichever is holding one, right only while one
-        model is loaded; every caller in the gateway now names its shape.
+        nothing, rather than lowering another model's count. There is no
+        "whichever holds one" any more: every caller names its shape (audit M1),
+        and the tests do too.
         """
         with self._lock:
-            if shape is not None:
-                if self._state.loaded.get(shape, 0) > 0:
-                    self._state.loaded[shape] -= 1
-            else:
-                for held in self._state.loaded:
-                    if self._state.loaded[held] > 0:
-                        self._state.loaded[held] -= 1
-                        break
+            if self._state.loaded.get(shape, 0) > 0:
+                self._state.loaded[shape] -= 1
         self._pump()
 
     # -- what the interface asks --------------------------------------------
