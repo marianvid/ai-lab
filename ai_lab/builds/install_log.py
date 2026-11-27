@@ -9,7 +9,12 @@ indistinguishable from a hang.
 
 from __future__ import annotations
 
+import contextlib
+import os
+import queue
+import signal
 import subprocess
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -26,7 +31,10 @@ Elapsed = Callable[[], int]
 
 @dataclass(frozen=True)
 class Command:
-    """One program to run: its arguments, where, with which environment, for how long."""
+    """One program to run: its arguments, where, with which environment, for how long.
+
+    An empty `environment` means the gateway's own (the process inherits it).
+    """
 
     argv: list[str]
     cwd: Path
@@ -66,18 +74,81 @@ class InstallLog:
 
     def run(self, command: Command, elapsed: Elapsed) -> None:
         """Run `command`, forwarding each line; ValueError if it fails or runs too long."""
-        process = subprocess.Popen(command.argv, cwd=str(command.cwd), stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True,
-                                   env=command.environment)
-        deadline = time.monotonic() + command.timeout_s
-        assert process.stdout is not None
-        for line in process.stdout:
-            self.say("out", line.rstrip(), elapsed())
-            if time.monotonic() > deadline:
-                process.kill()
-                raise ValueError(f"{command.argv[0]} took longer than {command.timeout_s:g}s")
-        if process.wait() != 0:
+        try:
+            code = run_streamed(command, lambda line: self.say("out", line.rstrip(), elapsed()))
+        except TimeoutError:
+            raise ValueError(f"{command.argv[0]} took longer than {command.timeout_s:g}s") from None
+        if code != 0:
             raise ValueError(f"{' '.join(command.argv[:3])} failed")
+
+
+# How long the reader of a killed command's output is waited for before its
+# pipe is closed anyway (a grandchild may still hold the other end).
+READER_GRACE_S = 5.0
+
+
+def run_streamed(command: Command, on_line: Callable[[str], None]) -> int:
+    """Run `command` to the end, each output line to `on_line`; its exit code.
+
+    The output is read on a thread of its own, so the time limit holds while
+    the command prints nothing, and holds after it closed its output too.
+    The command runs in a process group of its own: a build is a tree
+    (`make`, a compiler under it, `pip` building a wheel), and past
+    `timeout_s` the whole tree is killed, not only its top, so nothing is left
+    holding the pipe. Then it is waited for, its pipe closed, and
+    `TimeoutError` raised. Shared by the installs and the source builds
+    (`build_commands.SubprocessStream`).
+    """
+    process = subprocess.Popen(command.argv, cwd=str(command.cwd), stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, bufsize=1,
+                               env=command.environment or None, start_new_session=True)
+    lines: queue.Queue[str | None] = queue.Queue()
+    reader = threading.Thread(target=_read_into, args=(process, lines), daemon=True,
+                              name=f"output-of-{command.argv[0]}")
+    reader.start()
+    deadline = time.monotonic() + command.timeout_s
+    try:
+        while (line := _next_line(lines, deadline)) is not None:
+            on_line(line.rstrip("\n"))
+        try:
+            return process.wait(timeout=max(deadline - time.monotonic(), 0))
+        except subprocess.TimeoutExpired:
+            raise TimeoutError from None
+    finally:
+        _end_group(process)
+        process.wait()
+        reader.join(READER_GRACE_S)
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+def _end_group(process: subprocess.Popen) -> None:
+    """Kill every process of the command's group still alive; nothing when all have ended."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _read_into(process: subprocess.Popen, lines: queue.Queue) -> None:
+    """Hand each line of the process's output on; None once it has ended."""
+    try:
+        if process.stdout is not None:
+            for line in process.stdout:
+                lines.put(line)
+    except (OSError, ValueError):
+        pass  # the pipe was closed under the reader: the command was ended
+    finally:
+        lines.put(None)
+
+
+def _next_line(lines: queue.Queue, deadline: float) -> str | None:
+    """The next line, None at the end; TimeoutError when the deadline comes first."""
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise TimeoutError
+    try:
+        return lines.get(timeout=left)
+    except queue.Empty:
+        raise TimeoutError from None
 
 
 def since(started: float) -> Elapsed:

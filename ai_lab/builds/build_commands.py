@@ -7,13 +7,12 @@ them. It keeps no state, so it needs no lock.
 
 from __future__ import annotations
 
-import subprocess
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .install_log import Command, run_streamed
 from .source_checkout import GitCommands
 
 
@@ -35,19 +34,14 @@ class SubprocessStream:
 
     def run(self, command: list[str], cwd: Path, on_line: Callable[[str], None],
             timeout: float) -> None:
-        """Run to the end; raise if it fails or takes longer than `timeout` seconds."""
-        process = subprocess.Popen(
-            command, cwd=cwd, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, bufsize=1,
-        )
-        deadline = time.monotonic() + timeout
-        assert process.stdout is not None
-        for line in process.stdout:
-            on_line(line.rstrip("\n"))
-            if time.monotonic() > deadline:
-                process.kill()
-                raise TimeoutError(f"{command[0]} exceeded {timeout:g}s")
-        code = process.wait()
+        """Run to the end; raise if it fails or takes longer than `timeout` seconds.
+
+        The time limit holds while the command is silent too (`run_streamed`).
+        """
+        try:
+            code = run_streamed(Command(command, cwd, {}, timeout), on_line)
+        except TimeoutError:
+            raise TimeoutError(f"{command[0]} exceeded {timeout:g}s") from None
         if code != 0:
             raise RuntimeError(f"{' '.join(command)} failed with exit code {code}")
 

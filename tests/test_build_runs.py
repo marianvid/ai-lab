@@ -1,8 +1,10 @@
 """The long commands of builds and installs, run for real on harmless programs or recorded."""
 
 import json
+import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -35,6 +37,59 @@ class CommandStreamTests(Folder):
         with self.assertRaisesRegex(TimeoutError, r"sh exceeded 0.2s"):
             SubprocessStream().run(["sh", "-c", "echo a; sleep 0.4; echo b; sleep 5"],
                                    self.folder, lambda _line: None, 0.2)
+
+
+class SilentCommandTests(Folder):
+    """A command that hangs without printing is stopped by its limit, and nothing is left behind."""
+
+    def silent(self):
+        pid_file = self.folder / "pid"
+        return ["sh", "-c", f"echo $$ > {pid_file}; exec sleep 30"], pid_file
+
+    def assert_gone(self, pid_file):
+        pid = int(pid_file.read_text())
+        with self.assertRaises(ProcessLookupError):   # not even a zombie: it was waited for
+            os.kill(pid, 0)
+
+    def test_a_silent_build_step_is_stopped_at_its_limit(self):
+        argv, pid_file = self.silent()
+        started = time.monotonic()
+        with self.assertRaisesRegex(TimeoutError, "sh exceeded 0.5s"):
+            SubprocessStream().run(argv, self.folder, lambda _line: None, 0.5)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assert_gone(pid_file)
+
+    def test_a_silent_step_with_children_is_stopped_whole(self):
+        """A build is a tree: the compiler under `make` is what hangs, and it holds the pipe."""
+        child_pid = self.folder / "child"
+        argv = ["sh", "-c", f"sleep 30 & echo $! > {child_pid}; sleep 30"]
+        started = time.monotonic()
+        with self.assertRaisesRegex(TimeoutError, "sh exceeded 0.5s"):
+            SubprocessStream().run(argv, self.folder, lambda _line: None, 0.5)
+        self.assertLess(time.monotonic() - started, 3)
+        for _ in range(50):                 # the child is reaped by init, a moment later
+            try:
+                os.kill(int(child_pid.read_text()), 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        self.assert_gone(child_pid)
+
+    def test_a_command_that_closes_its_output_and_runs_on_is_stopped_too(self):
+        started = time.monotonic()
+        with self.assertRaisesRegex(TimeoutError, "exceeded 0.5s"):
+            SubprocessStream().run(["sh", "-c", "exec >/dev/null 2>&1; sleep 30"],
+                                   self.folder, lambda _line: None, 0.5)
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_a_silent_install_step_is_stopped_at_its_limit(self):
+        argv, pid_file = self.silent()
+        started = time.monotonic()
+        with self.assertRaisesRegex(ValueError, "took longer than 0.5s"):
+            InstallLog("comfyui", None).run(
+                Command(argv, self.folder, {"PATH": "/usr/bin:/bin"}, 0.5), lambda: 0)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assert_gone(pid_file)
 
 
 class InstallLogTests(Folder):
