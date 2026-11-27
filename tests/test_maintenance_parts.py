@@ -128,6 +128,15 @@ class FromGitTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "not a git repository"):
             fromgit.waiting("/nowhere")
 
+    def test_the_commits_read_stop_at_the_tag_the_update_takes(self):
+        # Audit m24: up to upstream's tip listed commits the update does not bring.
+        answer = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(fromgit.subprocess, "run", return_value=answer) as ran:
+            fromgit.waiting("/nowhere", fetch=False, until="v0.3.0")
+            fromgit.waiting("/nowhere", fetch=False, until="--output=/tmp/x")
+        ranges = [call.args[0][-1] for call in ran.call_args_list]
+        self.assertEqual(ranges, ["HEAD..refs/tags/v0.3.0", "HEAD..origin/HEAD"])
+
     def test_more_than_the_most_are_cut_and_counted(self):
         lines = "".join(f"h{n}\x1ftitle {n}\n" for n in range(fromgit.MOST + 5))
         answer = subprocess.CompletedProcess([], 0, lines, "")

@@ -20,6 +20,10 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..builds.package_environments import version_in
+from ..config.policy import SYSTEM_PATH
+from .versions import version_key
+
 TIMEOUT_S = 180
 
 # The ones whose movement changes the character of the update rather than
@@ -42,8 +46,9 @@ class Move:
     @property
     def backwards(self) -> bool:
         """Would this replace what is installed with something older?"""
-        return bool(self.was and self.becomes
-                    and _number(self.becomes) < _number(self.was))
+        was, becomes = version_key(self.was), version_key(self.becomes)
+        # In packaging's order (audit L32): 0.27.1rc2 -> 0.27.1 is forwards.
+        return bool(was and becomes and becomes < was)
 
     @property
     def heavy(self) -> bool:
@@ -56,7 +61,8 @@ class Move:
                 "backwards": self.backwards, "heavy": self.heavy}
 
 
-def would_move(venv: str, package: str, uv: str = "uv") -> list[Move]:
+def would_move(venv: str, package: str, uv: str = "uv",
+               system_path: str = SYSTEM_PATH) -> list[Move]:
     """Ask what updating `package` in this environment would change.
 
     Raises `ValueError` with something readable. Nothing is installed and
@@ -66,7 +72,9 @@ def would_move(venv: str, package: str, uv: str = "uv") -> list[Move]:
         result = subprocess.run(
             [uv, "pip", "install", "--dry-run", "-U", package],
             capture_output=True, text=True, timeout=TIMEOUT_S,
-            env={"VIRTUAL_ENV": venv, "PATH": "/usr/local/bin:/usr/bin:/bin",
+            # The machine's search path (`limits.builds.system_path`), the one the
+            # real install uses: on the Mac uv is in /opt/homebrew/bin (m26).
+            env={"VIRTUAL_ENV": venv, "PATH": system_path,
                  "HOME": str(Path.home())})
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ValueError(f"could not ask uv what would change: {error}") from None
@@ -99,26 +107,13 @@ def installed_version(venv: str, package: str) -> str:
 
     Asked of the environment's own Python rather than worked out from the
     dry-run, because the dry-run says nothing about a package that is already
-    up to date — and "up to date at 0.27.1" is exactly what somebody wants to
-    read before deciding not to press anything.
+    up to date. The same question the installs ask (`version_in`), asked once
+    (audit L33).
     """
-    program = ("import importlib.metadata as m;"
-               f"print(m.version({package!r}))")
-    try:
-        result = subprocess.run([str(Path(venv) / "bin" / "python"), "-c", program],
-                                capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return result.stdout.strip() if result.returncode == 0 else ""
+    return version_in(Path(venv), package)
 
 
 def venv_of(binary: str) -> str:
     """The environment a launcher belongs to: …/.venv/bin/vllm -> …/.venv"""
     path = Path(binary)
     return str(path.parent.parent) if path.parent.name == "bin" else str(path.parent)
-
-
-def _number(version: str) -> tuple:
-    """Enough of a version to compare two of the same package."""
-    parts = re.findall(r"\d+", version.split("+")[0])
-    return tuple(int(part) for part in parts[:4])

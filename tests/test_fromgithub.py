@@ -31,6 +31,22 @@ class BetweenTests(unittest.TestCase):
         self.assertEqual(notes, "# 0.4.0\n\nfour")
         self.assertIn("different lines", warning)
 
+    def test_a_nightly_before_a_release_reads_that_releases_notes(self):
+        # Audit m25: 0.27.1rc2.dev949 is before 0.27.1, so 0.27.1's notes count.
+        releases = [{"tag_name": "v0.27.1", "name": "0.27.1", "body": "final"},
+                    {"tag_name": "v0.27.0", "name": "0.27.0", "body": "old"}]
+        notes, warning = between("0.27.1rc2.dev949+geac636a7f", "0.27.1", releases)
+        self.assertIn("final", notes)
+        self.assertNotIn("old", notes)
+        self.assertEqual(warning, "")
+
+    def test_build_tags_still_compare_by_their_count(self):
+        releases = [{"tag_name": "b10500", "name": "b10500", "body": "new"},
+                    {"tag_name": "b10448", "name": "b10448", "body": "here"}]
+        notes, _ = between("b10448", "b10500", releases)
+        self.assertIn("new", notes)
+        self.assertNotIn("here", notes)
+
     def test_nothing_newer_says_so(self):
         notes, warning = between("v0.4.0", "v0.4.0")
         self.assertEqual(notes, "")

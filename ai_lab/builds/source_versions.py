@@ -39,16 +39,6 @@ class Version:
                 return name
         return ""
 
-    @property
-    def number(self) -> tuple[int, ...]:
-        """Enough of the tag to order two of them on the *same* line.
-
-        Never used to compare across lines: `b10448` would sort above `v0.2.0`
-        and mean nothing by it. Comparing the two lines is git's job — see
-        `_is_ahead`.
-        """
-        return tuple(int(part) for part in re.findall(r"\d+", self.tag or ""))
-
 
 class BuildEnvironment:
     """One compiled source version, shaped like a package environment."""

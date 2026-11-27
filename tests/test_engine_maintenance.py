@@ -21,6 +21,8 @@ from ai_lab.types import IMAGES, TOOLS, Change, Format, Interests
 class Recorder:
     """A build or an install: what it was asked, and a fixed answer."""
 
+    job: Any = None
+
     def __init__(self, status=None, components=True):
         self.asked = []
         self._status = status or {}
@@ -102,6 +104,21 @@ class GuardedActionsTests(unittest.TestCase):
                                          ("install", "0.27")])
         self.assertEqual(build.asked, [("activate", "b2"), ("update",), ("check",)])
 
+    def test_a_job_is_checked_again_right_before_it_switches_the_engine(self):
+        # Audit m12: a model loaded while the job ran must stop the switch.
+        from ai_lab.builds.background_job import BackgroundJob
+        build = Recorder()
+        build.job = BackgroundJob("t", "a build")
+        rows: list[dict] = []
+        maintenance = EngineMaintenanceService(
+            MaintenanceParts(None, None, None, None, cast(Any, Holder("llamacpp", build)), None),
+            lambda: rows)
+        maintenance.update_engine("llamacpp")
+        build.job.swap_allowed()
+        rows.append({"id": "qwen", "running": True})
+        with self.assertRaisesRegex(ValueError, "qwen.*loaded while this ran"):
+            build.job.swap_allowed()
+
     def test_removing_a_spare_version_is_allowed_while_a_model_runs(self):
         build, install = Recorder(), Recorder()
         busy = service(Holder("llamacpp", build), Holder("vllm", install), running=("qwen",))
@@ -161,15 +178,20 @@ class WhatWouldChangeTests(unittest.TestCase):
         reader.moves.return_value = ([Move("torch", "2.8", "2.7")], "uv was slow.")
         reader.read.return_value = found
         config = SimpleNamespace(repositories=[], instances=[],
-                                 engines={"llamacpp": {"source": {"path": "/src"}}})
+                                 engines={"llamacpp": {"source": {"path": "/src"}}},
+                                 machine_limits=SimpleNamespace(
+                                     builds=SimpleNamespace(system_path="/opt/homebrew/bin:/bin")))
         maintenance = service(
             Holder("llamacpp", Recorder({"installed": "b1", "latest": "b2"})),
             store=SimpleNamespace(load=lambda: config),
             catalog=SimpleNamespace(scan=lambda _repositories: []),
             host=SimpleNamespace(capabilities=lambda: SimpleNamespace(accelerator_kind="cuda")),
             engines=SimpleNamespace(get=lambda _id: SimpleNamespace(name="llama.cpp")))
-        with mock.patch("ai_lab.application.engine_maintenance.Reader", return_value=reader):
+        with mock.patch("ai_lab.application.engine_maintenance.Reader",
+                        return_value=reader) as made:
             answer = maintenance.what_would_change("llamacpp")
+        # Audit m26: the dry run asks with the machine's own search path.
+        self.assertEqual(made.call_args.kwargs["system_path"], "/opt/homebrew/bin:/bin")
         reader.read.assert_called_once()
         self.assertEqual(reader.read.call_args.args[:2], ("b1", "b2"))
         self.assertEqual(answer["engine_name"], "llama.cpp")

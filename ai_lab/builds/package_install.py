@@ -241,6 +241,7 @@ class PackageInstall:
             # `uv venv` itself failing.
             self._build(target, landed, elapsed)
             previous = self.active()
+            self.job.swap_allowed()
             self.point_at(target)
             self.job.succeeded()
             self._say("status", f"{self.engine_id} now runs from {target.name}."
@@ -313,9 +314,11 @@ class PackageInstall:
             if line.strip():
                 self._say("out", line.rstrip(), elapsed())
         if result.returncode != 0:
-            raise ValueError(
-                f"The new environment does not start: "
-                f"{(result.stderr or result.stdout).strip().splitlines()[-1]}")
+            said = (result.stderr or result.stdout).strip().splitlines()
+            # A check that failed without a word used to raise IndexError (L23).
+            raise ValueError("The new environment does not start: "
+                             + (said[-1] if said else f"its check exited {result.returncode} "
+                                                       "and printed nothing"))
 
     def _check_program(self) -> str:
         """A Python one-liner importing every module and checking every minimum version."""

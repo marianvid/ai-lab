@@ -61,10 +61,11 @@ class EngineMaintenanceService:
         Nothing is changed by asking. Every source is read separately, so one
         being unreachable costs only that section.
         """
-        settings = self.store.load().engines.get(engine_id) or {}
+        config = self.store.load()
+        settings = config.engines.get(engine_id) or {}
         engine = self.engines.get(engine_id)
-        reader = Reader(engine_id, settings.get("source"),
-                        binary=settings.get("binary", ""))
+        reader = Reader(engine_id, settings.get("source"), binary=settings.get("binary", ""),
+                        system_path=config.machine_limits.builds.system_path)
         moves, trouble = reader.moves()
         installed, latest = self._versions(engine_id, reader, moves)
         found = reader.read(installed, latest, self.interests())
@@ -178,7 +179,9 @@ class EngineMaintenanceService:
         """
         self._nothing_running("The engine is about to be launched from "
                               "somewhere else.")
-        return self._installs().get(engine_id).install(version)
+        install = self._installs().get(engine_id)
+        self._guard(install, "Nothing was switched; install again once no model runs")
+        return install.install(version)
 
     def activate_install(self, engine_id: str, name: str) -> dict:
         """Go back to, or forward to, an installed version."""
@@ -200,6 +203,7 @@ class EngineMaintenanceService:
         """Move one extension (a ComfyUI custom node) to its newest version."""
         self._nothing_running("The engine and its extensions are being replaced.")
         install = self._installs().get(engine_id)
+        self._guard(install, "Nothing was switched; update again once no model runs")
         if not hasattr(install, "update_component"):
             raise ValueError(f"{engine_id} has no separately managed components")
         return install.update_component(name)
@@ -230,4 +234,18 @@ class EngineMaintenanceService:
         """
         self._nothing_running("The engine binary cannot be replaced while it "
                               "is executing.")
-        return self._builds().get(engine_id).update()
+        build = self._builds().get(engine_id)
+        self._guard(build, "Nothing was switched; update again once no model runs")
+        return build.update()
+
+    def _guard(self, target, why: str) -> None:
+        """Check again right before the job switches the engine (audit m12).
+
+        The check above runs when the job starts. A job runs minutes to an
+        hour, and a client can load a model meanwhile; that model would then
+        run the old version while the page said the new one.
+        """
+        job = getattr(target, "job", None)
+        if job is not None:
+            job.guard_swaps(lambda: self._nothing_running(
+                f"A model was loaded while this ran. {why}."))

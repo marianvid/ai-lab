@@ -232,6 +232,21 @@ class Installing(unittest.TestCase):
         self.assertEqual((self.working / "lib" / "proof").read_text(),
                          "the one that works")
 
+    def test_a_start_check_that_fails_without_a_word_says_so(self):
+        # Audit L23: an empty output raised IndexError instead.
+        class Silent(FakeCheck):
+            def check(self, environment, program):
+                return type("Result", (), {"returncode": 3, "stdout": "", "stderr": ""})()
+
+        def uv(argv):
+            makes_the_folder(argv)
+
+        self.install = self._installer(FakeUv(uv), Silent())
+        with patch("ai_lab.builds.package_install.version_in", lambda path, package: "0.27.1"):
+            self.install.install("0.27.1")
+            finish(self.install)
+        self.assertIn("exited 3 and printed nothing", self.install.status()["error"])
+
     def test_an_environment_that_will_not_start_never_takes_over(self):
         status = self._run(starts=False)
         self.assertEqual(status["state"], "failed")

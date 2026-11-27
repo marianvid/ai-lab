@@ -80,6 +80,20 @@ class GitApplicationInstallTests(unittest.TestCase):
             assert self.install.job.thread is not None
             self.install.job.thread.join(timeout=5)
 
+    def test_a_custom_node_git_cannot_read_shows_unknown_and_the_page_still_draws(self):
+        # Audit L21: one broken node checkout failed the whole Engines page.
+        active = self.release(".release-first", "a" * 40)
+        (active / "ComfyUI" / "custom_nodes" / "broken" / ".git").mkdir(parents=True)
+
+        def refuses(*_args, **_kwargs):
+            raise ValueError("fatal: not a git repository")
+
+        self.install = self.installer(GitCommands(git=refuses))
+        self.install.point_at(active)
+        rows = self.install.status()["components"]
+        self.assertEqual([row["name"] for row in rows], ["broken"])
+        self.assertIn("not a git repository", rows[0]["error"])
+
     def test_dirty_custom_node_is_never_updated(self):
         active = self.release(".release-first", "a" * 40)
         node = active / "ComfyUI" / "custom_nodes" / "example"

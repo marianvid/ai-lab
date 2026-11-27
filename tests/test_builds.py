@@ -60,21 +60,6 @@ def build_with(path, bus, git=None, stream=None, options=None):
 
 
 class VersionTests(unittest.TestCase):
-    def test_a_build_tag_compares_numerically(self):
-        """b10331 is older than b10433, which string comparison gets right by
-        luck and would get wrong at four digits to five."""
-        self.assertLess(Version("b10331").number, Version("b10433").number)
-        self.assertLess(Version("b9999").number, Version("b10000").number)
-
-    def test_a_stable_version_compares_part_by_part(self):
-        """v0.1.10 is newer than v0.1.2, which string comparison gets wrong."""
-        self.assertLess(Version("v0.1.2").number, Version("v0.1.10").number)
-        self.assertLess(Version("v0.1.9").number, Version("v0.2.0").number)
-
-    def test_an_unreadable_tag_has_nothing_to_compare_rather_than_erroring(self):
-        self.assertEqual(Version("").number, ())
-        self.assertEqual(Version("unknown").number, ())
-
     def test_a_tag_says_which_line_it_is_on(self):
         # The two lines are different things: b tags are made on nearly every
         # commit to master, v tags are chosen releases. Telling them apart is
@@ -199,6 +184,36 @@ class SourceBuildTests(unittest.TestCase):
         status = build.status()
         self.assertEqual(status["state"], "failed")
         self.assertIn("cmake exited 2", status["error"])
+
+    def test_a_failed_compile_in_the_tree_puts_the_checkout_back_and_says_rebuild(self):
+        # Audit m13: the checkout stayed on the new tag, so the page showed an
+        # update that never happened.
+        def explode(command):
+            if command[0] == "cmake":
+                raise RuntimeError("cmake exited 2")
+
+        git, stream = FakeGit(["v0.1.0\n"] * 40), FakeStream(explode)
+        build = self.build(git, stream)
+        build.update()
+        finish(build)
+        back = [call for call in git.calls.call_args_list if call.args[:2] == ("checkout", "--force")]
+        self.assertEqual(len(back), 1, "the checkout was not put back")
+        self.assertIn("rebuild before loading a model", build.status()["error"])
+
+    def test_a_model_loaded_meanwhile_stops_the_build_before_it_compiles_in_the_tree(self):
+        # Audit m12: the check ran only when the job started.
+        stream = FakeStream()
+        build = self.build(FakeGit(["v0.1.0\n"] * 40), stream)
+
+        def loaded():
+            raise ValueError("Unload the running instances first: qwen")
+
+        build.job.guard_swaps(loaded)
+        build.update()
+        finish(build)
+        self.assertEqual(build.status()["state"], "failed")
+        self.assertIn("qwen", build.status()["error"])
+        self.assertFalse(any(command[:2] == ["cmake", "--build"] for command in stream.commands))
 
     def test_two_builds_cannot_run_at_once(self):
         started, release = threading.Event(), threading.Event()
@@ -329,6 +344,26 @@ class VersionedBuildTests(unittest.TestCase):
         self.assertIn("-DCMAKE_CUDA_ARCHITECTURES=native", configure)
         self.assertTrue(any(command[-1:] == ["--version"] for command in commands))
 
+    def test_a_model_loaded_meanwhile_keeps_the_active_build(self):
+        # Audit m12: re-checked just before the switch.
+        def make_folder(command):
+            if command[:2] == ["cmake", "-S"]:
+                target = Path(command[command.index("-B") + 1])
+                (target / "bin").mkdir(parents=True)
+                (target / "bin" / "llama-server").write_text("binary")
+
+        build = self.made(FakeGit(["v0.3.0\n", "v0.3.0\n", "newcommit\n", ""]),
+                          FakeStream(make_folder))
+
+        def loaded():
+            raise ValueError("Unload the running instances first: qwen")
+
+        build.job.guard_swaps(loaded)
+        build.update()
+        finish(build)
+        self.assertEqual(build.status()["state"], "failed")
+        self.assertEqual(build.active(), self.legacy.resolve())
+
     def test_a_failed_new_build_leaves_the_active_one_and_no_partial_copy(self):
         def fail_compiling(command):
             if command[:3] == ["cmake", "--build", str(self.builds / "build-v0.3.0")]:
@@ -420,6 +455,18 @@ class WatchTests(unittest.TestCase):
             while not checked and __import__("time").monotonic() < deadline:
                 __import__("time").sleep(0.01)
         self.assertIn("llamacpp", checked)
+
+    def test_an_engine_whose_update_runs_is_not_checked(self):
+        # Audit L20: the watcher's git fetch raced the update's own git.
+        from ai_lab.builds.background_job import BackgroundJob
+        builds = self.builds(BuildLimits(builds_first_check_s=0.01))
+        self.addCleanup(builds.stop)
+        checked = []
+        with patch.object(SourceBuild, "check", lambda self: checked.append(self.engine_id)), \
+                patch.object(BackgroundJob, "state", new=property(lambda self: "running")):
+            builds.watch(interval_s=0.05)
+            __import__("time").sleep(0.3)
+        self.assertEqual(checked, [])
 
     def test_a_failure_is_swallowed_rather_than_shouted_about(self):
         """Being offline is not worth a message on a page nobody is reading."""

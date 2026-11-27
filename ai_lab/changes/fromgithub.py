@@ -28,6 +28,7 @@ import urllib.request
 from collections.abc import Callable
 
 from ..shared.public_services import address
+from .versions import version_key
 
 TIMEOUT_S = 20
 
@@ -36,10 +37,6 @@ TIMEOUT_S = 20
 # months behind can be a dozen releases back.
 HOW_MANY = 30
 
-# 0.27.1rc2.dev949+geac636a7f -> (0, 27, 1). Everything after the numbers is
-# dropped on purpose: a nightly is "somewhere after this version", which is
-# exactly how it should be compared.
-NUMBERS = re.compile(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?")
 
 
 def github_releases(repo: str) -> list[dict]:
@@ -136,8 +133,15 @@ def _shape(text: str) -> str:
     return "other"
 
 
-def _version(text: str) -> tuple[int, int, int] | None:
-    match = NUMBERS.search(text or "")
-    if not match:
-        return None
-    return tuple(int(part or 0) for part in match.groups())      # type: ignore
+def _version(text: str) -> tuple | None:
+    """A tag's place in packaging's order (`versions.py`).
+
+    0.27.1rc2.dev949 is BEFORE 0.27.1, not "somewhere after" it (audit m25):
+    read as (0, 27, 1) it made 0.27.1 the floor and dropped that release's
+    notes from the very update the page was describing. A build tag
+    (`b10448`) is its count.
+    """
+    build = re.match(r"^b(\d+)$", (text or "").strip())
+    if build:
+        return version_key(build.group(1))
+    return version_key(text)

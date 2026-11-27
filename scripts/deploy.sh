@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Test locally, ship, test again on the far side, then restart.
+# Test locally, ship beside the running code, test there, swap, then restart.
 #
 # The engine services are deliberately left alone: a deployment must not
 # unload a model somebody is using. Only the web manager restarts.
-set -euo pipefail
+set -Eeuo pipefail   # -E: the ERR trap (restore) also fires inside remote()
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Which machine to deploy to is not this repository's business, so there is no
@@ -23,7 +23,15 @@ container_id="${AI_LAB_CTID:?set AI_LAB_CTID to the Proxmox container id}"
 ssh_key="${AI_LAB_SSH_KEY:?set AI_LAB_SSH_KEY to the private key for that host}"
 runtime_dir="/opt/ai-lab"
 
+next_dir="${runtime_dir}.next"     # the new code, tested here before it replaces anything
+prev_dir="${runtime_dir}.prev"     # the code it replaced, put back if the manager will not start
+
+# AI_LAB_DRY_RUN=1: print what would be done on the far side, change nothing there.
 remote() {
+  if [ "${AI_LAB_DRY_RUN:-0}" = 1 ]; then
+    echo "  would run: pct exec ${container_id} -- $*"
+    return 0
+  fi
   ssh -i "${ssh_key}" "${target_host}" "pct exec '${container_id}' -- $*"
 }
 
@@ -38,36 +46,62 @@ else
   echo "  (skipping the interface tests: run npm install first)"
 fi
 
-echo "[2/6] Uploading to container ${container_id}"
-# Remove the code tree first: tar only adds and overwrites, so a file deleted
-# in the repository would otherwise stay on the server for ever — a stale
-# module still importable, a stale script still served. The running manager
-# holds its code in memory and is restarted at the end, so this is safe.
-remote "rm -rf ${runtime_dir}/ai_lab ${runtime_dir}/tests"
+echo "[2/6] Uploading to ${next_dir} in container ${container_id}, beside the running code"
+# The far side is not touched until the new code has passed its tests there
+# (audit m14). It lands in a fresh folder; a broken ssh or tar mid-way leaves
+# the code in ${runtime_dir} as it was.
+# One shell inside the container: a bare `a && b` would run b on the Proxmox host.
+remote "sh -lc 'rm -rf ${next_dir} && install -d ${next_dir}'"
 # opts/ is the private half: machine addresses, an ssh key path, passwords.
 # This script reads opts/deploy.env here, before anything is sent, so the far
-# side never needs it — and the far side runs a web page with no authentication
-# on it. node_modules is the test runner for the interface, which runs here
-# too: the container has no node, so 25 MB crosses the wire for nothing.
-COPYFILE_DISABLE=1 tar \
-  --no-xattrs \
-  --exclude=.git --exclude=.venv --exclude=.pytest_cache \
-  --exclude='*.egg-info' --exclude='__pycache__' \
-  --exclude='.DS_Store' --exclude='._*' --exclude=tmp \
-  --exclude=opts --exclude=benchmark --exclude=node_modules \
-  --exclude=build --exclude=dist --exclude=.claude \
-  --exclude=package-lock.json --exclude=research \
-  -C "${project_dir}" -cf - . \
-  | ssh -i "${ssh_key}" "${target_host}" \
-      "pct exec '${container_id}' -- tar -C '${runtime_dir}' -xf -"
+# side never needs it. node_modules is the test runner for the interface, which
+# runs here: the container has no node, so 25 MB would cross the wire for nothing.
+pack() {
+  COPYFILE_DISABLE=1 tar \
+    --no-xattrs \
+    --exclude=.git --exclude=.venv --exclude=.pytest_cache \
+    --exclude='*.egg-info' --exclude='__pycache__' \
+    --exclude='.DS_Store' --exclude='._*' --exclude=tmp \
+    --exclude=opts --exclude=benchmark --exclude=node_modules \
+    --exclude=build --exclude=dist --exclude=.claude \
+    --exclude=package-lock.json --exclude=research \
+    -C "${project_dir}" -cf - .
+}
+if [ "${AI_LAB_DRY_RUN:-0}" = 1 ]; then
+  echo "  would send $(pack | tar -tf - | wc -l | tr -d ' ') entries to ${next_dir}"
+else
+  pack | ssh -i "${ssh_key}" "${target_host}" \
+      "pct exec '${container_id}' -- tar -C '${next_dir}' -xf -"
+fi
 
-# tar keeps the owner it found on the Mac, and that user id means nothing here:
-# the files land owned by a number with no account behind it. It works only
-# because everything happens to be world-readable. Put the checkout back under
-# the account the manager actually runs as.
+echo "[3/6] Running the tests inside the container, on the new code in ${next_dir}"
+# Run from ${next_dir}: its own ai_lab is found first, before the installed one.
+remote "sh -lc 'cd ${next_dir} && ${runtime_dir}/.venv/bin/python -m unittest discover -t . -s tests'"
+
+# From step 4 on, any failure puts the previous code back and restarts it
+# (the reviewer, on m14): a half-done swap must not wait for the next restart.
+restore() {
+  trap - ERR
+  echo "  putting the previous code back from ${prev_dir}" >&2
+  remote "sh -lc 'for item in ai_lab tests; do [ ! -e ${prev_dir}/\$item ] || \
+    { rm -rf ${runtime_dir}/\$item && mv ${prev_dir}/\$item ${runtime_dir}/; }; done && \
+    chown -R ai-lab-manager:ai-lab-manager ${runtime_dir} && systemctl restart ai-lab.service'" || true
+  exit 1
+}
+
+echo "[4/6] Putting the new code in place (the old one kept in ${prev_dir})"
+# The code tree is replaced, not overlaid: tar only adds and overwrites, so a
+# file deleted in the repository would otherwise stay on the server for ever.
+# The running manager holds its code in memory and restarts at the end.
+remote "sh -lc 'rm -rf ${prev_dir} && install -d ${prev_dir} && \
+  for item in ai_lab tests; do [ ! -e ${runtime_dir}/\$item ] || mv ${runtime_dir}/\$item ${prev_dir}/; done && \
+  cp -a ${next_dir}/. ${runtime_dir}/ && rm -rf ${next_dir}'" || restore
+trap restore ERR
+# tar keeps the owner it found on the Mac, and that user id means nothing here.
+# Put the checkout back under the account the manager actually runs as.
 remote "chown -R ai-lab-manager:ai-lab-manager ${runtime_dir}"
 
-echo "[3/6] Installing configuration, helper and units"
+echo "[5/6] Installing configuration, helper and units"
 # The configuration is seeded, never overwritten. Instances are created from
 # the interface and live in /etc/ai-lab/config.json, so copying the repository
 # version over it on every deployment would quietly delete them. The file in
@@ -90,6 +124,9 @@ remote "sh -lc '\
   usermod -aG systemd-journal ai-lab-manager && \
   systemctl daemon-reload'"
 
+# The journal group (above) lets the manager quote an engine's own error when
+# it fails to load, instead of reporting only that a process exited.
+#
 # Existing configuration is owned by the private opts snapshot. Migrations
 # are explicit operations: rerunning a historical migration on every deploy
 # can reintroduce obsolete profiles and create drift from the active snapshot.
@@ -100,26 +137,35 @@ remote "sh -lc 'install -o ai-lab-manager -g ai-lab-manager -m 0644 \
 # immediately when a managed release already exists; on the first deployment
 # after this feature it creates and verifies one before configuration starts
 # pointing the engine at `current`.
-"${project_dir}/scripts/install-comfyui-linux.sh"
+if [ "${AI_LAB_DRY_RUN:-0}" = 1 ]; then
+  echo "  would run scripts/install-comfyui-linux.sh"
+else
+  "${project_dir}/scripts/install-comfyui-linux.sh"
+fi
 
-# Read-only access to the journal, so that when an engine fails to load the
-# manager can quote its own error instead of reporting that a process exited.
-
-echo "[4/6] Installing the package"
 remote "'${runtime_dir}/.venv/bin/pip' install --quiet --no-deps -e '${runtime_dir}'"
 
-echo "[5/6] Running the same tests inside the container"
-remote "sh -lc 'cd ${runtime_dir} && ${runtime_dir}/.venv/bin/python -m unittest discover -t . -s tests'"
-
-echo "[6/6] Restarting the manager"
+echo "[6/6] Restarting the manager, then waiting until it answers and stays up"
 remote "systemctl restart ai-lab.service"
-sleep 2
-remote "systemctl is-active --quiet ai-lab.service"
+if [ "${AI_LAB_DRY_RUN:-0}" != 1 ]; then
+  # A simple unit is "active" as soon as its process starts, so the manager
+  # itself is asked (ai_lab.hosts.ready reads its port from the configuration), and
+  # systemd must not have restarted it meanwhile.
+  restarts=$(remote "systemctl show -p NRestarts --value ai-lab.service")
+  remote "${runtime_dir}/.venv/bin/python -m ai_lab.hosts.ready --config /etc/ai-lab/config.json" || restore
+  [ "$(remote "systemctl show -p NRestarts --value ai-lab.service")" = "${restarts}" ] || {
+    echo "  systemd restarted the manager while it was being checked" >&2; restore; }
+fi
+trap - ERR
 
 # The operator's active files and the private snapshots must remain identical.
 # This verifier prints only status and counts, never configuration values.
-if [ -f "${project_dir}/opts/verify_sync.py" ]; then
+if [ "${AI_LAB_DRY_RUN:-0}" != 1 ] && [ -f "${project_dir}/opts/verify_sync.py" ]; then
   python3 "${project_dir}/opts/verify_sync.py"
 fi
 
-echo "Deployment completed. Inference instances were not touched."
+if [ "${AI_LAB_DRY_RUN:-0}" = 1 ]; then
+  echo "Dry run: nothing was changed on the far side."
+else
+  echo "Deployment completed. Inference instances were not touched."
+fi

@@ -11,6 +11,7 @@ readable is `sifting`'s job, not this file's; here they are only read out.
 
 from __future__ import annotations
 
+import re
 import subprocess
 
 from ..types import Change
@@ -25,10 +26,16 @@ READ_TIMEOUT_S = 20
 # would otherwise put ten thousand lines into one page and make the browser
 # unusable. Whatever is cut is reported, never dropped silently.
 MOST = 400
+# A tag name as git writes it; anything else is not passed to git at all.
+TAG = re.compile(r"^[A-Za-z0-9][\w.\-]*$")
 
 
-def waiting(path: str, fetch: bool = True) -> tuple[list[Change], int]:
-    """Commits on the remote that this checkout does not have.
+def waiting(path: str, fetch: bool = True, until: str = "") -> tuple[list[Change], int]:
+    """Commits on the remote that this checkout does not have, up to `until`.
+
+    `until` is the tag the update would move to. Without it, everything up to
+    upstream's tip is read, which on the stable line lists commits the update
+    will NOT bring (audit m24): the tag is a chosen commit behind the tip.
 
     Returns them newest first, with the number left out by `MOST`.
 
@@ -40,7 +47,8 @@ def waiting(path: str, fetch: bool = True) -> tuple[list[Change], int]:
         _git(path, "fetch", "--tags", "--prune", timeout=FETCH_TIMEOUT_S)
     # %s is the subject — the first line, which is the one written to be read.
     # %h is the short hash, which is what identifies it upstream.
-    output = _git(path, "log", "--format=%h%x1f%s", "HEAD..origin/HEAD",
+    upto = f"refs/tags/{until}" if TAG.match(until) else "origin/HEAD"
+    output = _git(path, "log", "--format=%h%x1f%s", f"HEAD..{upto}",
                   timeout=READ_TIMEOUT_S)
     lines = [line for line in output.splitlines() if line.strip()]
     from .sifting import area_of

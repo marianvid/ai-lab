@@ -45,7 +45,7 @@ class Reader:
     """
 
     def __init__(self, engine_id: str, source: dict | None, binary: str = "",
-                 uv: str = "uv") -> None:
+                 uv: str = "uv", system_path: str = "") -> None:
         self.engine_id = engine_id
         source = source or {}
         self.checkout = source.get("path") or ""
@@ -54,6 +54,7 @@ class Reader:
         self.install = source.get("install") or self.package
         self.binary = binary
         self.uv = uv
+        self.system_path = system_path
 
     def read(self, installed: str, latest: str, interests: Interests) -> Changes:
         """Everything that can be found out about this update.
@@ -70,7 +71,7 @@ class Reader:
 
         if self.checkout:
             try:
-                found, cut = waiting(self.checkout)
+                found, cut = waiting(self.checkout, until=latest)
                 yours, others = sift(found, interests)
                 if cut:
                     troubles.append(
@@ -112,7 +113,8 @@ class Reader:
         if not self.package or not self.binary:
             return [], ""
         try:
-            return would_move(venv_of(self.binary), self.install, self.uv), ""
+            return would_move(venv_of(self.binary), self.install, self.uv,
+                              *([self.system_path] if self.system_path else [])), ""
         except ValueError as error:
             return [], f"Could not work out which packages would change: {error}"
 

@@ -186,6 +186,7 @@ class GitApplicationInstall:
                 raise ValueError(f"Release {target.name} already exists")
             target.mkdir(parents=True)
             self._build(target, commit, component, elapsed)
+            self.job.swap_allowed()
             self.point_at(target)
             self._latest = commit[:SHORT]
             self.job.succeeded()
@@ -223,10 +224,20 @@ class GitApplicationInstall:
             return
         old, new = active / self.application / "custom_nodes", app / "custom_nodes"
         new.mkdir(exist_ok=True)
-        if old.is_dir():
-            for node in old.iterdir():
-                if (node / ".git").is_dir() and not (new / node.name).exists():
-                    shutil.copytree(node, new / node.name, symlinks=True)
+        if not old.is_dir():
+            return
+        plain = []
+        for node in sorted(old.iterdir()):
+            if not node.is_dir() or (new / node.name).exists():
+                continue
+            # A node that is not a git checkout comes along as it is (audit
+            # L22): left behind, the workflows using it broke with no word.
+            shutil.copytree(node, new / node.name, symlinks=True)
+            if not (node / ".git").is_dir():
+                plain.append(node.name)
+        if plain:
+            self.job.say("Copied as they are, not from git (they cannot be updated here): "
+                         + ", ".join(plain))
 
     def _install_requirements(self, target: Path, elapsed: Elapsed) -> None:
         python, app = str(target / ".venv" / "bin" / "python"), target / self.application
@@ -286,11 +297,21 @@ class GitApplicationInstall:
             return rows
         for node in sorted(root.iterdir()):
             if (node / ".git").is_dir():
-                rows.append({"name": node.name, "repository": self._remote(node),
-                             "installed": self._git(node, "rev-parse", f"--short={SHORT}",
-                                                    "HEAD").strip(),
-                             "dirty": bool(self._git(node, "status", "--porcelain").strip())})
+                rows.append(self._component(node))
         return rows
+
+    def _component(self, node: Path) -> dict:
+        """One custom node's row; one whose git cannot be read shows unknown (audit L21).
+
+        It used to raise, and one broken checkout failed the whole Engines page.
+        """
+        try:
+            return {"name": node.name, "repository": self._remote(node),
+                    "installed": self._git(node, "rev-parse", f"--short={SHORT}", "HEAD").strip(),
+                    "dirty": bool(self._git(node, "status", "--porcelain").strip())}
+        except ValueError as error:
+            return {"name": node.name, "repository": "", "installed": "", "dirty": False,
+                    "error": f"git could not read it: {error}"}
 
     def _remote(self, checkout: Path) -> str:
         return self._git(checkout, "remote", "get-url", "origin").strip()

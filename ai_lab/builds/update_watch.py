@@ -1,7 +1,7 @@
 """Asking upstream for new versions on a timer, in the background.
 
 So the settings screen is already right when it is opened, rather than only
-after someone presses a button. Shared by the source builds (`builds.py`) and
+after someone presses a button. Shared by the source builds (`builds/core.py`) and
 the package installs (`installs.py`). An expected failure is ignored: being
 offline, or upstream being unreachable, is not worth a message on a page
 nobody is looking at. Any other is said once in the service log (`unexpected`).
@@ -62,6 +62,11 @@ class UpdateWatcher:
             for item in self._items():
                 if self._stop.is_set():
                     return
+                # Not while that engine's update runs (audit L20): its own git
+                # fetch and checkout use the same tree and the same lock.
+                job = getattr(item, "job", None)
+                if job is not None and job.state == "running":
+                    continue
                 try:
                     item.check()
                 except UPSTREAM_FAILED:

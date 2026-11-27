@@ -39,6 +39,7 @@ class BackgroundJob:
         self._error = ""
         self._thread: threading.Thread | None = None
         self._changing = 0
+        self._before_swap: Callable[[], None] | None = None
 
     @property
     def state(self) -> str:
@@ -77,6 +78,23 @@ class BackgroundJob:
             self._thread = threading.Thread(target=task, args=args, daemon=True,
                                             name=self.name)
             self._thread.start()
+
+    def guard_swaps(self, check: Callable[[], None] | None) -> None:
+        """Run `check` right before a task switches the engine to what it made (audit m12).
+
+        The owner of the engine (`EngineMaintenance`) checks that no model runs
+        when a task starts; a task runs for minutes to an hour, and a client can
+        load a model meanwhile. `check` raises to refuse the switch.
+        """
+        with self._lock:
+            self._before_swap = check
+
+    def swap_allowed(self) -> None:
+        """Raise if the engine may not be switched now; called by the task just before it switches."""
+        with self._lock:
+            check = self._before_swap
+        if check is not None:
+            check()
 
     def succeeded(self) -> None:
         """The task finished well."""

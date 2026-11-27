@@ -66,6 +66,7 @@ class _Attempt:
     previous: Version
     target_dir: Path | None = None
     created: bool = False
+    compiling: bool = False
 
     def elapsed(self) -> int:
         """Milliseconds since the update began."""
@@ -279,6 +280,11 @@ class SourceBuild:
                           "-DCMAKE_BUILD_TYPE=Release", *self.cmake_args],
                          attempt.elapsed, self.build_timeout_s)
             build_path = str(target_dir)
+        if not self.build_root:
+            # In the tree the compile itself overwrites the binary: the last
+            # moment to refuse is before it starts (audit m12).
+            self.job.swap_allowed()
+        attempt.compiling = True
         command = ["cmake", "--build", build_path, "--config", "Release"]
         if self.jobs:
             command += ["-j", str(self.jobs)]
@@ -294,6 +300,7 @@ class SourceBuild:
         self._stream([str(binary), "--version"], attempt.elapsed, VERIFY_TIMEOUT)
         mark_version(target_dir, source)
         old = self.active()
+        self.job.swap_allowed()
         self.point_at(target_dir)
         self._say("status", f"{self.engine_id} now runs from {target_dir.name}."
                   + (f" {old.name} is kept for rollback." if old else ""), attempt.elapsed())
@@ -309,11 +316,15 @@ class SourceBuild:
         if attempt.created and target_dir and target_dir.exists() \
                 and target_dir != self.active():
             shutil.rmtree(target_dir, ignore_errors=True)
-        # A failed versioned build did not become active. Put the checkout
-        # back too, so update detection and change reading still compare
-        # upstream with the binary that actually runs.
-        if self.build_root:
-            self.compiled.back_to(attempt.previous)
+        # A failed build did not become active. Put the checkout back, so
+        # update detection and change reading still compare upstream with
+        # the binary that actually runs.
+        # In the tree too (audit m13): `installed()` reads the checkout there,
+        # so leaving it on the new tag showed an update that never happened.
+        self.compiled.back_to(attempt.previous)
+        if not self.build_root and attempt.compiling:
+            error = ValueError(f"{error}. The checkout is back at {attempt.previous.tag}, but "
+                               "the compile had started in place: rebuild before loading a model")
         self.job.failed(error)
         self._announce()
 

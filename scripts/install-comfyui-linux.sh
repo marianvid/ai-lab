@@ -2,10 +2,14 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "${project_dir}/opts/deploy.env"
-target_host="${AI_LAB_HOST:?}"
-container_id="${AI_LAB_CTID:?}"
-ssh_key="${AI_LAB_SSH_KEY:?}"
+# As deploy.sh: the private half when it is checked out, else the environment (audit L67).
+if [ -f "${project_dir}/opts/deploy.env" ]; then
+  # shellcheck disable=SC1091
+  . "${project_dir}/opts/deploy.env"
+fi
+target_host="${AI_LAB_HOST:?set AI_LAB_HOST, or check out the private half into opts/}"
+container_id="${AI_LAB_CTID:?set AI_LAB_CTID to the Proxmox container id}"
+ssh_key="${AI_LAB_SSH_KEY:?set AI_LAB_SSH_KEY to the private key for that host}"
 
 ssh -i "${ssh_key}" "${target_host}" "pct exec '${container_id}' -- bash -s" <<'REMOTE'
 set -euo pipefail
@@ -22,7 +26,10 @@ if [ ! -d "${release}" ]; then
 runuser -u ai-lab-manager -- install -d "${release}"
 runuser -u ai-lab-manager -- env HOME=/var/lib/ai-lab git clone https://github.com/Comfy-Org/ComfyUI.git "${release}/ComfyUI"
 runuser -u ai-lab-manager -- env HOME=/var/lib/ai-lab git -C "${release}/ComfyUI" checkout --detach "${commit}"
-runuser -u ai-lab-manager -- env HOME=/var/lib/ai-lab UV_NO_CONFIG=1 /usr/local/bin/uv venv "${release}/.venv" --python /opt/ai/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12
+# The newest Python 3.12 installed under /opt/ai/python, not a version written here.
+python=$(ls -d /opt/ai/python/cpython-3.12*/bin/python3.12 2>/dev/null | sort -V | tail -1)
+test -n "${python}" || { echo "no Python 3.12 under /opt/ai/python" >&2; exit 1; }
+runuser -u ai-lab-manager -- env HOME=/var/lib/ai-lab UV_NO_CONFIG=1 /usr/local/bin/uv venv "${release}/.venv" --python "${python}"
 runuser -u ai-lab-manager -- env HOME=/var/lib/ai-lab UV_NO_CONFIG=1 /usr/local/bin/uv pip install \
   --python "${release}/.venv/bin/python" -r "${release}/ComfyUI/requirements.txt"
 runuser -u ai-lab-manager -- env HOME=/var/lib/ai-lab bash -lc \
