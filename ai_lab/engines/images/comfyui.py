@@ -54,7 +54,8 @@ class ComfyUiEngine(IsolatedEngine):
             raise ValueError("ComfyUI path is not configured (engine_settings.comfyui.comfyui)")
         argv = [self.binary, self.server, "--comfyui", self.comfyui,
                 "--model-root", model.entrypoint, "--name", model.name,
-                "--host", LOOPBACK, "--port", str(port)]
+                "--host", LOOPBACK, "--port", str(port),
+                "--ui-port", str(self.editor_port(port))]
         mode = settings["vram_mode"]
         if mode in _MODE_FLAGS:
             argv.append(_MODE_FLAGS[mode])

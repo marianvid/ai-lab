@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...types import ModelSet, Task
 from ..base import SPEECH_PATHS, LaunchPlan
-from ..isolated import ConfiguredEngine, model_directory, script_env, ui_port, with_headroom_mb
+from ..isolated import ConfiguredEngine, model_directory, script_env, with_headroom_mb
 
 # Defaults for the two inference settings a model's options may set.
 CFG_VALUE = 2.0
@@ -35,7 +35,7 @@ class VoxCpmEngine(ConfiguredEngine):
             "--cfg-value", str(options.get("cfg_value", CFG_VALUE)),
             "--inference-timesteps",
             str(options.get("inference_timesteps", INFERENCE_TIMESTEPS)),
-            "--port", str(port), "--ui-port", ui_port(port)],
+            "--port", str(port), "--ui-port", str(self.editor_port(port))],
             env=script_env())
 
     def needs_mb(self, model: ModelSet, params: dict, card_total_mb: float) -> float:

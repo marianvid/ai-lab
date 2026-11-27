@@ -68,7 +68,8 @@ AI-Lab at start with a message naming it.
                  "system_path": "/usr/local/bin:/usr/bin:/bin"},
   "embeddings": {"start_s": 120, "stop_s": 30, "drain_s": 60, "hold_s": 900, "call_s": 600},
   "clients":    {"chars_per_token": 3.0, "retry_after_s": 5},
-  "first_port": 8080
+  "first_port": 8080,
+  "editor_port_offset": 10000
 }
 ```
 
@@ -90,6 +91,7 @@ AI-Lab at start with a message naming it.
 | `clients.chars_per_token` | A capped client's prompt is counted as its characters divided by this ([caps](access.md)) | 3.0 |
 | `clients.retry_after_s` | How long a client over its cap is told to wait (`Retry-After`) | 5 s |
 | `first_port` | The first port offered when a model entry is added | 8080 |
+| `editor_port_offset` | How far above a model's port its own page listens (ComfyUI, the speech editors, the music studios); 1000 to 50000, read at start | 10000 |
 
 The gateway's own waits (`first_byte_s`, `between_bytes_s`, `stall_s`,
 `safety_s`, `max_waiting`, `default_max_tokens`, per-task waits) stay in the

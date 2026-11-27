@@ -26,7 +26,6 @@ from pathlib import Path
 from urllib.parse import quote
 
 from ...engines.base import MUSIC_WINDOW_PATHS
-from ...engines.isolated import ui_port
 from ...gateway.errors import ModelNotLoadedError, WindowCallActiveError, WindowRequestError
 from ...shared.song_names import REQUEST_ID, check_generation_id
 from ...network import LOOPBACK
@@ -220,7 +219,7 @@ class GenerationFiles:
             port, _name = self.gateway.where_loaded((query or {})["model"], WINDOW_PATH)
         except ModelNotLoadedError:
             return None
-        return int(ui_port(port))
+        return self.engine(query).editor_port(port)
 
     def refuse_busy(self, query: dict | None, generation_id: str) -> None:
         """409 when a window call edits this generation, or a Studio job writes or reads it."""

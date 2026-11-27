@@ -12,9 +12,9 @@ from ai_lab.engines.isolated import (
     IsolatedEngine,
     model_directory,
     script_env,
-    ui_port,
     with_headroom_mb,
 )
+from ai_lab.engines.registry import Registry
 from ai_lab.engines.text.text_launch import SAMPLING, sampling_argv
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
@@ -52,7 +52,16 @@ class Configured(ConfiguredEngine):
 
 class HelperTests(unittest.TestCase):
     def test_the_editor_page_sits_beside_the_api(self):
-        self.assertEqual(ui_port(8100), "18100")
+        self.assertEqual(Plain().editor_port(8100), 18100)
+
+    def test_the_registry_gives_every_page_engine_the_machines_offset(self):
+        engines = Registry(editor_port_offset=2000).known()
+        pages = [engine for engine in engines.values() if isinstance(engine, IsolatedEngine)]
+        self.assertIn("comfyui", {engine.id for engine in pages})
+        self.assertEqual({engine.editor_port(8100) for engine in pages}, {10100})
+        comfyui = Registry().get("comfyui")
+        assert isinstance(comfyui, IsolatedEngine)
+        self.assertEqual(comfyui.editor_port(8100), 18100)
 
     def test_a_checkpoint_file_means_its_folder(self):
         with TemporaryDirectory() as root:

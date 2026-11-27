@@ -68,6 +68,12 @@ FIELDS: tuple[Field, ...] = (
           1, 65535, "The first port suggested when a model entry is added; the next free "
           "one above it is offered. Only a suggestion: each entry's port can be changed. "
           "Pick a range nothing else on this machine uses.", kind="integer", restart=False),
+    Field("limits.editor_port_offset", "loading", "Editor page offset", "",
+          policy.EDITOR_PORT_OFFSET, 1000, 50000, "How far above a model's port its own "
+          "page listens (ComfyUI, the speech editors, the music studios): the Create, "
+          "Speak and Music links open that port. Too small: an editor's port lands on "
+          "another model's port and one of the two fails to start. Too large: the port "
+          "passes 65535 and the editor cannot start.", kind="integer"),
     _seconds("limits.builds.install_s", "updates", "Install step", policy.INSTALL_S,
              "How long one install command (a package install, a ComfyUI step) may run. "
              "Too small: a slow download is cut and the install fails, the old version "

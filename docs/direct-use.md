@@ -26,6 +26,9 @@ AI-Lab does not substitute small browser forms for their full interfaces.
 MuLaCover has no verified full native editor. ASR, VAD, diarization,
 alignment and OCR remain API utilities. These entries have no
 direct-use button rather than a misleading one.
+"Plus 10000" below is the default of `limits.editor_port_offset`
+([settings](settings.md)); the links follow whatever it is set to.
+
 Qwen3-TTS exposes its upstream Gradio editor on the
 instance port plus 10000, in the same process as the API and with the same
 model object; opening the editor does not load a second checkpoint. Their

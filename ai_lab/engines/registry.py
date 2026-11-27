@@ -117,8 +117,15 @@ def build(settings: dict | None = None) -> dict[str, Engine]:
 class Registry:
     """The engines this installation uses."""
 
-    def __init__(self, settings: dict | None = None) -> None:
+    def __init__(self, settings: dict | None = None, *,
+                 editor_port_offset: int | None = None) -> None:
+        """`editor_port_offset`: the machine's `limits.editor_port_offset`, set on every
+        engine that serves a page of its own; left out, the engines keep the default."""
         self._engines = build(settings)
+        if editor_port_offset is not None:
+            for engine in self._engines.values():
+                if hasattr(engine, "editor_port_offset"):
+                    engine.editor_port_offset = editor_port_offset
 
     def get(self, engine_id: str) -> Engine:
         """The engine with this id; KeyError when there is none."""

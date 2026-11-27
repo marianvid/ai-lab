@@ -29,6 +29,10 @@ class ComfyUiEngineTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--comfyui") + 1], "/opt/ComfyUI/main.py")
         self.assertEqual(argv[argv.index("--model-root") + 1], "/models/flux")
         self.assertEqual(argv.count("--extra-model-root"), 2)
+        self.assertEqual(argv[argv.index("--ui-port") + 1], "18093")
+        self.engine.editor_port_offset = 2000
+        argv = self.engine.plan(self.model, 8093, {}).argv
+        self.assertEqual(argv[argv.index("--ui-port") + 1], "10093")
 
     def test_an_unconfigured_comfyui_path_is_refused(self):
         with self.assertRaisesRegex(ValueError, "not configured"):

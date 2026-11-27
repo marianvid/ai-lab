@@ -36,6 +36,7 @@ class SettingFieldsTests(unittest.TestCase):
             self.assertEqual(sum(1 for key in BY_KEY if key.startswith(f"limits.{part}.")),
                              count, part)
         self.assertIn("limits.first_port", BY_KEY)
+        self.assertIn("limits.editor_port_offset", BY_KEY)
 
     def test_every_explanation_says_what_too_little_or_too_much_does(self):
         for field in FIELDS:

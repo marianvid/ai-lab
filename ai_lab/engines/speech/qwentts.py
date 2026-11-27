@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...types import ModelSet, Task
 from ..base import SPEECH_PATHS, LaunchPlan
-from ..isolated import ConfiguredEngine, model_directory, script_env, ui_port, with_headroom_mb
+from ..isolated import ConfiguredEngine, model_directory, script_env, with_headroom_mb
 
 # The two kinds of Qwen3-TTS checkpoint this runtime serves.
 MODES = frozenset({"voice-design", "custom-voice"})
@@ -47,7 +47,7 @@ class QwenTtsEngine(ConfiguredEngine):
         return LaunchPlan(argv=[self.binary, self.server, "--backend", "qwen",
                                 "--model-path", model_directory(model),
                                 "--mode", self.model_modes[model.name],
-                                "--ui-port", ui_port(port),
+                                "--ui-port", str(self.editor_port(port)),
                                 "--port", str(port)],
                           env=script_env(offline=False))
 

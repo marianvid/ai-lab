@@ -89,7 +89,8 @@ def build(config_path: Path) -> Manager:
     bus = EventBus()
     config = store.load()
     engine_settings = engine_settings_of(config)
-    engines = Registry(engine_settings)
+    engines = Registry(engine_settings,
+                       editor_port_offset=config.machine_limits.editor_port_offset)
     validate_configuration(config, set(engines.known()), check_workflows=True,
                            sections=CONFIG_SECTIONS)
     host = current_host(engine_settings)

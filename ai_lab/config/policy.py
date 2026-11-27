@@ -38,6 +38,8 @@ EMBEDDINGS_DRAIN_S = 60.0
 EMBEDDINGS_HOLD_S = 900.0
 EMBEDDINGS_CALL_S = 600.0
 FIRST_PORT = 8080
+# An engine's own editor page listens this far above its API port.
+EDITOR_PORT_OFFSET = 10000
 CHARS_PER_TOKEN = 3.0
 RETRY_AFTER_S = 5
 # The longest any of those waits may be set to: a week.
@@ -255,7 +257,7 @@ class ClientCapLimits:
 
 @dataclass(frozen=True, slots=True)
 class MachineLimits:
-    """The `limits` section: this machine's waits and first port, each with today's default.
+    """The `limits` section: this machine's waits and ports, each with today's default.
 
     Every value may be left out; then the default holds. See
     docs/settings.md ("Limits kept in the configuration") for what each one is
@@ -267,6 +269,7 @@ class MachineLimits:
     embeddings: EmbeddingsLimits = field(default_factory=EmbeddingsLimits)
     clients: ClientCapLimits = field(default_factory=ClientCapLimits)
     first_port: int = FIRST_PORT
+    editor_port_offset: int = EDITOR_PORT_OFFSET
 
     @classmethod
     def from_mapping(cls, raw: Mapping | None) -> MachineLimits:
@@ -279,4 +282,6 @@ class MachineLimits:
                    embeddings=EmbeddingsLimits.from_mapping(_part(raw, "embeddings")),
                    clients=ClientCapLimits.from_mapping(_part(raw, "clients")),
                    first_port=_integer(raw, "first_port", FIRST_PORT, bounds=(1, 65535),
-                                       section="Limits"))
+                                       section="Limits"),
+                   editor_port_offset=_integer(raw, "editor_port_offset", EDITOR_PORT_OFFSET,
+                                               bounds=(1000, 50000), section="Limits"))

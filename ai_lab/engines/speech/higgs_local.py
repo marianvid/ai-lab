@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ...types import ModelSet, Task
 from ..base import SPEECH_PATHS, LaunchPlan
-from ..isolated import ConfiguredEngine, model_directory, script_env, ui_port
+from ..isolated import ConfiguredEngine, model_directory, script_env
 
 # Limits on decoding several requests together.
 MAX_BATCH = 16
@@ -52,7 +52,7 @@ class HiggsLocalEngine(ConfiguredEngine):
             "--max-batch", str(self.max_batch),
             "--batch-window-ms", str(self.batch_window_ms),
             # The upstream Higgs playground page, for direct use in a browser.
-            "--ui-port", ui_port(port)],
+            "--ui-port", str(self.editor_port(port))],
             env=script_env(PYTORCH_ENABLE_MPS_FALLBACK="1"))
 
     def concurrency(self, params: dict) -> int:

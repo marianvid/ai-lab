@@ -98,6 +98,9 @@ class Engine:
     def generations_dir(self):
         return self.folder
 
+    def editor_port(self, port):
+        return port + 10000
+
 
 class Operations:
     def __init__(self, folder):

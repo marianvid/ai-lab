@@ -18,6 +18,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+from ..config.policy import EDITOR_PORT_OFFSET
 from ..hosts.command import which
 from ..network import LOOPBACK
 from ..types import Format, ModelSet, Task
@@ -28,14 +29,7 @@ from .probe import http_ok
 # above it, which a script needs on its path to import `ai_lab`.
 AI_LAB_PACKAGE = Path(__file__).resolve().parents[1]
 REPOSITORY = AI_LAB_PACKAGE.parent
-# An engine's own editor page listens this far above its API port.
-UI_PORT_OFFSET = 10000
 MIB = 1024 * 1024
-
-
-def ui_port(port: int) -> str:
-    """The port of the engine's own page, beside its API on `port`."""
-    return str(port + UI_PORT_OFFSET)
 
 
 def model_directory(model: ModelSet) -> str:
@@ -92,10 +86,17 @@ class IsolatedEngine:
     # The `--backend` of the shared server script, for engines that are one.
     backend: str = ""
     display_name: str
+    # How far above its API port the engine's own page listens: the machine's
+    # `limits.editor_port_offset`, which the registry sets on every engine.
+    editor_port_offset: int = EDITOR_PORT_OFFSET
 
     def __init__(self, binary: str | None = None, server: str | None = None) -> None:
         self.binary = binary or (which("python") if self.finds_python else None) or "python"
         self.server = server or str(AI_LAB_PACKAGE.joinpath(*self.script))
+
+    def editor_port(self, port: int) -> int:
+        """The port of the engine's own page, beside its API on `port`."""
+        return port + self.editor_port_offset
 
     def formats(self) -> frozenset[Format]:
         """Weight formats this engine can load."""

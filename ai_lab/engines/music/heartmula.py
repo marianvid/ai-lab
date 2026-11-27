@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...types import ModelSet, Task
 from ..base import MUSIC_PATHS, LaunchPlan
-from ..isolated import ConfiguredEngine, model_directory, script_env, ui_port
+from ..isolated import ConfiguredEngine, model_directory, script_env
 from . import music_server
 
 
@@ -36,6 +36,6 @@ class HeartMulaEngine(ConfiguredEngine):
             "--topk", str(options["topk"]),
             "--temperature", str(options["temperature"]),
             "--cfg-scale", str(options["cfg_scale"]),
-            "--port", str(port), "--ui-port", ui_port(port),
+            "--port", str(port), "--ui-port", str(self.editor_port(port)),
             "--heartmuse-root", where["heartmuse_root"]],
             env=script_env())

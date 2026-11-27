@@ -35,16 +35,16 @@ class TheSectionTests(unittest.TestCase):
                           limits.embeddings.drain_s, limits.embeddings.hold_s,
                           limits.embeddings.call_s), (120, 30, 60, 900, 600))
         self.assertEqual((limits.clients.chars_per_token, limits.clients.retry_after_s), (3.0, 5))
-        self.assertEqual(limits.first_port, 8080)
+        self.assertEqual((limits.first_port, limits.editor_port_offset), (8080, 10000))
 
     def test_a_value_set_is_read_and_the_others_keep_their_default(self):
         limits = MachineLimits.from_mapping({"runtime": {"load_s": 1800},
                                              "builds": {"system_path": "/opt/bin:/usr/bin"},
-                                             "first_port": 9000})
+                                             "first_port": 9000, "editor_port_offset": 2000})
         self.assertEqual(limits.runtime.load_s, 1800)
         self.assertEqual(limits.runtime.start_s, 60)
         self.assertEqual(limits.builds.system_path, "/opt/bin:/usr/bin")
-        self.assertEqual(limits.first_port, 9000)
+        self.assertEqual((limits.first_port, limits.editor_port_offset), (9000, 2000))
 
     def test_a_wrong_value_is_refused_with_its_name(self):
         wrong = {
@@ -56,6 +56,7 @@ class TheSectionTests(unittest.TestCase):
             "Limits embeddings call_s": {"embeddings": {"call_s": -1}},
             "Limits clients retry_after_s": {"clients": {"retry_after_s": 2.5}},
             "Limits first_port": {"first_port": 70000},
+            "Limits editor_port_offset": {"editor_port_offset": 999},
         }
         for message, raw in wrong.items():
             with self.subTest(message), self.assertRaisesRegex(ValueError, message):

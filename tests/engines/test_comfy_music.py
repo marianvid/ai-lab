@@ -31,6 +31,7 @@ class ComfyMusicTests(unittest.TestCase):
             '/models/future-music/text_encoders',
             '/models/future-music/vae'])
         self.assertEqual(engine.needs_mb(model, {}, 32623), 30000)
+        self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18125')
 
 
 if __name__ == '__main__':

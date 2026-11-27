@@ -70,9 +70,9 @@ class ServerTests(unittest.TestCase):
             backend, _ = run(comfy_server, [
                 "--comfyui", "/c", "--workflow", "/w.json", "--model-name", "minimax",
                 "--ffmpeg", "ffmpeg", "--model-path", "/m1", "--model-path", "/m2",
-                "--port", "9008"], "ComfyMusicBackend")
+                "--port", "9008", "--ui-port", "11008"], "ComfyMusicBackend")
         runtime = backend.args[0]
-        self.assertEqual((runtime.model_paths, runtime.port), (["/m1", "/m2"], 19008))
+        self.assertEqual((runtime.model_paths, runtime.port), (["/m1", "/m2"], 11008))
 
     def test_yue2_serves_through_its_studio(self):
         studios = []

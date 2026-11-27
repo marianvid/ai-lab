@@ -33,8 +33,6 @@ from ai_lab.network import LOOPBACK, PAGE_INTERFACES
 DEFAULT_TIMEOUT_S = 1800.0
 START_LIMIT_S = 180.0
 HISTORY_POLL_S = 0.25
-# The private ComfyUI listens this far above the bridge's own port.
-PRIVATE_PORT_OFFSET = 10_000
 VRAM_FLAGS = {"low": ("--lowvram",), "cpu": ("--cpu",)}
 
 
@@ -256,17 +254,19 @@ def main() -> None:
     parser.add_argument("--name", required=True)
     parser.add_argument("--host", default=LOOPBACK)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--ui-port", type=int, required=True)
     parser.add_argument("--workflow", type=Path)
     memory = parser.add_mutually_exclusive_group()
     memory.add_argument("--lowvram", action="store_true")
     memory.add_argument("--cpu", action="store_true")
     args = parser.parse_args()
-    # Each bridge gets its own private ComfyUI port.  A fixed port left a
-    # previous model's child process answering the next model after a switch.
+    # Each bridge gets its own private ComfyUI port, `--ui-port` (its own port
+    # plus the machine's editor offset).  A fixed port left a previous model's
+    # child process answering the next model after a switch.
     backend = Backend(ComfyLaunch(
         sys.executable, args.comfyui, [args.model_root, *args.extra_model_root],
         Path(tempfile.gettempdir()) / f"ai-lab-comfyui-{args.port}",
-        args.port + PRIVATE_PORT_OFFSET,
+        args.ui_port,
         vram_mode="low" if args.lowvram else "cpu" if args.cpu else "normal",
         workflow=args.workflow, ui_workflow=for_model(args.name)))
     atexit.register(backend.close)

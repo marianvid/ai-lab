@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...types import ModelSet, Task
 from ..base import SPEECH_PATHS, LaunchPlan
-from ..isolated import ConfiguredEngine, script_env, ui_port
+from ..isolated import ConfiguredEngine, script_env
 
 # What each model's options must name.
 REQUIRED_OPTIONS = ("language_code", "default_voice", "repo_id")
@@ -40,5 +40,5 @@ class KokoroEngine(ConfiguredEngine):
             "--language-code", options["language_code"],
             "--default-voice", options["default_voice"],
             "--repo-id", options["repo_id"], "--port", str(port),
-            "--ui-port", ui_port(port)],
+            "--ui-port", str(self.editor_port(port))],
             env=script_env())

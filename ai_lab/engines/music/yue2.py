@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ...types import ModelSet, Task
 from ..base import MUSIC_PATHS, MUSIC_WINDOW_PATHS, LaunchPlan, ParamSpec, validate
-from ..isolated import ConfiguredEngine, model_directory, script_env, ui_port
+from ..isolated import ConfiguredEngine, model_directory, script_env
 from . import music_server
 from .transfer import TransferSettings
 
@@ -135,7 +135,7 @@ class Yue2Engine(ConfiguredEngine):
             "--vae-path", where["vae_path"], "--output-root", where["output_root"],
             "--cot", options["cot"], "--memory-budget-gib",
             str(options["memory_budget_gib"]), "--port", str(port),
-            "--ui-port", ui_port(port), "--cfg-scale", str(window["cfg_scale"]),
+            "--ui-port", str(self.editor_port(port)), "--cfg-scale", str(window["cfg_scale"]),
             "--webui-root", where["webui_root"], "--device", self.device,
             "--window-settings", json.dumps(window, sort_keys=True)],
             env=script_env())

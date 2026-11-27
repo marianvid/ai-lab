@@ -318,7 +318,9 @@ export function createCard({ progress, open, paint, paintFromState, run, removeI
     return element('a', {
       class: 'pill chat-link', target: '_blank', rel: 'noopener',
       href: `${window.location.protocol}//${window.location.hostname}:`
-        + `${instance.port + (comfy || qwenTts || higgs || voxcpm || kokoro || yue2 || heartmula ? 10000 : 0)}/`
+        // The engine's own page: the gateway says on which port (the API port
+        // plus the machine's editor offset); llama.cpp's chat is on its API port.
+        + `${llama ? instance.port : instance.editor_port}/`
         + (comfy ? '?ai_lab_preset=1' : ''),
       title: comfy ? 'Open this model in ComfyUI with its configured workflow'
         : qwenTts ? 'Open the official Qwen3-TTS editor using this loaded model'

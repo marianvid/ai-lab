@@ -30,7 +30,8 @@ class ComfyMusicEngine(ConfiguredEngine):
         model_dir = checkpoint.parent if checkpoint.name == "diffusion_models" else checkpoint
         argv = [self.binary, self.server, "--comfyui", self.locations["comfyui"],
                 "--workflow", options["workflow"], "--model-name", model.name,
-                "--ffmpeg", self.locations["ffmpeg"] or "ffmpeg", "--port", str(port)]
+                "--ffmpeg", self.locations["ffmpeg"] or "ffmpeg", "--port", str(port),
+                "--ui-port", str(self.editor_port(port))]
         for subdir in options["component_subdirs"]:
             argv.extend(["--model-path", str(model_dir / subdir)])
         return LaunchPlan(argv=argv, env=script_env(), web_ui=True)

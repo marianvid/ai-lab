@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...types import ModelSet, Task
 from ..base import SPEECH_PATHS, LaunchPlan
-from ..isolated import ConfiguredEngine, model_directory, script_env, ui_port
+from ..isolated import ConfiguredEngine, model_directory, script_env
 
 # How many speech requests the SGLang worker may be sent at once, at most.
 MAX_PARALLEL = 64
@@ -51,7 +51,7 @@ class HiggsEngine(ConfiguredEngine):
             "--worker-port", str(options["worker_port"]),
             "--mem-fraction-static", str(options["mem_fraction_static"]),
             "--max-parallel", str(self.max_parallel),
-            "--port", str(port), "--ui-port", ui_port(port)],
+            "--port", str(port), "--ui-port", str(self.editor_port(port))],
             env=script_env())
 
     def concurrency(self, params: dict) -> int:

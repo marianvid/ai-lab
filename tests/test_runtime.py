@@ -580,3 +580,21 @@ class WhenTheWeightsWillNotFit(unittest.TestCase):
         params = runtime.checks.split_if_it_will_not_fit(
             instance, self._model(), VllmEngine(binary="/bin/true"))
         self.assertEqual(params, {"gpu_memory_fraction": 0.9})
+
+
+class EditorPortTests(unittest.TestCase):
+    """The model list says where each engine's own page listens."""
+
+    def row(self, engine):
+        runtime = Runtime(FakeHost(), EventBus(), sample_interval_s=0)
+        return runtime.status(instance(port=8093), engine, ProcessStatus(running=False))
+
+    def test_a_page_engine_is_its_port_plus_the_machines_offset(self):
+        from ai_lab.engines.images.comfyui import ComfyUiEngine
+        engine = ComfyUiEngine()
+        self.assertEqual(self.row(engine)["editor_port"], 18093)
+        engine.editor_port_offset = 2000
+        self.assertEqual(self.row(engine)["editor_port"], 10093)
+
+    def test_any_other_engine_is_its_own_port(self):
+        self.assertEqual(self.row(FakeEngine(host=FakeHost()))["editor_port"], 8093)
