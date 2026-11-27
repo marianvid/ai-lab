@@ -31,7 +31,7 @@ RUN_HEADER = "X-Run-Id"
 
 
 class Songs(Protocol):
-    """The songs of a YuE2 entry, as `music_windows.GenerationFiles` keeps them."""
+    """The songs of a YuE2 entry, as `studio.SongFolders` keeps them."""
 
     def engine(self, query: dict | None):
         """The entry's engine, with `transfer` and `generations_dir()`."""

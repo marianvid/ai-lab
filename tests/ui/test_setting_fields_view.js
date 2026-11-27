@@ -39,9 +39,15 @@ const ADDRESS = {
   high: null, kind: 'fixed', restart: true, help: 'Change it in config.json.',
   restart_note: 'Takes effect when AI-Lab is next started.', value: 8091, saved: true,
 };
+const EDITORS = {
+  key: 'code.comfyui_templates.__init__._TEMPLATES', group: 'gpu_alarms',
+  label: 'ComfyUI: models with their own editor', unit: '', default: ['flux2-klein', 'qwen-image'],
+  low: null, high: null, kind: 'fixed', restart: false, help: 'By name.', restart_note: '',
+  value: ['flux2-klein', 'qwen-image'], saved: false,
+};
 const FIELDS = {
   groups: { loading: 'Loading models', updates: 'Engine updates', gpu_alarms: 'GPU health: alarms' },
-  fields: [LOAD, PORT, PATH, ON, XIDS, ADDRESS],
+  fields: [LOAD, PORT, PATH, ON, XIDS, ADDRESS, EDITORS],
 };
 
 async function renderPage(overrides = {}) {
@@ -112,6 +118,14 @@ describe('the settings from the configuration file', () => {
     assert.equal(row.querySelector('input'), null);
     assert.match(row.textContent, /8091/);
     assert.match(row.title, /config.json/);
+  });
+
+  it('shows a fixed table of names as a list', async () => {
+    // Audit L60: the models with their own ComfyUI editor are names, not a number.
+    const { view } = await renderPage();
+    const row = [...namedSection(view, 'GPU health: alarms').querySelectorAll('label.field')]
+      .find((item) => item.textContent.includes('own editor'));
+    assert.match(row.textContent, /flux2-klein, qwen-image/);
   });
 
   it('keeps what was typed when the server refuses it', async () => {

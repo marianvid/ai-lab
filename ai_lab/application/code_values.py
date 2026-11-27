@@ -2,9 +2,10 @@
 
 The owner's rule: a value that decides how AI-Lab behaves is a setting, editable
 where its bounds are clear and at least visible where they are not. These are
-the ones not yet made settings (audit L19, L26, L34, L57, L59, m26): waits of
-the engine installs, the speech engines' room and defaults, the card monitor's
-fixed periods, the music and speech servers' waits.
+the ones not yet made settings (audit L19, L26, L34, L57, L59, L60, L61, m26):
+waits of the engine installs, the speech engines' room and defaults, the card
+monitor's fixed periods, the music and speech servers' waits, Canary's language,
+the models with their own ComfyUI editor, YuE2 Studio's questions.
 
 Each value is read from its module's source text, not imported: several of
 these modules run inside an engine's own process (torch, a studio) and must
@@ -45,9 +46,13 @@ class CodeValue:
 
 
 def _number(node: ast.AST) -> object:
-    """A literal, or arithmetic on literals (7 * 86400.0); ValueError for anything else."""
+    """A literal, arithmetic on literals (7 * 86400.0), or a table's names (its string keys,
+    sorted); ValueError for anything else."""
     if isinstance(node, ast.Constant):
         return node.value
+    if isinstance(node, ast.Dict) and all(isinstance(key, ast.Constant) and isinstance(key.value, str)
+                                          for key in node.keys):
+        return sorted(str(key.value) for key in node.keys if isinstance(key, ast.Constant))
     if isinstance(node, ast.BinOp) and type(node.op) in _OPERATIONS:
         return _OPERATIONS[type(node.op)](_number(node.left), _number(node.right))
     raise ValueError("not a literal")
@@ -117,6 +122,20 @@ VALUES: tuple[CodeValue, ...] = (
           "How long the studio may take to start."),
     _wait("speech/higgs_server.py", "PLAYGROUND_START_S", "Higgs page: start",
           "How long the Higgs page may take to start."),
+    _wait("songs/studio.py", "STUDIO_CALL_S", "YuE2 Studio: one question",
+          "How long the studio may take to list its jobs or delete a song."),
+    CodeValue("songs/studio.py", "STUDIO_JOBS_LOOKED_AT", "YuE2 Studio: jobs looked at", "",
+              "How many of the studio's latest jobs are read to know whether one works on a song."),
+    _wait("api/routes/music_windows.py", "CANCEL_CALL_S", "YuE2: cancelling a window call",
+          "How long the engine may take to say it is cancelling a window call."),
+    CodeValue("audio/server.py", "CANARY_LANGUAGE", "Canary: language when none is named", "",
+              "The language Canary transcribes when a request names none. Nemotron is given "
+              "ro-RO for ro."),
+    CodeValue("comfyui_templates/__init__.py", "_TEMPLATES", "ComfyUI: models with their own editor",
+              "", "The entries whose ComfyUI page opens a native editor, by name; a model renamed "
+              "or added in the Library gets none."),
+    CodeValue("comfyui_templates/__init__.py", "PLATFORM_MODEL", "ComfyUI: editor by platform", "",
+              "The entry whose native editor differs on macOS and Linux."),
 )
 
 

@@ -111,6 +111,11 @@ class NemoBackend:
                 if key in parameters or (open_ended and key != "language")}
 
 
+# The language Canary is given when a request names none (audit L59; shown on
+# Settings → Fixed in code).
+CANARY_LANGUAGE = "ro"
+
+
 def _language_options(model_kind: str, language: str | None) -> dict:
     """The language options each NeMo family understands, before checking the signature.
 
@@ -119,7 +124,7 @@ def _language_options(model_kind: str, language: str | None) -> dict:
     `language`, only when the model's `transcribe` names that parameter.
     """
     if model_kind == "canary":
-        return {"source_lang": language or "ro", "target_lang": language or "ro",
+        return {"source_lang": language or CANARY_LANGUAGE, "target_lang": language or CANARY_LANGUAGE,
                 "task": "asr", "pnc": "yes"}
     if not language:
         return {}

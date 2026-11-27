@@ -16,6 +16,7 @@ import { section } from './settings_section.js';
 function shown(field, value) {
   if (field.kind === 'list') return (value || []).join(', ');
   if (field.kind === 'boolean') return value ? 'on' : 'off';
+  if (Array.isArray(value)) return value.join(', ');
   return String(value);
 }
 

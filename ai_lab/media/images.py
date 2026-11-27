@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -97,9 +98,16 @@ class ImageCalls:
             try:
                 with urllib.request.urlopen(request, timeout=first) as response:
                     return json.loads(response.read())
+            except urllib.error.HTTPError:
+                # The bridge answered (a workflow that failed is a 500): its
+                # job is over, so there is nothing to interrupt.
+                raise
             except (TimeoutError, OSError):
                 # The wait ran out, or the bridge went away: the job it was
                 # rendering is interrupted before the place is given back, so
                 # the card does not keep rendering for nobody (audit L58).
+                # "current" is this call's job: the lease admits one image call
+                # per engine at a time. If calls on one engine ever overlap,
+                # this must name the job instead.
                 _interrupt(lease.port)
                 raise

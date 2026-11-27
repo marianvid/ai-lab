@@ -5,6 +5,8 @@ import io
 import json
 import tempfile
 import unittest
+import urllib.error
+from email.message import Message
 from pathlib import Path
 from unittest import mock
 
@@ -88,6 +90,19 @@ class ImageCallsTest(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", opened), self.assertRaises(TimeoutError):
             self.images.submit({"profile": "qwen", "prompt": "a cat"}, Task.IMAGE_GENERATION)
         self.assertEqual(asked[-1], "http://127.0.0.1:8105/api/jobs/current/cancel")
+
+    def test_a_call_the_bridge_refused_interrupts_nothing(self):
+        # The reviewer's note on L58: an answer (a failed workflow's 500) ends the
+        # job, so no cancel is sent, which could stop another call's job.
+        asked = []
+
+        def opened(request, timeout):
+            asked.append(request.full_url)
+            raise urllib.error.HTTPError(request.full_url, 500, "failed", Message(), io.BytesIO(b"{}"))
+
+        with mock.patch("urllib.request.urlopen", opened), self.assertRaises(urllib.error.HTTPError):
+            self.images.submit({"profile": "qwen", "prompt": "a cat"}, Task.IMAGE_GENERATION)
+        self.assertEqual(asked, ["http://127.0.0.1:8105/v1/images/generations"])
 
     def test_an_engine_without_images_is_an_error(self):
         with self.answer({"data": []}), self.assertRaisesRegex(RuntimeError, "no images"):

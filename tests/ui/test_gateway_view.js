@@ -297,6 +297,24 @@ describe('the limits, on the page that shows what they cost', () => {
     context.window.close();
   });
 
+  it('asks for the setting fields once per visit, not on every redraw', async () => {
+    // The reviewer's note on L63: the text does not change between redraws.
+    const context = installDom({ '/api/gateway': STATS, '/api/setting-fields': { fields: [] } });
+    let tick = null;
+    context.window.setInterval = (callback) => { tick = callback; return 1; };
+    context.window.clearInterval = () => {};
+    const { render, stopRefreshing } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    await render(context.view);
+    await settle();
+    tick();
+    await settle();
+    stopRefreshing();
+    const asked = (path) => context.calls.filter((call) => call.path.startsWith(path)).length;
+    assert.equal(asked('/api/gateway'), 2);
+    assert.equal(asked('/api/setting-fields'), 1);
+    context.window.close();
+  });
+
   it('shows what each limit is set to', async () => {
     const { view } = await renderPage();
     assert.equal(field(view, 'Max TTFT').querySelector('input').value, '120');

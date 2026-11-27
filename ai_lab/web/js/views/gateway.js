@@ -400,7 +400,10 @@ export function stopRefreshing() {
   if (timer) { window.clearInterval(timer); timer = null; }
 }
 
-export async function render(container) {
+// `help`: the limits' explanations already fetched on this visit. The timer's
+// redraws pass it on, so /api/setting-fields is asked once per visit, not every
+// 5 s, for text that does not change (the reviewer's note on L63).
+export async function render(container, help) {
   // One timer at a time. Leaving the old one running would make the page
   // redraw twice as often for every visit to this tab.
   stopRefreshing();
@@ -410,7 +413,7 @@ export async function render(container) {
     stats = await api.gateway();
     // Each limit's default, range and what too small or too large does (audit
     // L63), from the one list of fields; the page still draws without it.
-    stats.fieldHelp = await api.settingFields().then(fieldHelp).catch(() => ({}));
+    stats.fieldHelp = help ?? await api.settingFields().then(fieldHelp).catch(() => ({}));
   } catch (error) {
     container.replaceChildren(element('p', { class: 'error', text: error.message }));
     return;
@@ -422,7 +425,7 @@ export async function render(container) {
   container.replaceChildren(element('div', { class: 'gateway-grid' }, [
     element('div', { class: 'at-activity' }, activity(stats)),
     element('div', { class: 'at-address' }, address(stats)),
-    element('div', { class: 'at-limits' }, limits(stats, () => render(container))),
+    element('div', { class: 'at-limits' }, limits(stats, () => render(container, stats.fieldHelp))),
     element('div', { class: 'at-queue' }, coming(stats)),
   ]));
 
@@ -433,6 +436,6 @@ export async function render(container) {
     if (container.firstChild !== mine) { window.clearInterval(timer); timer = null; return; }
     // Not while a limit is being typed: the redraw would put the saved value back.
     if (beingEdited(container)) return;
-    render(container).catch(() => {});
+    render(container, stats.fieldHelp).catch(() => {});
   }, EVERY_MS);
 }

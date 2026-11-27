@@ -4,18 +4,22 @@ import sys
 from pathlib import Path
 
 
+# Which model opens which native editor, by entry name (audit L60; shown on
+# Settings → Fixed in code). A model renamed in the Library gets no editor.
 _TEMPLATES = {
     "qwen-image-2512-nvfp4": "image_qwen_2512_nvfp4.json",
     "qwen-image-edit-2511-fp8mixed": "image_qwen_edit_2511_fp8mixed.json",
     "flux2-klein-4b-bf16": "image_flux2_klein_4b_distilled.json",
     "minimax-music3": "audio_minimax_music_3.json",
 }
+# The one model whose editor depends on the platform (macOS or Linux).
+PLATFORM_MODEL = "flux2-dev-q8-0"
 
 
 def for_model(name: str, platform: str | None = None) -> Path | None:
     """The native editor ComfyUI's page opens for this model; None when it has none."""
     filename: str | None
-    if name == "flux2-dev-q8-0":
+    if name == PLATFORM_MODEL:
         filename = ("image_flux2_dev_q8_macos.json" if
                     (platform or sys.platform) == "darwin" else
                     "image_flux2_dev_q8_linux.json")

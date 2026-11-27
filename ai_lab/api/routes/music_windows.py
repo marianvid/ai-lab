@@ -6,7 +6,8 @@ card, `gateway.py`); what is added here is what the front door must know about i
 - the call's `request_id`, so `DELETE /v1/audio/music/window-generations/{request_id}` can
   stop it: still waiting for the card, it is dropped from the queue; already running, the
   engine is told to cancel it;
-- the songs themselves, read from the engine's folder without the model loaded:
+- the songs themselves, read from the engine's folder without the model loaded (what
+  makes a song busy and how it is removed is decided in `songs/studio.py`):
   `GET /v1/audio/music/generations/{generation_id}/audio` (the whole song, FLAC),
   `GET .../{generation_id}/window-audio` (the regenerated clip, WAV) and
   `DELETE /v1/audio/music/generations/{generation_id}`. The engine is found by the
@@ -15,7 +16,6 @@ card, `gateway.py`); what is added here is what the front door must know about i
 from __future__ import annotations
 
 import json
-import shutil
 import threading
 import urllib.error
 import urllib.request
@@ -27,9 +27,10 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from ...engines.base import MUSIC_WINDOW_PATHS
-from ...gateway.errors import ModelNotLoadedError, WindowCallActiveError, WindowRequestError
-from ...shared.song_names import REQUEST_ID, check_generation_id
+from ...gateway.errors import WindowCallActiveError, WindowRequestError
+from ...shared.song_names import REQUEST_ID
 from ...network import LOOPBACK
+from ...songs.studio import SongFolders
 from ..passthrough import Passthrough
 from .music_transfers import register_transfers
 
@@ -37,15 +38,10 @@ if TYPE_CHECKING:
     from ...operations import CardView
 
 WINDOW_PATH = MUSIC_WINDOW_PATHS[0]
-# How long the engine may take to say it is cancelling.
+# How long the engine may take to say it is cancelling a window call.
 CANCEL_CALL_S = 30
 # A song's file is sent in pieces of this size.
 CHUNK_BYTES = 1 << 20
-# How many of the Studio's latest jobs are looked at for one still working on a song;
-# the Studio runs one job at a time, so the pending and running ones are among the latest.
-STUDIO_JOBS_LOOKED_AT = 50
-# How YuE2 Studio's refusal to delete a song a job is still writing begins (`library.delete_directory`).
-STUDIO_IN_USE = "an active job is writing"
 # The files a generation serves, by route: name in its folder, and media type.
 FILES = {"audio": ("audio.flac", "audio/flac"), "window-audio": ("window.wav", "audio/wav")}
 
@@ -191,48 +187,12 @@ def ended_with(answer: Passthrough, done) -> Passthrough:
     return answer
 
 
-class GenerationFiles:
-    """A YuE2 entry's songs, read and removed in its engine's folder."""
+class GenerationFiles(SongFolders):
+    """A YuE2 entry's songs (`songs.studio.SongFolders`), and their files sent in pieces."""
 
     def __init__(self, gateway, operations: CardView, windows: WindowCalls | None = None) -> None:
-        self.gateway = gateway
-        self.operations = operations
         self.windows = windows or WindowCalls()
-
-    def engine(self, query: dict | None):
-        """The engine of the entry named by `?model=`, refused unless it keeps generations."""
-        model = (query or {}).get("model")
-        if not model:
-            raise ValueError("name the YuE2 entry with ?model=")
-        instance = self.gateway.resolve(model, self.operations.configured())
-        engine = self.operations.engine(instance["engine"])
-        if getattr(engine, "generations_dir", None) is None:
-            raise ValueError(f"{model} keeps no generations")
-        return engine
-
-    def folder(self, query: dict | None, generation_id: str) -> Path:
-        """The generation's folder, for the entry named by `?model=`."""
-        folder = self.engine(query).generations_dir() / check_generation_id(generation_id)
-        if not folder.is_dir():
-            raise FileNotFoundError(f"no generation {generation_id}")
-        return folder
-
-    def studio_port(self, query: dict | None) -> int | None:
-        """The YuE2 Studio's port while the entry is loaded, else None."""
-        try:
-            port, _name = self.gateway.where_loaded((query or {})["model"], WINDOW_PATH)
-        except ModelNotLoadedError:
-            return None
-        return self.engine(query).editor_port(port)
-
-    def refuse_busy(self, query: dict | None, generation_id: str) -> None:
-        """409 when a window call edits this generation, or a Studio job writes or reads it."""
-        editing = self.windows.in_use(generation_id)
-        if editing is not None:
-            raise WindowCallActiveError(f"{generation_id} is the source of window call {editing}")
-        port = self.studio_port(query)
-        if port is not None and _studio_uses(port, generation_id):
-            raise WindowCallActiveError(f"a YuE2 Studio job is working on {generation_id}")
+        super().__init__(gateway, operations, self.windows.in_use)
 
     def send(self, query: dict | None, generation_id: str, what: str) -> Passthrough:
         """One of the generation's files (`FILES`), in pieces."""
@@ -242,68 +202,6 @@ class GenerationFiles:
             raise FileNotFoundError(f"generation {generation_id} has no {name}")
         return Passthrough(status=200, content_type=media_type, chunks=_pieces(path),
                            headers={"Content-Disposition": f'attachment; filename="{generation_id}-{name}"'})
-
-    def delete(self, query: dict | None, generation_id: str) -> dict:
-        """Remove the generation (a candidate not kept).
-
-        Through YuE2 Studio when the engine is up, so its own guard refuses a folder
-        a job is writing and its cached mp3 goes too; straight from the folder when it
-        is down, since then nothing can be writing. The source of a window call that
-        is waiting or running is refused (409) either way.
-        """
-        folder = self.folder(query, generation_id)
-        editing = self.windows.in_use(generation_id)
-        if editing is not None:
-            raise WindowCallActiveError(f"{generation_id} is the source of window call {editing}")
-        port = self.studio_port(query)
-        if port is None:
-            shutil.rmtree(folder)
-        else:
-            _studio_delete(port, generation_id)
-        return {"deleted": generation_id}
-
-
-def _studio_delete(studio_port: int, generation_id: str) -> None:
-    """YuE2 Studio's own delete of a library song; its refusal of a folder in use is a 409.
-
-    The Studio answers both refusals with 404 and says which in `detail`
-    (`routes.delete_song`): an unknown song, or "an active job is writing to this
-    directory" (`library.delete_directory`), which is not "not found".
-    """
-    request = urllib.request.Request(
-        f"http://{LOOPBACK}:{studio_port}/api/library/songs/{quote(generation_id, safe='')}",
-        method="DELETE")
-    try:
-        with urllib.request.urlopen(request, timeout=CANCEL_CALL_S):
-            return
-    except urllib.error.HTTPError as error:
-        detail = _detail(error)
-        if error.code == HTTPStatus.NOT_FOUND and detail.startswith(STUDIO_IN_USE):
-            raise WindowCallActiveError(f"YuE2 Studio refused to delete {generation_id}: {detail}") from error
-        if error.code == HTTPStatus.NOT_FOUND:
-            raise FileNotFoundError(f"no generation {generation_id}") from error
-        raise RuntimeError(f"YuE2 Studio could not delete {generation_id}: HTTP {error.code}") from error
-
-
-def _studio_uses(studio_port: int, generation_id: str) -> bool:
-    """Whether a pending or running Studio job writes this generation, or edits it as its source."""
-    url = f"http://{LOOPBACK}:{studio_port}/api/jobs?limit={STUDIO_JOBS_LOOKED_AT}"
-    with urllib.request.urlopen(url, timeout=CANCEL_CALL_S) as response:
-        jobs = json.load(response).get("jobs", [])
-    return any(job.get("status") in ("pending", "running")
-               and (Path(job.get("output_dir") or "").name == generation_id
-                    or (job.get("params") or {}).get("source") == generation_id)
-               for job in jobs)
-
-
-def _detail(error: urllib.error.HTTPError) -> str:
-    """The Studio's `detail` sentence, or the body as it came."""
-    body = error.read().decode(errors="replace")
-    try:
-        detail = json.loads(body).get("detail", body)
-    except (ValueError, AttributeError):
-        return body
-    return str(detail)
 
 
 def _pieces(path: Path) -> Iterator[bytes]:
