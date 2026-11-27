@@ -48,6 +48,8 @@ class Operations:
         self._downloads = services.model_downloads
         self._maintenance = services.engine_maintenance
         self._settings_changes = services.settings_changes
+        # Every setting of the configuration file as a page field (`view`, `update`).
+        self.setting_fields = services.setting_fields
 
     @classmethod
     def assemble(cls, parts: OperationsParts) -> Operations:

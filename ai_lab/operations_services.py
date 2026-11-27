@@ -24,6 +24,7 @@ from .application.model_storage import (
     StorageParts,
 )
 from .application.move_jobs import MoveJobStore
+from .application.setting_fields import SettingFields
 from .application.settings_changes import SettingsChanges
 from .types import ChangeEvent
 
@@ -87,6 +88,7 @@ class OperationsServices:
     instance_configuration: InstanceConfiguration
     engine_maintenance: EngineMaintenanceService
     settings_changes: SettingsChanges
+    setting_fields: SettingFields
 
 
 class ChangeNotifier:
@@ -124,4 +126,5 @@ def build_services(parts: OperationsParts) -> OperationsServices:
         listing=listing, model_downloads=downloads, model_storage=storage,
         move_jobs=storage.jobs, instance_service=instances,
         instance_configuration=instances.configuration, engine_maintenance=maintenance,
-        settings_changes=SettingsChanges(parts.store, parts.host, parts.settings, changed))
+        settings_changes=SettingsChanges(parts.store, parts.host, parts.settings, changed),
+        setting_fields=SettingFields(parts.store, changed))

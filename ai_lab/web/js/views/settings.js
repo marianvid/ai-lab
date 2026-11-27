@@ -1,5 +1,6 @@
 // Settings: the machine, its engines, and where models are kept.
-// Everything here is read-only by decision.
+// What is set here is the machine's; every setting AI-Lab reads from its
+// configuration file has a field (`setting_fields.js`).
 
 import { api } from '../api.js';
 import { machine } from './machine.js';
@@ -7,6 +8,7 @@ import { onLog } from '../events.js';
 import { element } from '../format.js';
 import { paths, enginePaths } from './settings_paths.js';
 import { createEngineSection } from './settings_engines.js';
+import { settingFieldsSection } from './setting_fields.js';
 
 // Lines arriving while a build runs, kept here so switching tabs and coming
 // back does not lose them.
@@ -43,9 +45,10 @@ export async function render(container) {
   // The installed folders of every package engine, fetched alongside so the
   // engine rows can show them. A machine with none answers with an empty list
   // rather than an error, so this never decides whether the page draws.
-  const [settings, installed] = await Promise.all([
+  const [settings, installed, fields] = await Promise.all([
     api.settings(),
     api.allInstalls().catch(() => []),
+    api.settingFields().catch(() => null),
   ]);
   byEngine.clear();
   (installed || []).forEach((item) => byEngine.set(item.engine, item));
@@ -54,11 +57,15 @@ export async function render(container) {
   container.replaceChildren(element('div', { class: 'columns settings-columns' }, [
     element('div', {}, [
       engines(settings.engines, refresh),
+      settingFieldsSection(fields, 'updates', refresh),
       enginePaths(settings, refresh),
+      settingFieldsSection(fields, 'embeddings', refresh),
     ].filter(Boolean)),
     element('div', {}, [
       machine(settings, refresh),
+      settingFieldsSection(fields, 'loading', refresh),
       paths(settings, refresh),
+      settingFieldsSection(fields, 'clients', refresh),
     ].filter(Boolean)),
   ]));
 }

@@ -27,6 +27,9 @@ def _register_paths(router, operations) -> None:
     router.add("PATCH", "/api/model-roots/{id}",
                lambda id, body=None, **_: operations.update_model_root(
                    id, body or {}))
+    router.add("GET", "/api/setting-fields", lambda **_: operations.setting_fields.view())
+    router.add("PATCH", "/api/setting-fields",
+               lambda body=None, **_: operations.setting_fields.update(body or {}))
     router.add("GET", "/api/memory", lambda **_: operations.memory_budget())
     router.add("PATCH", "/api/memory",
                lambda body=None, **_: operations.update_memory(body or {}))

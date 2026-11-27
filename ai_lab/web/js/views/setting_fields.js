@@ -1,0 +1,79 @@
+// Settings kept in the configuration file, one section per group.
+//
+// The owner's rule (2026-11-27): no setting lives only in a file. Each field
+// says, when pointed at, what it means, its unit and default, and what too
+// small or too large does; one that takes effect only at the next start says
+// so beside it. The fields, their explanations and their checks come from the
+// server (`application/setting_fields.py`), so the page cannot drift from what
+// AI-Lab actually reads.
+
+import { api } from '../api.js';
+import { showNotice } from '../confirm.js';
+import { element } from '../format.js';
+import { section } from './settings_section.js';
+
+// What a field says when pointed at: its meaning, then its default.
+function explanation(field) {
+  const unit = field.unit ? ` ${field.unit}` : '';
+  return `${field.help}\n\nDefault: ${field.default}${unit}.`
+    + (field.restart_note ? `\n${field.restart_note}` : '');
+}
+
+function input(field) {
+  const text = field.kind === 'text';
+  return element('input', {
+    type: text ? 'text' : 'number', value: String(field.value),
+    ...(text ? { size: 28 } : { size: 8, step: field.kind === 'integer' ? '1' : 'any' }),
+    ...(field.low !== null && !text ? { min: String(field.low) } : {}),
+    ...(field.high !== null && !text ? { max: String(field.high) } : {}),
+  });
+}
+
+function label(field) {
+  const name = field.unit ? `${field.label} (${field.unit})` : field.label;
+  return element('span', {}, [
+    element('span', { text: name }),
+    field.restart_note
+      ? element('span', { class: 'muted', text: ' · after a restart' }) : null,
+  ].filter(Boolean));
+}
+
+// One group's fields and a Save that wakes only when something differs.
+export function settingFieldsSection(view, group, refresh) {
+  const fields = (view?.fields || []).filter((field) => field.group === group);
+  if (!fields.length) return null;
+  const inputs = new Map();
+  const rows = fields.map((field) => {
+    const box = input(field);
+    inputs.set(field.key, { box, field });
+    return element('label', { class: 'field explained', title: explanation(field) },
+                   [label(field), box]);
+  });
+  const valueOf = ({ box, field }) => (field.kind === 'text' ? box.value : Number(box.value));
+  const changes = () => {
+    const now = {};
+    inputs.forEach((entry, key) => {
+      if (String(valueOf(entry)) !== String(entry.field.value)) now[key] = valueOf(entry);
+    });
+    return now;
+  };
+  const save = element('button', {
+    class: 'action', text: 'Save', disabled: 'disabled',
+    onclick: async () => {
+      save.disabled = true;
+      try {
+        await api.updateSettingFields(changes());
+      } catch (error) {
+        await showNotice({ title: `Could not save ${view.groups[group].toLowerCase()}`,
+                           body: error.message });
+      }
+      refresh();
+    },
+  });
+  inputs.forEach(({ box }) => {
+    box.addEventListener('input', () => { save.disabled = !Object.keys(changes()).length; });
+  });
+  return section(view.groups[group], [
+    ...rows, element('div', { class: 'row' }, [element('span', {}), save]),
+  ]);
+}
