@@ -133,7 +133,7 @@ function securitySection(security, refresh) {
     return element('label', { class: 'row', title }, [box, element('span', { text: label })]);
   };
   const current = element('input', { type: 'password', placeholder: 'current password' });
-  const fresh = element('input', { type: 'password', placeholder: 'new password (8+)' });
+  const fresh = element('input', { type: 'password', placeholder: `new password (${security.password_min ?? 8}+)` });
   const save = element('button', {
     class: 'action', text: security.password_set ? 'Change password' : 'Set password',
     onclick: () => act('Could not set the password',
@@ -149,28 +149,50 @@ function securitySection(security, refresh) {
            'Needs a password first. Turning it off while a token is required is refused: the '
            + 'token requirement would then protect nothing.'),
     element('div', { class: 'row' }, [...(security.password_set ? [current] : []), fresh, save]),
-    sessionDays(security, refresh),
+    ...SECURITY_NUMBERS.map((spec) => numberRow(security, spec, refresh)),
+    line('Password hash', `scrypt, cost ${security.password_hash?.n ?? '?'} (r ${security.password_hash?.r ?? '?'}, p ${security.password_hash?.p ?? '?'})`,
+         'How the password is kept: a salted scrypt hash, never the text. Shown, not changed '
+         + 'here: a new cost would need every password set again.'),
     ...(security.token_holds === false ? [element('p', { class: 'error', text: TOKEN_DOES_NOT_HOLD })] : []),
   ]);
 }
 
-// "Remember me": how long this browser stays logged in, through the browser
-// closing and AI-Lab restarting (clients/sessions.py).
-function sessionDays(security, refresh) {
-  const days = element('input', { type: 'number', min: '1', max: '365', step: '1',
-                                  value: String(security.session_days ?? 30) });
+// Security's numbers (clients/security.py NUMBERS), each with its meaning, its
+// default and what too small or too large does (audit m22: the mailbox's two
+// were on no page). "Remember me" is the first: how long this browser stays
+// logged in, through the browser closing and AI-Lab restarting.
+const SECURITY_NUMBERS = [
+  { key: 'session_days', label: 'Stay logged in for (days)', min: 1, max: 365, fallback: 30,
+    help: 'How long a login holds, in days: the browser keeps it after closing, and AI-Lab '
+          + 'keeps it after a restart (only a digest of the session is written). Default 30; '
+          + 'from 1 to 365. Shorter means logging in more often; longer means a lost or shared '
+          + 'browser stays let in longer. Applies to logins made from then on; a login already open keeps its end.' },
+  { key: 'password_min', label: 'Shortest password (characters)', min: 8, max: 128, fallback: 8,
+    help: 'The fewest characters a new password may have. Default 8; from 8 to 128. Longer '
+          + 'is harder to guess; a length the owner cannot type reliably locks nobody out '
+          + 'but makes changing it harder. Checked when a password is set.' },
+  { key: 'mailbox_keep', label: 'Mailbox keeps (messages)', min: 10, max: 100000, fallback: 2000,
+    help: 'How many messages the agents\' mailbox keeps; the oldest go first. Default 2 000; '
+          + 'from 10 to 100 000. Too few: a message is gone before the other side reads it. '
+          + 'Too many: a larger file read at every post.' },
+  { key: 'mailbox_max_chars', label: 'Mailbox message, longest (characters)', min: 100,
+    max: 200000, fallback: 20000,
+    help: 'The longest message the mailbox takes. Default 20 000; from 100 to 200 000. Too '
+          + 'small: a report has to be sent in many parts. Too large: one message can fill '
+          + 'what the mailbox keeps.' },
+];
+
+function numberRow(security, spec, refresh) {
+  const box = element('input', { type: 'number', min: String(spec.min), max: String(spec.max),
+                                 step: '1', 'data-security': spec.key,
+                                 value: String(security[spec.key] ?? spec.fallback) });
   const save = element('button', {
     class: 'action', text: 'Save',
-    onclick: () => act('Could not change how long a login holds',
-                       () => api.updateSecurity({ session_days: Number(days.value) }), refresh),
+    onclick: () => act(`Could not change ${spec.label.toLowerCase()}`,
+                       () => api.updateSecurity({ [spec.key]: Number(box.value) }), refresh),
   });
-  return element('label', {
-    class: 'row',
-    title: 'How long a login holds, in days: the browser keeps it after closing, and AI-Lab '
-           + 'keeps it after a restart (only a digest of the session is written). Default 30; '
-           + 'from 1 to 365. Shorter means logging in more often; longer means a lost or shared '
-           + 'browser stays let in longer. Applies to logins made from then on; a login already open keeps its end.',
-  }, [element('span', { text: 'Stay logged in for (days)' }), days, save]);
+  return element('label', { class: 'row', title: spec.help },
+                 [element('span', { text: spec.label }), box, save]);
 }
 
 export const TOKEN_DOES_NOT_HOLD = 'The token requirement does not hold on this machine until '

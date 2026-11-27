@@ -125,8 +125,20 @@ class SecurityTest(unittest.TestCase):
         security = SecuritySettings(self.path)
         self.assertEqual(security.view(), {"require_token": False, "login_required": False,
                                            "password_set": False, "token_holds": True,
+                                           "password_hash": {"kind": "scrypt", "n": 2 ** 14,
+                                                             "r": 8, "p": 1},
                                            "mailbox_keep": 2000, "mailbox_max_chars": 20000,
-                                           "session_days": 30})
+                                           "session_days": 30, "password_min": 8})
+
+    def test_the_shortest_password_is_a_setting_never_below_eight(self):
+        # Audit m22: fixed in code before.
+        security = SecuritySettings(self.path)
+        with self.assertRaises(ValueError):
+            security.update({"password_min": 7})
+        security.update({"password_min": 12})
+        with self.assertRaisesRegex(ValueError, "at least 12 characters"):
+            security.set_password("eleven-char")
+        security.set_password("twelve-chars")
 
     def test_a_machine_already_half_protected_is_not_changed_and_still_saves(self):
         # Both machines were in this state when m1 was built: nothing locks

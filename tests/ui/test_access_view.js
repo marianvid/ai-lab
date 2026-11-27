@@ -88,7 +88,7 @@ describe('the Access page', () => {
     const security = { ...BASE['/api/security'], token_holds: true, session_days: 30 };
     const { view, calls } = await renderPage({ ...BASE, '/api/security': security,
       'PATCH /api/security': { ...security, session_days: 90 } });
-    const days = view.querySelector('input[type="number"][max="365"]');
+    const days = view.querySelector('input[data-security="session_days"]');
     assert.equal(days.value, '30');
     days.value = '90';
     const save = [...view.querySelectorAll('button')]
@@ -97,6 +97,25 @@ describe('the Access page', () => {
     await settle();
     const sent = calls.find((call) => call.method === 'PATCH' && call.path === '/api/security');
     assert.deepEqual(JSON.parse(sent.body), { session_days: 90 });
+  });
+
+  it('shows the mailbox\'s two numbers and the shortest password, and the hash only as text', async () => {
+    // Audit m22: Security settings that were on no page.
+    const security = { ...BASE['/api/security'], token_holds: true, session_days: 30,
+                       password_min: 8, mailbox_keep: 2000, mailbox_max_chars: 20000,
+                       password_hash: { kind: 'scrypt', n: 16384, r: 8, p: 1 } };
+    const { view, calls } = await renderPage({ ...BASE, '/api/security': security,
+      'PATCH /api/security': security });
+    for (const key of ['password_min', 'mailbox_keep', 'mailbox_max_chars']) {
+      assert.ok(view.querySelector(`input[data-security="${key}"]`), key);
+    }
+    assert.match(view.textContent, /scrypt, cost 16384/);
+    const keep = view.querySelector('input[data-security="mailbox_keep"]');
+    keep.value = '500';
+    [...keep.parentElement.querySelectorAll('button')][0].click();
+    await settle();
+    const sent = calls.find((call) => call.method === 'PATCH' && call.path === '/api/security');
+    assert.deepEqual(JSON.parse(sent.body), { mailbox_keep: 500 });
   });
 
   it('says when AI-Lab is Off', async () => {

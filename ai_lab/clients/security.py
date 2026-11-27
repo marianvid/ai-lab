@@ -19,8 +19,9 @@ from ..shared.numbers import whole_number
 from .registry import write_private
 
 SALT_BYTES = 16
+# The password hash's cost: shown on the Access page, not changed there (a
+# change would need every password set again; audit m22).
 SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}
-MIN_PASSWORD = 8
 SWITCHES = ("require_token", "login_required")
 # The agents' mailbox (clients/mailbox.py). A mailbox is a conversation, not an
 # archive: 2 000 messages is weeks of two agents talking. 20 000 characters is a
@@ -30,7 +31,9 @@ MAILBOX_LIMITS = {"mailbox_keep": (2000, 10, 100000), "mailbox_max_chars": (2000
 # How long a web session holds, in days ("remember me", `sessions.py`): the
 # browser keeps the cookie that long and AI-Lab keeps it across restarts.
 SESSION_LIMITS = {"session_days": (30, 1, 365)}
-NUMBERS = {**MAILBOX_LIMITS, **SESSION_LIMITS}
+# The shortest password the page accepts (audit m22): never below 8.
+PASSWORD_LIMITS = {"password_min": (8, 8, 128)}
+NUMBERS = {**MAILBOX_LIMITS, **SESSION_LIMITS, **PASSWORD_LIMITS}
 
 
 def _hash(password: str, salt: bytes) -> str:
@@ -82,6 +85,7 @@ class SecuritySettings:
         """What the Security page shows (never the hash)."""
         return {"require_token": self.require_token, "login_required": self.login_required,
                 "password_set": self.password_set, "token_holds": self.token_holds,
+                "password_hash": {"kind": "scrypt", **SCRYPT},
                 **{key: self.number(key) for key in NUMBERS}}
 
     def update(self, changes: dict) -> dict:
@@ -109,8 +113,9 @@ class SecuritySettings:
         """Set the password; changing an existing one needs the current one."""
         if self.password_set and not self.check(current or ""):
             raise AccessDeniedError("The current password is wrong")
-        if len(new or "") < MIN_PASSWORD:
-            raise ValueError(f"A password has at least {MIN_PASSWORD} characters")
+        shortest = self.number("password_min")
+        if len(new or "") < shortest:
+            raise ValueError(f"A password has at least {shortest} characters")
         salt = secrets.token_bytes(SALT_BYTES)
         with self._lock:
             self._data["password"] = {"salt": salt.hex(), "hash": _hash(new, salt)}
