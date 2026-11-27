@@ -225,3 +225,38 @@ class StopTimeoutTests(unittest.TestCase):
         # Equal was the bug; one second more would be the same bug with better
         # luck. systemd still has to reap the processes after it kills them.
         self.assertGreaterEqual(CONTROL_TIMEOUT_S - self.unit_stop_seconds(), 30.0)
+
+
+class MachineMemoryTests(unittest.TestCase):
+    """What the container's own memory reads, from /proc/meminfo, here without a container."""
+
+    def reading(self, text):
+        with patch.object(Path, "read_text", return_value=text):
+            return LinuxHost().system_memory()
+
+    def test_used_is_the_total_less_what_the_kernel_counts_available(self):
+        meminfo = ("MemTotal:       65536000 kB\nMemFree:          1024000 kB\n"
+                   "MemAvailable:   49152000 kB\nCached:  40000000 kB\n")
+        self.assertEqual(self.reading(meminfo), (16000.0, 64000.0))
+
+    def test_an_unreadable_file_reads_as_no_answer(self):
+        self.assertEqual(self.reading("MemTotal: nonsense\n"), (0.0, 0.0))
+        with patch.object(Path, "read_text", side_effect=OSError("no /proc")):
+            self.assertEqual(LinuxHost().system_memory(), (0.0, 0.0))
+
+
+class ProcessMemoryTests(unittest.TestCase):
+    """How much of the card one engine holds, from nvidia-smi's list of processes."""
+
+    def held(self, pid, answer):
+        with patch("ai_lab.hosts.linux.run", return_value=answer):
+            return LinuxHost._process_memory(pid)
+
+    def test_the_process_is_found_by_its_pid(self):
+        listing = "4321, 30460\n99, 120\n"
+        self.assertEqual(self.held(4321, result(listing)), 30460.0)
+        self.assertEqual(self.held(7, result(listing)), 0.0)
+
+    def test_a_failed_or_unreadable_listing_is_nothing_held(self):
+        self.assertEqual(self.held(4321, result(returncode=9)), 0.0)
+        self.assertEqual(self.held(4321, result("4321, [N/A]\n")), 0.0)

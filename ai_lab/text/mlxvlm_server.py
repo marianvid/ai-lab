@@ -97,6 +97,7 @@ class AdjustRequests:
         sent = False
 
         async def replay():
+            """The request's body, once, as the server's first receive."""
             nonlocal sent
             if not sent:
                 sent = True

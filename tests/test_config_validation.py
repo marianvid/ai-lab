@@ -65,6 +65,7 @@ class ConfigurationValidationTests(unittest.TestCase):
                 'picture': {'model': 'picture', 'task': 'generation',
                             'workflow': 'generate.json'}}}
             validate_configuration(config, {'comfyui'}, check_workflows=True, sections={})
+        self.assertEqual(config.images['profiles']['picture']['workflow'], 'generate.json')
 
     def test_reports_bad_references_before_work_starts(self):
         config = self.base()
@@ -119,8 +120,11 @@ class SectionTests(unittest.TestCase):
 
     def test_an_empty_section_map_checks_only_the_configuration_s_own_parts(self):
         config = self.base()
-        config.gpu_health = {}
+        config.gpu_health = {'interval_s': 'not checked here'}
+        # The card's health section belongs to `gpu_health`: with no parser
+        # named for it, a value it would refuse passes the configuration's check.
         validate_configuration(config, {'comfyui'}, sections={})
+        self.assertEqual(config.gpu_health, {'interval_s': 'not checked here'})
 
     def test_the_sections_must_be_named(self):
         with self.assertRaises(TypeError):

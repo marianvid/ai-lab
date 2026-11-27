@@ -17,20 +17,25 @@ from __future__ import annotations
 def register(router, operations, gateway=None) -> None:
     """The model list's routes; Load, Unload and Apply are guarded."""
     def guard(action: str, instance_id: str, body: dict) -> dict:
+        """Refuse to interrupt work in progress unless forced; the body without `force`."""
         return _guard(gateway, (action, instance_id), body)
 
     def done(result):
+        """Tell the gateway the card changed, and answer the result."""
         return _done(gateway, result)
 
     def load(id, body=None, **_):
+        """The Load button."""
         guard("load", id, body or {})
         return done(operations.load(id).json())
 
     def unload(id, body=None, **_):
+        """The Unload button."""
         guard("unload", id, body or {})
         return done(operations.unload(id).json())
 
     def apply(id, body=None, **_):
+        """Apply an entry's changed settings and load it again."""
         changes = guard("apply & reload", id, body or {})
         return done(operations.apply_and_reload(id, changes))
 

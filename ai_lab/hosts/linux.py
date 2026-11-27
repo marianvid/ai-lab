@@ -266,6 +266,7 @@ class LinuxHost:
         name, used, total, temperature, utilization = fields[:GPU_FIELDS]
 
         def number(text: str) -> float | None:
+            """A figure `nvidia-smi` printed, or None when it printed none."""
             try:
                 return float(text)
             except ValueError:

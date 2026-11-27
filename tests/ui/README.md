@@ -11,6 +11,22 @@ npm test
 They also run as the first step of `scripts/deploy.sh`, before anything is
 uploaded, and are skipped with a notice if `node_modules` is absent.
 
+## How much of the interface they reach
+
+```bash
+npm run coverage
+```
+
+Node's own coverage (`--experimental-test-coverage`, the tests themselves left
+out). Measured on 2026-11-27, at the audit: **79.5 % of lines, 58.2 % of
+branches, 53.4 % of functions** of `ai_lab/web/js`. Every module is reached by
+some test, through its page if not on its own. The least reached are the
+pages' live parts — what they do on a refresh, a click, a server's answer:
+`ai_lab/web/js/views/gpu_health.js` (31 % of lines),
+`ai_lab/web/js/views/lanes.js` (44 %), `ai_lab/web/js/views/machine.js` (46 %)
+and `ai_lab/web/js/views/runtime.js` (58 %). No floor is set yet:
+the figure is written here so a change can be compared with it.
+
 ## What these are for
 
 Every test names something a person sees, what they would expect from it, and

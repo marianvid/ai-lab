@@ -80,6 +80,7 @@ def _access(state_dir: Path, gateway, journal: OperationJournal,
     themselves, because the server stops serving them while AI-Lab is Off.
     """
     def log(line: str) -> None:
+        """One line on screen and in the operation log."""
         print(line, flush=True)
         journal.write(line)
 
@@ -119,6 +120,7 @@ def _install_shutdown(host, lanes: SideLanes) -> None:
     processor models are the manager's own children and always stop with it.
     """
     def shutdown(_signal, _frame):
+        """On a stop signal, stop every engine and lane, then leave."""
         lanes.stop_all()
         host.stop_all()
         sys.exit(0)

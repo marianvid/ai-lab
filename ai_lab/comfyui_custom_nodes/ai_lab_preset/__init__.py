@@ -38,6 +38,7 @@ async def preset(_request):
     }
 
     def replace(value):
+        """The value with every placeholder in it filled in."""
         if isinstance(value, dict):
             return {key: replace(item) for key, item in value.items()}
         if isinstance(value, list):

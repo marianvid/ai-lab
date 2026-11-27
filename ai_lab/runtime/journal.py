@@ -80,6 +80,7 @@ class PhaseFollower:
         subscription = bus.subscribe()
 
         def run() -> None:
+            """Write each event of the stream to the log as it comes."""
             for event in subscription.events():
                 if event is not None:
                     self.take(event)

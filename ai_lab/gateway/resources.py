@@ -52,6 +52,7 @@ class GatewayResources:
     def needs_mb(self, shape, card_total_mb: float) -> float:
         """Ask the selected engine how much this request shape needs; 0 when it cannot say."""
         def estimate(engine, settings: dict) -> float:
+            """What the engine says this shape needs, in MB."""
             model = self.operations.model_for(shape.instance_id)
             return float(engine.needs_mb(model, settings, card_total_mb))
         return ask_engine(self.operations, shape, estimate, 0.0)

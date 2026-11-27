@@ -6,6 +6,7 @@ from threading import BoundedSemaphore
 from unittest.mock import patch
 
 import socket
+import time
 
 from ai_lab.speech.higgs_backend import HiggsBackend, wait_for_free_port
 
@@ -53,7 +54,9 @@ class WorkerPortTests(unittest.TestCase):
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             port = probe.getsockname()[1]
+        started = time.monotonic()
         wait_for_free_port(port, timeout_s=1)
+        self.assertLess(time.monotonic() - started, 0.5)       # no waiting at all
 
     def test_a_held_port_is_reported_instead_of_silently_moved(self):
         with socket.socket() as holder:

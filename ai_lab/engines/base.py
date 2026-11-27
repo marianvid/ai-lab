@@ -280,6 +280,7 @@ def progress_reader(engine, port: int) -> Callable[[], dict] | None:
         return None
 
     def read() -> dict:
+        """The engine's work counters now; empty when they cannot be read."""
         try:
             return dict(ask(port))
         except CALL_FAILED:

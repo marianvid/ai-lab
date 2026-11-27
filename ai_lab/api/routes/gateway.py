@@ -181,6 +181,7 @@ def _forwarder(gateway: Gateway, path: str, lanes: SideLanes = NO_LANES,
     counted is given back when the answer closes, with the place.
     """
     def handle(body=None, alive=None, cut=None, headers=None, **_):
+        """One call of this shape: counted tokens, a side lane, or the card."""
         payload = body or {}
         wanted = _model_name(payload)
         if path in TOKENIZE_PATHS:
@@ -220,6 +221,7 @@ def _take_place(gateway: Gateway, path: str, payload, call: _Call, caller):
         raise
 
     def release() -> None:
+        """Give back the card's place and the client's cap, once the answer ended."""
         lease.release()
         give_back()
     call.release = release
@@ -364,6 +366,7 @@ def _forward(gateway: Gateway, lease, path: str, payload, call: _Call):
     # A text too long for the model comes back with the limit and its size as
     # numbers next to the engine's sentence (`context_limit`).
     def send(body):
+        """Forward the body to the engine holding the lease."""
         return forward(f"http://{LOOPBACK}:{lease.port}{path}", body, waits, hooks,
                        content_type=content_type)
     if not isinstance(outgoing, dict) or not lease.text:

@@ -54,6 +54,7 @@ def launch_heartmuse(backend: HeartMulaBackend, args: argparse.Namespace) -> Non
     generator._active_variant = "base"
     original_generate = generator.generate_music
     def serialized_generate(*values, **options):
+        """The page's generate, one at a time with the API's."""
         with backend.lock:
             return original_generate(*values, **options)
     generator.generate_music = serialized_generate

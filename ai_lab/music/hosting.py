@@ -50,6 +50,7 @@ def stop_on_exit(stop: Callable[[], None]) -> None:
     atexit.register(stop)
 
     def stopped(_signum, _frame) -> None:
+        """On a stop signal, stop the backend and leave."""
         stop()
         raise SystemExit(0)
     signal.signal(signal.SIGTERM, stopped)

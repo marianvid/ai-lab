@@ -4,6 +4,7 @@ import time
 import unittest
 from typing import Any, cast
 from unittest import mock
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -1655,3 +1656,44 @@ class PointingAnEngineSomewhereElse(unittest.TestCase):
     def test_an_unknown_engine_is_a_missing_thing(self):
         with self.assertRaises(KeyError):
             self.operations.update_engine_binary("nonesuch", str(self.program))
+
+
+class FacadeHandOffTests(unittest.TestCase):
+    """What the façade joins itself: the settings screen with the source builds, and storage."""
+
+    def setUp(self):
+        self._temporary = TemporaryDirectory()
+        self.addCleanup(self._temporary.cleanup)
+        self.parts, self.host = parts_with_instances(1)
+
+    def test_the_settings_screen_names_each_engine_s_source_build_beside_it(self):
+        class Builds:
+            def all(self, with_sizes=True):
+                return [{"engine": "llamacpp", "state": "idle", "sized": with_sizes}]
+        parts = replace(self.parts, builds=cast(Any, Builds()))
+        view = Operations.assemble(parts).settings_view()
+        by_id = {engine["id"]: engine for engine in view["engines"]}
+        self.assertEqual(by_id["llamacpp"]["source"], {"engine": "llamacpp", "state": "idle",
+                                                       "sized": False})
+
+    def test_storage_is_reported_and_cleared_through_its_service_or_said_absent(self):
+        bare = Operations.assemble(self.parts)
+        self.assertEqual(bare.storage_view(), {"items": [], "recoverable_bytes": 0})
+        with self.assertRaisesRegex(KeyError, "No reclaimable storage"):
+            bare.clear_storage("cache")
+
+        class Storage:
+            def view(self):
+                return {"items": [{"id": "cache"}], "recoverable_bytes": 10}
+
+            def clear(self, item_id):
+                return {"cleared": item_id}
+        parts = replace(self.parts, storage=cast(Any, Storage()))
+        kept = Operations.assemble(parts)
+        self.assertEqual(kept.storage_view()["recoverable_bytes"], 10)
+        self.assertEqual(kept.clear_storage("cache"), {"cleared": "cache"})
+
+    def test_the_machine_budget_comes_from_the_host_with_this_machine_s_reserve(self):
+        operations = Operations.assemble(self.parts)
+        budget = operations.machine_budget()
+        self.assertTrue(any(pool.reserve_mb == operations.reserve_mb() for pool in budget.pools))

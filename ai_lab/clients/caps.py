@@ -180,6 +180,7 @@ class ClientCaps:
         done = threading.Event()
 
         def give_back() -> None:
+            """Take the call off what the client holds, once only."""
             if done.is_set():
                 return
             done.set()

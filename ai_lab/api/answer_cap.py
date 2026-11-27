@@ -76,6 +76,7 @@ def send_capped(send: Callable[[dict], Passthrough], request: dict, path: str, c
     first_close = answer.close
 
     def close() -> None:
+        """End the answer, then let the place keeper give back what it holds."""
         first_close()
         keeper()
     return Passthrough(answer.status, answer.content_type, answer.chunks, answer.headers, close)

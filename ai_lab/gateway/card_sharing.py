@@ -50,6 +50,7 @@ def guard_loads(service: Any, neighbours: CardNeighbours) -> None:
 
     @functools.wraps(load)
     def guarded(*args: Any, **kwargs: Any) -> Any:
+        """The load, with the card's neighbours stepped aside first and told after."""
         neighbours.make_way()
         try:
             return load(*args, **kwargs)

@@ -37,7 +37,8 @@ class LaunchSpecTests(unittest.TestCase):
     def test_a_plain_id_is_accepted(self):
         for good in ("qwen", "qwen-coder", "a1", "gemma-general-2"):
             with self.subTest(good=good):
-                launch.write_spec(ProcessSpec(good, ["x"], {}), self.directory)
+                path = launch.write_spec(ProcessSpec(good, ["x"], {}), self.directory)
+                self.assertTrue(path.is_file())
 
     def test_the_file_is_plain_json_the_launcher_can_read(self):
         path = launch.write_spec(ProcessSpec("qwen", ["a", "b"], {}), self.directory)

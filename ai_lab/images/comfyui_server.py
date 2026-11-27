@@ -272,6 +272,7 @@ def main() -> None:
     atexit.register(backend.close)
 
     def stop(_signum, _frame):
+        """On a stop signal, close ComfyUI and leave."""
         backend.close()
         raise SystemExit(0)
 

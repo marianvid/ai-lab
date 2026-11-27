@@ -47,15 +47,18 @@ def main() -> None:
     health = handler_class.handle_health_check
 
     def only_this_model(self, model_path, adapter_path=None, draft_model_path=None):
+        """Load the one model given at start, whatever name the request used."""
         return load(self, "default_model", adapter_path, draft_model_path)
 
     def load_default_then_say_so(self):
+        """Load the model, and say once that its weights are in memory."""
         load_default(self)
         if not loaded.is_set():
             print("AI-Lab: weights loaded", flush=True)
             loaded.set()
 
     def health_once_loaded(self):
+        """`/health` answers only once the weights are loaded (503 before)."""
         if loaded.is_set():
             return health(self)
         self._set_completion_headers(503)

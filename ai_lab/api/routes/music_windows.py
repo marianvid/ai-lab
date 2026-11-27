@@ -146,6 +146,7 @@ def window_call(gateway, path: str, ask: WindowAsk, windows: WindowCalls,
     windows.begin(request_id, source if isinstance(source, str) else None)
     try:
         def still_wanted() -> bool:
+            """Whether the call is neither cancelled nor left by its client."""
             return windows.wanted(request_id) and (ask.alive is None or ask.alive())
         lease = gateway.acquire(ask.model, shape=path, settings=ask.settings,
                                 still_wanted=still_wanted)
@@ -178,6 +179,7 @@ def ended_with(answer: Passthrough, done) -> Passthrough:
     close = answer.close
 
     def closing() -> None:
+        """End the answer, then forget the window call."""
         try:
             close()
         finally:

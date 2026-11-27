@@ -47,6 +47,7 @@ class DarwinHostTests(unittest.TestCase):
 
     def test_stopping_something_that_is_not_running_is_harmless(self):
         self.host.stop("never-started")
+        self.assertFalse(self.host.status("never-started").running)
 
 
 if __name__ == "__main__":

@@ -1129,8 +1129,8 @@ class RequestShapeTests(unittest.TestCase):
     def test_no_shape_given_means_no_check(self):
         # The card can be taken for reasons that are not a forwarded request.
         gateway = quick(mixed_engines(coder=True))
-        with gateway.acquire("coder"):
-            pass
+        with gateway.acquire("coder") as lease:
+            self.assertEqual(lease.instance_id, "coder")           # the card was held
 
     def test_the_listing_says_which_shapes_each_entry_answers(self):
         gateway = quick(mixed_engines())

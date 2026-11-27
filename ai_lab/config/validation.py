@@ -80,6 +80,7 @@ def absolute_path(key: str) -> Rule:
 def file_names(key: str) -> Rule:
     """A non-empty list of bare names."""
     def check(options: dict) -> bool:
+        """Whether the option is a non-empty list of plain file names."""
         values = options.get(key)
         return (isinstance(values, list) and bool(values)
                 and all(isinstance(value, str) and value and Path(value).name == value
@@ -96,6 +97,7 @@ def number(key: str, low: float, high: float, *, above_low: bool = False,
            below_high: bool = False) -> Rule:
     """A number between `low` and `high`; either end may be excluded."""
     def check(options: dict) -> bool:
+        """Whether the option is a number within the bounds."""
         value = options.get(key)
         if isinstance(value, bool) or not isinstance(value, int | float):
             return False
@@ -166,6 +168,7 @@ class _Report:
     repository_ids: list[str] = field(default_factory=list)
 
     def add(self, message: str) -> None:
+        """Keep one problem for the report."""
         self.errors.append(message)
 
 

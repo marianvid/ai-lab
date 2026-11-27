@@ -218,12 +218,15 @@ def _gguf_chat_template(path: Path) -> str:
             return ""
 
         def number(fmt: str, width: int):
+            """One number of `width` bytes, read with the struct format `fmt`."""
             return struct.unpack(fmt, handle.read(width))[0]
 
         def text() -> str:
+            """One GGUF string: its length, then its bytes."""
             return handle.read(number("<Q", 8)).decode("utf-8", "replace")
 
         def step_over(kind: int) -> None:
+            """Read past one value of this GGUF type without keeping it."""
             if kind == _STRING:
                 text()
             elif kind == _ARRAY:

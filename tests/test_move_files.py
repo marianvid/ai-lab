@@ -33,7 +33,9 @@ class MoveFilesTests(unittest.TestCase):
             reject_unfit_destination(self.plan([self.root / "new"], size_bytes=10**30))
 
     def test_a_free_destination_with_room_passes(self):
-        reject_unfit_destination(self.plan([self.root / "new"]))
+        destination = self.root / "new"
+        reject_unfit_destination(self.plan([destination]))
+        self.assertFalse(destination.exists())                # checking writes nothing
 
     @unittest.skipIf(os.geteuid() == 0, "root can write anywhere")
     def test_a_source_in_a_read_only_directory_is_refused(self):

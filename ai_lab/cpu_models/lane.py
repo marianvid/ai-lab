@@ -212,6 +212,7 @@ class CpuLane:
     def start_reaper(self) -> threading.Thread:
         """Check for idle models in the background, every `REAP_EVERY_S`."""
         def loop() -> None:
+            """Stop idle models every `REAP_EVERY_S`, for as long as the manager runs."""
             while True:
                 time.sleep(REAP_EVERY_S)
                 self.reap_idle()

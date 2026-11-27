@@ -250,6 +250,7 @@ def window_request(body: dict, settings: WindowSettings, model_name: str) -> dic
 def ask_studio(ui_url: str) -> StudioCall:
     """The studio at `ui_url`, asked over HTTP; its refusals as `StudioRefusedError`."""
     def call(method: str, path: str, body: dict | None = None) -> dict:
+        """One JSON call to the YuE2 Studio's own web worker."""
         payload = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(
             ui_url.rstrip("/") + path, data=payload, method=method,

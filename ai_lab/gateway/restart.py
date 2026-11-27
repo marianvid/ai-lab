@@ -46,6 +46,7 @@ class StalledEngines:
             self._restarting.add(instance_id)
 
         def run() -> None:
+            """Restart the engine, then mark it as no longer restarting."""
             try:
                 self._restart(instance_id, reason)
             finally:

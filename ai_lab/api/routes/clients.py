@@ -28,6 +28,7 @@ def register(router, access, journal=None) -> None:
 
 def _mailbox(router, access) -> None:
     def read(headers, query, **_):
+        """The caller's mailbox messages after `?after=`."""
         try:
             after = int(query.get("after") or 0)
         except ValueError:
@@ -35,6 +36,7 @@ def _mailbox(router, access) -> None:
         return access.mail_read(headers, after)
 
     def post(headers, body, **_):
+        """Send one message to another party's mailbox."""
         return access.mail_post(headers, str(body.get("to", "")), body.get("text"))
 
     router.add("GET", "/api/mailbox", read)
@@ -43,6 +45,7 @@ def _mailbox(router, access) -> None:
 
 def _clients(router, access) -> None:
     def heartbeat(headers, **_):
+        """Note that the client is there; say whether AI-Lab is On."""
         return {"received_at": access.heartbeat(headers), "on": access.power.on}
 
     router.add("GET", "/api/clients", lambda **_: access.clients())
@@ -57,13 +60,16 @@ def _clients(router, access) -> None:
 
 def _web(router, access) -> None:
     def login(body, **_):
+        """Open a web session for the right password."""
         cookie = access.login(str(body.get("password", "")))
         return Reply({"ok": True}, {"Set-Cookie": cookie})
 
     def logout(headers, **_):
+        """Close the caller's web session."""
         return Reply({"ok": True}, {"Set-Cookie": access.logout(headers)})
 
     def password(body, **_):
+        """Change the page's password (the current one is needed when one is set)."""
         return access.set_password(str(body.get("new", "")), body.get("current"))
 
     router.add("GET", "/api/session", lambda headers, **_: access.session(headers))

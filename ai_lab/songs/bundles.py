@@ -47,10 +47,12 @@ class _Sink:
         self.pieces: list[bytes] = []
 
     def write(self, data: bytes) -> int:
+        """Keep what `tarfile` wrote; say it was all taken."""
         self.pieces.append(bytes(data))
         return len(data)
 
     def take(self) -> Iterator[bytes]:
+        """What was written since the last take, piece by piece."""
         pieces, self.pieces = self.pieces, []
         yield from pieces
 
