@@ -13,6 +13,7 @@
 import { api } from '../api.js';
 import { element } from '../format.js';
 import { showNotice } from '../confirm.js';
+import { fileSettingsSections } from './file_settings.js';
 
 const EVERY_MS = 5000;
 let timer = null;
@@ -182,6 +183,8 @@ export async function render(container) {
   }
   const providers = stats.providers || {};
   const cpu = stats.cpu_models || {};
+  // What the lanes are configured with in the file, read-only (secrets never shown).
+  const fileSettings = await fileSettingsSections('lanes');
   const redraw = () => render(container).catch(() => {});
   const panels = [
     ...Object.entries(providers).map(([name, item]) => vendor(name, item || {})),
@@ -194,6 +197,7 @@ export async function render(container) {
     howToCall(providers, cpu),
     ...(panels.length ? panels
       : [element('p', { class: 'muted', text: 'None configured on this machine.' })]),
+    ...fileSettings,
   ]));
 
   const mine = container.firstChild;

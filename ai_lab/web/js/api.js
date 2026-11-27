@@ -72,6 +72,7 @@ export const api = {
   gateway: () => request('GET', '/api/gateway'),
   updateGateway: (changes) => request('PATCH', '/api/gateway', changes),
   settingFields: () => request('GET', '/api/setting-fields'),
+  fileSettings: (page) => request('GET', `/api/file-settings?page=${encodeURIComponent(page)}`),
   updateSettingFields: (changes) => request('PATCH', '/api/setting-fields', changes),
   // Processor models start on their own and stop when idle; these do it now.
   startCpuModel: (name) =>

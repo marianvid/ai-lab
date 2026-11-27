@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { element } from '../format.js';
 import { setInstalledRedraw, repositorySection, refreshLibrary } from './library_installed.js';
 import { createDiscovery } from './library_discovery.js';
+import { fileSettingsSections } from './file_settings.js';
 const { setDiscoveryContext, searchResults, searchBox, repositoryRow, transferList } = createDiscovery();
 
 // -- the view ---------------------------------------------------------------
@@ -10,8 +11,8 @@ const { setDiscoveryContext, searchResults, searchBox, repositoryRow, transferLi
 export async function render(container) {
   const redraw = () => render(container);
   setInstalledRedraw(redraw);
-  const [models, settings, transfers] = await Promise.all([
-    api.models(), api.settings(), api.transfers(),
+  const [models, settings, transfers, fileSettings] = await Promise.all([
+    api.models(), api.settings(), api.transfers(), fileSettingsSections('library'),
   ]);
   setDiscoveryContext(settings, transfers, redraw);
   const { outcome, results, openRepo } = searchResults();
@@ -70,6 +71,8 @@ export async function render(container) {
       }),
     ]),
     ...sections,
+    // What the library is configured with in the file: profiles, bundles, notes.
+    ...(fileSettings.length ? [element('hr', {}), ...fileSettings] : []),
   ].filter(Boolean);
   container.replaceChildren(...children);
 }

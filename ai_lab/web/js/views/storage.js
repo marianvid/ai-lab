@@ -5,6 +5,7 @@ import { confirmDestructive, showNotice } from '../confirm.js';
 import { bytes, element } from '../format.js';
 import { whileWorking } from '../working.js';
 import { versions } from './versions.js';
+import { fileSettingsSections } from './file_settings.js';
 
 
 function reclaimable(state, refresh) {
@@ -74,12 +75,14 @@ function rollbacks(installs, engines, refresh) {
 
 export async function render(container) {
   const refresh = () => render(container);
-  const [storage, installs, builds, settings] = await Promise.all([
+  const [storage, installs, builds, settings, fileSettings] = await Promise.all([
     api.storage(), api.allInstalls(), api.builds(), api.settings(),
+    fileSettingsSections('storage'),
   ]);
   const engines = new Map((settings.engines || []).map((item) => [item.id, item]));
   container.replaceChildren(element('div', { class: 'columns' }, [
     reclaimable(storage, refresh),
     rollbacks([...installs, ...builds], engines, refresh),
+    ...fileSettings,
   ]));
 }

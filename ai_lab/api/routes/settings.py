@@ -33,6 +33,9 @@ def _register_paths(router, operations: MachineSettingsView) -> None:
                lambda id, body=None, **_: operations.update_model_root(
                    id, body or {}))
     router.add("GET", "/api/setting-fields", lambda **_: operations.setting_fields.view())
+    # The settings kept only in the file, shown read-only on their pages (`?page=`).
+    router.add("GET", "/api/file-settings", lambda query=None, **_:
+               operations.file_settings.view((query or {}).get("page")))
     router.add("PATCH", "/api/setting-fields",
                lambda body=None, **_: operations.setting_fields.update(body or {}))
     router.add("GET", "/api/memory", lambda **_: operations.memory_budget())

@@ -51,6 +51,21 @@ what is actually on the machine rather than typed — a path typed by hand is a
 path with a typo in it, and the failure arrives much later as a screen with no
 models on it.
 
+## Settings kept only in the file, shown read-only
+
+The record-shaped sections of `config.json` are not changed from a page yet
+(the owner, 2026-11-27: read-only where it is not certain how they should be
+changed), but every one is shown, read-only, on the page it belongs to:
+the image profiles, download bundles and model notes on the Library page;
+the reclaimable folders on the Storage page; the subscription models
+(`providers`) and the models on the processor (`cpu_models`) on the Lanes
+page; the engines' settings beyond their program, the file format version
+and any keys this version does not know here. Each says what it is, what it
+is for, where it is changed and whether a restart is needed. A secret (a
+token, a key, a password) is shown only as "(set)". Which page shows each
+key of the file is listed in `ai_lab/application/file_settings.py`
+(`SCHEMA`); a test fails when a key is on no page.
+
 ## Limits, upload caps and the card's monitor
 
 How long this machine's slow jobs may take, and where its ports start. They

@@ -9,6 +9,7 @@ import { element } from '../format.js';
 import { paths, enginePaths } from './settings_paths.js';
 import { createEngineSection } from './settings_engines.js';
 import { settingFieldsSection } from './setting_fields.js';
+import { fileSettingsSections } from './file_settings.js';
 
 // Lines arriving while a build runs, kept here so switching tabs and coming
 // back does not lose them.
@@ -45,10 +46,11 @@ export async function render(container) {
   // The installed folders of every package engine, fetched alongside so the
   // engine rows can show them. A machine with none answers with an empty list
   // rather than an error, so this never decides whether the page draws.
-  const [settings, installed, fields] = await Promise.all([
+  const [settings, installed, fields, fileSettings] = await Promise.all([
     api.settings(),
     api.allInstalls().catch(() => []),
     api.settingFields().catch(() => null),
+    fileSettingsSections('settings'),
   ]);
   byEngine.clear();
   (installed || []).forEach((item) => byEngine.set(item.engine, item));
@@ -62,6 +64,8 @@ export async function render(container) {
       settingFieldsSection(fields, 'embeddings', refresh),
       settingFieldsSection(fields, 'gpu_readings', refresh),
       settingFieldsSection(fields, 'gpu_windows', refresh),
+      // What this page shows but does not change: kept only in config.json.
+      ...fileSettings,
     ].filter(Boolean)),
     element('div', {}, [
       machine(settings, refresh),

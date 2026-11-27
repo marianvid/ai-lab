@@ -283,6 +283,7 @@ class MachineSettingsView:
         self._settings_changes = services.settings_changes
         self._maintenance = services.engine_maintenance
         self.setting_fields = services.setting_fields
+        self.file_settings = services.file_settings
 
     def settings_view(self) -> dict:
         """The settings screen, with each engine described in one piece.
