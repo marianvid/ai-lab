@@ -8,18 +8,20 @@ survives a restart: an AI-Lab switched Off comes back Off.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .registry import write_private
+from .registry import read_private, write_private
 
 # Calls that would use a model: refused while Off.
 MODEL_PREFIXES = ("/v1/", "/tokenize")
 LOAD_SUFFIX = "/load"
 INSTANCES = "/api/instances/"
+# Starting a processor model by hand puts a model to work too (audit L50).
+CPU_MODELS = "/api/cpu-models/"
+START_SUFFIX = "/start"
 
 
 def uses_a_model(method: str, path: str) -> bool:
@@ -27,6 +29,8 @@ def uses_a_model(method: str, path: str) -> bool:
     if method.upper() == "GET":
         return False                            # reading (the model list too) stays open
     if path.startswith(MODEL_PREFIXES):
+        return True
+    if path.startswith(CPU_MODELS) and path.endswith(START_SUFFIX):
         return True
     return path.startswith(INSTANCES) and path.endswith(LOAD_SUFFIX)
 
@@ -38,7 +42,7 @@ class Power:
         self.path = Path(path)
         self.clock = clock
         self._lock = threading.Lock()
-        self._state = json.loads(self.path.read_text()) if self.path.is_file() else {"on": True}
+        self._state = read_private(self.path, {"on": True})
         self._when_off: list[Callable[[], object]] = []
 
     @property

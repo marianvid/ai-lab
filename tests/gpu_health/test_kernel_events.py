@@ -70,6 +70,18 @@ class Follow(unittest.TestCase):
         self.write({"ts": 3, "kind": "kernel", "line": AER_FATAL}, mode="w")
         self.assertEqual([item.key for item in self.events.read()], ["xid:79", "aer_uncorrectable"])
 
+    def test_a_backlog_larger_than_one_chunk_in_the_rotated_file_is_all_read(self):
+        # Audit L37: the rest of the old file was read once, capped at CHUNK.
+        from unittest import mock
+        self.write({"ts": 1, "kind": "kernel", "line": XID_13})
+        self.events.read()
+        self.write(*[{"ts": 2 + n, "kind": "kernel", "line": XID_79} for n in range(20)])
+        os.replace(self.path, self.path.with_name("events.jsonl.1"))
+        self.write({"ts": 99, "kind": "kernel", "line": AER_FATAL}, mode="w")
+        with mock.patch("ai_lab.gpu_health.kernel.events.CHUNK", 200):
+            keys = [item.key for item in self.events.read()]
+        self.assertEqual(keys.count("xid:79"), 20)
+
     def test_bad_lines_are_skipped(self):
         self.write("not json\n", "[1, 2]\n", {"ts": 1, "kind": "kernel", "line": XID_13})
         self.assertEqual(len(self.events.read()), 1)

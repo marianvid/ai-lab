@@ -34,6 +34,9 @@ class PowerTest(unittest.TestCase):
         self.assertFalse(uses_a_model("GET", "/v1/models"))
         self.assertFalse(uses_a_model("POST", "/api/instances/qwen/unload"))
         self.assertFalse(uses_a_model("POST", "/api/power"))
+        # Audit L50: a processor model started by hand while Off.
+        self.assertTrue(uses_a_model("POST", "/api/cpu-models/bge-m3/start"))
+        self.assertFalse(uses_a_model("POST", "/api/cpu-models/bge-m3/stop"))
 
 
 if __name__ == "__main__":

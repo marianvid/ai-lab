@@ -51,7 +51,8 @@ class TextRule:
 def text(body: dict, field: str, rule: TextRule, default: str = "") -> str:
     """One text field, trimmed, within `rule`'s length; ValueError with its message."""
     value = body.get(field, default)
-    if rule.coerce:
+    # A JSON null is no text: str(None) used to be sung as "None" (audit L55).
+    if rule.coerce and value is not None:
         value = str(value)
     if not isinstance(value, str) or not rule.shortest <= len(value.strip()) <= rule.longest:
         raise ValueError(rule.message)

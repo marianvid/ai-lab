@@ -154,6 +154,13 @@ class SecurityTest(unittest.TestCase):
         security.update({"login_required": True})
         self.assertTrue(security.token_holds)
 
+    def test_a_damaged_state_file_names_itself_and_is_not_replaced(self):
+        # Audit L51: a JSON traceback stopped the start without naming the file.
+        self.path.write_text('{"require_token": tr')
+        with self.assertRaisesRegex(ValueError, "security.json cannot be read"):
+            SecuritySettings(self.path)
+        self.assertEqual(self.path.read_text(), '{"require_token": tr')
+
     def test_session_days_has_bounds(self):
         security = SecuritySettings(self.path)
         for days in (0, 366):

@@ -12,6 +12,8 @@ class SpeechRequestTests(unittest.TestCase):
     def test_invalid_text_and_fields_are_rejected(self):
         with self.assertRaisesRegex(ValueError, 'text must contain'):
             validate_payload({'text': ' '})
+        with self.assertRaisesRegex(ValueError, 'text must contain'):
+            validate_payload({'text': None})        # audit L55: not "None"
         with self.assertRaisesRegex(ValueError, 'Unknown speech fields'):
             validate_payload({'text': 'Hello', 'command': 'run'})
 

@@ -78,6 +78,23 @@ class ReadingWeights(unittest.TestCase):
         self.assertIn(IMAGES, Known(Path(tempfile.mkdtemp())).of(
             str(self.dir), False, ["config.json"]))
 
+    def test_gemma_and_llava_name_the_image_token_otherwise(self):
+        # Audit L47: image_token_index, not image_token_id.
+        (self.dir / "config.json").write_text(json.dumps(
+            {"vision_config": {"hidden_size": 1}, "image_token_index": 262144}))
+        self.assertIn(IMAGES, self.known.of(str(self.dir), False, ["config.json"]))
+
+    def test_a_directory_whose_files_changed_is_read_again(self):
+        # Audit L45: the answer was kept under the path alone, for ever.
+        import os as _os
+        (self.dir / "config.json").write_text(json.dumps({}))
+        self.assertNotIn(IMAGES, self.known.of(str(self.dir), False, ["config.json"]))
+        (self.dir / "config.json").write_text(json.dumps(
+            {"vision_config": {"hidden_size": 1}, "image_token_id": 7}))
+        later = (self.dir / "config.json").stat().st_mtime_ns + 10**9
+        _os.utime(self.dir / "config.json", ns=(later, later))
+        self.assertIn(IMAGES, self.known.of(str(self.dir), False, ["config.json"]))
+
     def test_directory_reads_a_separate_template_file(self):
         (self.dir / "chat_template.jinja").write_text("{{ tools | length }}")
         self.assertIn(TOOLS, self.known.of(str(self.dir), False,

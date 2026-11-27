@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import secrets
 import threading
 from pathlib import Path
 
 from .errors import AccessDeniedError
 from ..shared.numbers import whole_number
-from .registry import write_private
+from .registry import read_private, write_private
 
 SALT_BYTES = 16
 # The password hash's cost: shown on the Access page, not changed there (a
@@ -46,7 +45,7 @@ class SecuritySettings:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self._lock = threading.Lock()
-        self._data = json.loads(self.path.read_text() or "{}") if self.path.is_file() else {}
+        self._data = read_private(self.path, {})
 
     @property
     def require_token(self) -> bool:

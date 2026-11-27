@@ -7,6 +7,7 @@ Everything that must survive a restart is kept in the store's `state` table.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 
 from . import readings
@@ -44,6 +45,10 @@ class Steps:
         try:
             sample = readings.fast(self._nvml, now, self.missing)
         except Exception:
+            # Closed as well as forgotten (audit L36): an open without its
+            # shutdown raised NVML's init count by one per failed reading.
+            with contextlib.suppress(Exception):
+                self._nvml.close()
             self._opened = False
             raise
         sample.model, sample.running = self._activity()

@@ -37,6 +37,17 @@ class Report(unittest.TestCase):
         self.assertIn("Chip 40–49 °C", report["text"])
         self.assertIn("Alarms: 1 (1 critical).", report["text"])
 
+    def test_a_report_longer_than_the_raw_readings_counts_the_folded_ones_too(self):
+        # Audit L38: only the raw part was counted once any raw row existed.
+        for index in range(12):
+            self.store.add_sample(Sample(ts=NOW - 6 * 86400 + index * 30, temp_gpu=50, power_w=100.0))
+        self.store.fold_old_samples(NOW - 5 * 86400)
+        for index in range(5):
+            self.store.add_sample(Sample(ts=NOW - 100 + index, temp_gpu=60, power_w=100.0))
+        report = weekly(self.store, self.analysis, NOW)
+        self.assertGreater(report["samples"], 5)
+        self.assertEqual(report["temp"]["min"], 50)
+
     def test_r_against_its_reference_or_without_one(self):
         base = {"days": 7, "samples": 1, "windows": 3, "idle_windows": 2, "temp": None,
                 "alarms": 0, "critical": 0, "idle_today": {"temp": 30.0, "from_day": "d"},

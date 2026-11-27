@@ -32,7 +32,7 @@ from pathlib import Path
 from ..config.policy import CHARS_PER_TOKEN, ClientCapLimits
 from ..shared.numbers import whole_number
 from .errors import RefusalError
-from .registry import write_private
+from .registry import read_private, write_private
 
 # The OpenAI and Anthropic shapes of a text call that goes to the card.
 TEXT_PATHS = frozenset({"/v1/chat/completions", "/v1/completions", "/v1/messages"})
@@ -84,7 +84,7 @@ class ClientCaps:
         # How a prompt's tokens are estimated, and how long a refused client waits.
         self.limits = limits or ClientCapLimits()
         self._lock = threading.Lock()
-        data = json.loads(self.path.read_text() or "{}") if self.path.is_file() else {}
+        data = read_private(self.path, {})
         self._caps: dict[str, dict[str, int]] = dict(data.get("clients", {}))
         # name -> [tokens in flight, calls in flight]
         self._held: dict[str, list[int]] = {}

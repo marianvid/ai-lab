@@ -27,6 +27,25 @@ def digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def read_private(path: Path, default: dict) -> dict:
+    """A private state file's object; `default` when there is none.
+
+    One that cannot be read stops the start with its name and what to do
+    (audit L51), never with a bare JSON traceback; it is not replaced by the
+    default, which for security.json would quietly drop the token requirement.
+    """
+    if not path.is_file():
+        return dict(default)
+    try:
+        data = json.loads(path.read_text() or "{}")
+    except (OSError, ValueError) as error:
+        raise ValueError(f"{path} cannot be read ({error}): fix it, or move it aside "
+                         "to start without what it held") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} does not hold a JSON object: fix it, or move it aside")
+    return data
+
+
 def write_private(path: Path, payload: dict) -> None:
     """Write JSON readable by the owner only, in one atomic step."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -46,10 +65,7 @@ class ClientRegistry:
         self._clients: dict[str, dict] = self._read()
 
     def _read(self) -> dict[str, dict]:
-        if not self.path.is_file():
-            return {}
-        data = json.loads(self.path.read_text() or "{}")
-        return dict(data.get("clients", {}))
+        return dict(read_private(self.path, {}).get("clients", {}))
 
     def register(self, name: str) -> str:
         """A new token for `name`, replacing any earlier one. Returned only here."""

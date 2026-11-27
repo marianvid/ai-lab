@@ -20,7 +20,12 @@ DAY = 86400.0
 def weekly(store: Store, analysis: Analysis, now: float, days: int = 7) -> dict:
     """The report of the last `days` days."""
     since = now - days * DAY
-    samples = store.samples_since(since) or store.samples_5m_since(since)
+    # The folded rows for what is older than the raw ones still kept, then the
+    # raw ones (audit L38): a report longer than raw_keep_days used to count
+    # only the raw part.
+    raw = store.samples_since(since)
+    first_raw = raw[0]["ts"] if raw else float("inf")
+    samples = [row for row in store.samples_5m_since(since) if row["ts"] < first_raw] + raw
     alarms = [event for event in store.events(limit=1000, since=since)
               if event["kind"] in {"alarm", "event"} and event["level"] != "info"]
     report = {

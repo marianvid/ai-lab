@@ -28,7 +28,9 @@ one wants to know.
 from __future__ import annotations
 
 import json
+import os
 import struct
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -45,6 +47,8 @@ TOOL_MARKER = "tools"
 # current convention and the second is where it used to live.
 TEMPLATE_FILE = "chat_template.jinja"
 TOKENIZER_CONFIG = "tokenizer_config.json"
+# The files a directory model's answer is read from: their times are part of its key.
+ANSWERED_BY = ("config.json", TEMPLATE_FILE, TOKENIZER_CONFIG)
 
 # GGUF's metadata sits at the head of the file, but the chat template is behind
 # the tokenizer's vocabulary — measured on this machine, between six and
@@ -79,6 +83,8 @@ class Known:
         self.path = Path(directory) / FILE_NAME if directory else None
         self._read = read or _read
         self._known: dict[str, list[str]] = self._load()
+        # Page scans and the download worker ask at once (audit L46).
+        self._lock = threading.Lock()
 
     def of(self, entrypoint: str, is_gguf: bool,
            companions: list[str]) -> frozenset[str]:
@@ -95,7 +101,8 @@ class Known:
         key = self._key(path, is_gguf)
         if key is None:
             return frozenset()
-        remembered = self._known.get(key)
+        with self._lock:
+            remembered = self._known.get(key)
         if remembered is not None:
             return frozenset(remembered)
         try:
@@ -105,14 +112,16 @@ class Known:
         except Exception as error:
             note(f"reading what {path.name} can do", error)
             found = frozenset()
-        self._known[key] = sorted(found)
-        self._save()
+        with self._lock:
+            self._known[key] = sorted(found)
+            self._save()
         return found
 
     def forget(self) -> None:
         """Drop everything read. For a library that was replaced, and for tests."""
-        self._known.clear()
-        self._save()
+        with self._lock:
+            self._known.clear()
+            self._save()
 
     # -- keeping it ---------------------------------------------------------
 
@@ -123,11 +132,12 @@ class Known:
         except OSError:
             return None
         # A directory's own mtime says nothing about the files in it, so for
-        # those the key is the path alone and a changed model is a changed
-        # path. GGUF is one file, and there the size and the time are exactly
-        # the question.
+        # those the key is the path and the times of the two files the answer
+        # is read from (audit L45): a download merged into the folder, or a
+        # model replaced under the same name, is read again. GGUF is one file,
+        # and there the size and the time are exactly the question.
         if not is_gguf:
-            return f"dir:{path}"
+            return f"dir:{path}:" + ":".join(_mtime(path / name) for name in ANSWERED_BY)
         return f"gguf:{path}:{stamp.st_size}:{stamp.st_mtime_ns}"
 
     def _load(self) -> dict:
@@ -144,7 +154,7 @@ class Known:
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_suffix(".tmp")
+            temporary = self.path.with_suffix(f".{os.getpid()}.tmp")
             temporary.write_text(json.dumps(self._known, indent=2, sort_keys=True))
             temporary.replace(self.path)
         except OSError:
@@ -170,6 +180,14 @@ def _read(path: Path, is_gguf: bool, companions: list[str]) -> frozenset[str]:
     return frozenset(found)
 
 
+def _mtime(path: Path) -> str:
+    """A file's time as a key part; "-" when it is not there."""
+    try:
+        return str(path.stat().st_mtime_ns)
+    except OSError:
+        return "-"
+
+
 def _mentions_tools(template: str) -> bool:
     return TOOL_MARKER in (template or "").lower()
 
@@ -182,7 +200,9 @@ def _directory_sees_images(directory: Path) -> bool:
         return False
     if not isinstance(config, dict):
         return False
-    return bool(config.get("vision_config")) and "image_token_id" in config
+    # Gemma 3 and LLaVA name it image_token_index (audit L47).
+    return bool(config.get("vision_config")) and (
+        "image_token_id" in config or "image_token_index" in config)
 
 
 def _directory_chat_template(directory: Path) -> str:

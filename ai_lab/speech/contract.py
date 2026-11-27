@@ -32,12 +32,14 @@ def validate_payload(body: dict, *, seed: bool = False,
     asked for without a word — so it is refused by name instead.
     """
     _refuse_unknown(body, seed=seed, reference=reference)
-    text = str(body.get("text", "")).strip()
+    raw = body.get("text", "")
+    # A JSON null is no text: str(None) used to be spoken as "None" (audit L55).
+    text = "" if raw is None else str(raw).strip()
     if not 1 <= len(text) <= MAX_TEXT_CHARS:
         raise ValueError(f"text must contain 1–{MAX_TEXT_CHARS} characters")
     result: dict[str, Any] = {
         "text": text,
-        "instruction": _short({"instruction": str(body.get("instruction", "")).strip()},
+        "instruction": _short({"instruction": str(body.get("instruction") or "").strip()},
                               "instruction", "", MAX_INSTRUCTION_CHARS,
                               f"instruction must contain at most {MAX_INSTRUCTION_CHARS} "
                               "characters"),

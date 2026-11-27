@@ -72,7 +72,13 @@ class KernelEvents:
         if self.position["inode"] is None or not old.is_file() \
                 or old.stat().st_ino != self.position["inode"]:
             return b""
-        return _complete_lines(old, self.position["offset"])
+        # All of it, chunk after chunk (audit L37): once rotated, this is the
+        # only read the old file gets.
+        data, offset = b"", self.position["offset"]
+        while part := _complete_lines(old, offset):
+            data += part
+            offset += len(part)
+        return data
 
     def _line(self, raw: str) -> list[Condition]:
         try:

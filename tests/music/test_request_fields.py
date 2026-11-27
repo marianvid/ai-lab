@@ -51,6 +51,13 @@ class FieldTests(unittest.TestCase):
                 text(body, "prompt", rule)
         self.assertEqual(text({"prompt": 42}, "prompt", TextRule("bad", 5, coerce=True)), "42")
 
+    def test_a_null_is_no_text_even_where_numbers_are_taken_as_text(self):
+        # Audit L55: str(None) was sung as the style "None".
+        rule = TextRule("prompt must be text", longest=100, shortest=1, coerce=True)
+        with self.assertRaisesRegex(ValueError, "prompt must be text"):
+            text({"prompt": None}, "prompt", rule)
+        self.assertEqual(text({"prompt": 120}, "prompt", rule), "120")
+
     def test_flag_seconds_and_seed(self):
         self.assertTrue(flag({}, "instrumental", True))
         with self.assertRaisesRegex(ValueError, "true or false"):
