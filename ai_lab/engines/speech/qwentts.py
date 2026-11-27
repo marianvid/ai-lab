@@ -16,6 +16,7 @@ class QwenTtsEngine(ConfiguredEngine):
 
     id = "qwentts"
     display_name = "Qwen3-TTS"
+    has_editor_page = True
     task = Task.SPEECH_SYNTHESIS
     paths = SPEECH_PATHS
     script = ("speech", "server.py")

@@ -14,6 +14,7 @@ class HiggsEngine(ConfiguredEngine):
 
     id = "higgs"
     display_name = "Higgs TTS"
+    has_editor_page = True
     task = Task.SPEECH_SYNTHESIS
     paths = SPEECH_PATHS
     script = ("speech", "higgs_server.py")

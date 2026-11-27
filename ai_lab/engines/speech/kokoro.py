@@ -14,6 +14,7 @@ class KokoroEngine(ConfiguredEngine):
 
     id = "kokoro"
     display_name = "Kokoro"
+    has_editor_page = True
     task = Task.SPEECH_SYNTHESIS
     paths = SPEECH_PATHS
     script = ("speech", "server.py")

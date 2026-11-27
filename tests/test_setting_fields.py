@@ -89,6 +89,18 @@ class SettingFieldsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Longest side must be at most 100000"):
             self.fields.update({"gateway.max_upload_dimension": 100001})
 
+    def test_an_offset_that_puts_a_page_on_a_taken_port_is_refused(self):
+        self.path.write_text(json.dumps({"instances": [
+            {"id": "studio", "engine": "yue2", "model_id": "music/yue2", "port": 8124},
+            {"id": "chat", "engine": "llamacpp", "model_id": "gguf/chat", "port": 9124}]}))
+        fields = SettingFields(ConfigStore(self.path), self.told.append,
+                               frozenset({"yue2"}))
+        before = self.path.read_text()
+        with self.assertRaisesRegex(ValueError, "studio: its page would be on port 9124"):
+            fields.update({"limits.editor_port_offset": 1000})
+        self.assertEqual(self.path.read_text(), before)
+        fields.update({"limits.editor_port_offset": 2000})
+
     def test_a_value_that_would_break_the_card_monitor_is_refused(self):
         before = self.path.read_text()
         breaking = {"gpu_health.sample_s": 0, "gpu_health.repeat_s": 0,

@@ -12,6 +12,7 @@ class HeartMulaEngine(ConfiguredEngine):
 
     id = "heartmula"
     display_name = "HeartMuLa"
+    has_editor_page = True
     task = Task.MUSIC_GENERATION
     paths = MUSIC_PATHS
     script = music_server("heartmula")

@@ -16,6 +16,7 @@ from typing import Any
 
 from ..catalog.core import Catalog
 from ..config.store import INSTANCE_ID, ConfigStore, Instance
+from ..config.validation import editor_port_problems
 from ..engines.base import validate
 from ..hosts.base import Host
 from ..runtime.core import Runtime
@@ -124,6 +125,7 @@ class InstanceConfiguration:
             if any(item.port == instance.port for item in config.instances):
                 raise ValueError(f"Port {instance.port} is already in use")
             config.instances.append(instance)
+            _refuse_page_clashes(config, self.engines)
         self._changed("instances")
         return asdict(instance)
 
@@ -154,6 +156,7 @@ class InstanceConfiguration:
                 instance.model_id = str(changes["model_id"])
             if "port" in changes:
                 instance.port = _free_port(config, instance_id, int(changes["port"]))
+                _refuse_page_clashes(config, self.engines)
         self._changed("instances")
         running = self.host.status(instance_id).running
         return {"id": instance_id, "applied": not running,
@@ -182,6 +185,14 @@ def _supported_model_ids(engine, description: dict, models: list[dict]) -> list[
             if model["name"] in configured_names
             and model["format"] in description["formats"]
             and model["task"] in description["tasks"]]
+
+
+def _refuse_page_clashes(config, engines) -> None:
+    """ValueError when an engine's own page would land on a taken or absent port."""
+    page_engines: frozenset[str] = getattr(engines, "page_engines", frozenset)()
+    problems = editor_port_problems(config, page_engines)
+    if problems:
+        raise ValueError("; ".join(problems))
 
 
 def _free_port(config, instance_id: str, port: int) -> int:

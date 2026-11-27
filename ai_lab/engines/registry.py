@@ -134,6 +134,11 @@ class Registry:
             raise KeyError(f"Unknown engine: {engine_id}")
         return engine
 
+    def page_engines(self) -> frozenset[str]:
+        """The engines that serve a page of their own beside their API (`has_editor_page`)."""
+        return frozenset(key for key, engine in self._engines.items()
+                         if getattr(engine, "has_editor_page", False))
+
     def known(self) -> dict[str, Engine]:
         """Every engine, whether or not this machine can run it."""
         return dict(self._engines)

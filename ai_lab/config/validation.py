@@ -162,6 +162,7 @@ class _Report:
     engine_ids: set[str]
     check_workflows: bool
     sections: Mapping[str, Section] = field(default_factory=dict)
+    page_engines: frozenset[str] = frozenset()
     errors: list[str] = field(default_factory=list)
     instance_ids: set[str] = field(default_factory=set)
     ports: set[int] = field(default_factory=set)
@@ -310,22 +311,60 @@ def _check_profile_workflow(report: _Report, profile_id: str, workflow: str,
         report.add(f"Image profile {profile_id}: workflow file is absent")
 
 
+def editor_port_problems(config: Config, page_engines: Iterable[str]) -> list[str]:
+    """What is wrong with the ports the engines' own pages would take.
+
+    An engine in `page_engines` (one that serves a page of its own, ComfyUI or a
+    speech editor) opens it on its entry's port plus `limits.editor_port_offset`.
+    That port must exist (65535 at most) and must not be another entry's port
+    or the manager's, or one of the two fails to start. With the offset itself
+    wrong, `_check_policies` says so and this has nothing to add.
+    """
+    try:
+        offset = config.machine_limits.editor_port_offset
+    except ValueError:
+        return []
+    pages = set(page_engines)
+    taken = {item.port: item.id for item in config.instances}
+    taken.setdefault(config.port, "the manager")
+    problems = []
+    for item in config.instances:
+        if item.engine not in pages:
+            continue
+        page = item.port + offset
+        if page > MAX_PORT:
+            problems.append(f"{item.id}: its page would be on port {page} (port {item.port} plus "
+                            f"the editor offset {offset}), above {MAX_PORT}")
+        elif page in taken:
+            problems.append(f"{item.id}: its page would be on port {page} (port {item.port} plus "
+                            f"the editor offset {offset}), which is {taken[page]}'s port")
+    return problems
+
+
+def _check_editor_ports(report: _Report) -> None:
+    for problem in editor_port_problems(report.config, report.page_engines):
+        report.add(problem)
+
+
 CHAIN = (_check_roots, _check_repositories, _check_manager_port,
          _check_instances, _check_policies, _check_section_ports,
-         _check_image_profiles)
+         _check_image_profiles, _check_editor_ports)
 
 
 def validate_configuration(config: Config, engine_ids: set[str], *,
                            sections: Mapping[str, Section],
-                           check_workflows: bool = False) -> None:
+                           check_workflows: bool = False,
+                           page_engines: Iterable[str] = ()) -> None:
     """Reject broken references and conflicting ports with one useful report.
 
     `sections` are the parts of the configuration other packages own, by the
     name `Config` keeps them under (see `wiring.CONFIG_SECTIONS`). Required:
     a caller that leaves them out must say so with an empty mapping, so half
-    the file is never validated by accident.
+    the file is never validated by accident. `page_engines`: the engines that
+    serve a page of their own (`editor_port_problems`).
     """
-    report = _Report(config, engine_ids, check_workflows, dict(sections))
+    report = _Report(config, engine_ids, check_workflows, dict(sections),
+                     page_engines=frozenset(page_engines))
     for checker in CHAIN:
         checker(report)
     if report.errors:

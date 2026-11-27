@@ -107,6 +107,11 @@ class ChangeNotifier:
             self.bus.publish(ChangeEvent(topic=topic))
 
 
+def _page_engines(engines) -> frozenset[str]:
+    """The engines that serve a page of their own (a stand-in registry may not say)."""
+    return getattr(engines, "page_engines", frozenset)()
+
+
 def build_services(parts: OperationsParts) -> OperationsServices:
     """Every service, built from the parts and connected to each other."""
     changed = ChangeNotifier(parts.bus)
@@ -127,4 +132,4 @@ def build_services(parts: OperationsParts) -> OperationsServices:
         move_jobs=storage.jobs, instance_service=instances,
         instance_configuration=instances.configuration, engine_maintenance=maintenance,
         settings_changes=SettingsChanges(parts.store, parts.host, parts.settings, changed),
-        setting_fields=SettingFields(parts.store, changed))
+        setting_fields=SettingFields(parts.store, changed, _page_engines(parts.engines)))

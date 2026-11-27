@@ -4,7 +4,8 @@ from tempfile import TemporaryDirectory
 from typing import cast
 
 from ai_lab.config.store import Config, Instance, ModelRoot, Repository
-from ai_lab.config.validation import Section, validate_configuration
+from ai_lab.config.validation import Section, editor_port_problems, validate_configuration
+from ai_lab.engines.registry import Registry
 
 
 def _base_config():
@@ -20,6 +21,41 @@ def _base_config():
 class ConfigurationValidationTests(unittest.TestCase):
     def base(self):
         return _base_config()
+
+    def test_an_engine_page_must_land_on_a_free_port_that_exists(self):
+        config = self.base()
+        self.assertEqual(editor_port_problems(config, {"comfyui"}), [])
+        config.instances.append(Instance('chat', 'comfyui', 'images/chat', 18100))
+        with self.assertRaisesRegex(ValueError, "picture: its page would be on port 18100 .port "
+                                                "8100 plus the editor offset 10000., which is "
+                                                "chat's port"):
+            validate_configuration(config, {'comfyui'}, sections={}, page_engines={'comfyui'})
+        # Only the engines with a page of their own are checked.
+        validate_configuration(config, {'comfyui'}, sections={})
+        config.instances[1].port = 9000
+        config.limits = {"editor_port_offset": 50000}
+        config.instances[0].port = 18000
+        self.assertEqual(editor_port_problems(config, {"comfyui"}),
+                         ["picture: its page would be on port 68000 (port 18000 plus the editor "
+                          "offset 50000), above 65535"])
+        config.instances[0].port = 8100
+        config.limits = {"editor_port_offset": 1000}
+        config.port = 9100
+        self.assertIn("the manager's port", editor_port_problems(config, {"comfyui"})[0])
+
+    def test_saving_an_entry_whose_page_lands_on_a_taken_port_is_refused(self):
+        from ai_lab.application.instance_config import _refuse_page_clashes
+        config = self.base()
+        config.instances.append(Instance('chat', 'llamacpp', 'gguf/chat', 18100))
+        with self.assertRaisesRegex(ValueError, "which is chat's port"):
+            _refuse_page_clashes(config, Registry())
+        config.instances[1].port = 18101
+        _refuse_page_clashes(config, Registry())
+
+    def test_the_engines_with_a_page_of_their_own(self):
+        self.assertEqual(Registry().page_engines(), {
+            "comfyui", "comfy_music", "heartmula", "yue2", "qwentts", "higgs", "higgs_local",
+            "voxcpm", "kokoro"})
 
     def test_gateway_policy_has_typed_task_waits(self):
         config = self.base()

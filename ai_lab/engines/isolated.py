@@ -89,6 +89,9 @@ class IsolatedEngine:
     # How far above its API port the engine's own page listens: the machine's
     # `limits.editor_port_offset`, which the registry sets on every engine.
     editor_port_offset: int = EDITOR_PORT_OFFSET
+    # Whether it serves that page at all (ComfyUI, the speech editors, the
+    # music studios): their page ports are checked against the other entries'.
+    has_editor_page: bool = False
 
     def __init__(self, binary: str | None = None, server: str | None = None) -> None:
         self.binary = binary or (which("python") if self.finds_python else None) or "python"

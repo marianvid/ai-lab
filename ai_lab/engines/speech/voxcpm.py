@@ -16,6 +16,7 @@ class VoxCpmEngine(ConfiguredEngine):
 
     id = "voxcpm"
     display_name = "VoxCPM"
+    has_editor_page = True
     task = Task.SPEECH_SYNTHESIS
     paths = SPEECH_PATHS
     script = ("speech", "server.py")

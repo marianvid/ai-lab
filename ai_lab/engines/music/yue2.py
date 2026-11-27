@@ -79,6 +79,7 @@ class Yue2Engine(ConfiguredEngine):
 
     id = "yue2"
     display_name = "YuE2"
+    has_editor_page = True
     task = Task.MUSIC_GENERATION
     paths = MUSIC_PATHS + MUSIC_WINDOW_PATHS
     settings = (CFG_SETTING,) + WINDOW_SETTINGS

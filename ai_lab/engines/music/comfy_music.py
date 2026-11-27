@@ -14,6 +14,7 @@ class ComfyMusicEngine(ConfiguredEngine):
 
     id = "comfy_music"
     display_name = "ComfyUI Music"
+    has_editor_page = True
     task = Task.MUSIC_GENERATION
     paths = MUSIC_PATHS
     script = music_server("comfy")

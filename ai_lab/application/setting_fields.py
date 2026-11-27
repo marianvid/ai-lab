@@ -21,6 +21,7 @@ from typing import cast
 
 from ..config import policy
 from ..config.store import Config, ConfigStore
+from ..config.validation import editor_port_problems
 from ..gpu_health.settings import BOUNDS as MONITOR_BOUNDS
 from ..gpu_health.settings import ORDERED as MONITOR_ORDER
 from ..gpu_health.settings import GpuHealthSettings
@@ -99,9 +100,8 @@ FIELDS: tuple[Field, ...] = (
     Field("limits.editor_port_offset", "loading", "Editor page offset", "",
           policy.EDITOR_PORT_OFFSET, 1000, 50000, "How far above a model's port its own "
           "page listens (ComfyUI, the speech editors, the music studios): the Create, "
-          "Speak and Music links open that port. Too small: an editor's port lands on "
-          "another model's port and one of the two fails to start. Too large: the port "
-          "passes 65535 and the editor cannot start. On CT 102 the firewall opens only "
+          "Speak and Music links open that port. An offset that puts a page on another "
+          "model's port, or past 65535, is refused (too small or too large). On CT 102 the firewall opens only "
           "18124 (YuE2 Studio); another offset needs home-lab to open the new port.",
           kind="integer"),
     _seconds("limits.builds.install_s", "updates", "Install step", policy.INSTALL_S,
@@ -421,9 +421,13 @@ def _check_order(config: Config) -> None:
 class SettingFields:
     """The fields, with their saved values, and the change of some of them."""
 
-    def __init__(self, store: ConfigStore, changed: Callable[[str], None]) -> None:
+    def __init__(self, store: ConfigStore, changed: Callable[[str], None],
+                 page_engines: frozenset[str] = frozenset()) -> None:
+        """`page_engines`: the engines that serve a page of their own, whose page
+        ports a new `limits.editor_port_offset` must leave free."""
         self.store = store
         self._changed = changed
+        self._page_engines = page_engines
 
     def view(self) -> dict:
         """Every field with its value now (its default when the file sets none), by group."""
@@ -452,5 +456,8 @@ class SettingFields:
             # The pairs first: the page names them by their labels.
             _check_order(config)
             GpuHealthSettings.from_mapping(config.gpu_health)
+            problems = editor_port_problems(config, self._page_engines)
+            if problems:
+                raise ValueError("; ".join(problems))
         self._changed("settings")
         return self.view()

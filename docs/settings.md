@@ -97,7 +97,7 @@ AI-Lab at start with a message naming it.
 | `clients.chars_per_token` | A capped client's prompt is counted as its characters divided by this ([caps](access.md)) | 3.0 |
 | `clients.retry_after_s` | How long a client over its cap is told to wait (`Retry-After`) | 5 s |
 | `first_port` | The first port offered when a model entry is added | 8080 |
-| `editor_port_offset` | How far above a model's port its own page listens (ComfyUI, the speech editors, the music studios); 1000 to 50000, read at start. On CT 102 the firewall opens only 18124 (YuE2 Studio); another offset needs home-lab to open the new port | 10000 |
+| `editor_port_offset` | How far above a model's port its own page listens (ComfyUI, the speech editors, the music studios); 1000 to 50000, read at start. A page that would land on another entry's port (or the manager's), or above 65535, is refused when the offset or an entry's port is saved and at start. On CT 102 the firewall opens only 18124 (YuE2 Studio); another offset needs home-lab to open the new port | 10000 |
 
 The gateway's own waits (`first_byte_s`, `between_bytes_s`, `stall_s`,
 `safety_s`, `max_waiting`, `default_max_tokens`, per-task waits) stay in the

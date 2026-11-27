@@ -20,6 +20,7 @@ class HiggsLocalEngine(ConfiguredEngine):
 
     id = "higgs_local"
     display_name = "Higgs TTS (transformers)"
+    has_editor_page = True
     task = Task.SPEECH_SYNTHESIS
     paths = SPEECH_PATHS
     script = ("speech", "server.py")

@@ -24,6 +24,7 @@ class ComfyUiEngine(IsolatedEngine):
 
     id = "comfyui"
     display_name = "ComfyUI"
+    has_editor_page = True
     task = Task.IMAGE_GENERATION
     # The task classifies the checkpoint in the model library. Once the
     # adapter is running, the workflow profile decides whether a request
