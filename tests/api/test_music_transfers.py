@@ -11,25 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from ai_lab.api.router import Router
-from ai_lab.api.routes.music_transfers import (
-    MANIFEST,
-    manifest,
-    receive,
-    register_transfers,
-    run_id_of,
-    tar_pieces,
-)
+from ai_lab.api.routes.music_transfers import register_transfers, run_id_of
 from ai_lab.api.routes.music_windows import GenerationFiles, WindowCalls
 from ai_lab.engines.music.transfer import TransferSettings
 from ai_lab.engines.music.yue2 import Yue2Engine
-from ai_lab.gateway.errors import (
-    ModelNotLoadedError,
-    NotConfiguredError,
-    SchedulerDoorError,
-    SongAlreadyHereError,
-    TransferCheckError,
-    WindowCallActiveError,
-)
+from ai_lab.gateway.errors import ModelNotLoadedError, NotConfiguredError, WindowCallActiveError
+from ai_lab.songs.bundles import MANIFEST, manifest, receive, tar_pieces
+from ai_lab.songs.transfers import RUN_HEADER, PutBack
+from ai_lab.songs.errors import (PeerConflictError, SchedulerDoorError, SongAlreadyHereError,
+                                TransferCheckError)
 
 CHUNK = 4096
 
@@ -271,6 +261,11 @@ class PullTests(unittest.TestCase):
         self.assertEqual(FakeDoor.tokens, [])                         # no token between the AI-Labs
         self.assertEqual([path.name for path in self.here.iterdir()], ["song-a"])
 
+    def test_the_service_takes_no_put_back_without_a_bundle(self):
+        with self.assertRaisesRegex(ValueError, "body is the bundle"):
+            PutBack(self.files, {"model": "yue2"}, "song-a", None, "run-7")
+        self.assertEqual(run_id_of(Headers({RUN_HEADER.lower(): " run-7 "})), "run-7")
+
     def test_a_pull_without_its_run_is_refused_before_any_call(self):
         for run in (None, "", "  "):
             with self.subTest(run=run), self.assertRaisesRegex(ValueError, "needs the header X-Run-Id"):
@@ -288,12 +283,12 @@ class PullTests(unittest.TestCase):
     def test_a_pull_that_loses_the_race_to_another_copy_is_a_409_and_leaves_no_copy(self):
         from unittest.mock import patch
 
-        from ai_lab.api.routes import music_transfers
+        from ai_lab.songs import bundles
 
         def another_copy_wins(_source, _destination):
             song(self.here, "song-a")
             raise OSError(66, "Directory not empty")
-        with patch.object(music_transfers.os, "rename", another_copy_wins), \
+        with patch.object(bundles.os, "rename", another_copy_wins), \
                 self.assertRaisesRegex(SongAlreadyHereError, "appeared on this machine meanwhile"):
             self.pull()
         self.assertEqual([path.name for path in self.here.iterdir()], ["song-a"])
@@ -313,7 +308,7 @@ class PullTests(unittest.TestCase):
     def test_refusals(self):
         with self.assertRaisesRegex(FileNotFoundError, "has no generation nobody"):
             self.pull("nobody")
-        with self.assertRaisesRegex(WindowCallActiveError, "refused"):
+        with self.assertRaisesRegex(PeerConflictError, "refused"):
             self.pull("busy")
         with self.assertRaisesRegex(SchedulerDoorError, "partner_lost"):
             self.pull("lost")
@@ -370,6 +365,16 @@ class PullTests(unittest.TestCase):
 
 
 class RunIdTests(unittest.TestCase):
+    def test_each_refusal_keeps_the_status_it_had(self):
+        from http import HTTPStatus
+
+        from ai_lab.api.server import status_for
+        statuses = {SongAlreadyHereError: HTTPStatus.CONFLICT, PeerConflictError: HTTPStatus.CONFLICT,
+                    TransferCheckError: HTTPStatus.BAD_GATEWAY, SchedulerDoorError: HTTPStatus.BAD_GATEWAY}
+        for error, status in statuses.items():
+            with self.subTest(error=error.__name__):
+                self.assertEqual(status_for(error("x")), status)
+
     def test_the_run_id_of_the_headers(self):
         self.assertEqual(run_id_of(Headers({"x-run-id": " run-1 "})), "run-1")
         self.assertIsNone(run_id_of(Headers({"x-run-id": " "})))

@@ -34,7 +34,8 @@ Three kinds of file sit outside the line:
   files, `catalog/naming.py`, `events.py`, `budget.py`, `gateway/eviction.py`, `multipart.py`,
   `uploads.py`, and everything in `shared/`: `shared/unexpected.py` (the
   failures each reading expects, and the one line said when another one
-  happens) and `shared/public_services.py` (the public addresses). They hold
+  happens), `shared/public_services.py` (the public addresses) and
+  `shared/song_names.py` (a YuE2 song's and a window call's names). They hold
   data shapes, rules or arithmetic, and decide nothing about what to do.
 - **The image calls** `media/images.py`. They are handed the gateway when the
   application is built, so they sit beside `api/`, above the gateway, and send
@@ -74,10 +75,13 @@ engine's process.
 | `text.mlxlm_server`, `text.mlxvlm_server` (scripts) | — |
 | `network`, `multipart`, `comfyui_templates` (shared with the manager) | — |
 
-No import breaks the rule today. The last one did: the image calls borrowed
-the multipart reader and the uploaded-image check from `api/`. Both moved to
-the shared level (`multipart.py`, `uploads.py`), so the image calls and the web
-layer now import them from below.
+No import breaks the rule today. The last ones did: the image calls borrowed
+the multipart reader and the uploaded-image check from `api/`, and the music
+routes borrowed a song's name check from the YuE2 adapter. They moved to the
+shared level (`multipart.py`, `uploads.py`, `shared/song_names.py`), so the
+image calls and the web layer import them from below. The adapter keeps its
+own copy of the song names (it may import nothing of the manager's); a test
+holds the two equal.
 
 The reason is practical rather than doctrinal. When two modules depend on each
 other, a change to either can break the other in a way nothing catches until
@@ -113,6 +117,7 @@ there is exactly one place to look.
 | `catalog/capabilities.py` | Reading a model's own files to find out whether it can call tools or read pictures, and remembering the answer | Which engine will run it, and what any setting says |
 | `runtime/core.py`, `runtime/checks.py` | Load, unload and swap, with timings and progress events; `Runtime` holds its `StartChecks` (split, refuse what cannot fit, refuse a stranger on the port) and owns every lock | Direct systemctl or nvidia-smi calls — it is handed a host |
 | `runtime/state.py`, `runtime/diagnostics.py` | The record of one load or unload; finding the useful line in an engine's noisy log when it fails | — |
+| `songs/` | A YuE2 song's files and moving them between AI-Labs: the bundle (`bundles.py`: manifest, tar, checking a received one, the rename into place), a pull through the scheduler door and a put-back (`transfers.py`), this machine's list of songs (`listing.py`); each refusal names its own HTTP status (`errors.py`). The engine and its folder come in through the `Songs` interface | HTTP routes, window calls |
 | `downloads/` | Hugging Face browsing (`huggingface.py`), the download queue (`transfers.py`), and models made of files from several places (`bundles.py`) | Deciding what a model *is* — that is the catalog's rule |
 | `settings.py` | Assembling the settings screen from configuration and host | Writing to the accelerator |
 | `storage.py` | Files that can be deleted to free space and are not models, chosen by id from a configured list | Model files, or any path the browser sends |

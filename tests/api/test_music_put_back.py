@@ -8,10 +8,12 @@ import unittest
 from pathlib import Path
 
 from ai_lab.api.router import Router
-from ai_lab.api.routes.music_transfers import MANIFEST, register_transfers
+from ai_lab.api.routes.music_transfers import register_transfers
 from ai_lab.api.routes.music_windows import GenerationFiles, WindowCalls
 from ai_lab.engines.music.transfer import TransferSettings
-from ai_lab.gateway.errors import SongAlreadyHereError, WindowCallActiveError
+from ai_lab.gateway.errors import WindowCallActiveError
+from ai_lab.songs.bundles import MANIFEST
+from ai_lab.songs.errors import SongAlreadyHereError
 from ai_lab.api.raw_body import RawBody, is_raw
 from tests.api.test_music_transfers import (
     CHUNK,
@@ -163,26 +165,26 @@ class RaceTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_a_folder_gone_during_the_list_is_left_out(self):
-        from ai_lab.api.routes.music_transfers import _entry, _made
+        from ai_lab.songs.listing import _entry, _made
         self.assertIsNone(_made(self.root / "gone"))
         self.assertIsNone(_entry(self.root / "gone"))
 
     def test_a_second_put_back_racing_the_first_is_a_409(self):
         from unittest.mock import patch
 
-        from ai_lab.api.routes import music_transfers
+        from ai_lab.songs import bundles
         checked = song(self.root, ".put-back-song-a")
         target = self.root / "song-a"
 
         def first_one_wins(source, destination):
             song(self.root, "song-a")
             raise OSError(66, "Directory not empty")
-        with patch.object(music_transfers.os, "rename", first_one_wins), \
+        with patch.object(bundles.os, "rename", first_one_wins), \
                 self.assertRaisesRegex(SongAlreadyHereError, "appeared on this machine meanwhile"):
-            music_transfers._into_place(checked, target)
-        with patch.object(music_transfers.os, "rename", side_effect=OSError(5, "I/O error")), \
+            bundles.into_place(checked, target)
+        with patch.object(bundles.os, "rename", side_effect=OSError(5, "I/O error")), \
                 self.assertRaisesRegex(OSError, "I/O error"):
-            music_transfers._into_place(checked, self.root / "song-b")
+            bundles.into_place(checked, self.root / "song-b")
 
 
 class RawBodyTests(unittest.TestCase):

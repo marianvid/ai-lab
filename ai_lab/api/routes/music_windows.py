@@ -28,7 +28,7 @@ from urllib.parse import quote
 from ...engines.base import MUSIC_WINDOW_PATHS
 from ...engines.isolated import ui_port
 from ...gateway.errors import ModelNotLoadedError, WindowCallActiveError, WindowRequestError
-from ...music.backends.yue2_web_backend import REQUEST_ID, check_generation_id
+from ...shared.song_names import REQUEST_ID, check_generation_id
 from ...network import LOOPBACK
 from ..passthrough import Passthrough
 from .music_transfers import register_transfers

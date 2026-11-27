@@ -25,13 +25,7 @@ from ..clients.errors import (AccessDeniedError, AiLabOffError, ModelReplacedErr
                               RefusalError, TokenInvalidError, TokenMissingError)
 from ..events import EventBus
 from ..gateway.core import CardBusyError, ModelNotLoadedError
-from ..gateway.errors import (
-    SchedulerDoorError,
-    SongAlreadyHereError,
-    TransferCheckError,
-    WindowCallActiveError,
-    WindowRequestError,
-)
+from ..gateway.errors import WindowCallActiveError, WindowRequestError
 from ..multipart import MultipartBody
 from ..operations import Operations
 from ..providers import (
@@ -68,13 +62,7 @@ STATUS = {
     ModelNotLoadedError: HTTPStatus.CONFLICT,
     # A window call's request_id is already in use (it names the call to cancel).
     WindowCallActiveError: HTTPStatus.CONFLICT,
-    # A song moved from another AI-Lab is already here (another copy got there first).
-    SongAlreadyHereError: HTTPStatus.CONFLICT,
     WindowRequestError: HTTPStatus.UNPROCESSABLE_ENTITY,
-    # A song moved from another AI-Lab arrived different from its manifest.
-    TransferCheckError: HTTPStatus.BAD_GATEWAY,
-    # The scheduler door a pull goes through refused it or did not answer.
-    SchedulerDoorError: HTTPStatus.BAD_GATEWAY,
     # The vendor refused its sign-in on this machine: no retry helps until the
     # owner renews it; the caller's fallback takes over and says it plainly.
     ProviderLoginExpiredError: HTTPStatus.SERVICE_UNAVAILABLE,
@@ -132,10 +120,11 @@ def status_for(error: Exception) -> HTTPStatus:
     """
     if _timed_out(error):
         return HTTPStatus.GATEWAY_TIMEOUT
-    # A refusal that names its own status: a client over its caps is told to
-    # retry later (429, clients/caps.py).
+    # An error that names its own status: a client over its caps is told to
+    # retry later (429, clients/caps.py); a song's move says why it was
+    # refused (409 or 502, songs/errors.py).
     own = getattr(error, "http_status", None)
-    if isinstance(error, RefusalError) and isinstance(own, int):
+    if isinstance(own, int):
         return HTTPStatus(own)
     for kind, status in STATUS.items():
         if isinstance(error, kind):
