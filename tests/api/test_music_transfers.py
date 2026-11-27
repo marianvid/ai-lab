@@ -26,6 +26,7 @@ from ai_lab.gateway.errors import (
     ModelNotLoadedError,
     NotConfiguredError,
     SchedulerDoorError,
+    SongAlreadyHereError,
     TransferCheckError,
     WindowCallActiveError,
 )
@@ -90,6 +91,8 @@ class BundleTests(unittest.TestCase):
         cases = [
             (tar_of([("a.bin", b"abc")]), "manifest"),
             (tar_of([(MANIFEST, listing(*good)), ("a.bin", b"abd")]), "different"),
+            (tar_of([(MANIFEST, listing(*good)), ("a.bin", b"abc" * 4096)]),
+             "a.bin is larger than its manifest says"),
             (tar_of([(MANIFEST, listing(*good)), ("a.bin", b"abc"), ("b.bin", b"x")]), "does not list"),
             (tar_of([(MANIFEST, listing(*good, ("b.bin", b"x"))), ("a.bin", b"abc")]), "without: b.bin"),
             (tar_of([(MANIFEST, listing(("../a", b"abc")))]), "is not one"),
@@ -282,6 +285,19 @@ class PullTests(unittest.TestCase):
             self.pull()
         self.assertEqual((list(self.here.iterdir()), FakeDoor.deletes), ([], []))   # source untouched
 
+    def test_a_pull_that_loses_the_race_to_another_copy_is_a_409_and_leaves_no_copy(self):
+        from unittest.mock import patch
+
+        from ai_lab.api.routes import music_transfers
+
+        def another_copy_wins(_source, _destination):
+            song(self.here, "song-a")
+            raise OSError(66, "Directory not empty")
+        with patch.object(music_transfers.os, "rename", another_copy_wins), \
+                self.assertRaisesRegex(SongAlreadyHereError, "appeared on this machine meanwhile"):
+            self.pull()
+        self.assertEqual([path.name for path in self.here.iterdir()], ["song-a"])
+
     def test_the_doors_404_is_not_a_missing_song(self):
         with self.assertRaisesRegex(SchedulerDoorError, r"HTTP 404, unknown_provider"):
             self.pull("unrouted")
@@ -304,7 +320,7 @@ class PullTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no peer 'other'"):
             self.pull(peer="other")
         (self.here / "song-a").mkdir()
-        with self.assertRaisesRegex(WindowCallActiveError, "already on this machine"):
+        with self.assertRaisesRegex(SongAlreadyHereError, "already on this machine"):
             self.pull()
         self.assertEqual(len(FakeDoor.runs), 3)
         self.assertEqual(FakeDoor.deletes, [])

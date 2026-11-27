@@ -77,8 +77,7 @@ engine's process.
 No import breaks the rule today. The last one did: the image calls borrowed
 the multipart reader and the uploaded-image check from `api/`. Both moved to
 the shared level (`multipart.py`, `uploads.py`), so the image calls and the web
-layer now import them from below. `api/multipart.py` and `api/uploads.py`
-remain only as pass-throughs so older imports keep working.
+layer now import them from below.
 
 The reason is practical rather than doctrinal. When two modules depend on each
 other, a change to either can break the other in a way nothing catches until

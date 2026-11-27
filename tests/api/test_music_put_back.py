@@ -11,7 +11,7 @@ from ai_lab.api.router import Router
 from ai_lab.api.routes.music_transfers import MANIFEST, register_transfers
 from ai_lab.api.routes.music_windows import GenerationFiles, WindowCalls
 from ai_lab.engines.music.transfer import TransferSettings
-from ai_lab.gateway.errors import WindowCallActiveError
+from ai_lab.gateway.errors import SongAlreadyHereError, WindowCallActiveError
 from ai_lab.api.raw_body import RawBody, is_raw
 from tests.api.test_music_transfers import (
     CHUNK,
@@ -116,7 +116,7 @@ class StudioTests(unittest.TestCase):
 
     def test_refused_when_the_id_is_here_or_busy(self):
         song(self.here, "song-a")
-        with self.assertRaisesRegex(WindowCallActiveError, "already on this machine"):
+        with self.assertRaisesRegex(SongAlreadyHereError, "already on this machine"):
             self.put_back("song-a", raw(self.kept()))
         self.windows.begin("w-1", "song-b")
         with self.assertRaisesRegex(WindowCallActiveError, "window call w-1"):
@@ -178,7 +178,7 @@ class RaceTests(unittest.TestCase):
             song(self.root, "song-a")
             raise OSError(66, "Directory not empty")
         with patch.object(music_transfers.os, "rename", first_one_wins), \
-                self.assertRaisesRegex(WindowCallActiveError, "appeared on this machine meanwhile"):
+                self.assertRaisesRegex(SongAlreadyHereError, "appeared on this machine meanwhile"):
             music_transfers._into_place(checked, target)
         with patch.object(music_transfers.os, "rename", side_effect=OSError(5, "I/O error")), \
                 self.assertRaisesRegex(OSError, "I/O error"):

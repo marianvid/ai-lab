@@ -37,7 +37,7 @@ from .builds.installs import Installs
 from .runtime.lastloaded import LastLoaded
 from .operations import Operations
 from .application.instances import InstanceService
-from .operations_services import OperationsParts, build_services
+from .operations_services import OperationsParts
 from .providers import ProviderPool
 from .providers.settings import ProvidersConfig
 from .runtime.core import Runtime
@@ -232,7 +232,6 @@ def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry
         storage=Storage(store.load().storage, bus), bus=bus,
         # What was on the card when the manager last stopped, where the host keeps state.
         last_loaded=LastLoaded(host.state_dir()))
-    services = build_services(parts)
-    operations = Operations(parts, services)
+    operations = Operations.assemble(parts)
     built.append(operations)
-    return operations, services.instance_service
+    return operations, operations.instance_service

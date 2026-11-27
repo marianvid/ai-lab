@@ -22,6 +22,7 @@ from .application import paths
 from .operations_services import OperationsParts, OperationsServices, build_services
 
 if TYPE_CHECKING:
+    from .application.instances import InstanceService
     from .types import Interests
 
 
@@ -50,8 +51,16 @@ class Operations:
 
     @classmethod
     def assemble(cls, parts: OperationsParts) -> Operations:
-        """Built from its parts, with the standard services (see `build_services`)."""
+        """Built from its parts, with the standard services (see `build_services`).
+
+        How `wiring` builds it, and how the tests do: one way in.
+        """
         return cls(parts, build_services(parts))
+
+    @property
+    def instance_service(self) -> InstanceService:
+        """The configured entries' service, whose loads the side lanes guard (`guard_loads`)."""
+        return self._instances
 
     # -- reading -----------------------------------------------------------
 

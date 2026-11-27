@@ -42,9 +42,9 @@ from ...network import LOOPBACK
 from ...clients.errors import ModelReplacedError
 from ...gateway.admission.parts import StillWanted
 from ...types import Task
-from ..multipart import MultipartBody
+from ...multipart import MultipartBody
 from ..answer_cap import Hooks, PlaceKeeper, Waits, forward, send_capped
-from ..uploads import UploadRejectedError, validate_image
+from ...uploads import UploadRejectedError, validate_image
 from .music_windows import GenerationFiles, WindowAsk, WindowCalls, register_files, window_call
 
 # Every shape any engine here can answer. Registered as routes whatever is

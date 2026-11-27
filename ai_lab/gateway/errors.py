@@ -72,6 +72,14 @@ class WindowRequestError(ValueError):
     """A window call the front door cannot take as it is (no usable `request_id`): a 422."""
 
 
+class SongAlreadyHereError(RuntimeError):
+    """A pull or a put-back would land on a song this machine already has: a 409.
+
+    Said before anything is fetched, and again if another pull or put-back
+    got there while this one was copying; the copy is removed, the song kept.
+    """
+
+
 class TransferCheckError(RuntimeError):
     """A song fetched from another AI-Lab did not arrive as its manifest says: a 502.
 

@@ -1,10 +1,8 @@
 """Small core modules, each on its own: configuration upgrades and policies,
-the gateway's control and report, the progress stream and the upload shim."""
+the gateway's control and report, and the progress stream."""
 
 import unittest
 
-from ai_lab import uploads
-from ai_lab.api import uploads as api_uploads
 from ai_lab.api.sse import stream
 from ai_lab.config.migrations import SCHEMA_VERSION, migrate
 from ai_lab.config.policy import GatewayPolicy
@@ -123,8 +121,3 @@ class StreamTests(unittest.TestCase):
         stream(bus, written.append, lambda: False)
         self.assertEqual(written, [])
 
-
-class UploadShimTests(unittest.TestCase):
-    def test_the_old_import_path_is_the_same_check(self):
-        self.assertIs(api_uploads.validate_image, uploads.validate_image)
-        self.assertIs(api_uploads.UploadRejectedError, uploads.UploadRejectedError)

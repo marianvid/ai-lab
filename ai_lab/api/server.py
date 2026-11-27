@@ -27,6 +27,7 @@ from ..events import EventBus
 from ..gateway.core import CardBusyError, ModelNotLoadedError
 from ..gateway.errors import (
     SchedulerDoorError,
+    SongAlreadyHereError,
     TransferCheckError,
     WindowCallActiveError,
     WindowRequestError,
@@ -67,6 +68,8 @@ STATUS = {
     ModelNotLoadedError: HTTPStatus.CONFLICT,
     # A window call's request_id is already in use (it names the call to cancel).
     WindowCallActiveError: HTTPStatus.CONFLICT,
+    # A song moved from another AI-Lab is already here (another copy got there first).
+    SongAlreadyHereError: HTTPStatus.CONFLICT,
     WindowRequestError: HTTPStatus.UNPROCESSABLE_ENTITY,
     # A song moved from another AI-Lab arrived different from its manifest.
     TransferCheckError: HTTPStatus.BAD_GATEWAY,

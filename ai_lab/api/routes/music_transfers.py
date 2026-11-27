@@ -45,7 +45,8 @@ from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 from urllib.parse import quote, urlencode
 
-from ...gateway.errors import SchedulerDoorError, TransferCheckError, WindowCallActiveError
+from ...gateway.errors import (SchedulerDoorError, SongAlreadyHereError, TransferCheckError,
+                               WindowCallActiveError)
 from ...music.backends.yue2_web_backend import check_generation_id
 from ..passthrough import Passthrough
 from ..raw_body import RawBody
@@ -182,11 +183,16 @@ def _member(tar: tarfile.TarFile, member: tarfile.TarInfo):
 
 
 def _write_checked(source, target: Path, item: dict, chunk_bytes: int) -> int:
-    digest, size = hashlib.sha256(), 0
+    """Copy one member, refusing it as soon as it runs past the size its manifest declares."""
+    digest, size, declared = hashlib.sha256(), 0, item["size"]
     with target.open("wb") as out:
-        while piece := source.read(chunk_bytes):
-            digest.update(piece)
+        # One byte past the declared size is enough to know it is too large.
+        while piece := source.read(min(chunk_bytes, declared + 1 - size)):
             size += len(piece)
+            if size > declared:
+                raise TransferCheckError(f"{item['name']} is larger than its manifest says "
+                                         f"({declared} bytes)")
+            digest.update(piece)
             out.write(piece)
     if size != item["size"] or digest.hexdigest() != item["sha256"]:
         raise TransferCheckError(f"{item['name']} arrived different from the source "
@@ -219,7 +225,7 @@ class Pull:
         self.target = self.engine.generations_dir() / self.generation_id
         files.refuse_busy(query, self.generation_id)
         if self.target.exists():
-            raise WindowCallActiveError(f"{self.generation_id} is already on this machine")
+            raise SongAlreadyHereError(f"{self.generation_id} is already on this machine")
 
     def run(self) -> dict:
         """Fetch the bundle, check every file, move the copy into place."""
@@ -228,9 +234,7 @@ class Pull:
             with self._fetch() as response:
                 count, size = receive(response, temporary, self.transfer.chunk_bytes,
                                       self.generation_id)
-            if self.target.exists():
-                raise WindowCallActiveError(f"{self.generation_id} appeared on this machine meanwhile")
-            os.rename(temporary, self.target)
+            _into_place(temporary, self.target)
         except BaseException:
             shutil.rmtree(temporary, ignore_errors=True)
             raise
@@ -392,7 +396,7 @@ class PutBack:
         self.target = self.engine.generations_dir() / self.generation_id
         files.refuse_busy(query, self.generation_id)
         if self.target.exists():
-            raise WindowCallActiveError(f"{self.generation_id} is already on this machine")
+            raise SongAlreadyHereError(f"{self.generation_id} is already on this machine")
 
     def run(self) -> dict:
         """Check every file against the manifest, then move the folder into place."""
@@ -414,12 +418,12 @@ class PutBack:
 def _into_place(temporary: Path, target: Path) -> None:
     """Rename the checked folder into place; 409 when another put-back or pull got there first."""
     if target.exists():
-        raise WindowCallActiveError(f"{target.name} appeared on this machine meanwhile")
+        raise SongAlreadyHereError(f"{target.name} appeared on this machine meanwhile")
     try:
         os.rename(temporary, target)
     except OSError as error:
         if target.exists():
-            raise WindowCallActiveError(f"{target.name} appeared on this machine meanwhile") from error
+            raise SongAlreadyHereError(f"{target.name} appeared on this machine meanwhile") from error
         raise
 
 

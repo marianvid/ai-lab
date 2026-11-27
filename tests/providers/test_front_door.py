@@ -4,7 +4,7 @@ import unittest
 from http import HTTPStatus
 from typing import Any, cast
 
-from ai_lab.api.multipart import MultipartBody
+from ai_lab.multipart import MultipartBody
 from ai_lab.api.routes.gateway import _catalogue, _describe, _forwarder, _stats
 from ai_lab.api.server import error_kind, status_for
 from ai_lab.lanes import SideLanes

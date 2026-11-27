@@ -93,7 +93,11 @@ class EventBus:
 
     @property
     def subscriber_count(self) -> int:
-        """How many watchers there are now."""
+        """How many watchers there are now.
+
+        Read by the tests, to see that a closed page is forgotten; nothing in
+        AI-Lab decides anything by it.
+        """
         with self._lock:
             return len(self._subscribers)
 
