@@ -74,6 +74,31 @@ describe('the Access page', () => {
     assert.deepEqual(JSON.parse(sent.body), { max_tokens_in_flight: 90000, max_calls_at_once: null });
   });
 
+  it('warns while the token requirement does not hold, and not otherwise', async () => {
+    const half = { require_token: true, login_required: false, password_set: false,
+                   token_holds: false, session_days: 30 };
+    const { view } = await renderPage({ ...BASE, '/api/security': half });
+    assert.match(view.textContent, /does not hold on this machine until login is on/);
+    open.view.stopRefreshing();
+    const { view: fine } = await renderPage();
+    assert.doesNotMatch(fine.textContent, /does not hold/);
+  });
+
+  it('saves how long a login holds, in days', async () => {
+    const security = { ...BASE['/api/security'], token_holds: true, session_days: 30 };
+    const { view, calls } = await renderPage({ ...BASE, '/api/security': security,
+      'PATCH /api/security': { ...security, session_days: 90 } });
+    const days = view.querySelector('input[type="number"][max="365"]');
+    assert.equal(days.value, '30');
+    days.value = '90';
+    const save = [...view.querySelectorAll('button')]
+      .find((item) => item.textContent === 'Save' && item.parentElement.contains(days));
+    save.click();
+    await settle();
+    const sent = calls.find((call) => call.method === 'PATCH' && call.path === '/api/security');
+    assert.deepEqual(JSON.parse(sent.body), { session_days: 90 });
+  });
+
   it('says when AI-Lab is Off', async () => {
     const { view } = await renderPage({ ...BASE, '/api/power': { on: false, since: 1760700000 },
                                         '/api/clients': { clients: [] } });

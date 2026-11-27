@@ -18,13 +18,14 @@ from .power import Power
 from .presence import Presence
 from .registry import ClientRegistry
 from .security import SecuritySettings
-from .sessions import SessionBook, cookie_header, session_of
+from .sessions import PAGE_SESSION_S, SessionBook, cookie_header, session_of
 
 CLIENTS_FILE = "clients.json"
 MAILBOX_FILE = "mailbox.jsonl"
 CAPS_FILE = "client_caps.json"
 SECURITY_FILE = "security.json"
 POWER_FILE = "power.json"
+SESSIONS_FILE = "sessions.json"
 ENDED = 0
 
 
@@ -42,13 +43,15 @@ class Access:
         self.log = log
         self.mailbox = mailbox
         self.presence = Presence()
-        self.sessions = SessionBook()
+        # Kept beside security.json, so a login survives a restart ("remember me").
+        self.sessions = SessionBook(lifetime_s=lambda: security.session_s,
+                                    path=security.path.parent / SESSIONS_FILE)
         self.door = Door(DoorKeys(registry, self.presence, security, self.sessions), log, power)
 
     @classmethod
     def in_folder(cls, state_dir: Path, log: Callable[[str], None] = print,
                   caps: ClientCapLimits | None = None) -> Access:
-        """The access kept in `state_dir` (clients.json, security.json, power.json).
+        """The access kept in `state_dir` (clients.json, security.json, power.json, sessions.json).
 
         `caps`: how the client caps count and refuse (`limits.clients`).
         """
@@ -150,13 +153,14 @@ class Access:
     def session(self, headers) -> dict:
         """Whether the page must show the login form."""
         return {"login_required": self.security.login_required,
-                "logged_in": self.sessions.valid(session_of(headers))}
+                "logged_in": self.sessions.valid(session_of(headers)),
+                "token_holds": self.security.token_holds}
 
     def login(self, password: str) -> str:
         """A Set-Cookie value for a right password; AccessDeniedError otherwise."""
         if not self.security.check(password):
             raise AccessDeniedError("Wrong password")
-        return cookie_header(self.sessions.start())
+        return cookie_header(self.sessions.start(), self.sessions.lifetime_s)
 
     def logout(self, headers) -> str:
         """End this browser's session; the Set-Cookie value that clears it."""
@@ -167,7 +171,7 @@ class Access:
         """With login off, the page opens a session by itself; else nothing."""
         if self.security.login_required or self.sessions.valid(session_of(headers)):
             return None
-        return cookie_header(self.sessions.start())
+        return cookie_header(self.sessions.start(kept=False), PAGE_SESSION_S)
 
     def update_security(self, changes: dict) -> dict:
         """Change the switches; switching login on ends every open session."""

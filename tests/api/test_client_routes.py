@@ -18,6 +18,12 @@ from ai_lab.clients.errors import ModelReplacedError
 from ai_lab.events import EventBus
 
 
+
+def require_token(access):
+    """Tokens required, the only way that holds: a password set and login on (the read's m1)."""
+    access.set_password("a long password", None)
+    access.update_security({"login_required": True, "require_token": True})
+
 class ClientRoutesTest(unittest.TestCase):
     def setUp(self):
         self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
@@ -47,13 +53,13 @@ class ClientRoutesTest(unittest.TestCase):
             return error.code, json.loads(error.read()), error.headers
 
     def test_health_is_open_and_says_on_or_off(self):
-        self.access.update_security({"require_token": True})
+        require_token(self.access)
         self.access.power.switch(False)
         status, body, _ = self.call("GET", "/api/health")
         self.assertEqual((status, body), (200, {"ok": True, "on": False}))
 
     def test_a_refusal_carries_its_code_both_ways(self):
-        self.access.update_security({"require_token": True})
+        require_token(self.access)
         status, body, _ = self.call("GET", "/api/clients")
         self.assertEqual(status, 401)
         self.assertEqual(body["ai_lab"], {"reason": "token_missing"})
@@ -65,7 +71,7 @@ class ClientRoutesTest(unittest.TestCase):
 
     def test_register_then_call_and_heartbeat(self):
         _, created, _ = self.call("POST", "/api/clients", {"name": "scheduler-linux"})
-        self.access.update_security({"require_token": True})
+        require_token(self.access)
         auth = {"Authorization": f"Bearer {created['token']}"}
         status, echoed, _ = self.call("POST", "/v1/echo", {"a": 1}, auth)
         self.assertEqual((status, echoed), (200, {"a": 1}))
@@ -175,7 +181,7 @@ class ClientRoutesTest(unittest.TestCase):
         self.assertEqual((status, sent["from"]), (200, "owner"))
 
     def test_the_event_stream_is_behind_the_door(self):
-        self.access.update_security({"require_token": True})
+        require_token(self.access)
         with self.assertRaises(urllib.error.HTTPError) as refused:
             urllib.request.urlopen(self.base + "/api/events", timeout=5)
         self.assertEqual(refused.exception.code, 401)

@@ -91,8 +91,23 @@ class Door:
                 return name
             return self._without(TokenInvalidError, "a token that is not registered", path, peer)
         if self.sessions.valid(session_of(headers)):
+            self._note_page_session(path, peer)
             return WEB
         return self._without(TokenMissingError, "no token", path, peer)
+
+    def _note_page_session(self, path: str, peer: str) -> None:
+        """While the token does not hold, say once per route and address who gets in by a page session.
+
+        Before the owner turns login on, these are the callers it would stop:
+        a browser, or a program that took the cookie `GET /` hands out (m1).
+        """
+        if self.security.token_holds:
+            return
+        key = ("a page session", route_key(path), peer)
+        if key not in self._logged:
+            self._logged.add(key)
+            self.log(f"[clients] call with a page session and no token on {key[1]} from "
+                     f"{peer or '?'} (served now; refused once login is on, unless it logs in)")
 
     def caller(self, headers) -> str | None:
         """The registered client behind a request's token, if any."""

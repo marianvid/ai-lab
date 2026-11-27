@@ -19,7 +19,7 @@ import { render as renderLanes,
 import { render as renderStorage } from './views/storage.js';
 import { render as renderGpuHealth,
          stopRefreshing as stopGpuHealthRefreshing } from './views/gpu_health.js';
-import { render as renderAccess,
+import { render as renderAccess, TOKEN_DOES_NOT_HOLD,
          stopRefreshing as stopAccessRefreshing } from './views/access.js';
 
 // "Models" is the list you run; "Library" is what is on disk. They were both
@@ -169,12 +169,21 @@ function drawLogin() {
   ]));
 }
 
+// A token required with login off protects nothing (the read's m1): every page
+// says so until the owner turns login on. Nothing is changed for him.
+function drawTokenWarning(session) {
+  if (session.token_holds !== false) return;
+  document.querySelector('header').after(
+    element('p', { class: 'error', id: 'token-warning', text: TOKEN_DOES_NOT_HOLD }));
+}
+
 async function start() {
   const session = await api.session().catch(() => ({ login_required: false }));
   if (session.login_required && !session.logged_in) {
     drawLogin();
     return;
   }
+  drawTokenWarning(session);
   drawTabs();
   select(current);
   drawHostSummary().catch(() => {});

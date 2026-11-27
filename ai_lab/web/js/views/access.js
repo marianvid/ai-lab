@@ -141,12 +141,40 @@ function securitySection(security, refresh) {
   });
   return section('Security', [
     toggle('require_token', 'Require a token on every call',
-           'Off: a call without a valid token is served and written to the log. On: it is refused with 401.'),
+           'Off: a call without a valid token is served and written to the log. On: it is '
+           + 'refused with 401. Holds only with login on (below): without it the page hands '
+           + 'any visitor a session admitted as the web interface, so AI-Lab refuses that '
+           + 'combination. Set a password and turn login on first.'),
     toggle('login_required', 'Ask for the password (off: no logon)',
-           'Needs a password first.'),
+           'Needs a password first. Turning it off while a token is required is refused: the '
+           + 'token requirement would then protect nothing.'),
     element('div', { class: 'row' }, [...(security.password_set ? [current] : []), fresh, save]),
+    sessionDays(security, refresh),
+    ...(security.token_holds === false ? [element('p', { class: 'error', text: TOKEN_DOES_NOT_HOLD })] : []),
   ]);
 }
+
+// "Remember me": how long this browser stays logged in, through the browser
+// closing and AI-Lab restarting (clients/sessions.py).
+function sessionDays(security, refresh) {
+  const days = element('input', { type: 'number', min: '1', max: '365', step: '1',
+                                  value: String(security.session_days ?? 30) });
+  const save = element('button', {
+    class: 'action', text: 'Save',
+    onclick: () => act('Could not change how long a login holds',
+                       () => api.updateSecurity({ session_days: Number(days.value) }), refresh),
+  });
+  return element('label', {
+    class: 'row',
+    title: 'How long a login holds, in days: the browser keeps it after closing, and AI-Lab '
+           + 'keeps it after a restart (only a digest of the session is written). Default 30; '
+           + 'from 1 to 365. Shorter means logging in more often; longer means a lost or shared '
+           + 'browser stays let in longer. Applies to logins made from then on; a login already open keeps its end.',
+  }, [element('span', { text: 'Stay logged in for (days)' }), days, save]);
+}
+
+export const TOKEN_DOES_NOT_HOLD = 'The token requirement does not hold on this machine until '
+  + 'login is on: set a password on Access, then turn "Ask for the password" on.';
 
 export async function render(target) {
   const [power, clients, journal, security] = await Promise.all([

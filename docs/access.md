@@ -11,6 +11,7 @@ The approved list of 2026-10-25 (`claude/requests/2026-10-25-simplify-ai-lab/lis
   - off (the switch-over, step 1): a call without a valid token is still served; the door writes one line in the journal per caller kind and route;
   - on (step 4): it is refused with `401`.
 - The web interface is let in by its session cookie, not a token.
+- **The token requirement holds only with login on.** With `require_token` on and login off, `GET /` hands any visitor a session cookie that is admitted as `web`. Saving that combination is refused, with the reason. A machine already in it is not changed: it works as before, every page shows a warning until login is on, and the journal names, once per route and address, each call let in by a page session without a token (those are the callers login would stop).
 
 ## Refusals (A7)
 
@@ -100,7 +101,9 @@ work must never be harmed by an external client's mistakes.
 
 - **Settings → Security**: set the password (`POST /api/security/password {"new", "current"}`), then switch `login_required` on (`PATCH /api/security`). Login cannot be required before a password exists.
 - The password is kept as a salted scrypt hash in the file security.json, never as text.
-- `POST /api/login {"password"}` sets the session cookie (`HttpOnly`, `SameSite=Strict`, 30 days); `POST /api/logout` clears it. Sessions live in memory: a restart asks for the password again.
+- `POST /api/login {"password"}` sets the session cookie (`HttpOnly`, `SameSite=Strict`); `POST /api/logout` clears it.
+- **Staying logged in ("remember me").** A login holds for `session_days` (Settings → Security on the Access page; default 30, from 1 to 365). The cookie has that `Max-Age`, so it outlives the browser closing. The sessions are kept in the file sessions.json in the private state folder, so they outlive a restart. Only a SHA-256 digest of each session id is written, and only for a login: the session the page opens by itself with login off protects nothing, so it lives one day in memory (at most 1 000 of them) and a restart just hands out a new cookie. Logging out, switching login on, and changing the password with login on end sessions in that file too.
+- There is no "log out everywhere" button. Changing the password with login on does it.
 - **"No logon"** (`login_required` off): opening the page starts its session by itself.
 
 ## On/Off (A6)

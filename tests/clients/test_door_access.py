@@ -1,5 +1,6 @@
 """The door: tokens, the web session, the open routes, log mode and require mode."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,12 @@ def cookie(header: str | None) -> dict:
     assert header is not None
     return {"Cookie": header.split(";")[0]}
 
+
+
+def require_token(access):
+    """Tokens required, the only way that holds: a password set and login on (the read's m1)."""
+    access.set_password("a long password", None)
+    access.update_security({"login_required": True, "require_token": True})
 
 class DoorTest(unittest.TestCase):
     def setUp(self):
@@ -41,7 +48,7 @@ class DoorTest(unittest.TestCase):
         self.assertIn("from 192.168.50.143", self.lines[2])
 
     def test_require_mode_refuses_with_the_code(self):
-        self.access.update_security({"require_token": True})
+        require_token(self.access)
         with self.assertRaises(TokenMissingError) as missing:
             self.door.admit("GET", "/v1/models", {})
         self.assertEqual(missing.exception.detail, {"ai_lab": {"reason": "token_missing"}})
@@ -49,14 +56,29 @@ class DoorTest(unittest.TestCase):
             self.door.admit("GET", "/v1/models", {"Authorization": "Bearer nope"})
 
     def test_the_open_routes_need_nothing(self):
-        self.access.update_security({"require_token": True})
+        require_token(self.access)
         for method, path in (("GET", "/api/health"), ("GET", "/api/session"),
                              ("POST", "/api/login")):
             self.assertEqual(self.door.admit(method, path, {}), ANONYMOUS)
 
+    def test_while_the_token_does_not_hold_a_page_session_call_is_said_once(self):
+        # Before login goes on, the log names who gets in by a page cookie.
+        folder = Path(tempfile.mkdtemp())
+        (folder / "security.json").write_text('{"require_token": true}')
+        lines: list[str] = []
+        access = Access.in_folder(folder, log=lines.append)
+        page = cookie(access.page_cookie({}))
+        for _ in range(2):
+            self.assertEqual(access.door.admit("GET", "/api/gateway", page, "console-host"), WEB)
+        said = [line for line in lines if "page session" in line]
+        self.assertEqual(len(said), 1)
+        self.assertIn("/api/gateway from console-host", said[0])
+        with self.assertRaises(TokenMissingError):
+            access.door.admit("GET", "/api/gateway", {}, "console-host")
+
     def test_the_web_session_is_let_in(self):
-        self.access.update_security({"require_token": True})
-        header = self.access.page_cookie({})
+        require_token(self.access)
+        header = self.access.login("a long password")
         self.assertEqual(self.door.admit("GET", "/api/instances", cookie(header)), WEB)
 
     def test_helpers(self):
@@ -107,6 +129,45 @@ class AccessTest(unittest.TestCase):
         header = self.access.login("a long password")
         self.access.set_password("another password", "a long password")
         self.assertFalse(self.access.session(cookie(header))["logged_in"])
+
+    def test_a_login_holds_through_a_restart_and_its_cookie_for_the_days_set(self):
+        # The owner's "remember me": closing the browser keeps the cookie
+        # (Max-Age), and a restart (a new Access on the same folder) keeps it.
+        folder = Path(tempfile.mkdtemp())
+        access = Access.in_folder(folder, log=lambda _line: None)
+        access.set_password("a long password", None)
+        access.update_security({"login_required": True, "session_days": 7})
+        header = access.login("a long password")
+        self.assertIn(f"Max-Age={7 * 86400}", header)
+        again = Access.in_folder(folder, log=lambda _line: None)
+        self.assertTrue(again.session(cookie(header))["logged_in"])
+        again.logout(cookie(header))
+        self.assertFalse(Access.in_folder(folder, log=lambda _line: None)
+                         .session(cookie(header))["logged_in"])
+
+    def test_page_sessions_with_login_off_are_never_written_to_disk(self):
+        # The reviewer's FIX FIRST: every cookie-less GET / wrote a 30-day
+        # session; a check a minute grew the file for a month.
+        folder = Path(tempfile.mkdtemp())
+        access = Access.in_folder(folder, log=lambda _line: None)
+        pages = [access.page_cookie({}) for _ in range(100)]
+        self.assertFalse((folder / "sessions.json").exists())
+        self.assertIn("Max-Age=86400", str(pages[0]))
+        self.assertTrue(access.session(cookie(pages[-1]))["logged_in"])
+        access.set_password("a long password", None)
+        access.update_security({"login_required": True})
+        self.assertFalse(access.session(cookie(pages[-1]))["logged_in"])
+        header = access.login("a long password")
+        written = (folder / "sessions.json").read_text()
+        self.assertEqual(len(json.loads(written)), 1)
+        self.assertTrue(Access.in_folder(folder, log=lambda _line: None)
+                        .session(cookie(header))["logged_in"])
+
+    def test_the_session_view_says_whether_the_token_holds(self):
+        self.assertTrue(self.access.session({})["token_holds"])
+        (self.access.security.path).write_text('{"require_token": true}')
+        half = Access.in_folder(self.access.security.path.parent, log=lambda _line: None)
+        self.assertFalse(half.session({})["token_holds"])
 
     def test_remove(self):
         self.access.register("voice-studio")

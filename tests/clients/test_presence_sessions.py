@@ -7,7 +7,7 @@ from pathlib import Path
 from ai_lab.clients.errors import AccessDeniedError
 from ai_lab.clients.presence import Presence
 from ai_lab.clients.security import SecuritySettings
-from ai_lab.clients.sessions import COOKIE, SessionBook, cookie_header, session_of
+from ai_lab.clients.sessions import COOKIE, SessionBook, cookie_header, digest, session_of
 
 
 class Clock:
@@ -47,6 +47,57 @@ class SessionsTest(unittest.TestCase):
         self.assertFalse(book.valid(session))
         self.assertFalse(book.valid(None))
 
+    def test_a_session_survives_a_restart_and_only_its_digest_is_on_disk(self):
+        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        clock = Clock()
+        session = SessionBook(clock, lifetime_s=60, path=path).start()
+        self.assertNotIn(session, path.read_text())
+        self.assertIn(digest(session), path.read_text())
+        again = SessionBook(clock, lifetime_s=60, path=path)
+        self.assertTrue(again.valid(session))
+        clock.now += 61
+        self.assertFalse(SessionBook(clock, lifetime_s=60, path=path).valid(session))
+
+    def test_ending_sessions_removes_them_from_disk(self):
+        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        book = SessionBook(path=path)
+        first, second = book.start(), book.start()
+        book.end(first)
+        self.assertFalse(SessionBook(path=path).valid(first))
+        self.assertTrue(SessionBook(path=path).valid(second))
+        book.end_all()
+        self.assertFalse(SessionBook(path=path).valid(second))
+
+    def test_an_unreadable_book_starts_empty(self):
+        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        for text in ("{not json", "[1, 2]", '{"k": "soon"}'):
+            path.write_text(text)
+            with self.subTest(text=text):
+                self.assertEqual(len(SessionBook(path=path)), 0)
+
+    def test_the_lifetime_is_read_when_a_session_starts(self):
+        days = [1.0]
+        clock = Clock()
+        book = SessionBook(clock, lifetime_s=lambda: days[0] * 100)
+        first = book.start()
+        days[0] = 3.0
+        second = book.start()
+        clock.now += 150
+        self.assertEqual((book.valid(first), book.valid(second)), (False, True))
+
+    def test_page_sessions_live_a_day_in_memory_and_are_capped(self):
+        from unittest import mock
+        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        clock = Clock()
+        book = SessionBook(clock, path=path)
+        with mock.patch("ai_lab.clients.sessions.PAGE_SESSIONS_MAX", 3):
+            first, *rest = [book.start(kept=False) for _ in range(4)]
+        self.assertFalse(book.valid(first), "the oldest page session stays past the cap")
+        self.assertTrue(all(book.valid(item) for item in rest))
+        self.assertFalse(path.exists())
+        clock.now += 86400 + 1
+        self.assertFalse(book.valid(rest[-1]))
+
     def test_end_and_end_all(self):
         book = SessionBook()
         first, second = book.start(), book.start()
@@ -73,8 +124,29 @@ class SecurityTest(unittest.TestCase):
     def test_defaults_let_everything_in(self):
         security = SecuritySettings(self.path)
         self.assertEqual(security.view(), {"require_token": False, "login_required": False,
-                                           "password_set": False, "mailbox_keep": 2000,
-                                           "mailbox_max_chars": 20000})
+                                           "password_set": False, "token_holds": True,
+                                           "mailbox_keep": 2000, "mailbox_max_chars": 20000,
+                                           "session_days": 30})
+
+    def test_a_machine_already_half_protected_is_not_changed_and_still_saves(self):
+        # Both machines were in this state when m1 was built: nothing locks
+        # them out and nothing rewrites their switches; the page warns.
+        self.path.write_text('{"require_token": true}')
+        security = SecuritySettings(self.path)
+        self.assertFalse(security.token_holds)
+        security.update({"mailbox_keep": 500, "session_days": 90})
+        security.update({"require_token": True})
+        self.assertTrue(security.require_token)
+        self.assertEqual((security.view()["session_days"], security.session_s), (90, 90 * 86400.0))
+        security.set_password("correct horse")
+        security.update({"login_required": True})
+        self.assertTrue(security.token_holds)
+
+    def test_session_days_has_bounds(self):
+        security = SecuritySettings(self.path)
+        for days in (0, 366):
+            with self.subTest(days=days), self.assertRaises(ValueError):
+                security.update({"session_days": days})
 
     def test_login_cannot_be_required_without_a_password(self):
         with self.assertRaises(ValueError):
@@ -89,6 +161,19 @@ class SecurityTest(unittest.TestCase):
         security.update({"login_required": True, "require_token": True})
         again = SecuritySettings(self.path)
         self.assertTrue(again.login_required and again.require_token)
+
+    def test_a_token_required_with_login_off_is_refused_it_would_protect_nothing(self):
+        # The line-by-line read's m1: with login off the page hands any visitor
+        # a session admitted as `web`, so the token switch held nothing.
+        security = SecuritySettings(self.path)
+        with self.assertRaisesRegex(ValueError, "only holds with login on"):
+            security.update({"require_token": True})
+        security.set_password("correct horse")
+        security.update({"login_required": True, "require_token": True})
+        with self.assertRaisesRegex(ValueError, "only holds with login on"):
+            security.update({"login_required": False})
+        security.update({"require_token": False, "login_required": False})
+        self.assertFalse(security.require_token or security.login_required)
 
     def test_changing_the_password_needs_the_current_one(self):
         security = SecuritySettings(self.path)

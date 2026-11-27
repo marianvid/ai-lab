@@ -6,6 +6,24 @@ import { describe, it } from 'node:test';
 import { installDom, settle } from './support/dom.js';
 
 
+describe('the warning on every page', () => {
+  it('is shown under the header while the token requirement does not hold', async () => {
+    installDom({ '/api/session': { login_required: false, logged_in: true, token_holds: false },
+                 '/api/instances': [], '/api/models': [], '/api/installs': [],
+                 '/api/settings': { title: 'AI-Lab', engines: [], repositories: [],
+                                    accelerator: {}, host: {} } });
+    global.localStorage = { getItem: () => null, setItem: () => {} };
+    const theme = document.createElement('button');
+    theme.id = 'theme';
+    document.body.append(theme);
+    await import(`../../ai_lab/web/js/app.js?${Math.random()}`);
+    await settle();
+    const warning = document.getElementById('token-warning');
+    assert.ok(warning, 'no warning drawn');
+    assert.match(warning.textContent, /set a password on Access/);
+  });
+});
+
 describe('switching pages', () => {
   it('selects the tab and shows progress before its data arrives', async () => {
     let finishStorage;

@@ -26,6 +26,10 @@ SWITCHES = ("require_token", "login_required")
 # long report, and the size of the largest MS Graph result sqwad.ai quotes is
 # what an agent may need to pass on in parts.
 MAILBOX_LIMITS = {"mailbox_keep": (2000, 10, 100000), "mailbox_max_chars": (20000, 100, 200000)}
+# How long a web session holds, in days ("remember me", `sessions.py`): the
+# browser keeps the cookie that long and AI-Lab keeps it across restarts.
+SESSION_LIMITS = {"session_days": (30, 1, 365)}
+NUMBERS = {**MAILBOX_LIMITS, **SESSION_LIMITS}
 
 
 def _hash(password: str, salt: bytes) -> str:
@@ -55,29 +59,41 @@ class SecuritySettings:
         """Whether a password exists."""
         return "password" in self._data
 
-    def mailbox_limit(self, key: str) -> int:
-        """`mailbox_keep` or `mailbox_max_chars`: the value set, else its default."""
-        return int(self._data.get(key, MAILBOX_LIMITS[key][0]))
+    @property
+    def token_holds(self) -> bool:
+        """False only when a token is required with login off: then it protects nothing (m1)."""
+        return not (self.require_token and not self.login_required)
+
+    @property
+    def session_s(self) -> float:
+        """How long a new web session holds, in seconds."""
+        return self.number("session_days") * 24 * 3600.0
+
+    def number(self, key: str) -> int:
+        """A number of `NUMBERS` (the mailbox's two, `session_days`): the value set, else its default."""
+        return int(self._data.get(key, NUMBERS[key][0]))
 
     def mailbox_limits(self) -> tuple[int, int]:
         """(messages kept, characters a message may have), as the mailbox reads them at each post."""
-        return self.mailbox_limit("mailbox_keep"), self.mailbox_limit("mailbox_max_chars")
+        return self.number("mailbox_keep"), self.number("mailbox_max_chars")
 
     def view(self) -> dict:
         """What the Security page shows (never the hash)."""
         return {"require_token": self.require_token, "login_required": self.login_required,
-                "password_set": self.password_set,
-                **{key: self.mailbox_limit(key) for key in MAILBOX_LIMITS}}
+                "password_set": self.password_set, "token_holds": self.token_holds,
+                **{key: self.number(key) for key in NUMBERS}}
 
     def update(self, changes: dict) -> dict:
         """Change the switches and the mailbox's limits; login cannot be required without a password."""
-        unknown = set(changes) - set(SWITCHES) - set(MAILBOX_LIMITS)
+        unknown = set(changes) - set(SWITCHES) - set(NUMBERS)
         if unknown:
             raise ValueError(f"Unknown security setting: {', '.join(sorted(unknown))}")
         if changes.get("login_required") and not self.password_set:
             raise ValueError("Set a password before requiring login")
         values: dict[str, bool | int] = {key: bool(changes[key]) for key in SWITCHES if key in changes}
-        for key, (_default, low, high) in MAILBOX_LIMITS.items():
+        _refuse_half_protection(self.token_holds, {"require_token": self.require_token,
+                                                   "login_required": self.login_required, **values})
+        for key, (_default, low, high) in NUMBERS.items():
             if key in changes:
                 number = int(changes[key])
                 if not low <= number <= high:
@@ -106,3 +122,22 @@ class SecuritySettings:
             return False
         typed = _hash(password or "", bytes.fromhex(stored["salt"]))
         return hmac.compare_digest(typed, stored["hash"])
+
+
+HALF_PROTECTION_REFUSED = ("The token requirement only holds with login on: without it, the page "
+                     "hands any visitor a session that is admitted as the web interface. "
+                     "Set a password and turn login on first, or turn the token requirement off.")
+
+
+def _refuse_half_protection(held_before: bool, after: dict) -> None:
+    """Refuse a change that puts the token required with login off (the read's m1).
+
+    In that combination `GET /` answers with a session cookie, and every later
+    call carrying it is admitted as `web`: the token switch looks on and
+    protects nothing. A change that turns the token off, or turns login on,
+    is always taken. A machine already in that combination (both were, when
+    this was written) is not changed and not locked out: its other settings
+    still save, and every page warns until login is on.
+    """
+    if held_before and after.get("require_token") and not after.get("login_required"):
+        raise ValueError(HALF_PROTECTION_REFUSED)
