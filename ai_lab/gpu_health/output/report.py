@@ -73,7 +73,7 @@ def text(report: dict) -> str:
                      f"reference {base['r']:.3f} ({base['period_start']} – {base['period_end']}).")
     elif recent:
         lines.append(f"Thermal resistance {recent['r']:.3f} °C/W; no reference yet "
-                     "(it forms after the first 21 days).")
+                     "(it forms once the days and windows set for the reference are there).")
     else:
         lines.append("No thermal resistance: no stable load window with a resting temperature.")
     lines.append(f"Alarms: {report['alarms']} ({report['critical']} critical)."

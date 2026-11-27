@@ -1,0 +1,39 @@
+"""The values still fixed in code, shown read-only (audit L19, L26, L34, L57, m26)."""
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from ai_lab.application import code_values
+from ai_lab.application.setting_fields import SettingFields
+from ai_lab.builds import package_install
+from ai_lab.config.store import ConfigStore
+
+
+class CodeValuesTests(unittest.TestCase):
+    def test_every_entry_still_names_a_constant_of_its_module(self):
+        for item in code_values.VALUES:
+            with self.subTest(item.key):
+                self.assertIsInstance(code_values.value_of(item.module, item.name), (int, float))
+
+    def test_the_value_shown_is_the_one_the_code_uses(self):
+        self.assertEqual(code_values.value_of("builds/package_install.py", "CHECK_TIMEOUT_S"),
+                         package_install.CHECK_TIMEOUT_S)
+        self.assertEqual(code_values.value_of("gpu_health/monitor.py", "WEEK_S"), 7 * 86400.0)
+        with self.assertRaises(KeyError):
+            code_values.value_of("builds/package_install.py", "NOT_THERE")
+
+    def test_the_page_shows_them_and_refuses_to_change_them(self):
+        path = Path(tempfile.mkdtemp()) / "config.json"
+        path.write_text(json.dumps({}))
+        fields = SettingFields(ConfigStore(path), lambda _topic: None)
+        shown = [item for item in fields.view()["fields"] if item["group"] == code_values.GROUP]
+        self.assertEqual(len(shown), len(code_values.VALUES))
+        self.assertTrue(all(item["kind"] == "fixed" for item in shown))
+        with self.assertRaisesRegex(ValueError, "Fixed in AI-Lab's code"):
+            fields.update({shown[0]["key"]: 1})
+
+
+if __name__ == "__main__":
+    unittest.main()

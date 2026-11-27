@@ -24,7 +24,10 @@ from ..config.store import Config, ConfigStore
 from ..config.validation import editor_port_problems
 from ..gpu_health.settings import ORDERED as MONITOR_ORDER
 from ..gpu_health.settings import GpuHealthSettings
+from . import code_values
 from .field_list import BY_KEY, FIELDS, FIXED, GROUPS, RESTART, Field
+
+IN_CODE = "Fixed in code (shown, not changed here)"
 
 __all__ = ["BY_KEY", "FIELDS", "GROUPS", "Field", "SettingFields"]
 
@@ -146,12 +149,18 @@ class SettingFields:
             fields.append({**asdict(field), "value": field.default if saved is None else saved,
                            "saved": saved is not None,
                            "restart_note": RESTART if field.restart else ""})
-        return {"groups": GROUPS, "fields": fields}
+        # Values still fixed in the code, shown so they are known (`code_values`).
+        fields += [{**item, "value": item["default"], "saved": False, "restart_note": ""}
+                   for item in code_values.views()]
+        return {"groups": {**GROUPS, code_values.GROUP: IN_CODE}, "fields": fields}
 
     def update(self, changes: dict) -> dict:
         """Save some fields, each checked by the parser that owns its section."""
         if not isinstance(changes, dict) or not changes:
             raise ValueError("Send the fields to change, by key")
+        in_code = sorted(key for key in changes if key.startswith("code."))
+        if in_code:
+            raise ValueError("Fixed in AI-Lab's code, not a setting yet: " + ", ".join(in_code))
         unknown = sorted(set(changes) - set(BY_KEY))
         if unknown:
             raise ValueError("Unknown settings: " + ", ".join(unknown))

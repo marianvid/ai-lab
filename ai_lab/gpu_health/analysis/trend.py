@@ -9,8 +9,8 @@ thermal paste or a tired fan make R rise slowly over months; the room's
 temperature mostly cancels out, because the resting temperature is measured
 in the same room on the same day.
 
-- The reference (baseline) is the median R of the first 21 days, formed once
-  there are at least 10 windows, and kept with its dates. It changes only when
+- The reference (baseline) is the median R of the first `baseline_days` (21 by default), formed once
+  there are `baseline_min_windows` (10), and kept with its dates. It changes only when
   somebody resets it by hand, with a note.
 - The trend is the median R of the last 14 days.
 - The fan is compared at the same power: windows are grouped in 25 W bands.

@@ -66,6 +66,8 @@ export async function render(container) {
       settingFieldsSection(fields, 'gpu_windows', refresh),
       // What this page shows but does not change: kept only in config.json.
       ...fileSettings,
+      // And what is still fixed in AI-Lab's code, so it is known (audit L19, L26, L34, L57).
+      settingFieldsSection(fields, 'in_code', refresh),
     ].filter(Boolean)),
     element('div', {}, [
       machine(settings, refresh),

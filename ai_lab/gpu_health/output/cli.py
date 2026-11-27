@@ -55,7 +55,8 @@ def _reference(analysis: dict) -> list[str]:
               f"({base['period_start']} – {base['period_end']})"
               for scope, base in analysis["baselines"].items()]
     if not analysis["baselines"]:
-        lines.append("Reference: not formed yet (first 21 days, at least 10 windows)")
+        # Not "21 days, 10 windows": those are settings (audit L34).
+        lines.append("Reference: not formed yet (the days and windows set for it are not there yet)")
     return lines
 
 
