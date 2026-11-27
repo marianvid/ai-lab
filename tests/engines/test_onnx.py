@@ -1,6 +1,7 @@
 import unittest
 
 from ai_lab.engines.audio.onnx import OnnxEngine
+from ai_lab.engines.base import NEEDS_NOTHING_MB
 from ai_lab.types import Format, ModelFile, ModelSet, Task
 
 
@@ -19,7 +20,8 @@ class OnnxEngineTests(unittest.TestCase):
     def test_it_serves_vad_without_reserving_the_gpu(self):
         self.assertEqual(self.engine.formats(), frozenset({Format.ONNX}))
         self.assertEqual(self.engine.tasks(), frozenset({Task.VAD}))
-        self.assertEqual(self.engine.needs_mb(model(), {}, 32000), 0)
+        # Needs nothing of the card, said so, not 0 ("cannot say": clear the card).
+        self.assertEqual(self.engine.needs_mb(model(), {}, 32000), NEEDS_NOTHING_MB)
         self.assertIn("/v1/audio/speech-segments", self.engine.api_paths())
 
     def test_it_starts_the_silero_adapter(self):

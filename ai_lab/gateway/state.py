@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -45,15 +46,23 @@ class Lease:
     progress: EngineProgress | None = None
     # When the place was taken, so giving it back can say how long it was held.
     started: float = 0.0
+    # The model and settings the place was taken on, so giving it back lowers
+    # that model's count and no other's: with two models loaded, a request
+    # ending on one must not leave the other looking idle mid-answer.
+    shape: Shape | None = None
     _given_back: bool = False
+    # The two callers that give a place back (the code that noticed a failure,
+    # and the reader's cleanup) may run on two threads.
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def release(self) -> None:
         """Give the place back, once; a second call does nothing."""
-        if self._given_back:
-            return
-        self._given_back = True
+        with self._lock:
+            if self._given_back:
+                return
+            self._given_back = True
         self.gateway.finished(time.perf_counter() - self.started
-                              if self.started else 0.0)
+                              if self.started else 0.0, self.shape)
 
     def __enter__(self) -> Lease:
         return self

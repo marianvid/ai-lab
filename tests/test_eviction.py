@@ -1,12 +1,13 @@
 import unittest
 
+from ai_lab.engines.base import NEEDS_NOTHING_MB
 from ai_lab.gateway.eviction import EvictionPlanner
 
 
 class EvictionPlannerTests(unittest.TestCase):
     def setUp(self):
         self.planner = EvictionPlanner()
-        self.sizes = {'wanted': 7, 'idle-old': 3, 'idle-new': 3, 'busy': 4}
+        self.sizes: dict[str, float] = {'wanted': 7, 'idle-old': 3, 'idle-new': 3, 'busy': 4}
 
     def choose(self, free=1, capacity=11):
         loaded = [
@@ -38,6 +39,12 @@ class EvictionPlannerTests(unittest.TestCase):
     def test_unknown_size_clears_the_card_conservatively(self):
         self.sizes['wanted'] = 0
         self.assertEqual(self.choose(), ['idle-old', 'idle-new', 'busy'])
+
+    def test_a_model_that_needs_nothing_of_the_card_takes_nothing_off(self):
+        # The line-by-line read's m3: the processor VAD and a split llama.cpp
+        # answered 0, read here as "unknown", and emptied the whole card.
+        self.sizes['wanted'] = NEEDS_NOTHING_MB
+        self.assertEqual(self.choose(free=8), [])
 
     def test_near_full_card_request_clears_all_residents(self):
         self.sizes['wanted'] = 10

@@ -29,7 +29,7 @@ from .state import Lease, Shape
 from .stats import GatewayCounters, GatewayStats, StatsSources
 from .card_operations import CardOperations
 from .admission.scheduler import (AbandonedError, Replacements, Scheduler, StillWanted,
-                                  WillNotFitError)
+                                  WillNotFitError, forget_one)
 from ..types import Task
 
 # The gateway's errors are part of its interface: callers import them from here.
@@ -112,27 +112,24 @@ class Gateway:
 
         `shape` is the kind of request about to be forwarded, and `settings`
         what the model should be started with instead of its entry's own; both
-        are checked before anything is queued, so a wrong one comes back at
-        once rather than after a forty-second load. Two requests wanting
-        different settings cannot share a card, whatever the model.
-
-        `still_wanted()` says whether the request is still to be served, asked
-        at the head of the queue before anything is unloaded: a client that
-        gave up must not cost a swap.
+        are checked before anything is queued. `still_wanted()` is asked at the
+        head of the queue before anything is unloaded: a client that gave up
+        must not cost a swap.
         """
         started = time.perf_counter()
         instance, asked_for = self._what_is_asked(wanted, shape, settings)
-        self._enter(Shape.of(instance["id"], asked_for), asked_for, still_wanted)
+        place = Shape.of(instance["id"], asked_for)
+        self._enter(place, asked_for, still_wanted)
         try:
             self._counters.requests += 1
             self._counters.waited_s += time.perf_counter() - started
             self._counters.arrivals.append((time.time(), instance["id"]))
-            return self._lease(instance, asked_for)
+            return self._lease(instance, asked_for, place)
         except BaseException:
             # The place has been taken. Anything that goes wrong between there
             # and handing it to the caller has to give it back, or the card
             # loses a place with nobody using it.
-            self._scheduler.leave()
+            self._scheduler.leave(place)
             raise
 
     def where_loaded(self, wanted: str, shape: str) -> tuple[int, str]:
@@ -141,13 +138,13 @@ class Gateway:
         return self.control.where_loaded(self._catalogue, self._operations.configured(),
                                           wanted, shape)
 
-    def _lease(self, instance: dict, asked_for: dict) -> Lease:
+    def _lease(self, instance: dict, asked_for: dict, place: Shape) -> Lease:
         """The place handed to the caller, with what forwarding must know."""
         return Lease(self, instance["id"], instance["port"], Catalogue.engine_name(instance),
                      drop=self._catalogue.refused_fields(instance, asked_for),
                      text=Catalogue.writes_text(instance),
                      progress=self._watches.of(instance, self._catalogue.progress_reader(instance)),
-                     started=time.perf_counter())
+                     started=time.perf_counter(), shape=place)
 
     def _what_is_asked(self, wanted: str, shape: str | None,
                        settings: dict | None) -> tuple[dict, dict]:
@@ -198,10 +195,11 @@ class Gateway:
                 self._counters.last_error = str(error)
             raise
 
-    def finished(self, held_s: float = 0.0) -> None:
-        """Give a place back, and let in whoever can go next."""
+    def finished(self, held_s: float = 0.0, shape: Shape | None = None) -> None:
+        """Give a place back on `shape` (the model it was taken on), and let in
+        whoever can go next."""
         self._counters.served_s += held_s
-        self._scheduler.leave()
+        self._scheduler.leave(shape)
 
     def first_token(self, seconds: float, instance_id: str = "") -> None:
         """How long that request waited for its first token.
@@ -290,7 +288,7 @@ class Gateway:
             self._counters.last_error = f"{reason}; stopping {instance_id} failed: {error}"
         else:
             self._counters.last_error = f"{instance_id} restarted: {reason}"
-        self.reset(f"{instance_id} was restarted: {reason}")
+        self.reset_one(instance_id, f"{instance_id} was restarted: {reason}")
         self._watches.book.forget(instance_id)
 
     def card_changed(self) -> None:
@@ -313,6 +311,11 @@ class Gateway:
         self._loader.card_changed()
         self.replacements.stopped(reason, self._scheduler.state()["loaded"])
         return self._scheduler.reset(reason)
+
+    def reset_one(self, instance_id: str, reason: str) -> int:
+        """Throw away one entry only: what a stall in that engine means (`admission.scheduler.forget_one`)."""
+        self._loader.card_changed()
+        return forget_one(self._scheduler, self.replacements, instance_id, reason)
 
     # -- what the buttons on the page have to respect -----------------------
 

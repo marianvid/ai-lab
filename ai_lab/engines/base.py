@@ -16,6 +16,12 @@ from typing import Protocol
 from ..types import Format, ModelSet, Task
 from ..shared.unexpected import CALL_FAILED, note
 
+# What `needs_mb` answers for an engine that needs nothing of the card (it runs
+# on the processor, or takes whatever room there is): one megabyte, so it fits
+# beside anything. Zero is a different answer, "cannot say", which the gateway
+# reads as "clear the card to be safe" (`gateway/eviction.py`).
+NEEDS_NOTHING_MB = 1.0
+
 
 @dataclass(frozen=True, slots=True)
 class ParamSpec:
@@ -218,8 +224,10 @@ class Engine(Protocol):
         of the model, llama.cpp takes the weights plus a cache whose size comes
         from the context.
 
-        Zero means "cannot say" — a caller reads that as no opinion rather than
-        as no memory, and goes ahead. Nothing is remembered between loads;
+        Zero means "cannot say": the gateway then clears the card of every other
+        model to be safe (`gateway/eviction.py`), and skips its free-memory
+        check. An engine that needs nothing of the card answers
+        `NEEDS_NOTHING_MB`, never zero, so loading it takes nothing off. Nothing is remembered between loads;
         this is worked out from the settings each time, because how much a
         model needs is a property of the request and knowing it over time is
         the job of whatever is making the requests.

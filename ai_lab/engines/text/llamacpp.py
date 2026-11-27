@@ -15,7 +15,7 @@ from pathlib import Path
 from ...hosts.command import which
 from ...network import LOOPBACK
 from ...types import Format, ModelSet, Task
-from ..base import OPENAI_PATHS, LaunchPlan, ParamSpec, validate
+from ..base import NEEDS_NOTHING_MB, OPENAI_PATHS, LaunchPlan, ParamSpec, validate
 from ..isolated import MIB
 from ..probe import http_ok
 from .text_launch import MIN_P, TEMPERATURE, TOP_K, TOP_P, sampling_argv
@@ -259,11 +259,12 @@ class LlamaCppEngine:
         many layers as there is room for, and told to put everything on the
         card it refuses and says so. Either way it knows something this cannot.
 
-        Zero when it is going to split, because then any amount of room is
-        workable and holding one back would be inventing a requirement.
+        `NEEDS_NOTHING_MB` when it is going to split, because then any amount of
+        room is workable and holding one back would be inventing a requirement.
+        Not zero: zero means "cannot say", and the gateway would empty the card.
         """
         if _splits(int(params.get("gpu_layers", ALL_ON_CARD))):
-            return 0.0
+            return NEEDS_NOTHING_MB
         return max(0.0, getattr(model, "size_bytes", 0) / MIB)
 
     def concurrency(self, params: dict) -> int:

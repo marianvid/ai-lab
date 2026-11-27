@@ -5,10 +5,12 @@ is stuck (`progress.py`). Its requests are cut with "engine stalled"; that frees
 nobody while the engine itself stays stuck, so the next requests would stall
 too. The owner approved restarting it automatically (22 October 2026).
 
-"Restart" here is the same thing the page's forced stop does, minus the
-person: the engine is stopped, every request still waiting for the card is
-turned away with the reason, and the gateway forgets what it believed was
-loaded. The next request loads the model through the ordinary queue. Loading
+"Restart" here is the page's forced stop for that one engine, minus the
+person: the engine is stopped, every request still waiting for it is turned
+away with the reason, and the gateway forgets that it was loaded. Every other
+loaded model keeps its place, its waiting requests and its count of requests
+in flight (`Gateway.reset_one`): a stall in one engine must not make another
+look idle mid-answer. The next request loads the model through the ordinary queue. Loading
 it here instead would race that queue: a request arriving meanwhile would
 start a second load of the same model.
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+
 
 
 class StalledEngines:

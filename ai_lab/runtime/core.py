@@ -32,6 +32,7 @@ from ..config.store import Instance
 from ..engines.base import Engine, withheld
 from ..events import EventBus
 from ..hosts.base import Host
+from ..shared.unexpected import note
 from .checks import MIB, StartChecks
 from .diagnostics import RuntimeDiagnostics
 from .state import (
@@ -229,12 +230,22 @@ class Runtime:
               operation: Operation, clock: _Clock) -> None:
         params = self.checks.split_if_it_will_not_fit(instance, model, engine)
         plan = engine.plan(model, instance.port, params)
-        self._active[instance.id] = dict(params)
         self.checks.refuse_stranger(instance, engine)
         self.checks.refuse_if_it_cannot_fit(instance, model, plan)
         self._mark(operation, clock, Phase.STARTING, f"Starting {model.name}")
         self.host.start(ProcessSpec(instance.id, plan.argv, plan.env))
+        self._active[instance.id] = dict(params)   # claimed only once a process runs
+        try:
+            self._await_ready(instance, model, engine, operation, clock)
+        except BaseException:   # a failed load leaves no process filling the card
+            self._active.pop(instance.id, None)
+            self._pids.pop(instance.id, None)
+            _stop_after_failed_start(self.host, instance.id)
+            raise
+        self._mark(operation, clock, Phase.READY, f"{model.name} ready")
 
+    def _await_ready(self, instance: Instance, model: ModelSet, engine: Engine,
+                     operation: Operation, clock: _Clock) -> None:
         self._await(lambda: self.host.status(instance.id).running, instance.id, clock,
                     _Wait(Phase.STARTING, self.limits.start_s,
                           "waiting for the process to start"))
@@ -242,12 +253,10 @@ class Runtime:
         # what makes the bar mean something when another model is resident.
         self._pids[instance.id] = self.host.status(instance.id).pid
         self._mark(operation, clock, Phase.PROCESS_UP, "Process running")
-
         self._await(lambda: engine.ready(instance.port), instance.id, clock,
                     _Wait(Phase.WEIGHTS_LOADING, self.limits.load_s,
                           "waiting for the weights to load"),
                     alive=lambda: self.host.status(instance.id).running)
-        self._mark(operation, clock, Phase.READY, f"{model.name} ready")
 
     def _unload(self, instance_id: str, operation: Operation, clock: _Clock) -> None:
         # Remember the pid before stopping, so the samples during the stop can
@@ -392,3 +401,11 @@ class _Clock:
     def elapsed_ms(self) -> int:
         """How long since it began."""
         return int((time.monotonic() - self._start) * 1000)
+
+
+def _stop_after_failed_start(host: Host, instance_id: str) -> None:
+    """Stop a process whose load failed; a stop that fails is said, not raised."""
+    try:
+        host.stop(instance_id)
+    except Exception as error:  # noqa: BLE001  the load's own failure is what is reported
+        note(f"stopping {instance_id} after its load failed", error)

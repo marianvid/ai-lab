@@ -639,6 +639,26 @@ class SeveralAtOnce(unittest.TestCase):
         loaded = {item["shape"] for item in s.state()["loaded"]}
         self.assertEqual(loaded, {"b", "c"})
 
+    def test_a_request_ending_on_one_model_leaves_the_other_s_count_alone(self):
+        # The line-by-line read's M1: with two models loaded, B's request
+        # ending lowered A's count, so A looked idle while answering and could
+        # be taken off mid-answer.
+        s = self.scheduler_holding()
+        s.enter("a")                            # A answers, and goes on
+        s.enter("b")
+        s.leave("b")                            # B's request ends
+        counts = {item["shape"]: item["in_flight"] for item in s.state()["loaded"]}
+        self.assertEqual(counts, {"a": 1, "b": 0})
+        s.enter("c")                            # a third must displace B, never A
+        self.assertEqual(self.card.taken_off[-1], ("b",))
+
+    def test_a_place_given_back_on_a_model_no_longer_loaded_lowers_nothing(self):
+        s = self.scheduler_holding()
+        s.enter("a")
+        s.leave("gone")                         # the card was cleared under it
+        counts = {item["shape"]: item["in_flight"] for item in s.state()["loaded"]}
+        self.assertEqual(counts, {"a": 1})
+
     def test_an_idle_model_goes_before_one_that_is_answering(self):
         # Taking off an idle model costs nothing. Taking off one mid-answer
         # costs however long it has left, and everything waits for it.

@@ -122,6 +122,10 @@ class GatewayResources:
                     f"holding what it was using.")
             time.sleep(self.poll_s)
 
+    def settle_neighbours(self) -> None:
+        """The load the neighbours stepped aside for is not coming: they may come back."""
+        self._neighbours.settled()
+
     def _wait_for_release(self, deadline: float, keeping: bool) -> None:
         """Wait for the driver to hand back what those processes held.
 

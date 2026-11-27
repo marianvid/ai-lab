@@ -210,6 +210,11 @@ class InstanceService:
             except Exception as error:                  # reported, not raised
                 self._log(f"Could not restore {item['instance_id']}: {error}")
                 break
+            # A load refused or failed is not raised (`Runtime.load` reports it):
+            # it stops the restore too (the line-by-line read's m18).
+            if not last.ok:
+                self._log(f"Could not restore {item['instance_id']}: {last.error}")
+                break
         return last
 
     def _log(self, text: str) -> None:

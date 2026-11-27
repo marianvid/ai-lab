@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ...types import Format, ModelSet, Task
-from ..base import VAD_PATHS
+from ..base import NEEDS_NOTHING_MB, VAD_PATHS
 from ..isolated import IsolatedEngine
 
 
@@ -20,5 +20,5 @@ class OnnxEngine(IsolatedEngine):
     backend = "silero"
 
     def needs_mb(self, model: ModelSet, params: dict, card_total_mb: float) -> float:
-        """Nothing: it runs on the processor."""
-        return 0.0
+        """Nothing of the card: it runs on the processor (`NEEDS_NOTHING_MB`, not 0)."""
+        return NEEDS_NOTHING_MB

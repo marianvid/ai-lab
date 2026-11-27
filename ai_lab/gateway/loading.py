@@ -57,6 +57,10 @@ class CardMemory(Protocol):
         """Wait for the driver to hand back what the stopped models held."""
         ...
 
+    def settle_neighbours(self) -> None:
+        """Tell the card's neighbours the load they stepped aside for is not coming."""
+        ...
+
 
 class CardLoader:
     """Room on the card, and loading into it.
@@ -197,9 +201,14 @@ class CardLoader:
         started = time.perf_counter()
         self._take_resweep()            # this sweep answers any change made before it
         unloaded = self._clear(victims)
-        self._memory.wait_until_quiet(unloaded)
-        self.read_the_card()
-        self._refuse_if_still_full(shape)
+        try:
+            self._memory.wait_until_quiet(unloaded)
+            self.read_the_card()
+            self._refuse_if_still_full(shape)
+        except BaseException:
+            # They stepped aside for a load that is not coming (the read's L1).
+            self._memory.settle_neighbours()
+            raise
 
         operation = self.operations.load(shape.instance_id, shape.as_dict() or None)
         if not operation.ok:

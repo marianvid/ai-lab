@@ -89,6 +89,12 @@ class SplitAcrossCpuTests(unittest.TestCase):
         # the free memory on the card.
         self.assertTrue(self.plan({"gpu_layers": 60}).splits_across_cpu)
 
+    def test_a_split_needs_nothing_of_the_card_said_so_not_zero(self):
+        # Zero is "cannot say" and empties the card (the line-by-line read's m3).
+        from ai_lab.engines.base import NEEDS_NOTHING_MB
+        self.assertEqual(self.engine.needs_mb(model(), {"gpu_layers": 60}, 32000),
+                         NEEDS_NOTHING_MB)
+
     def test_llama_cpp_can_be_left_to_work_out_the_count(self):
         # The flag must be absent, not set to something. llama.cpp refuses to
         # measure free memory once the flag is present: "n_gpu_layers already

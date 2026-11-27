@@ -338,6 +338,31 @@ class TimeoutTests(unittest.TestCase):
         self.assertIn("no such file", operation.error)
 
 
+class FailedLoadTests(unittest.TestCase):
+    """A load that fails leaves nothing behind (the line-by-line read's m10, m11)."""
+
+    def test_a_load_that_times_out_stops_its_process_and_claims_no_settings(self):
+        host = FakeHost()
+        runtime = Runtime(host, EventBus(), sample_interval_s=0,
+                          limits=RuntimeLimits(load_s=0.2))
+        operation = runtime.load(instance(), model(), FakeEngine(ready_after=10**12, host=host))
+        self.assertFalse(operation.ok)
+        self.assertEqual(host.stopped, ["qwen"], "the engine still filling the card")
+        self.assertFalse(host.status("qwen").running)
+        self.assertNotIn("qwen", runtime._active)  # noqa: SLF001
+
+    def test_a_refused_load_claims_no_settings(self):
+        host = FakeHost()
+        runtime = Runtime(host, EventBus(), sample_interval_s=0)
+        # Something else already answers the port (an engine not tied to this
+        # host answers at once): the load is refused before anything starts.
+        engine = FakeEngine(ready_after=0)
+        operation = runtime.load(instance(), model(), engine)
+        self.assertFalse(operation.ok)
+        self.assertNotIn("qwen", runtime._active)  # noqa: SLF001
+        self.assertEqual(host.started, [], "nothing was started")
+
+
 class FailureMessageTests(unittest.TestCase):
     """The message must quote the engine, not the supervisor.
 

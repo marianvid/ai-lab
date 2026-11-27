@@ -862,6 +862,23 @@ class TakingUpWhatIsAlreadyThere(unittest.TestCase):
         running = sorted(e["id"] for e in operations.instances() if e["running"])
         self.assertEqual(running, ["coder", "reviewer"])
 
+    def test_a_request_ending_on_one_leaves_the_other_answering(self):
+        # The line-by-line read's M1: the lease forgot its model, so B's
+        # request ending lowered A's count and A looked idle mid-answer.
+        operations = two_models(coder=True, reviewer=True)
+        gateway = quick(operations)
+        coder = gateway.acquire("coder")
+        with gateway.acquire("reviewer"):
+            pass
+        counts = {item["shape"].instance_id: item["in_flight"]
+                  for item in gateway._scheduler.state()["loaded"]}
+        self.assertEqual(counts, {"coder": 1, "reviewer": 0})
+        coder.release()
+        coder.release()                         # a second give-back takes nothing
+        counts = {item["shape"].instance_id: item["in_flight"]
+                  for item in gateway._scheduler.state()["loaded"]}
+        self.assertEqual(counts, {"coder": 0, "reviewer": 0})
+
     def test_one_still_coming_up_is_left_for_later(self):
         # Adopting it would send requests to a port with nothing behind it.
         # Giving up on it for good would leave it invisible until something

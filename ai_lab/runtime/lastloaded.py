@@ -28,6 +28,8 @@ restore that brought back the same model set up differently.
 from __future__ import annotations
 
 import json
+import os
+import threading
 from pathlib import Path
 
 FILE_NAME = "last-loaded.json"
@@ -38,6 +40,10 @@ class LastLoaded:
 
     def __init__(self, directory: Path) -> None:
         self.path = Path(directory) / FILE_NAME
+        # Two loads or unloads of different entries may run at once (the Load
+        # button and the gateway hold different locks): each read-change-write
+        # is one step, or one of them is lost.
+        self._lock = threading.Lock()
 
     def remember(self, instance_id: str, settings: dict | None = None) -> None:
         """Add this to what is loaded, or move it to the end if it is there.
@@ -46,9 +52,10 @@ class LastLoaded:
         back in: the oldest was there first and is likeliest to be the one that
         matters.
         """
-        kept = [item for item in self.all() if item["instance_id"] != instance_id]
-        kept.append({"instance_id": instance_id, "settings": settings or {}})
-        self._write(kept)
+        with self._lock:
+            kept = [item for item in self.all() if item["instance_id"] != instance_id]
+            kept.append({"instance_id": instance_id, "settings": settings or {}})
+            self._write(kept)
 
     def forget(self, instance_id: str | None = None) -> None:
         """Record that this is no longer loaded, or that nothing is.
@@ -56,11 +63,12 @@ class LastLoaded:
         `instance_id` names one to drop and leaves the rest. Without it the
         whole lot goes, which is what emptying the machine means.
         """
-        if instance_id is None:
-            self._write([])
-            return
-        self._write([item for item in self.all()
-                     if item["instance_id"] != instance_id])
+        with self._lock:
+            if instance_id is None:
+                self._write([])
+                return
+            self._write([item for item in self.all()
+                         if item["instance_id"] != instance_id])
 
     def read(self) -> dict | None:
         """The last one loaded, or None. Kept for callers that want just one."""
@@ -100,7 +108,9 @@ class LastLoaded:
         """
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_suffix(".tmp")
+            # A name of this process's own, so two managers (or a test beside
+            # the service) never write the same temporary file.
+            temporary = self.path.with_suffix(f".{os.getpid()}.tmp")
             temporary.write_text(json.dumps(value or [], indent=2))
             temporary.replace(self.path)
         except OSError:

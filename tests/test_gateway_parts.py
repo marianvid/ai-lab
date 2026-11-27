@@ -82,6 +82,9 @@ class Memory:
     def wait_until_quiet(self, _stopped):
         return None
 
+    def settle_neighbours(self):
+        return None
+
 
 class Loads(Entries):
     """Entries that record what was asked to load."""

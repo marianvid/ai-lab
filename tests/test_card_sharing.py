@@ -8,7 +8,11 @@ from ai_lab.gateway.card_sharing import NoNeighbours, guard_loads
 from ai_lab.config.store import Config, Instance, ModelRoot
 from ai_lab.config.validation import validate_configuration
 from ai_lab.wiring import CONFIG_SECTIONS
+from ai_lab.gateway.errors import CouldNotLoadError
+from ai_lab.gateway.loading import CardLoader
 from ai_lab.gateway.resources import GatewayResources
+from ai_lab.gateway.state import Shape
+from ai_lab.gateway.stats import GatewayCounters
 from ai_lab.wiring import card_free_mb as _card_free_mb
 from ai_lab.types import AcceleratorSnapshot
 from ai_lab.operations import Operations
@@ -47,6 +51,28 @@ class ResourcesTests(unittest.TestCase):
     def test_what_a_neighbour_holds_counts_as_free_for_a_card_model(self):
         pools = {"card": {"available_mb": 4000}}
         self.assertEqual(self.resources.free_mb(pools), 5300.0)
+
+    def test_neighbours_told_to_come_back_when_the_load_is_not_coming(self):
+        # The line-by-line read's L1: a load refused after they stepped aside
+        # left them off the card until their hold ran out.
+        neighbours = self.neighbours
+
+        class StillFull:
+            """A card that the neighbours leave and that never goes quiet."""
+
+            def wait_until_quiet(self, _stopped):
+                neighbours.make_way()
+                raise CouldNotLoadError("the card is still full")
+
+            def settle_neighbours(self):
+                neighbours.settled()
+
+        operations = SimpleNamespace(instances=list, unload=lambda _id: None)
+        loader = CardLoader(operations, StillFull(), GatewayCounters(),  # type: ignore[arg-type]
+                            scheduled=lambda: {"loaded": []}, engine_name_of=str)
+        with self.assertRaises(CouldNotLoadError):
+            loader.put_on_card(Shape.of("qwen", {}))
+        self.assertEqual(self.neighbours.calls, ["make_way", "settled"])
 
     def test_neighbours_leave_before_the_card_is_read_even_when_nothing_was_stopped(self):
         self.resources.wait_until_quiet([])

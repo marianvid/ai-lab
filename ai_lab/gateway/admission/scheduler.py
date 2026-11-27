@@ -81,6 +81,8 @@ that would not fit a moment ago will not fit now.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable
+from typing import Any
 import threading
 import time
 from .parts import (
@@ -179,13 +181,16 @@ class Scheduler:
     def leave(self, shape=None) -> None:
         """Give back a place, and let in whoever can go next.
 
-        `shape` says which model the request was on. Without it the place is
-        taken from whichever is holding one, which is right while only one is
-        loaded and is why every caller predating the budget still works.
+        `shape` says which model the request was on: only its count goes down.
+        A shape no longer loaded (the card was cleared under it) gives back
+        nothing, rather than lowering another model's count. Without a shape
+        the place is taken from whichever is holding one, right only while one
+        model is loaded; every caller in the gateway now names its shape.
         """
         with self._lock:
-            if shape is not None and self._state.loaded.get(shape, 0) > 0:
-                self._state.loaded[shape] -= 1
+            if shape is not None:
+                if self._state.loaded.get(shape, 0) > 0:
+                    self._state.loaded[shape] -= 1
             else:
                 for held in self._state.loaded:
                     if self._state.loaded[held] > 0:
@@ -232,6 +237,27 @@ class Scheduler:
             self._state.last_used = {}
         for entry in turned_away:
             entry.fail(AbandonedError(reason))
+        return len(turned_away)
+
+    def drop(self, belongs: Callable[[object], bool], reason: str) -> int:
+        """Forget the loaded shapes for which `belongs(shape)` is true, and turn
+        away whoever waits for one of them; every other shape is left as it is.
+
+        What a stall in one engine means: that engine was stopped, the others
+        go on answering with their counts intact. Returns how many were turned
+        away.
+        """
+        with self._lock:
+            self._state.epoch += 1
+            turned_away = [entry for entry in self._state.queue if belongs(entry.shape)]
+            self._state.queue = [entry for entry in self._state.queue
+                                 if not belongs(entry.shape)]
+            for shape in [shape for shape in self._state.loaded if belongs(shape)]:
+                del self._state.loaded[shape]
+                self._state.last_used.pop(shape, None)
+        for entry in turned_away:
+            entry.fail(AbandonedError(reason))
+        self._pump()
         return len(turned_away)
 
     def adopt(self, *shapes) -> None:
@@ -288,3 +314,20 @@ class Scheduler:
             with self._lock:
                 ready = self._planner.settle(self._state, job, failure)
             release(ready)
+
+
+def forget_one(scheduler: Any, replacements: Any, instance_id: str, reason: str) -> int:
+    """Forget one entry only: what a stall in that engine means.
+
+    Its requests in flight are already dying with it; whoever waits for it is
+    turned away (`Scheduler.drop`), and only it is marked replaced. Every other
+    loaded model keeps its place and its count, so it is not taken for idle
+    mid-answer. Returns how many were turned away.
+    """
+    replacements.note(f"gateway: {instance_id} stopped and its queue turned away: {reason}")
+    replacements.mark([instance_id], reason)
+
+    def mine(shape: Any) -> bool:
+        return shape.instance_id == instance_id
+
+    return int(scheduler.drop(mine, reason))

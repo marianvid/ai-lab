@@ -1459,6 +1459,22 @@ class RestoringTests(unittest.TestCase):
         self.memory.remember("no-such-entry")
         self.assertIsNone(self.operations.restore_last())
 
+    def test_a_restore_stops_at_the_first_load_that_fails(self):
+        # The line-by-line read's m18: a failed load is returned, not raised,
+        # so the loop went on loading the rest after a refusal.
+        self.memory.remember("model-0")
+        self.memory.remember("model-1")
+        asked = []
+
+        def failing(instance, *_args, **_kwargs):
+            asked.append(instance.id)
+            return _failed(instance.id)
+
+        self.parts.runtime.load = failing
+        operation = self.operations.restore_last()
+        self.assertFalse(operation.ok)
+        self.assertEqual(asked, ["model-0"], "it went on after the first refusal")
+
     def test_nothing_remembered_means_nothing_done(self):
         self.assertIsNone(self.operations.restore_last())
         self.assertEqual(self.host.running, set())

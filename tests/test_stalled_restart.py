@@ -6,6 +6,7 @@ from ai_lab.gateway.core import Gateway
 from ai_lab.gateway.limits import GatewayLimits
 from ai_lab.gateway.progress import ProgressBook
 from ai_lab.gateway.restart import StalledEngines
+from ai_lab.gateway.state import Shape
 
 
 class StalledEnginesTests(unittest.TestCase):
@@ -69,6 +70,21 @@ class GatewayRestartTests(unittest.TestCase):
         self.assertEqual(operations.unloaded, ["qwen"])
         self.assertIsNot(book.of("qwen", 8141, dict), first, "the counters start again")
         self.assertIn("qwen restarted", gateway._counters.last_error)  # noqa: SLF001
+
+    def test_only_the_stalled_engine_is_forgotten_the_others_keep_their_counts(self):
+        # The line-by-line read's m2: a stall in one engine reset everything,
+        # so a healthy model answering beside it lost its count and its place.
+        gateway = self.gateway(Operations())
+        scheduler = gateway._scheduler  # noqa: SLF001
+        healthy, stalled = Shape.of("coder", {}), Shape.of("qwen", {})
+        scheduler.adopt(healthy, stalled)
+        scheduler._state.loaded[healthy] = 2  # noqa: SLF001  two answers in flight
+        scheduler._state.loaded[stalled] = 1  # noqa: SLF001
+        gateway._restart_stalled("qwen", "engine stalled")  # noqa: SLF001
+        counts = {item["shape"]: item["in_flight"] for item in scheduler.state()["loaded"]}
+        self.assertEqual(counts, {healthy: 2})
+        self.assertIsNotNone(gateway.replacements.since("qwen", 0))
+        self.assertIsNone(gateway.replacements.since("coder", 0))
 
     def test_a_stop_that_fails_is_said_and_the_queue_still_cleared(self):
         gateway = self.gateway(Operations(fails=True))
