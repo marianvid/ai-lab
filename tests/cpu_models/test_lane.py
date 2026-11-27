@@ -3,6 +3,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -99,8 +100,11 @@ class CpuLaneTests(unittest.TestCase):
                    for _ in range(5)]
         for thread in threads:
             thread.start()
+        # With a deadline (audit L69): a regression fails here instead of hanging.
+        deadline = time.monotonic() + 5
         while self.lane.stats()["bge-m3"]["waiting"] < 3:
-            pass
+            self.assertLess(time.monotonic(), deadline, "the requests never queued")
+            time.sleep(0.005)
         release.set()
         for thread in threads:
             thread.join()

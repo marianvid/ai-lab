@@ -115,7 +115,9 @@ function reserveRow(memory, refresh) {
   return memoryField({
     key: 'reserve_mb', value: memory.reserve_mb, label: 'Reserved for the system',
     title: 'Kept for the operating system and everything else you run, so '
-         + 'models are never offered it. Taken out of the figures above.',
+         + 'models are never offered it. Taken out of the figures above. In MB; 0 keeps '
+         + 'nothing back. Too small: a model can take memory the machine itself needs. '
+         + 'Too large: models are refused room that is really free.',
     failed: 'Could not change the reserve',
   }, refresh);
 }
@@ -126,7 +128,9 @@ function ceilingRow(pool, refresh) {
   return memoryField({
     key: 'ceiling_mb', value: pool.ceiling_mb, label: 'Ceiling for models',
     title: 'The most the models together may hold. When a model loads, the '
-         + 'smaller of this and what is really free wins. 0 means no ceiling.',
+         + 'smaller of this and what is really free wins. In MB; 0 means no ceiling '
+         + '(the default). Too small: models that would fit are refused. Too large: '
+         + 'the same as no ceiling.',
     failed: 'Could not change the ceiling',
   }, refresh);
 }

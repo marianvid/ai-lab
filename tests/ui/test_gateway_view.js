@@ -282,6 +282,21 @@ describe('the limits, on the page that shows what they cost', () => {
     return found;
   }
 
+  it('explains each limit with its default and range, from the setting fields', async () => {
+    // Audit L63: meaning and unit were there, the default and the limits were not.
+    const context = installDom({ '/api/gateway': STATS, '/api/setting-fields': { fields: [
+      { key: 'gateway.first_byte_s', group: 'gateway', unit: 's', default: 120, low: 1,
+        high: 86400, help: 'Too small: cut. Too large: held.' }] } });
+    const { render, stopRefreshing } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    await render(context.view);
+    await settle();
+    stopRefreshing();
+    const title = field(context.view, 'Max TTFT').getAttribute('title');
+    assert.match(title, /Default: 120 s; from 1 to 86400\./);
+    assert.match(title, /Too small: cut/);
+    context.window.close();
+  });
+
   it('shows what each limit is set to', async () => {
     const { view } = await renderPage();
     assert.equal(field(view, 'Max TTFT').querySelector('input').value, '120');

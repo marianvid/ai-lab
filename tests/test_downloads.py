@@ -66,14 +66,21 @@ class DownloadTests(unittest.TestCase):
 
     def test_nothing_is_visible_until_it_is_complete(self):
         """A partial file must never look like a model to the catalog."""
-        started = []
+        # Looked at while the transfer runs, not only after (audit L69).
+        reading, release = threading.Event(), threading.Event()
 
-        def open_range(url, resume_from):
-            started.append(url)
-            return FakeResponse(b"y" * 8)
+        class Held(FakeResponse):
+            def read(self, size=-1):
+                reading.set()
+                release.wait(2)
+                return super().read(size)
 
-        manager = DownloadManager(opener=open_range)
+        manager = DownloadManager(opener=lambda *_: Held(b"y" * 8))
         transfer = manager.enqueue(remote_set(), self.destination)
+        self.assertTrue(reading.wait(2), "the download never started")
+        self.assertFalse(self.destination.exists() and any(self.destination.iterdir()),
+                         "something was visible while the file was still arriving")
+        release.set()
         self.wait(manager, transfer)
         self.assertEqual([item.name for item in self.destination.iterdir()], ["a.gguf"])
 

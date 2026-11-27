@@ -21,6 +21,8 @@ container wants CUDA and neither is told which it is. The configured entries
 decide the rest: the vision code only counts as yours if some entry points at a
 model that can read pictures.
 
+**A llama.cpp entry set to split (some layers on the processor) loads beside the other models** and gets only the room left on the card: it asks for nothing of its own (`NEEDS_NOTHING_MB`), so nothing is unloaded for it. Beside vLLM's reserved share that can mean almost every layer on the processor, and slow answers; the page does not say how many layers landed where. Before round 4 such an entry emptied the card of every other model.
+
 **llama.cpp has two release lines and you choose which to follow.** It tags
 almost every commit to master as `b10448` — 7,160 of them in the checkout,
 about seven a day. On 17 August 2026 it also began `v0.1.0` and up, in

@@ -76,12 +76,26 @@ class TogetherTests(unittest.TestCase):
         self.assertEqual(s.state()["in_flight"], 2)
 
     def test_each_shape_brings_its_own_limit(self):
+        # Audit L69: "a"'s limit was set and never tested, nor a fourth "b".
         card = Card(places={"a": 1, "b": 3})
         s = scheduler(card)
         s.enter("b")
         s.enter("b")
         s.enter("b")
         self.assertEqual(s.state()["in_flight"], 3)
+        fourth = run(s.enter, "b")
+        time.sleep(0.05)
+        self.assertEqual((s.state()["in_flight"], len(s.state()["waiting"])), (3, 1))
+        for _ in range(3):
+            s.leave("b")
+        fourth.join(timeout=2)
+        s.leave("b")
+        s.enter("a")
+        second_a = run(s.enter, "a")
+        time.sleep(0.05)
+        self.assertEqual((s.state()["in_flight"], len(s.state()["waiting"])), (1, 1))
+        s.leave("a")
+        second_a.join(timeout=2)
 
 
 class DoorClosesTests(unittest.TestCase):

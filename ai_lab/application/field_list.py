@@ -26,6 +26,9 @@ GROUPS = {
     "embeddings": "Embeddings lane",
     "clients": "Client caps",
     "uploads": "Uploaded images",
+    # Drawn on the Gateway page (its Limits), which reads their defaults and
+    # ranges from here (audit L63); not repeated on the Settings page.
+    "gateway": "Gateway limits",
     "gpu_readings": "GPU health: readings",
     "gpu_windows": "GPU health: stable and resting windows",
     "gpu_trend": "GPU health: reference and trend",
@@ -185,6 +188,32 @@ FIELDS: tuple[Field, ...] = (
           1, 3600, "How long a client over its cap is told to wait (the Retry-After header). "
           "Too small: it retries and is refused again. Too large: it waits longer than "
           "needed.", kind="integer"),
+    Field("gateway.first_byte_s", "gateway", "Max TTFT", "s", policy.FIRST_BYTE_S,
+          *policy.GATEWAY_BOUNDS["first_byte_s"],
+          "Too small: a large prompt, or a whole answer not streamed, is cut before it "
+          "starts. Too large: an engine that will never answer holds its caller that long.",
+          restart=False),
+    Field("gateway.between_bytes_s", "gateway", "Max idle time", "s", policy.BETWEEN_BYTES_S,
+          *policy.GATEWAY_BOUNDS["between_bytes_s"],
+          "Too small: a slow stretch of a streamed answer is taken for a stop and cut. Too "
+          "large: a stopped engine is noticed that much later.", restart=False),
+    Field("gateway.max_waiting", "gateway", "Max queue size", "", policy.MAX_WAITING,
+          *policy.GATEWAY_BOUNDS["max_waiting"],
+          "Too small: a burst of requests is refused instead of queued. Too large: many "
+          "threads wait, and a request waits behind more of them.", kind="integer",
+          restart=False),
+    Field("gateway.stall_s", "gateway", "Max engine stall", "s", policy.STALL_S,
+          *policy.GATEWAY_BOUNDS["stall_s"],
+          "Too small: a long prefill or a big batch is taken for a stall. Too large: a stuck "
+          "engine holds its requests that long.", restart=False),
+    Field("gateway.safety_s", "gateway", "Max request time", "s", policy.SAFETY_S,
+          *policy.GATEWAY_BOUNDS["safety_s"],
+          "Too small: a long answer is cut although the engine works. Too large: one request "
+          "that never ends holds a place that long.", restart=False),
+    Field("gateway.default_max_tokens", "gateway", "Default answer cap", "tokens",
+          policy.DEFAULT_MAX_TOKENS, *policy.GATEWAY_BOUNDS["default_max_tokens"],
+          "Too small: answers that named no cap are cut short. Too large (or 0): such an "
+          "answer may run to the end of the context.", kind="integer", restart=False),
     Field("gateway.max_upload_bytes", "uploads", "Largest file", "bytes", 0, 0, 1024 ** 3,
           "The largest image a request may upload (OCR, an image edit); a larger one is "
           "refused before it is decoded. 0: no limit. Too small: ordinary photos are "

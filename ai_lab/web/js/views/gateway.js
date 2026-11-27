@@ -194,6 +194,18 @@ function activity(stats) {
 // hold, and the answer cap it adds. Editable here rather than on the Settings page: they are about
 // the gateway, and they sit beside the figures you would read before deciding
 // to change them.
+// The Gateway Limits' extra explanation, by setting name, from /api/setting-fields.
+function fieldHelp(view) {
+  const help = {};
+  for (const field of view?.fields || []) {
+    if (field.group !== 'gateway') continue;
+    const unit = field.unit ? ` ${field.unit}` : '';
+    help[field.key.split('.').pop()] = `${field.help}\n\nDefault: ${field.default}${unit}; `
+      + `from ${field.low} to ${field.high}.`;
+  }
+  return help;
+}
+
 function limits(stats, redraw) {
   const fields = [
     ['first_byte_s', 'Max TTFT', stats.first_byte_s, 's',
@@ -236,7 +248,8 @@ function limits(stats, redraw) {
       type: 'number', value: String(value), min, size: 8,
     });
     inputs.set(key, input);
-    return element('label', { class: 'field explained', title: help }, [
+    const extra = stats.fieldHelp?.[key];
+    return element('label', { class: 'field explained', title: extra ? `${help}\n\n${extra}` : help }, [
       element('span', {}, element('span', { text: unit ? `${label} (${unit})` : label })),
       input,
     ]);
@@ -395,6 +408,9 @@ export async function render(container) {
   let stats;
   try {
     stats = await api.gateway();
+    // Each limit's default, range and what too small or too large does (audit
+    // L63), from the one list of fields; the page still draws without it.
+    stats.fieldHelp = await api.settingFields().then(fieldHelp).catch(() => ({}));
   } catch (error) {
     container.replaceChildren(element('p', { class: 'error', text: error.message }));
     return;
