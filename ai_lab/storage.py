@@ -9,6 +9,8 @@ Library page.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .disk import tree_size
@@ -20,11 +22,32 @@ from .types import ChangeEvent
 SAFE_DEPTH = 4
 
 
+@dataclass(frozen=True)
+class Guarded:
+    """What no reclaimable path may be, hold or sit in (audit m16).
+
+    `trees`: the model roots and repositories, refused as the path, above it or
+    inside it. `places`: AI-Lab's state folder, refused as the path or above it
+    (its caches inside may be emptied).
+    """
+
+    trees: tuple[Path, ...] = ()
+    places: tuple[Path, ...] = ()
+
+
+def guarded_paths(config, state_dir: Path) -> Guarded:
+    """The model roots, the repositories and the state folder of this `config`."""
+    trees = [Path(item.path) for item in (*config.model_roots, *config.repositories) if item.path]
+    return Guarded(trees=tuple(trees), places=(Path(state_dir),))
+
+
 class Storage:
     """The configured reclaimable places: what each holds, and emptying one."""
 
-    def __init__(self, settings: dict | None, bus: EventBus | None = None) -> None:
+    def __init__(self, settings: dict | None, bus: EventBus | None = None,
+                 guarded: Callable[[], Guarded] = Guarded) -> None:
         self.bus = bus
+        self._guarded = guarded
         self._items: dict[str, dict] = {}
         for raw in (settings or {}).get("reclaimable", []):
             item = dict(raw)
@@ -32,7 +55,7 @@ class Storage:
             path = Path(str(item.get("path", "")))
             if not item_id or item_id in self._items:
                 raise ValueError("Every reclaimable storage item needs a unique id")
-            _safe(path)
+            _safe(path, guarded())
             self._items[item_id] = {
                 "id": item_id,
                 "name": str(item.get("name") or item_id),
@@ -70,7 +93,7 @@ class Storage:
         except KeyError:
             raise KeyError(f"No reclaimable storage item called {item_id}") from None
         path = item["path"]
-        _safe(path)
+        _safe(path, self._guarded())
         if path.is_symlink() or path.is_file():
             path.unlink(missing_ok=True)
         elif path.is_dir():
@@ -80,7 +103,29 @@ class Storage:
         return self.view()
 
 
-def _safe(path: Path) -> None:
-    """Refuse broad targets even when a configuration has a typo."""
+def _safe(path: Path, guarded: Guarded) -> None:
+    """Refuse broad targets even when a configuration has a typo.
+
+    Depth alone was sized for Linux: on the Mac /Users/<name>/Documents or
+    /Volumes/<disk>/work pass it. So the home folder and its direct children,
+    the model roots and repositories and the state folder are refused by name.
+    """
     if not path.is_absolute() or len(path.parts) < SAFE_DEPTH:
         raise ValueError(f"Unsafe reclaimable storage path: {path}")
+    target = path.resolve()
+    home = Path.home().resolve()
+    if target in (home, *home.parents) or target.parent == home:
+        raise ValueError(f"Unsafe reclaimable storage path: {path} is the home folder or one of its own")
+    _refuse_guarded(path, target, guarded)
+
+
+def _refuse_guarded(path: Path, target: Path, guarded: Guarded) -> None:
+    """Refuse a path that is, holds or sits in models, or holds the state folder."""
+    for tree in guarded.trees:
+        tree = tree.resolve()
+        if target == tree or target in tree.parents or tree in target.parents:
+            raise ValueError(f"Unsafe reclaimable storage path: {path} holds or is inside models ({tree})")
+    for place in guarded.places:
+        place = place.resolve()
+        if target == place or target in place.parents:
+            raise ValueError(f"Unsafe reclaimable storage path: {path} holds AI-Lab's state ({place})")

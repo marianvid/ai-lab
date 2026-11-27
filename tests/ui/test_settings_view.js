@@ -234,6 +234,23 @@ describe('the Settings page', () => {
     assert.match(dialog.textContent, /up/, 'no way to go up a level');
   });
 
+  it('saves nothing when the folder picker is closed with Escape, and saves on "Use this folder"', async () => {
+    // Audit m7: Escape used to hand back the folder on screen, saved at once.
+    const { view, calls } = await renderPage();
+    const saves = () => calls.filter((call) => call.method !== 'GET').length;
+    const before = saves();
+    button(namedSection(view, 'Paths'), 'Browse…').click();
+    await settle();
+    document.querySelector('dialog.confirm').close();
+    await settle();
+    assert.equal(saves(), before, 'Escape saved the folder on screen');
+    button(namedSection(view, 'Paths'), 'Browse…').click();
+    await settle();
+    button(document.querySelector('dialog.confirm'), 'Use this folder').click();
+    await settle();
+    assert.equal(saves(), before + 1);
+  });
+
   it('leaves out what is already known: no format pill, no free space', async () => {
     // The name says which format it is, and free space belongs where a
     // download picks its destination, not on four repeated lines.

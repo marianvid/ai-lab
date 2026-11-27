@@ -42,7 +42,7 @@ from .providers import ProviderPool
 from .providers.settings import ProvidersConfig
 from .runtime.core import Runtime
 from .settings import Settings
-from .storage import Storage
+from .storage import Storage, guarded_paths
 from .shared.unexpected import READING_FAILED, note
 
 
@@ -230,7 +230,8 @@ def _operations(store: ConfigStore, bus: EventBus, host: Host, engines: Registry
         downloads=DownloadManager(bus=bus, arrived=learn_about_new_models),
         huggingface=HuggingFaceClient(),
         host=host, engines=engines, builds=builds, installs=installs,
-        storage=Storage(store.load().storage, bus), bus=bus,
+        storage=Storage(store.load().storage, bus, guarded=lambda: guarded_paths(store.load(), host.state_dir())),
+        bus=bus,
         # What was on the card when the manager last stopped, where the host keeps state.
         last_loaded=LastLoaded(host.state_dir()))
     operations = Operations.assemble(parts)

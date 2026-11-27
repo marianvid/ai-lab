@@ -31,6 +31,7 @@ continues from where it stopped instead of beginning again.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import shutil
 import threading
@@ -55,6 +56,8 @@ USER_AGENT = "AI-Lab/0.2"
 # filesystem rather than a copy across two. The leading dot is what keeps it
 # out of the library: `Catalog` does not look inside folders named this way.
 WORKING = ".ai-lab-downloads"
+HTTP_PARTIAL = 206
+HTTP_RANGE_REFUSED = 416
 # How often a running transfer says it has moved. Announcing every chunk would
 # redraw the page dozens of times a second to show a number that changes by a
 # percent.
@@ -150,7 +153,7 @@ class DownloadManager:
             raise ValueError(
                 f"{remote.name} is missing {len(remote.missing)} shard(s) upstream")
         transfer = Transfer(
-            id=f"{remote.repo}/{remote.name}".replace("/", "_"),
+            id=transfer_id(remote.repo, remote.name),
             repo=remote.repo, name=remote.name, destination=str(destination),
             total_bytes=remote.size_bytes, files_total=len(remote.files),
             storage_tier=storage_tier,
@@ -196,10 +199,21 @@ class DownloadManager:
             try:
                 transfer_id = self._queue.get(timeout=2.0)
             except Empty:
-                return
+                # Decided under the lock, with one more look (audit L28): an id
+                # put between the timeout and here would otherwise wait in the
+                # queue for the next model, with `_ensure_worker` seeing this
+                # thread still alive and starting none.
+                with self._lock:
+                    if self._queue.empty():
+                        self._worker = None
+                        return
+                continue
             transfer = self._transfers.get(transfer_id)
             plan = self._plans.get(transfer_id)
-            if transfer is None or plan is None or transfer.state is State.CANCELLED:
+            # Only a transfer still waiting runs: a model cancelled while
+            # queued and asked for again has its id in the queue twice, and
+            # the second one must not run the finished transfer again (L29).
+            if transfer is None or plan is None or transfer.state is not State.QUEUED:
                 continue
             self._download(transfer, *plan)
 
@@ -267,6 +281,23 @@ class DownloadManager:
             with contextlib.suppress(Exception):
                 self._arrived(destination)
 
+    def _resumed(self, url: str, partial: Path):
+        """The answer for a file, and the byte it continues from (audit L27).
+
+        A 416 means the part is already whole, or larger than upstream now has
+        it: asking the same range again would fail for ever, so the file starts
+        over. A 200 to a range is the whole file: appending it would double it.
+        """
+        resume_from = partial.stat().st_size if partial.exists() else 0
+        try:
+            response = self._open(url, resume_from)
+        except RangeRefusedError:
+            partial.unlink(missing_ok=True)
+            return self._open(url, 0), 0
+        if resume_from and getattr(response, "status", HTTP_PARTIAL) != HTTP_PARTIAL:
+            return response, 0
+        return response, resume_from
+
     def _file(self, transfer: Transfer, repo: str, item: RemoteFile,
               destination: Path) -> None:
         """Fetch one file into the working folder.
@@ -281,11 +312,9 @@ class DownloadManager:
             transfer.received_bytes += item.size_bytes
             return
         partial = target.with_name(target.name + ".part")
-        resume_from = partial.stat().st_size if partial.exists() else 0
+        response, resume_from = self._resumed(item.url(repo), partial)
         transfer.received_bytes += resume_from
-
-        with self._open(item.url(repo), resume_from) as response, \
-                partial.open("ab" if resume_from else "wb") as handle:
+        with response, partial.open("ab" if resume_from else "wb") as handle:
             while True:
                 if transfer.cancelled:
                     raise RuntimeError("cancelled")
@@ -298,6 +327,20 @@ class DownloadManager:
         partial.replace(target)
 
 
+class RangeRefusedError(ValueError):
+    """Upstream refused the range asked for (HTTP 416)."""
+
+
+def transfer_id(repo: str, name: str) -> str:
+    """A transfer's id: readable, and different for every (repo, name) (audit L30).
+
+    The readable part alone was not unique ("org/m" + "a_b" and "org/m" + "a/b"
+    both gave org_m_a_b), and the working folder is named after it.
+    """
+    tail = hashlib.sha256(f"{repo}\0{name}".encode()).hexdigest()[:10]
+    return f"{repo}/{name}".replace("/", "_") + "-" + tail
+
+
 def _open_range(url: str, resume_from: int):
     headers = {"User-Agent": USER_AGENT}
     if resume_from:
@@ -306,6 +349,8 @@ def _open_range(url: str, resume_from: int):
     try:
         return urllib.request.urlopen(request, timeout=60)
     except urllib.error.HTTPError as error:
+        if error.code == HTTP_RANGE_REFUSED and resume_from:
+            raise RangeRefusedError(f"Download failed with HTTP {error.code}") from None
         raise ValueError(f"Download failed with HTTP {error.code}") from None
     except OSError as error:
         raise ValueError(f"Download failed: {error}") from None
@@ -354,10 +399,22 @@ def _verify(transfer: Transfer, remote: RemoteSet, working: Path,
         if not item.sha256:
             continue
         if sha256_of(path) != item.sha256:
-            raise ValueError(
-                f"{path.name} arrived complete but its contents do not match "
-                "the checksum upstream publishes for it")
+            raise ValueError(_mismatch(path, fetched=folder == working))
         transfer.checked_hash += 1
+
+
+def _mismatch(path: Path, fetched: bool) -> str:
+    """The error for a file whose checksum is wrong; a file fetched here is removed (m9).
+
+    Kept, it was skipped on every retry for having the right size and failed
+    the same check again: the model could never be downloaded from the page.
+    A file that was already in the repository is the owner's, and is left.
+    """
+    said = f"{path.name} arrived complete but its contents do not match the checksum upstream publishes for it"
+    if not fetched:
+        return f"{said}. It was already in the repository and is left there; delete it to fetch it again"
+    path.unlink(missing_ok=True)
+    return f"{said}. It was removed, so asking again downloads it anew"
 
 
 def _publish(working: Path, destination: Path, staged: list) -> None:

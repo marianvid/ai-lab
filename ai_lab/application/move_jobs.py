@@ -35,6 +35,25 @@ class MoveCancelledError(Exception):
     """An operator cancelled a move; the job records this separately."""
 
 
+NAMED_AT_MOST = 5
+
+
+def _interrupted(job: dict) -> str:
+    """Why a recovered job failed; for one cut while publishing, which files are already in place."""
+    said = "Interrupted by a service restart"
+    if job.get("status") != "publishing":
+        return said
+    landed = [Path(path) for path in job.get("destinations", []) if Path(path).exists()]
+    if not landed:
+        return said + " while publishing; no file had reached its new place"
+    names = ", ".join(path.name for path in landed[:NAMED_AT_MOST]) \
+        + (" …" if len(landed) > NAMED_AT_MOST else "")
+    return (f"{said} while publishing: {len(landed)} of {len(job.get('destinations', []))} "
+            f"files are already in the destination under their real names ({names}), so the "
+            "Library may show that copy as incomplete. The source is intact: delete the "
+            "partial copy from the Library, or move again.")
+
+
 class MoveJobStore:
     """The move job files under the host's state directory."""
 
@@ -63,6 +82,9 @@ class MoveJobStore:
                "target_tier": plan.target_root.id,
                "bytes": plan.model.size_bytes, "files": len(plan.sources),
                "staging": str(staging_root / job_id), "status": "pending",
+               # Where each file lands: a publish of loose files interrupted
+               # by a restart is reported by name from this (audit L8).
+               "destinations": [str(path) for path in plan.destinations],
                "error": "", "started_at": time.time(),
                "updated_at": time.time()}
         self.write(job)
@@ -173,8 +195,8 @@ class MoveJobStore:
             staging = job.get("staging")
             if staging:
                 shutil.rmtree(staging, ignore_errors=True)
+            job["error"] = _interrupted(job)
             job["status"] = "failed"
-            job["error"] = "Interrupted by a service restart"
             job["updated_at"] = time.time()
             self.write(job)
             recovered.append(job)

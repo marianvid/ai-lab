@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_lab.application.model_storage import MoveMechanics
+from ai_lab.application.model_storage import MoveMechanics, publish_staged
 from ai_lab.application.move_jobs import MoveJobStore
 from ai_lab.catalog.core import Catalog
 from ai_lab.config.store import ConfigStore
@@ -606,6 +606,34 @@ class MoveModelTests(unittest.TestCase):
                         "a companion still needed by a sibling must not be deleted")
         self.assertTrue((self.core / "gguf" / "qwen" / "sibling.gguf").exists())
 
+    def test_deleting_one_model_keeps_a_companion_its_sibling_needs(self):
+        # Audit m15: delete_model removed the shared tokenizer; a move kept it.
+        self.operations.delete_instance("qwen")
+        directory = self.core / "gguf" / "qwen"
+        (directory / "tokenizer.json").write_text("{}")
+        make_files(directory, "sibling.gguf", size=10)
+        result = self.operations.delete_model("gguf/qwen/qwen")
+        self.assertFalse((directory / "qwen.gguf").exists())
+        self.assertTrue((directory / "tokenizer.json").exists(),
+                        "a companion still needed by a sibling must not be deleted")
+        self.assertEqual((result["files"], result["kept_for_siblings"], result["freed_bytes"]),
+                         (1, 1, 100))
+
+    def test_an_entry_loaded_while_the_move_publishes_keeps_both_copies(self):
+        # Audit L7: the source used to be removed under an engine that may
+        # have started from it between the last check and the repoint.
+        def publish_while_it_loads(*args):
+            publish_staged(*args)
+            self.host.running.add("qwen")
+
+        self.operations = self.assembled(mechanics=MoveMechanics(publish=publish_while_it_loads))
+        with self.assertRaises(ValueError) as caught:
+            self.operations.move_model("gguf/qwen/qwen", "benchmark")
+        self.assertIn("both copies are kept", str(caught.exception))
+        self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+        self.assertTrue((self.benchmark / "gguf" / "qwen" / "qwen.gguf").exists())
+        self.assertEqual(self.operations.move_jobs()[0]["status"], "failed")
+
     def test_a_failure_during_publishing_leaves_a_resumable_staging_state(self):
         """An interruption after copying must not delete published files
         or the staging area — it must leave something a retry can find.
@@ -742,6 +770,24 @@ class MoveModelTests(unittest.TestCase):
                          "a crashed move's staged bytes must be cleaned up")
         # The source, which a crashed copy never touches, must be untouched.
         self.assertTrue((self.core / "gguf" / "qwen" / "qwen.gguf").exists())
+
+    def test_a_move_cut_while_publishing_names_the_files_already_in_place(self):
+        # Audit L8: the job said only "Interrupted", with half a model visible.
+        self.operations.delete_instance("qwen")
+        landed = self.benchmark / "gguf" / "a.gguf"
+        landed.write_text("published")
+        job = {"id": "cut", "model_id": "gguf/qwen/qwen",
+               "target_model_id": "benchmark-gguf/qwen/qwen",
+               "source_tier": "core", "target_tier": "benchmark",
+               "bytes": 100, "files": 2, "staging": "", "status": "publishing",
+               "destinations": [str(landed), str(self.benchmark / "gguf" / "b.gguf")],
+               "error": "", "started_at": 0.0, "updated_at": 0.0}
+        MoveJobStore(self.host, lambda _topic: None).write(job)
+        self.operations.recover_moves()
+        error = self.operations.move_jobs()[0]["error"]
+        self.assertIn("1 of 2 files", error)
+        self.assertIn("a.gguf", error)
+        self.assertIn("source is intact", error)
 
     def test_recover_moves_leaves_finished_jobs_alone(self):
         self.operations.delete_instance("qwen")

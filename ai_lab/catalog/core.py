@@ -26,6 +26,18 @@ from ..types import Format, ModelFile, ModelSet, Task
 
 
 
+MANIFEST = ".ai-lab-model.json"
+
+
+def _manifest(path: Path) -> dict | None:
+    """A model manifest's fields; None when it cannot be read or is not an object."""
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
 class _Found(NamedTuple):
     """The weights of one model found in a directory, and the name it goes by."""
 
@@ -125,26 +137,30 @@ class Catalog:
         subdirectories. A tiny manifest at the model root makes that boundary
         explicit instead of exposing each component as a separate model.
         """
-        manifests = [path for path in root.rglob(".ai-lab-model.json")
-                     if not any(part.startswith(".") and part != ".ai-lab-model.json"
+        manifests = [path for path in root.rglob(MANIFEST)
+                     if not any(part.startswith(".") and part != MANIFEST
                                 for part in path.relative_to(root).parts)]
-        models, roots = [], []
-        for manifest in sorted(manifests):
-            directory = manifest.parent
-            raw = json.loads(manifest.read_text())
-            name = str(raw.get("name") or directory.name)
-            entrypoint = directory / str(raw.get("entrypoint") or "")
-            files = Catalog._physical_files(directory)
-            relative = directory.relative_to(root)
-            parts = [repository.id, *relative.parts[:-1], name] if relative.parts \
-                else [repository.id, name]
-            models.append(ModelSet(
-                id="/".join(parts), name=name, format=Format(repository.format),
-                entrypoint=str(entrypoint), files=files,
-                task=Task(repository.task), complete=True,
-            ))
-            roots.append(directory)
-        return models, roots
+        models = [Catalog._declared(repository, root, manifest) for manifest in sorted(manifests)]
+        return models, [manifest.parent for manifest in sorted(manifests)]
+
+    @staticmethod
+    def _declared(repository: Repository, root: Path, manifest: Path) -> ModelSet:
+        """The model one manifest declares; shown broken when the manifest cannot be read."""
+        directory = manifest.parent
+        raw = _manifest(manifest)
+        name = str((raw or {}).get("name") or directory.name)
+        entrypoint = directory / str((raw or {}).get("entrypoint") or "")
+        relative = directory.relative_to(root)
+        parts = [repository.id, *relative.parts[:-1], name] if relative.parts \
+            else [repository.id, name]
+        # One unreadable manifest shows that model as broken; it used to
+        # raise out of the scan and empty every page (audit m8).
+        return ModelSet(
+            id="/".join(parts), name=name, format=Format(repository.format),
+            entrypoint=str(entrypoint), files=Catalog._physical_files(directory),
+            task=Task(repository.task), complete=raw is not None,
+            missing=() if raw is not None else (f"{MANIFEST} (unreadable)",),
+        )
 
     @staticmethod
     def _physical_files(directory: Path) -> tuple[ModelFile, ...]:

@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from typing import cast
 
 from ..catalog.naming import (WEIGHT_SUFFIXES, base_name, is_companion, is_weight,
                       missing_shards)
@@ -23,6 +24,8 @@ from ..shared.public_services import address
 from .bundles import Bundle
 
 USER_AGENT = "AI-Lab/0.2"
+# A listing longer than this many pages is refused rather than read for ever.
+MAX_PAGES = 200
 TIMEOUT = 20.0
 
 
@@ -92,8 +95,13 @@ class RemoteSet:
 class HuggingFaceClient:
     """Searching Hugging Face and listing a repository's files, as JSON over HTTPS."""
 
-    def __init__(self, opener=None) -> None:
+    def __init__(self, opener=None, pages=None) -> None:
         self._open = opener or self._fetch
+        # One page of a listing and the address of the next, from the Link
+        # header the Hub pages large listings with (audit L31). A test that
+        # hands in its own `opener` gets one page per listing.
+        self._page = pages or (self._fetch_page if opener is None
+                               else (lambda url: (self._open(url), None)))
 
     def search(self, query: str, limit: int = 20) -> list[dict]:
         """The most downloaded repositories matching `query`, with their formats."""
@@ -111,11 +119,8 @@ class HuggingFaceClient:
 
     def files(self, repo: str) -> list[RemoteFile]:
         """Every file in a repository, with its size and, for large ones, its SHA-256."""
-        quoted = urllib.parse.quote(repo)
-        payload = self._open(
-            f"{address('huggingface_api')}/models/{quoted}/tree/main?recursive=true")
         files = []
-        for item in payload:
+        for item in self._listing(repo):
             if item.get("type") != "file":
                 continue
             lfs = item.get("lfs") or {}
@@ -144,6 +149,33 @@ class HuggingFaceClient:
                     listings[other] = self.files(other)
         return bundle_sets(declared, listings) + group(repo, listings[repo])
 
+    def _listing(self, repo: str) -> list:
+        """Every entry of a repository's tree, page after page, from the Hub only."""
+        hub = address("huggingface_api")
+        url: str | None = f"{hub}/models/{urllib.parse.quote(repo)}/tree/main?recursive=true"
+        payload: list = []
+        for _ in range(MAX_PAGES):
+            page, url = self._page(cast(str, url))
+            payload.extend(page)
+            if url is None:
+                return payload
+            if not url.startswith(hub):
+                raise ValueError(f"{repo}: the next page points away from the Hub ({url})")
+        raise ValueError(f"{repo}: the listing is longer than {MAX_PAGES} pages")
+
+    @staticmethod
+    def _fetch_page(url: str) -> tuple[list, str | None]:
+        """One page of a listing, and the next page's address from `Link: <…>; rel="next"`."""
+        request = urllib.request.Request(url, headers={
+            "Accept": "application/json", "User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+                return json.loads(response.read()), next_page(response.headers.get("Link"))
+        except urllib.error.HTTPError as error:
+            raise ValueError(f"Hugging Face returned {error.code} for {url}") from None
+        except (OSError, ValueError) as error:
+            raise ValueError(f"Could not reach Hugging Face: {error}") from None
+
     @staticmethod
     def _fetch(url: str):
         request = urllib.request.Request(url, headers={
@@ -155,6 +187,15 @@ class HuggingFaceClient:
             raise ValueError(f"Hugging Face returned {error.code} for {url}") from None
         except (OSError, ValueError) as error:
             raise ValueError(f"Could not reach Hugging Face: {error}") from None
+
+
+def next_page(link: str | None) -> str | None:
+    """The `rel="next"` address in an HTTP Link header, if there is one."""
+    for part in (link or "").split(","):
+        address_part, _, params = part.partition(";")
+        if 'rel="next"' in params.replace(" ", "") or "rel=next" in params.replace(" ", ""):
+            return address_part.strip().strip("<>") or None
+    return None
 
 
 def _formats(item: dict) -> list[str]:

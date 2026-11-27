@@ -124,13 +124,24 @@ class ModelStorageService:
                 + ", ".join(users) + " still points at this model.")
 
         roots = [Path(item.path).resolve() for item in config.repositories]
-        paths = _inside(roots, [Path(item.path).resolve() for item in model.files])
-        freed = sum(item.size_bytes for item in model.files)
-        for path in paths:
+        removed, kept = self._removable(config, model, roots)
+        sizes = {Path(item.path).resolve(): item.size_bytes for item in model.files}
+        for path in removed:
             path.unlink(missing_ok=True)
-        prune_empty(paths, roots)
+        prune_empty(removed, roots)
         self._changed("models")
-        return {"deleted": model.name, "files": len(paths), "freed_bytes": freed}
+        return {"deleted": model.name, "files": len(removed), "kept_for_siblings": len(kept),
+                "freed_bytes": sum(sizes.get(path, 0) for path in removed)}
+
+    def _removable(self, config, model, roots: list[Path]) -> tuple[list[Path], set[Path]]:
+        """The model's files to delete, and those kept for a sibling.
+
+        A companion (tokenizer, config, mmproj) that a sibling in the same GGUF
+        folder also lists stays, as a move leaves it (audit m15).
+        """
+        paths = _inside(roots, [Path(item.path).resolve() for item in model.files])
+        kept = self._companions_still_needed(config, model, paths)
+        return [path for path in paths if path not in kept], kept
 
     def move_model(self, model_id: str, target_root_id: str) -> dict:
         """Copy, verify and only then remove a model from its current tier.
@@ -283,6 +294,16 @@ class ModelStorageService:
         `Catalog.scan` — so one still needed by a sibling that has not
         moved is left where it is.
         """
+        # The last look before the source goes (audit L7): an entry loaded
+        # while the copy was published may have started from the source's
+        # files. Then both copies stay, and the job says why.
+        loaded = [item.id for item in self.store.load().instances
+                  if item.model_id == job["target_model_id"] and self.host.status(item.id).running]
+        if loaded:
+            raise ValueError(
+                f"{', '.join(loaded)} was loaded while the move was publishing, perhaps from the "
+                "source's files: both copies are kept. Delete the source from the Library "
+                "once that entry is unloaded.")
         protected = self._companions_still_needed(config, plan.model, plan.sources)
         removable = [source for source in plan.sources if source not in protected]
         for source in removable:

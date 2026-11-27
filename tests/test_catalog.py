@@ -122,6 +122,22 @@ class CatalogTests(unittest.TestCase):
             ".ai-lab-model.json").stat().st_size)
         self.assertTrue(models[0].entrypoint.endswith("diffusion_models/transformer.safetensors"))
 
+    def test_an_unreadable_manifest_shows_that_model_broken_and_the_rest_as_usual(self):
+        # Audit m8: one bad manifest used to raise out of the scan.
+        for name, text in (("half", '{"name": "hal'), ("list", "[1]")):
+            make_files(self.root / name, "model.safetensors", size=10)
+            (self.root / name / ".ai-lab-model.json").write_text(text)
+        make_files(self.root / "fine", "model.safetensors", size=10)
+
+        models = {model.name: model for model in self.scan(format="safetensors")}
+
+        self.assertEqual(set(models), {"half", "list", "fine"})
+        for name in ("half", "list"):
+            with self.subTest(name=name):
+                self.assertFalse(models[name].complete)
+                self.assertIn(".ai-lab-model.json (unreadable)", models[name].missing)
+        self.assertTrue(models["fine"].complete)
+
     def test_a_declared_cache_does_not_count_snapshot_symlinks_twice(self):
         model = self.root / "cached-model"
         blob = model / "blobs" / "weight"

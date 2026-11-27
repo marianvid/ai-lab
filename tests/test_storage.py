@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from ai_lab.events import EventBus
-from ai_lab.storage import Storage
+from ai_lab.storage import Guarded, Storage
 
 
 class ReclaimableStorage(unittest.TestCase):
@@ -48,6 +48,30 @@ class ReclaimableStorage(unittest.TestCase):
     def test_a_path_cannot_be_smuggled_in_as_an_id(self):
         with self.assertRaises(KeyError):
             self.storage.clear("../../models")
+        self.assertTrue(self.cache.exists())
+
+    def test_the_home_folder_models_and_the_state_folder_are_refused_by_name(self):
+        # Audit m16: depth alone let /Users/<name>/Documents through.
+        models = self.root / "models"
+        state = self.root / "state"
+        guarded = Guarded(trees=(models,), places=(state,))
+        refused = [Path.home() / "Documents", Path.home(), models, models / "gguf",
+                   self.root, state]
+        for path in refused:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                Storage({"reclaimable": [{"id": "bad", "path": str(path)}]},
+                        guarded=lambda: guarded)
+        allowed = Storage({"reclaimable": [{"id": "uv", "path": str(state / "cache" / "uv")}]},
+                          guarded=lambda: guarded)
+        self.assertEqual(allowed.view()["items"], [])
+
+    def test_a_guarded_place_is_checked_again_when_clearing(self):
+        guarded = [Guarded()]
+        storage = Storage({"reclaimable": [{"id": "packages", "path": str(self.cache)}]},
+                          guarded=lambda: guarded[0])
+        guarded[0] = Guarded(trees=(self.cache.parent,))
+        with self.assertRaises(ValueError):
+            storage.clear("packages")
         self.assertTrue(self.cache.exists())
 
     def test_broad_paths_are_refused_at_configuration_time(self):

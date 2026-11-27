@@ -1,6 +1,7 @@
 import unittest
 
-from ai_lab.downloads.huggingface import HuggingFaceClient, RemoteFile, group
+from ai_lab.downloads.huggingface import HuggingFaceClient, RemoteFile, group, next_page
+from ai_lab.shared.public_services import address
 
 
 class GroupTests(unittest.TestCase):
@@ -90,6 +91,35 @@ class ClientTests(unittest.TestCase):
         files = client.files("org/model")
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0].size_bytes, 999)
+
+    def test_a_listing_in_pages_is_read_to_its_last_page(self):
+        # Audit L31: the Hub pages a large tree; only the first page was read.
+        hub = address("huggingface_api")
+        pages = {"first": ([{"type": "file", "path": "a-00001-of-00002.gguf", "size": 1}],
+                           f"{hub}/models/org/m/tree/main?cursor=2"),
+                 "second": ([{"type": "file", "path": "a-00002-of-00002.gguf", "size": 1}], None)}
+        asked: list[str] = []
+
+        def page(url):
+            asked.append(url)
+            return pages["second" if "cursor=2" in url else "first"]
+
+        files = HuggingFaceClient(pages=page).files("org/m")
+        self.assertEqual([item.path for item in files],
+                         ["a-00001-of-00002.gguf", "a-00002-of-00002.gguf"])
+        self.assertEqual(len(asked), 2)
+
+    def test_a_next_page_away_from_the_hub_is_refused(self):
+        client = HuggingFaceClient(pages=lambda url: ([], "https://elsewhere.example/x"))
+        with self.assertRaises(ValueError):
+            client.files("org/m")
+
+    def test_the_next_page_is_read_from_the_link_header(self):
+        self.assertEqual(next_page('<https://hub/x?cursor=2>; rel="next"'), "https://hub/x?cursor=2")
+        self.assertEqual(next_page('<https://hub/p>; rel="prev", <https://hub/n>; rel="next"'),
+                         "https://hub/n")
+        self.assertIsNone(next_page('<https://hub/p>; rel="prev"'))
+        self.assertIsNone(next_page(None))
 
 
 if __name__ == "__main__":

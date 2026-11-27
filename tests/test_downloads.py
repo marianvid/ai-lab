@@ -6,7 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ai_lab.downloads.huggingface import RemoteFile, RemoteSet
-from ai_lab.downloads.transfers import WORKING, DownloadManager, State
+from ai_lab.downloads.transfers import (WORKING, DownloadManager, RangeRefusedError, State,
+                                        transfer_id)
 
 
 class FakeResponse(io.BytesIO):
@@ -84,7 +85,7 @@ class DownloadTests(unittest.TestCase):
         the library never had a chance to see it. Asking again continues from
         where it stopped rather than fetching those bytes twice.
         """
-        working = self.destination.parent / WORKING / "org_model_model"
+        working = self.destination.parent / WORKING / transfer_id("org/model", "model")
         working.mkdir(parents=True)
         (working / "a.gguf.part").write_bytes(b"x" * 5)
         self.assertFalse(self.destination.exists(),
@@ -95,6 +96,84 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(transfer.state, State.DONE)
         self.assertEqual(self.requested[0][1], 5)          # asked to resume at byte 5
         self.assertEqual((self.destination / "a.gguf").read_bytes(), b"x" * 8)
+
+    def test_a_file_with_a_wrong_checksum_is_removed_so_asking_again_fetches_it(self):
+        # Audit m9: kept, it was skipped on every retry and failed for ever.
+        import hashlib
+        good = b"x" * 8
+        files = (RemoteFile(path="a.gguf", size_bytes=8,
+                            sha256=hashlib.sha256(good).hexdigest()),)
+        remote = RemoteSet(repo="org/model", name="model", format="gguf", files=files,
+                           complete=True, missing=())
+        manager = DownloadManager(opener=lambda *_: FakeResponse(b"y" * 8))
+        failed = self.wait(manager, manager.enqueue(remote, self.destination))
+        self.assertEqual(failed.state, State.FAILED)
+        self.assertIn("removed", failed.error)
+        manager = DownloadManager(opener=self.opener(good))
+        done = self.wait(manager, manager.enqueue(remote, self.destination))
+        self.assertEqual(done.state, State.DONE)
+        self.assertEqual((self.destination / "a.gguf").read_bytes(), good)
+
+    def test_a_resume_answered_with_the_whole_file_starts_the_file_over(self):
+        # Audit L27: a 200 to a Range request is the whole file, not the rest.
+        working = self.destination.parent / WORKING / transfer_id("org/model", "model")
+        working.mkdir(parents=True)
+        (working / "a.gguf.part").write_bytes(b"x" * 5)
+
+        class Whole(FakeResponse):
+            status = 200
+
+        manager = DownloadManager(opener=lambda *_: Whole(b"z" * 8))
+        transfer = self.wait(manager, manager.enqueue(remote_set(), self.destination))
+        self.assertEqual(transfer.state, State.DONE)
+        self.assertEqual((self.destination / "a.gguf").read_bytes(), b"z" * 8)
+
+    def test_a_refused_range_starts_the_file_over(self):
+        # Audit L27: a part already whole was asked "bytes=8-", 416, for ever.
+        working = self.destination.parent / WORKING / transfer_id("org/model", "model")
+        working.mkdir(parents=True)
+        (working / "a.gguf.part").write_bytes(b"x" * 8)
+
+        def open_range(url, resume_from):
+            self.requested.append((url, resume_from))
+            if resume_from:
+                raise RangeRefusedError("Download failed with HTTP 416")
+            return FakeResponse(b"w" * 8)
+
+        manager = DownloadManager(opener=open_range)
+        transfer = self.wait(manager, manager.enqueue(remote_set(), self.destination))
+        self.assertEqual(transfer.state, State.DONE)
+        self.assertEqual([start for _, start in self.requested], [8, 0])
+        self.assertEqual((self.destination / "a.gguf").read_bytes(), b"w" * 8)
+
+    def test_a_model_cancelled_while_queued_and_asked_again_downloads_once(self):
+        # Audit L29: its id was in the queue twice and ran twice.
+        release = threading.Event()
+
+        class Slow(FakeResponse):
+            def read(self, size=-1):
+                release.wait(2)
+                return super().read(size)
+
+        arrived: list = []
+        manager = DownloadManager(opener=lambda *_: Slow(b"x" * 8), arrived=arrived.append)
+        first = manager.enqueue(remote_set(name="first"), self.destination)
+        queued = manager.enqueue(remote_set(), self.destination)
+        manager.cancel(queued.id)
+        again = manager.enqueue(remote_set(), self.destination)
+        release.set()
+        self.wait(manager, first)
+        self.wait(manager, again)
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline and len(arrived) < 2:
+            time.sleep(0.01)
+        time.sleep(0.2)
+        self.assertEqual(len(arrived), 2, "the model asked for again ran twice, or not at all")
+
+    def test_two_models_never_share_a_transfer_id(self):
+        # Audit L30: "org/m" + "a_b" and "org/m" + "a/b" were both org_m_a_b.
+        self.assertNotEqual(transfer_id("org/m", "a_b"), transfer_id("org/m", "a/b"))
+        self.assertTrue(transfer_id("org/m", "a/b").startswith("org_m_a_b-"))
 
     def test_an_already_present_file_is_not_fetched_again(self):
         self.destination.mkdir(parents=True)

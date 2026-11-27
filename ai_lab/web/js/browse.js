@@ -36,6 +36,10 @@ export function chooseProgram(startAt) {
 
 function pick({ startAt, programs, title }) {
   return new Promise((resolve) => {
+    // `shown` is the folder on screen; `chosen` is the answer, set only by
+    // "Use this folder" or by clicking a program (audit m7: Escape used to
+    // hand back the folder being looked at, and the page saved it at once).
+    let shown = null;
     let chosen = null;
     const list = element('div', { class: 'browser' });
     const here = element('div', { class: 'muted path' });
@@ -54,7 +58,7 @@ function pick({ startAt, programs, title }) {
             class: 'action', type: 'button', text: 'Create',
             onclick: async () => {
               if (!newName.value.trim()) return;
-              const target = `${chosen}/${newName.value.trim()}`;
+              const target = `${shown}/${newName.value.trim()}`;
               const response = await fetch('/api/directories', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -70,13 +74,13 @@ function pick({ startAt, programs, title }) {
         element('div', { class: 'inline' }, [
           element('button', {
             class: 'action', type: 'button', autofocus: 'autofocus', text: 'Cancel',
-            onclick: () => { chosen = null; dialog.close(); },
+            onclick: () => dialog.close(),
           }),
           // A program has none: clicking the file is the choice, and "use
           // this folder" would hand back the folder it sits in.
           programs ? null : element('button', {
             class: 'action', type: 'button', text: 'Use this folder',
-            onclick: () => dialog.close(),
+            onclick: () => { chosen = shown; dialog.close(); },
           }),
         ].filter(Boolean)),
       ]),
@@ -90,7 +94,7 @@ function pick({ startAt, programs, title }) {
         here.textContent = error.message;
         return;
       }
-      chosen = payload.path;
+      shown = payload.path;
       here.textContent = payload.path + (payload.writable ? '' : '  (read-only)');
       list.replaceChildren(...[
         payload.parent
@@ -116,8 +120,8 @@ function pick({ startAt, programs, title }) {
       ].filter(Boolean));
     }
 
-    // Closing by any means other than "Use this folder" is a refusal, and the
-    // answer is settled before the close event so nothing depends on ordering.
+    // Closing by any means other than "Use this folder" or a program's click
+    // (Cancel, Escape) is a refusal: `chosen` stays null.
     dialog.addEventListener('close', () => { dialog.remove(); resolve(chosen); });
     document.body.append(dialog);
     dialog.showModal();
