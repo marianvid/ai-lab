@@ -111,7 +111,7 @@ class EntriesView(CardView):
         return self._instances.logs(instance_id, lines)
 
     def suggest_port(self):
-        """The first free port at or above 8080."""
+        """The first free port at or above the machine's `limits.first_port` (8080)."""
         return self._configuration.suggest_port()
 
     def new_instance_form(self):

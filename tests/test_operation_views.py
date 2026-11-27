@@ -25,6 +25,21 @@ class OperationViewTests(unittest.TestCase):
         self.assertEqual(public - {"assemble"}, set(names))
         self.assertEqual(own(Operations), {"assemble"})
 
+    def test_a_name_two_views_bind_is_the_same_service_in_the_union(self):
+        """Each view sets its own attributes; where two set one name, both must mean one thing."""
+        names: dict[str, list[type]] = {}
+        for view in VIEWS:
+            for name in inspect.getsource(view.__init__).split("self.")[1:]:
+                names.setdefault(name.split(" ", 1)[0], []).append(view)
+        shared = {name for name, views in names.items() if len(views) > 1}
+        self.assertEqual(shared, {"_downloads", "_maintenance", "_settings_changes"})
+        source = inspect.getsource(operations)
+        for name in shared:
+            with self.subTest(name):
+                values = {line.split("=", 1)[1].strip() for line in source.splitlines()
+                          if line.strip().startswith(f"self.{name} =")}
+                self.assertEqual(len(values), 1, values)
+
     def test_operations_is_every_view(self):
         for view in VIEWS:
             with self.subTest(view.__name__):
