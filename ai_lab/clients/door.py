@@ -11,6 +11,8 @@ is logged, or refused. The web interface is let in by its session cookie.
 
 A client's token reaches the model API only (`route_classes`); management is
 for the page, so a token there is refused with 403 `management_needs_login`.
+So is a caller with nothing at all, whatever `require_token` says: with it off
+the anonymous caller reaches the model API (logged), never management.
 """
 
 from __future__ import annotations
@@ -82,10 +84,12 @@ class Door:
         # model, change a setting or register a client.
         if caller.startswith(MAILBOX_PREFIX) and route_key(path) != MAILBOX_ROUTE:
             raise AccessDeniedError("A mailbox token opens the mailbox only")
-        if caller not in (WEB, ANONYMOUS) and not model_api(method, path):
+        if caller != WEB and not model_api(method, path):
+            who = "a caller without a token or a page session" if caller == ANONYMOUS \
+                else "a client's token"
             raise ManagementNeedsLoginError(
-                f"{method.upper()} {path} is for AI-Lab's page, not for a client's token: "
-                "log in on the page to use it")
+                f"{method.upper()} {path} is for AI-Lab's page, not for {who}: "
+                "use it from the page (logged in, when login is on)")
         if self.power is not None and not self.power.on and uses_a_model(method, path):
             raise AiLabOffError("AI-Lab is switched Off: it serves no model until it is "
                                 "switched On", since=self.power.view()["since"])

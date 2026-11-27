@@ -15,6 +15,8 @@ from ai_lab.api.routes import clients as client_routes
 from ai_lab.api.server import Handler
 from ai_lab.clients.access import Access
 from ai_lab.clients.errors import ModelReplacedError
+from ai_lab.clients.route_classes import model_api
+from ai_lab.clients.sessions import COOKIE
 from ai_lab.events import EventBus
 
 
@@ -42,7 +44,11 @@ class ClientRoutesTest(unittest.TestCase):
         self.server.server_close()
 
     def call(self, method, path, body=None, headers=None):
+        """A call; with no headers, a management route is called as the owner's page does."""
         data = None if body is None else json.dumps(body).encode()
+        if headers is None and not model_api(method, path.split("?")[0]):
+            # Management is the page's (a page session), whatever the token switch says.
+            headers = {"Cookie": f"{COOKIE}={self.access.sessions.start(kept=False)}"}
         request = urllib.request.Request(self.base + path, data=data, method=method,
                                          headers={"Content-Type": "application/json",
                                                   **(headers or {})})
@@ -60,7 +66,7 @@ class ClientRoutesTest(unittest.TestCase):
 
     def test_a_refusal_carries_its_code_both_ways(self):
         require_token(self.access)
-        status, body, _ = self.call("GET", "/api/clients")
+        status, body, _ = self.call("GET", "/api/clients", headers={})   # nothing at all
         self.assertEqual(status, 401)
         self.assertEqual(body["ai_lab"], {"reason": "token_missing"})
         status, body, _ = self.call("POST", "/v1/echo", {"a": 1},

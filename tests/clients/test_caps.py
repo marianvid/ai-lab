@@ -19,6 +19,8 @@ from ai_lab.api.server import Handler
 from ai_lab.clients.access import Access
 from ai_lab.clients.caps import (CallOverClientCapError, ClientCaps,
                                  OverClientCapError, answer_limit, prompt_estimate)
+from ai_lab.clients.route_classes import model_api
+from ai_lab.clients.sessions import COOKIE
 from ai_lab.config.policy import CHARS_PER_TOKEN
 from ai_lab.events import EventBus
 from ai_lab.gateway.admission.replaced import Replacements
@@ -250,9 +252,13 @@ class CapRoutesTest(unittest.TestCase):
         self.server.server_close()
 
     def send(self, method, path, body=None):
+        """A call; a management route is called as the owner's page does (a page session)."""
         data = None if body is None else json.dumps(body).encode()
+        headers = {"Content-Type": "application/json"}
+        if not model_api(method, path):
+            headers["Cookie"] = f"{COOKIE}={self.access.sessions.start(kept=False)}"
         request = urllib.request.Request(self.base + path, data=data, method=method,
-                                         headers={"Content-Type": "application/json"})
+                                         headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
                 return response.status, json.loads(response.read()), response.headers
