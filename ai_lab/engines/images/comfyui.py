@@ -22,6 +22,7 @@ _MODE_FLAGS = {"low": "--lowvram", "cpu": "--cpu"}
 class ComfyUiEngine(IsolatedEngine):
     """ComfyUI for image generation and editing, one workflow per preset."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "comfyui"
     display_name = "ComfyUI"
     has_editor_page = True

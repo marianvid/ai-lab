@@ -295,15 +295,20 @@ class Yue2WebBackend:
         self._early_cancels: dict[str, float] = {}
         self._calls_lock = threading.Lock()
 
-    def generate(self, body: dict) -> dict:
-        """One song for the request, as base64 WAV, with its score and its generation id."""
+    def generate(self, body: dict, still_wanted: Callable[[], bool] | None = None) -> dict:
+        """One song for the request, as base64 WAV, with its score and its generation id.
+
+        `still_wanted` says whether the caller is still there (the server peeks
+        at its connection): one that left has its studio job cancelled, so the
+        card does not work an hour for nobody (audit L53).
+        """
         request = self._validate(body)
         params = {"style": request["prompt"], "lyrics": request["lyrics"],
                   "cot": request["cot"], "cfg_scale": request["cfg_scale"],
                   "seed": request["seed"]}
         if request["abc"]:
             params["abc"] = request["abc"]
-        job = self._wait(self._submit("generate", params, "AI-Lab generation"))
+        job = self._wait(self._submit("generate", params, "AI-Lab generation"), still_wanted)
         if job["status"] != "done":
             raise RuntimeError(job.get("error") or f"YuE2 job {job['status']}")
         output = Path(job["output_dir"])
@@ -330,7 +335,8 @@ class Yue2WebBackend:
         request = window_request(body, self.window, self.model_name)
         call = self._register(request["request_id"])
         try:
-            candidates = []
+            candidates: list = []
+            finished: list[dict] = []
             for candidate_seed in request["seeds"]:
                 if call.cancelled:
                     break
@@ -340,7 +346,12 @@ class Yue2WebBackend:
                 if job["status"] == "cancelled":
                     break
                 if job["status"] != "done":
+                    # The candidates already made go too (audit L54): the call
+                    # fails, so their ids never reach the caller.
+                    for made in finished:
+                        self._discard(made)
                     raise RuntimeError(job.get("error") or "YuE2 window job failed")
+                finished.append(job)
                 candidates.append(_candidate(job))
             return _window_answer(request, candidates, call.cancelled)
         finally:
@@ -405,15 +416,28 @@ class Yue2WebBackend:
         response = self._studio("POST", "/api/jobs", {"kind": kind, "name": name, "params": params})
         return response["job"]["id"]
 
-    def _wait(self, job_id: int) -> dict:
-        """The job once it has ended (done, failed or cancelled)."""
+    def _wait(self, job_id: int, still_wanted: Callable[[], bool] | None = None) -> dict:
+        """The job once it has ended (done, failed or cancelled).
+
+        A caller that left, or a job past `SONG_LIMIT_S`, has the job cancelled
+        in the studio before this raises (audit L53): nothing keeps the card
+        working for nobody.
+        """
         deadline = time.monotonic() + SONG_LIMIT_S
         while time.monotonic() < deadline:
             job = self._studio("GET", f"/api/jobs/{job_id}", None)
             if job["status"] in {"done", "failed", "cancelled"}:
                 return job
+            if still_wanted is not None and not still_wanted():
+                self._cancel_job(job_id)
+                raise ConnectionAbortedError("the caller left; the studio job was cancelled")
             time.sleep(POLL_S)
-        raise TimeoutError("YuE2 generation exceeded one hour")
+        self._cancel_job(job_id)
+        raise TimeoutError("YuE2 generation exceeded one hour; the studio job was cancelled")
+
+    def _cancel_job(self, job_id: int) -> None:
+        with contextlib.suppress(StudioRefusedError):       # it ended in the meantime
+            self._studio("DELETE", f"/api/jobs/{job_id}", None)
 
     def _validate(self, body: dict) -> dict:
         check_fields(body, ALLOWED_FIELDS, "YuE2", self.model_name)

@@ -21,6 +21,9 @@ _PATHS = {Task.TRANSCRIPTION: TRANSCRIPTION_PATHS, Task.DIARIZATION: DIARIZATION
 class NemoEngine(IsolatedEngine):
     """NeMo transcription (Canary, Parakeet, Nemotron) and diarization (Sortformer)."""
 
+    # Said on the Engines page when it is missing (registry._reason).
+    missing_reason = "Not installed"
+    needs_cuda = True
     id = "nemo"
     display_name = "NVIDIA NeMo Speech"
     task = Task.TRANSCRIPTION

@@ -19,6 +19,20 @@ from ..types import Task
 from ..uploads import validate_image
 from .image_workflows import ALLOWED, read_request, render
 
+CANCEL_PATH = "/api/jobs/current/cancel"
+CANCEL_WAIT_S = 10
+
+
+def _interrupt(port: int) -> None:
+    """Ask the ComfyUI bridge on `port` to stop the job it is rendering; best effort."""
+    request = urllib.request.Request(f"http://{LOOPBACK}:{port}{CANCEL_PATH}", data=b"{}",
+                                     method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=CANCEL_WAIT_S):
+            pass
+    except OSError:
+        pass
+
 EDIT_PATH = "/v1/images/edits"
 GENERATION_PATH = "/v1/images/generations"
 
@@ -80,5 +94,12 @@ class ImageCalls:
                 f"http://{LOOPBACK}:{lease.port}{path}", data=json.dumps(work).encode(),
                 method="POST", headers={"Content-Type": "application/json"})
             first, _ = self.gateway.timeouts_for(task)
-            with urllib.request.urlopen(request, timeout=first) as response:
-                return json.loads(response.read())
+            try:
+                with urllib.request.urlopen(request, timeout=first) as response:
+                    return json.loads(response.read())
+            except (TimeoutError, OSError):
+                # The wait ran out, or the bridge went away: the job it was
+                # rendering is interrupted before the place is given back, so
+                # the card does not keep rendering for nobody (audit L58).
+                _interrupt(lease.port)
+                raise

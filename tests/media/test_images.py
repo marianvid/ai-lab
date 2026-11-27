@@ -74,6 +74,21 @@ class ImageCallsTest(unittest.TestCase):
         self.assertEqual(work["workflow"]["1"]["inputs"]["text"], "a cat")
         self.assertEqual(timeout, 1800.0)
 
+    def test_a_call_whose_wait_runs_out_interrupts_the_render(self):
+        # Audit L58: the lease went back while ComfyUI kept rendering.
+        asked = []
+
+        @contextlib.contextmanager
+        def opened(request, timeout):
+            asked.append(request.full_url)
+            if request.full_url.endswith("/v1/images/generations"):
+                raise TimeoutError("timed out")
+            yield io.BytesIO(b"{}")
+
+        with mock.patch("urllib.request.urlopen", opened), self.assertRaises(TimeoutError):
+            self.images.submit({"profile": "qwen", "prompt": "a cat"}, Task.IMAGE_GENERATION)
+        self.assertEqual(asked[-1], "http://127.0.0.1:8105/api/jobs/current/cancel")
+
     def test_an_engine_without_images_is_an_error(self):
         with self.answer({"data": []}), self.assertRaisesRegex(RuntimeError, "no images"):
             self.images.submit({"profile": "qwen"}, Task.IMAGE_GENERATION)

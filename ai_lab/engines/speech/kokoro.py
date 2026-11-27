@@ -12,6 +12,7 @@ REQUIRED_OPTIONS = ("language_code", "default_voice", "repo_id")
 class KokoroEngine(ConfiguredEngine):
     """Kokoro, with its language, default voice and voice repository per model."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "kokoro"
     display_name = "Kokoro"
     has_editor_page = True

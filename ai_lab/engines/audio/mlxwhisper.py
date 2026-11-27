@@ -10,6 +10,7 @@ from ..isolated import IsolatedEngine
 class MlxWhisperEngine(IsolatedEngine):
     """Whisper checkpoints in MLX format, behind the shared audio server."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "mlxwhisper"
     display_name = "MLX Whisper"
     task = Task.TRANSCRIPTION

@@ -99,6 +99,7 @@ FLAGS = (("decode_concurrency", "--decode-concurrency"),
 class MlxLmEngine(MlxTextEngine):
     """mlx-lm's own server, behind AI-Lab's launcher (`text/mlxlm_server.py`)."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "mlxlm"
     display_name = "MLX LM"
     settings = PARAMS

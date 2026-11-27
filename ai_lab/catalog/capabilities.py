@@ -113,9 +113,22 @@ class Known:
             note(f"reading what {path.name} can do", error)
             found = frozenset()
         with self._lock:
+            self._forget_older(key)
             self._known[key] = sorted(found)
             self._save()
         return found
+
+    def _forget_older(self, key: str) -> None:
+        """Drop the older answers for the same directory model (the reviewer, on L45).
+
+        Its key carries the files' times, so without this every change would
+        leave one more line in the file for ever.
+        """
+        if not key.startswith("dir:"):
+            return
+        path = key.rsplit(":", len(ANSWERED_BY))[0]
+        for old in [item for item in self._known if item == path or item.startswith(path + ":")]:
+            del self._known[old]
 
     def forget(self) -> None:
         """Drop everything read. For a library that was replaced, and for tests."""

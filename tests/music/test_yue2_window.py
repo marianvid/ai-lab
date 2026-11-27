@@ -149,6 +149,20 @@ class WindowBackendTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "boom"):
             backend(FakeStudio(status="failed")).generate_window(body())
 
+    def test_a_later_candidate_failing_removes_the_ones_already_made(self):
+        # Audit L54: the first candidate stayed in the library, its id never sent.
+        studio = FakeStudio()
+
+        def second_fails():
+            if len(studio.posted) == 2:
+                studio.status = "failed"
+
+        studio.after_job = second_fails
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            backend(studio).generate_window(body())
+        self.assertEqual(sorted(studio.deleted),
+                         ["/api/library/songs/song-a-w101", "/api/library/songs/song-a-w202"])
+
     def test_a_cancelled_job_ends_the_call_and_leaves_no_folder(self):
         studio = FakeStudio(status="cancelled")
         answer = backend(studio).generate_window(body())
@@ -246,11 +260,31 @@ class FullSongTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "out of memory"):
             made.generate({"prompt": "rap", "lyrics": LYRICS, "instrumental": False})
 
-    def test_a_song_that_never_ends_times_out(self):
-        made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"),
-                              studio=lambda *args: {"status": "running", "job": {"id": 1}})
+    def test_a_song_that_never_ends_times_out_and_its_job_is_cancelled(self):
+        asked: list[tuple] = []
+
+        def studio(*args):
+            asked.append(args[:2])
+            return {"status": "running", "job": {"id": 1}}
+
+        made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"), studio=studio)
         with patch.object(yue2_web_backend, "SONG_LIMIT_S", 0), self.assertRaises(TimeoutError):
             made.generate({"prompt": "rap", "lyrics": LYRICS, "instrumental": False})
+        self.assertIn(("DELETE", "/api/jobs/1"), asked)        # audit L53
+
+    def test_a_song_whose_caller_left_has_its_job_cancelled(self):
+        # Audit L53: the card kept working up to an hour for nobody.
+        asked: list[tuple] = []
+
+        def studio(*args):
+            asked.append(args[:2])
+            return {"status": "running", "job": {"id": 1}}
+
+        made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"), studio=studio)
+        with self.assertRaisesRegex(ConnectionAbortedError, "caller left"):
+            made.generate({"prompt": "rap", "lyrics": LYRICS, "instrumental": False},
+                          still_wanted=lambda: False)
+        self.assertEqual(asked[-1], ("DELETE", "/api/jobs/1"))
 
 
 class Answering:
@@ -259,8 +293,9 @@ class Answering:
     def __init__(self, failure=None):
         self.failure = failure
 
-    def generate(self, body):
-        return {"song": True}
+    def generate(self, body, still_wanted=None):
+        # The host passes how to tell that its caller left (audit L53).
+        return {"song": callable(still_wanted) and still_wanted()}
 
     def generate_window(self, body):
         if self.failure is not None:

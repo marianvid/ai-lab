@@ -353,6 +353,9 @@ def pool_state(metrics: str) -> dict:
 class VllmEngine:
     """vLLM as an AI-Lab engine: text and speech models, many requests at once."""
 
+    # Said on the Engines page when it is missing (registry._reason).
+    missing_reason = "Not installed"
+    needs_cuda = True
     id = "vllm"
     display_name = "vLLM"
 

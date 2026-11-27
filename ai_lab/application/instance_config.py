@@ -17,6 +17,7 @@ from typing import Any
 from ..catalog.core import Catalog
 from ..config.store import INSTANCE_ID, ConfigStore, Instance
 from ..config.validation import MAX_PORT, editor_port_problems
+from ..shared.numbers import whole_number
 from ..engines.base import validate
 from ..hosts.base import Host
 from ..runtime.core import Runtime
@@ -206,7 +207,7 @@ def _refuse_page_clashes(config, engines, sections=None) -> None:
 
 def _port(value) -> int:
     """A port typed on the page; refused outside 1..65535, as the start refuses it (audit m21)."""
-    port = int(value)
+    port = whole_number(value, "A port")
     if not 1 <= port <= MAX_PORT:
         raise ValueError(f"A port is between 1 and {MAX_PORT}, not {port}")
     return port

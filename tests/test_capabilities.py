@@ -128,6 +128,21 @@ class Remembering(unittest.TestCase):
         self.weights = self.dir / "model.gguf"
         _gguf(self.weights, {"tokenizer.chat_template": "{{ tools }}"})
 
+    def test_a_directory_keeps_one_answer_not_one_per_change(self):
+        # The reviewer's note on L45: older keys of the same model go.
+        import os as _os
+        model = Path(tempfile.mkdtemp())
+        (self.state / FILE_NAME).write_text(json.dumps({f"dir:{model}": []}))
+        known = Known(self.state)
+        for step in range(3):
+            (model / "config.json").write_text(json.dumps({"step": step}))
+            later = 10**18 + step * 10**9
+            _os.utime(model / "config.json", ns=(later, later))
+            known.of(str(model), False, ["config.json"])
+        kept = [key for key in json.loads((self.state / FILE_NAME).read_text())
+                if key.startswith(f"dir:{model}")]
+        self.assertEqual(len(kept), 1, kept)
+
     def test_a_second_manager_does_not_read_the_file_again(self):
         first = Known(self.state)
         self.assertEqual(first.of(str(self.weights), True, ["model.gguf"]),

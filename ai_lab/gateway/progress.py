@@ -50,6 +50,7 @@ class EngineProgress:
         self._last_read = float("-inf")
         self._last_work: float | None = None
         self._last_progress = clock()
+        self._last_fold = float("-inf")
 
     def idle_for(self) -> float:
         """Seconds since the engine last did any work while it had some."""
@@ -67,7 +68,11 @@ class EngineProgress:
         # up only this caller; the others, already counted, answer at once.
         report = self._read()
         with self._lock:
-            self._look(report, now)
+            # Two slow reads may come back out of order: only the newer one is
+            # folded in (the reviewer's note on m5).
+            if now > self._last_fold:
+                self._last_fold = now
+                self._look(report, now)
             return now - self._last_progress
 
     def _look(self, report: dict, now: float) -> None:

@@ -10,6 +10,7 @@ from ..isolated import IsolatedEngine
 class OnnxEngine(IsolatedEngine):
     """Silero voice activity detection on the processor."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "onnx"
     display_name = "ONNX Runtime"
     task = Task.VAD

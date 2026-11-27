@@ -12,6 +12,7 @@ PARAMS = ()
 class PaddleOcrEngine(IsolatedEngine):
     """PaddleOCR detection and recognition models, behind the image server."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "paddleocr"
     display_name = "PaddleOCR"
     task = Task.OCR

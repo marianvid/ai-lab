@@ -17,6 +17,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import select
+import socket
 import subprocess
 import sys
 from collections.abc import Callable
@@ -63,7 +65,11 @@ class Yue2Host(GenerationHost):
     backend: Yue2WebBackend
 
     def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
-        """The window call, or the ordinary music call."""
+        """The window call, or the ordinary music call, cancelled if its caller leaves."""
+        if self.path == self.request_path:
+            backend = self.backend
+            self._answer(lambda: backend.generate(self._body(), still_wanted=self._caller_there))
+            return
         if self.path != WINDOW_PATH:
             super().do_POST()
             return
@@ -79,6 +85,14 @@ class Yue2Host(GenerationHost):
             return
         backend = self.backend
         self._answer(lambda: backend.cancel_window(request_id))
+
+    def _caller_there(self) -> bool:
+        """Whether the caller's connection is still open (a peek, nothing read)."""
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            return not readable or self.connection.recv(1, socket.MSG_PEEK) != b""
+        except OSError:
+            return False
 
     def _answer(self, work: Callable[[], dict]) -> None:
         try:

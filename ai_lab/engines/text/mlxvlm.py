@@ -75,6 +75,7 @@ FLAGS = (("max_num_seqs", "--max-num-seqs"), ("prefill_step_size", "--prefill-st
 class MlxVlmEngine(MlxTextEngine):
     """mlx-vlm's own server, behind AI-Lab's launcher (`text/mlxvlm_server.py`)."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "mlxvlm"
     display_name = "MLX VLM"
     settings = PARAMS

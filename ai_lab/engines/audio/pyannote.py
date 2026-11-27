@@ -12,6 +12,7 @@ PARAMS = ()
 class PyannoteEngine(IsolatedEngine):
     """pyannote.audio pipelines: who speaks when."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "pyannote"
     display_name = "pyannote.audio"
     task = Task.DIARIZATION

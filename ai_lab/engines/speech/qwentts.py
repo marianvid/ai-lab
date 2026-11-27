@@ -14,6 +14,7 @@ HEADROOM_MB = 2048
 class QwenTtsEngine(ConfiguredEngine):
     """Qwen3-TTS, with each checkpoint's mode (`model_modes`) from the configuration."""
 
+    missing_reason = "Not installed"   # said on the Engines page when it is missing
     id = "qwentts"
     display_name = "Qwen3-TTS"
     has_editor_page = True
