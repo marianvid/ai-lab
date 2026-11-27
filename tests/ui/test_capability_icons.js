@@ -46,6 +46,10 @@ function responses(overrides = {}) {
     '/api/models': [MODEL],
     '/api/settings': { title: 'AI-Lab', engines: [ENGINE], repositories: [],
                        accelerator: {}, host: {} },
+    // What the page asks of one entry, and its saves and removals.
+    [`/v1/models/${INSTANCE.id}`]: { id: INSTANCE.id, object: 'model', ai_lab: {} },
+    [`PATCH /api/instances/${INSTANCE.id}`]: { ...INSTANCE },
+    [`DELETE /api/instances/${INSTANCE.id}`]: { deleted: INSTANCE.id },
     ...overrides,
   };
 }

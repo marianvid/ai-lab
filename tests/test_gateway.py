@@ -4,13 +4,18 @@ Each test names something an agent workflow would hit. The card is faked: what
 matters is which entry gets loaded, what gets unloaded first, and that a request
 in progress cannot have its model pulled out from under it.
 
-The design being tested is sequential. One model on the card, one request at a
-time, and a switch empties the card completely before loading.
+The design being tested shares the card: each engine says how much its model
+needs (`needs_mb`), models that fit beside what is loaded are loaded beside it,
+and when room is short the ones used longest ago, idle before busy, make room
+(`gateway/eviction.py`). The fake card here follows that arithmetic: each entry
+has a size (20 GB unless a test says otherwise, so on the 32 GB fake card two
+do not fit), and the card reads what the running entries hold.
 """
 
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from typing import Any, cast
 
 from ai_lab import budget
@@ -42,18 +47,27 @@ def places(gateway) -> int:
     return loaded[0]["places"] if loaded else 0
 
 
-class FakeHost:
-    """A card whose memory reading follows what is loaded.
+# What an entry's model needs of the card unless a test says otherwise
+# (`size_mb` on the entry): two do not fit on the 32 GB fake card.
+SIZE_MB = 20000.0
+CARD_MB = 32000.0
 
-    Real hardware returns the memory a moment after a process exits. `lag`
-    reproduces that: the first few readings after an unload still show the model
-    on the card, so the gateway has something real to wait for.
+
+class FakeHost:
+    """A card whose memory reading follows what is loaded, model by model.
+
+    It reads what the running entries hold (their sizes, added up), so one
+    model's memory coming back while another stays can be seen. Real hardware
+    returns the memory a moment after a process exits. `lag` reproduces that:
+    the first few readings after an unload still show what was there, so the
+    gateway has something real to wait for.
     """
 
     def __init__(self, operations, lag=0):
         self.operations = operations
         self.lag = lag
         self.readings = 0
+        self._last_used = 2.0
 
     def system_memory(self):
         """A machine with a separate pool, so the page has something to draw."""
@@ -61,14 +75,17 @@ class FakeHost:
 
     def accelerator(self):
         self.readings += 1
-        running = any(e["running"] for e in self.operations.instances())
-        stale = self.lag > 0
-        if stale:
+        held = sum(float(e.get("size_mb", SIZE_MB))
+                   for e in self.operations.instances() if e["running"])
+        used = min(CARD_MB, 2.0 + held)
+        if self.lag > 0:
+            # Still showing what was there before the unload.
             self.lag -= 1
-        used = 20000.0 if (running or stale) else 2.0
+            used = max(used, self._last_used)
+        self._last_used = used
         return AcceleratorSnapshot(available=True, name="Fake", kind="cuda",
                                    memory_kind="dedicated",
-                                   memory_used_mb=used, memory_total_mb=32000.0)
+                                   memory_used_mb=used, memory_total_mb=CARD_MB)
 
 
 # The settings a fake engine takes. Few, but real ParamSpecs checked by the
@@ -101,6 +118,10 @@ class FakeEngine:
         from the gateway guessing at a setting name.
         """
         return max(1, int(validate(FAKE_PARAMS, params)["parallel"]))
+
+    def needs_mb(self, model, params, card_total_mb):
+        """What the model needs, as every real engine answers: never "cannot say"."""
+        return float(model.size_mb)
 
 
 class FakeRegistry:
@@ -148,6 +169,12 @@ class FakeOperations:
 
     def instances(self):
         return [dict(entry) for entry in self._entries.values()]
+
+    def model_for(self, instance_id):
+        """The entry's model, as the real Operations finds it: its size, and what it can do."""
+        entry = self._entries[instance_id]
+        return SimpleNamespace(size_mb=float(entry.get("size_mb", SIZE_MB)),
+                               capabilities=frozenset(entry.get("capabilities", ())))
 
     def load(self, instance_id, settings=None):
         self.loads.append(instance_id)
@@ -523,13 +550,25 @@ class LoadingTests(unittest.TestCase):
             self.assertEqual(lease.port, 8080)
         self.assertEqual(operations.loads, ["coder"])
 
-    def test_a_different_model_empties_the_card_first(self):
+    def test_when_room_is_short_a_different_model_takes_the_loaded_ones_place(self):
         operations = two_models(coder=True)
         gateway = quick(operations)
         with gateway.acquire("reviewer"):
             pass
         self.assertEqual(operations.unloads, ["coder"])
         self.assertEqual(operations.loads, ["reviewer"])
+
+    def test_when_both_fit_both_stay(self):
+        # Its mate: 10 GB each on the 32 GB card, so nothing has to go.
+        operations = two_models(coder=True)
+        for entry_id in ("coder", "reviewer"):
+            operations._entries[entry_id]["size_mb"] = 10000.0
+        gateway = quick(operations)
+        with gateway.acquire("reviewer"):
+            pass
+        self.assertEqual(operations.unloads, [])
+        self.assertEqual(operations.loads, ["reviewer"])
+        self.assertEqual(sorted(loaded_names(gateway)), ["coder", "reviewer"])
 
     def test_switch_refreshes_memory_after_lazy_weight_load(self):
         operations = two_models()
@@ -546,8 +585,9 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(operations.unloads, ["coder"])
         self.assertEqual(operations.loads, ["coder", "reviewer"])
 
-    def test_only_the_new_model_is_left_running(self):
-        # Not "one fewer than before" — one, full stop.
+    def test_when_room_is_short_only_the_new_model_is_left_running(self):
+        # Two left running (a manager restart) and a third that needs 20 GB:
+        # not "one fewer than before" — one, full stop.
         operations = two_models(coder=True, reviewer=True)
         gateway = quick(operations)
         operations._entries["third"] = entry("third", "gguf/x/third", 8085)
@@ -556,15 +596,28 @@ class LoadingTests(unittest.TestCase):
         running = {i["id"] for i in operations.instances() if i["running"]}
         self.assertEqual(running, {"third"})
 
-    def test_everything_running_is_unloaded_not_only_the_last_one_asked_for(self):
-        # A manager restart can leave more than one engine up. Loading on top of
-        # whatever is left is how a model that is known to fit stops fitting.
+    def test_when_room_is_short_every_model_in_the_way_is_unloaded(self):
+        # A manager restart can leave more than one engine up, holding more
+        # than the card. Loading on top of what is left would not fit.
         operations = two_models(coder=True, reviewer=True)
         gateway = quick(operations)
         operations._entries["third"] = entry("third", "gguf/x/third", 8085)
         with gateway.acquire("third"):
             pass
         self.assertEqual(sorted(operations.unloads), ["coder", "reviewer"])
+
+    def test_when_all_three_fit_none_is_unloaded(self):
+        # The mate: 10 GB each, two running, the third fits beside them.
+        operations = two_models(coder=True, reviewer=True)
+        operations._entries["third"] = entry("third", "gguf/x/third", 8085)
+        for entry_id in ("coder", "reviewer", "third"):
+            operations._entries[entry_id]["size_mb"] = 10000.0
+        gateway = quick(operations)
+        with gateway.acquire("third"):
+            pass
+        self.assertEqual(operations.unloads, [])
+        running = {i["id"] for i in operations.instances() if i["running"]}
+        self.assertEqual(running, {"coder", "reviewer", "third"})
 
     def test_the_load_waits_until_the_card_has_actually_gone_quiet(self):
         # The driver hands memory back after the process exits, not with it.

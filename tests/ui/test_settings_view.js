@@ -62,6 +62,13 @@ function responses(overrides = {}) {
     '/api/browse': { path: '/models', parent: '/', writable: true,
                      entries: [{ name: 'gguf', path: '/models/gguf', writable: true },
                                { name: 'fp8', path: '/models/fp8', writable: true }] },
+    // What would change in an update, and the two saves the page makes on picking.
+    '/api/builds/llamacpp/changes': {
+      engine: 'llamacpp', engine_name: 'llama.cpp', installed: 'b10398', latest: 'v0.2.0',
+      yours: [], others: [], by_area: {}, other_areas: {}, notes: '', packages: [], unreadable: '',
+    },
+    'PATCH /api/engines/llamacpp/binary': {},
+    'PATCH /api/models-root': {},
     ...overrides,
   };
 }

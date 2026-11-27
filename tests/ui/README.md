@@ -55,3 +55,13 @@ support, so `showModal` and `close` are supplied, with `close` queueing its
 event the way the standard requires. That detail is not pedantry — dispatching
 it inline hid a real fault, where the confirmation resolved to "no" before the
 button that meant "yes" had finished.
+
+## Every request must be answered
+
+`support/dom.js` answers the page's requests from what a test gives it. A path
+the test does not answer fails that test, named in the message (the reviewer's
+read of the tests, item 14): before, it got 200 and `[]`, so a view calling a
+misspelt or removed route passed. Five reads every page makes in passing
+(`BACKGROUND`: the read-only sections, the setting fields, builds, installs,
+the login state) still get `[]` when unanswered; a test lists any other path
+it does not care about in `quiet`. `test_dom_support.js` holds the rule.

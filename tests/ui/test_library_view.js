@@ -41,6 +41,7 @@ function responses(overrides = {}) {
     'POST /api/downloads': TRANSFER,
     '/api/hf/search': { results: [SEARCH_RESULT], hidden: 0 },
     '/api/hf/sets': [VARIANT],
+    'DELETE /api/models/gguf%2Fqwen%2Fqwen': { deleted: 'gguf/qwen/qwen' },
     ...overrides,
   };
 }

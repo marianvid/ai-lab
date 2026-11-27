@@ -92,13 +92,19 @@ class FakeHost:
         )
 
 
+# What a fake engine adds to its model's files, as llama.cpp adds its cache.
+CACHE_MB = 512.0
+PORT_FLAG = "--port"
+
+
 class FakeEngine:
-    """Becomes ready after a fixed number of probes, once something is running.
+    """Becomes ready after a fixed number of probes, once its own process runs.
 
     The host is passed in so the fake behaves like a real engine on a real
-    port: nothing answers before a process exists. Without that, the runtime
-    cannot tell "not started yet" from "a stranger already holds the port",
-    which is a distinction it is required to make.
+    port: nothing answers before a process exists, and only the process
+    started for that port answers on it. Without that, the runtime cannot tell
+    "not started yet" from "a stranger already holds the port", nor "mine is
+    up" from "another one is up", which are distinctions it is required to make.
     """
 
     id = "fake"
@@ -126,19 +132,26 @@ class FakeEngine:
         return 1
 
     def needs_mb(self, model, params, card_total_mb):
-        return 0.0
+        """The model's files plus a cache: a real size, never "cannot say" (0)."""
+        return model.size_bytes / (1 << 20) + CACHE_MB
 
     def api_paths(self, task=None):
         return ("/v1/chat/completions",)
 
     def plan(self, model, port, params):
         from ai_lab.engines.base import LaunchPlan
-        return LaunchPlan(argv=["fake-server", model.entrypoint], env={},
+        return LaunchPlan(argv=["fake-server", model.entrypoint, PORT_FLAG, str(port)], env={},
                           health_path="/health",
                           splits_across_cpu=self.splits_across_cpu)
 
     def ready(self, port: int) -> bool:
-        if self.host is not None and not self.host.running:
+        if self.host is not None and not self._answers_on(port):
             return False
         self.probes += 1
         return self.probes >= self.ready_after
+
+    def _answers_on(self, port: int) -> bool:
+        """Whether a running process was started for this port."""
+        return any(spec.instance_id in self.host.running
+                   and spec.argv[spec.argv.index(PORT_FLAG) + 1:][:1] == [str(port)]
+                   for spec in self.host.started if PORT_FLAG in spec.argv)

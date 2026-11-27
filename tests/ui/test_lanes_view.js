@@ -78,7 +78,8 @@ describe('the Cloud & CPU page', () => {
   });
 
   it('stops a running processor model by hand', async () => {
-    const context = await renderPage({ '/api/gateway': STATS });
+    const context = await renderPage({ '/api/gateway': STATS,
+                                       'POST /api/cpu-models/bge-m3/stop': {} });
     button(context.view, 'Stop').click();
     await settle();
     assert.ok(context.calls.some((call) => call.method === 'POST'

@@ -5,7 +5,7 @@
 // reached the user because nothing was watching.
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
 import { installDom, button, settle } from './support/dom.js';
 
@@ -39,6 +39,10 @@ function responses(overrides = {}) {
     '/api/models': [MODEL],
     '/api/settings': { title: 'AI-Lab', engines: [ENGINE], repositories: [],
                        accelerator: {}, host: {} },
+    // What the page asks of one entry, and its saves and removals.
+    [`/v1/models/${INSTANCE.id}`]: { id: INSTANCE.id, object: 'model', ai_lab: {} },
+    [`PATCH /api/instances/${INSTANCE.id}`]: { ...INSTANCE },
+    [`DELETE /api/instances/${INSTANCE.id}`]: { deleted: INSTANCE.id },
     ...overrides,
   };
 }
@@ -754,12 +758,10 @@ describe('reading what an engine is saying', () => {
   // The panel is one panel for the whole page, so it keeps its state in the
   // module. In a browser that is right — there is one page. Here each test
   // builds a fresh document, and a panel left open belongs to the last one.
-  // It also runs a timer, which would keep the test process alive.
-  beforeEach(async () => {
-    const { closeLogs } = await import('../../ai_lab/web/js/logpane.js');
-    closeLogs();
-  });
-  after(async () => {
+  // It also runs a timer, which would keep the test process alive. Closed
+  // after each test, while its page is still open (support/dom.js closes
+  // every page once the test has ended).
+  afterEach(async () => {
     const { closeLogs } = await import('../../ai_lab/web/js/logpane.js');
     closeLogs();
   });
@@ -994,9 +996,10 @@ describe('one page does not lay out another', () => {
     assert.equal(context.view.className, '',
                  `the container kept "${context.view.className}"`);
     assert.equal(context.view.querySelector('.gateway-grid'), null);
-    // Not closing the window: the timers this test started are stopped above,
-    // and closing it out from under whatever jsdom is still finishing raises
-    // from inside jsdom rather than from anything under test.
+    // The page is closed after the test (support/dom.js): let what jsdom is
+    // still finishing for the two renders end first, so closing it raises nothing.
+    await settle(12);
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 });
 

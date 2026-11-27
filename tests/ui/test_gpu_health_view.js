@@ -92,7 +92,9 @@ describe('the GPU health page', () => {
 
   it('sends a test alarm and resets the reference with a note', async () => {
     const context = await renderPage({ '/api/gpu-health': STATE,
-                                       '/api/gpu-health/history': HISTORY });
+                                       '/api/gpu-health/history': HISTORY,
+                                       'POST /api/gpu-health/test-alarm': { sent: true },
+                                       'POST /api/gpu-health/baseline/reset': { reset: true } });
     button(context.view, 'Send test alarm').click();
     await settle();
     context.view.querySelector('input[type=text]').value = 'new paste';
