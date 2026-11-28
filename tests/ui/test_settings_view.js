@@ -447,6 +447,81 @@ describe('the Settings page', () => {
     assert.match(engineEntry(view, 'llama.cpp').textContent, /v0\.2\.0 available/);
   });
 
+  it('rebuilds a checkout when Update is pressed at the foot of the review', async () => {
+    // What the owner does when an engine says a new version is out.
+    const base = responses()['/api/settings'];
+    const withUpdate = { ...base, engines: [{ ...base.engines[0],
+      source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }] };
+    const { view, calls } = await renderPage({
+      '/api/settings': withUpdate,
+      'POST /api/builds/llamacpp/update': { started: true },
+    });
+    button(engineEntry(view, 'llama.cpp'), 'Update…').click();
+    await settle();
+    button(document.querySelector('dialog.review'), 'Update to v0.2.0').click();
+    await settle(12);
+    assert.ok(calls.some((call) => call.method === 'POST' && call.path === '/api/builds/llamacpp/update'));
+    assert.equal(document.querySelector('dialog.review'), null, 'the review stayed open');
+  });
+
+  it('says why when the build cannot start, and starts nothing else', async () => {
+    const base = responses()['/api/settings'];
+    const withUpdate = { ...base, engines: [{ ...base.engines[0],
+      source: { ...base.engines[0].source, latest: 'v0.2.0', update_available: true } }] };
+    const { view, calls } = await renderPage({
+      '/api/settings': withUpdate,
+      'POST /api/builds/llamacpp/update': { __status: 409, error: 'a build is already running' },
+    });
+    button(engineEntry(view, 'llama.cpp'), 'Update…').click();
+    await settle();
+    button(document.querySelector('dialog.review'), 'Update to v0.2.0').click();
+    await settle(12);
+    const notice = document.querySelector('dialog.notice');
+    assert.match(notice.textContent, /Could not build llama\.cpp/);
+    assert.match(notice.textContent, /a build is already running/);
+    assert.equal(calls.filter((call) => call.method === 'POST').length, 1);
+  });
+
+  it('installs an engine that is not there yet, after its review', async () => {
+    const base = responses()['/api/settings'];
+    const { view, calls } = await renderPage({
+      '/api/installs': [{ engine: 'vllm', installed: '', latest: '0.11.0', components: [] }],
+      '/api/builds/vllm/changes': { engine: 'vllm', engine_name: 'vLLM', installed: '', latest: '0.11.0',
+                                    yours: [], others: [], by_area: {}, other_areas: {}, notes: '',
+                                    packages: [], unreadable: '' },
+      'POST /api/installs/vllm': { started: true },
+      '/api/settings': base,
+    });
+    button(engineEntry(view, 'vLLM'), 'Install…').click();
+    await settle();
+    button(document.querySelector('dialog.review'), 'Update to 0.11.0').click();
+    await settle(12);
+    const install = calls.find((call) => call.method === 'POST' && call.path === '/api/installs/vllm');
+    assert.ok(install, calls.map((call) => `${call.method} ${call.path}`).join(', '));
+    assert.deepEqual(JSON.parse(install.body), { version: '' });
+  });
+
+  it('updates a managed custom node, and not one with local changes', async () => {
+    const base = responses()['/api/settings'];
+    const { view, calls } = await renderPage({
+      '/api/installs': [{ engine: 'llamacpp', installed: 'b10398', components: [
+        { name: 'ComfyUI-Manager', installed: '3.1', latest: '3.2', update_available: true, dirty: false },
+        { name: 'my-node', installed: '1.0', latest: '1.1', update_available: true, dirty: true },
+      ] }],
+      'POST /api/installs/llamacpp/components/ComfyUI-Manager/update': { started: true },
+      '/api/settings': base,
+    });
+    const entry = engineEntry(view, 'llama.cpp');
+    assert.match(entry.textContent, /2 managed custom nodes/);
+    assert.match(entry.textContent, /local changes/);
+    const buttons = [...entry.querySelectorAll('.components button')];
+    assert.equal(buttons.find((item) => item.textContent === 'Update to 1.1').disabled, true);
+    buttons.find((item) => item.textContent === 'Update to 3.2').click();
+    await settle(12);
+    assert.ok(calls.some((call) => call.method === 'POST'
+      && call.path === '/api/installs/llamacpp/components/ComfyUI-Manager/update'));
+  });
+
   it('has nothing to press that only asks upstream a question', async () => {
     // "Check for updates" did what the timer already does, and its only real
     // effect was to make the page look like it needed pressing.

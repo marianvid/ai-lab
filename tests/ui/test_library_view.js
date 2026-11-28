@@ -209,6 +209,42 @@ describe('the Library page', () => {
     assert.match(decodeURIComponent(deleted.path), /gguf\/qwen\/qwen/);
   });
 
+  it('moves a model between the fast and the large disk, each way', async () => {
+    // What the owner does to free the fast disk, or to bring a model back to it.
+    const path = `/api/models/${encodeURIComponent(MODEL.id)}/move`;
+    for (const [tier, label, target] of [['core', 'Move to benchmark', 'benchmark'],
+                                         ['benchmark', 'Move to core', 'core']]) {
+      const { view, calls } = await renderPage({
+        '/api/models': [{ ...MODEL, storage_tier: tier }],
+        [`POST ${path}`]: { job_id: 'j1' },
+      });
+      button(view, label).click();
+      await settle(12);
+      const moved = calls.find((call) => call.method === 'POST' && call.path === path);
+      assert.ok(moved, `${label} sent nothing`);
+      assert.deepEqual(JSON.parse(moved.body), { storage_tier: target });
+    }
+  });
+
+  it('says why a move or a delete was refused', async () => {
+    const id = encodeURIComponent(MODEL.id);
+    const { view } = await renderPage({
+      '/api/models': [{ ...MODEL, storage_tier: 'core' }],
+      [`POST /api/models/${id}/move`]: { __status: 409, error: 'an entry is using it' },
+      [`DELETE /api/models/${id}`]: { __status: 409, error: 'it is loaded' },
+    });
+    button(view, 'Move to benchmark').click();
+    await settle(12);
+    assert.match(document.querySelector('dialog.notice').textContent, /Could not move qwen.*an entry is using it/s);
+    button(document.querySelector('dialog.notice'), 'Close').click();
+    await settle(12);
+    button(view, 'Delete').click();
+    await settle();
+    button(document.querySelector('dialog.confirm'), 'Delete').click();
+    await settle(12);
+    assert.match(document.querySelector('dialog.notice').textContent, /Could not delete qwen.*it is loaded/s);
+  });
+
   it('lists what is on disk with its size and state', async () => {
     const { view } = await renderPage();
     assert.match(view.textContent, /qwen/);

@@ -17,15 +17,23 @@ uploaded, and are skipped with a notice if `node_modules` is absent.
 npm run coverage
 ```
 
-Node's own coverage (`--experimental-test-coverage`, the tests themselves left
-out). Measured on 2026-11-27, at the audit: **79.5 % of lines, 58.2 % of
-branches, 53.4 % of functions** of `ai_lab/web/js`. Every module is reached by
-some test, through its page if not on its own. The least reached are the
-pages' live parts — what they do on a refresh, a click, a server's answer:
-`ai_lab/web/js/views/gpu_health.js` (31 % of lines),
-`ai_lab/web/js/views/lanes.js` (44 %), `ai_lab/web/js/views/machine.js` (46 %)
-and `ai_lab/web/js/views/runtime.js` (58 %). No floor is set yet:
-the figure is written here so a change can be compared with it.
+`tests/ui/coverage.mjs`: the tests run with V8's raw coverage, and every copy
+of a module counts as one. The tests import a page as `views/x.js?<random>`,
+for a fresh copy of its state per test, and Node's own report
+(`--experimental-test-coverage`) lists every copy as a file of its own. That is
+why it read 79.5 % at the audit, with `gpu_health.js` at 31 % although every
+test there draws the whole page. Counted per file, lines that hold code:
+
+| Measured | All of `ai_lab/web/js` | Least reached |
+|---|---|---|
+| 2026-11-28, before round 6's UI tests | 90.5 % | `settings_engines.js` 66.0 %, `app.js` 70.9 %, `runtime_progress.js` 71.4 %, `library_installed.js` 75.0 % |
+| 2026-11-28, after them | **92.4 %** | `app.js` 70.9 %, `runtime_progress.js` 71.4 %, `api.js` 78.3 %; `settings_engines.js` 95.1 %, `library_installed.js` 87.1 % |
+
+`node tests/ui/coverage.mjs views/<file>.js` also prints that file's
+unreached lines. In `runtime_progress.js` they are the bars drawn from load
+events, which no test sends yet; `app.js` and `api.js` were not gone through
+in round 6. No floor is set: the figure is written here so a change can be
+compared with it.
 
 ## What these are for
 
