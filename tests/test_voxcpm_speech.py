@@ -15,7 +15,6 @@ from .support import stand_ins
 class VoxCPM:
     """The model: records each generation and the file it was given to clone from."""
 
-    built: dict = {}
     tts_model = SimpleNamespace(sample_rate=48000)
 
     def __init__(self, **built):

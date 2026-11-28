@@ -3,15 +3,14 @@
 import contextlib
 import io
 import json
-import tempfile
 import unittest
 import urllib.error
 from email.message import Message
-from pathlib import Path
 from unittest import mock
 
 from ai_lab.media.images import ImageCalls
 from ai_lab.types import Task
+from tests.support import temporary
 
 GRAPH = {"1": {"class_type": "Prompt", "inputs": {"text": ""}}}
 
@@ -44,7 +43,7 @@ class Gateway:
 
 class ImageCallsTest(unittest.TestCase):
     def setUp(self):
-        root = Path(tempfile.mkdtemp())
+        root = temporary.folder(self)
         (root / "gen.json").write_text(json.dumps(GRAPH))
         self.gateway = Gateway()
         self.images = ImageCalls(self.gateway, {"workflow_root": str(root), "profiles": {

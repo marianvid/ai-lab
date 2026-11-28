@@ -258,10 +258,6 @@ class ServerTests(LiveServer):
             self.assertEqual(response.headers["Content-Type"], "text/event-stream")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CachingTests(LiveServer):
     """Nothing may be cached by the browser.
 
@@ -771,3 +767,7 @@ class NoGatewayTests(unittest.TestCase):
         assert matched is not None
         handler, captured = matched
         self.assertEqual(handler(query={}, body={}, **captured)["total_ms"], 42)
+
+
+if __name__ == "__main__":
+    unittest.main()

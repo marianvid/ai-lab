@@ -1,19 +1,18 @@
 """The move job records: a cancellation asked for by one request reaches the move in another."""
 
-import tempfile
 import threading
 import unittest
-from pathlib import Path
 from typing import Any, cast
 
 from ai_lab.application.move_jobs import MoveCancelledError, MoveJobStore
+from tests.support import temporary
 
 
 class Host:
     """Just the state directory."""
 
-    def __init__(self):
-        self.root = Path(tempfile.mkdtemp())
+    def __init__(self, test):
+        self.root = temporary.folder(test)
 
     def state_dir(self):
         return self.root
@@ -25,7 +24,7 @@ def a_job(job_id="job1", status="copying"):
 
 class CancellingTests(unittest.TestCase):
     def setUp(self):
-        self.store = MoveJobStore(cast(Any, Host()), lambda _topic: None)
+        self.store = MoveJobStore(cast(Any, Host(self)), lambda _topic: None)
 
     def test_a_cancel_between_the_last_copy_and_verifying_stops_the_move(self):
         # The move thread holds its own copy of the job; the operator cancels

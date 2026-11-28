@@ -1,16 +1,15 @@
 """The mailbox between agents, read by the owner (2026-11-23)."""
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.clients.mailbox import Mailbox, check_client_name, party_of
 from ai_lab.clients.security import SecuritySettings
+from tests.support import temporary
 
 
 class MailboxTests(unittest.TestCase):
     def setUp(self):
-        self.box = Mailbox(Path(tempfile.mkdtemp()) / "mailbox.jsonl", lambda: (3, 50))
+        self.box = Mailbox(temporary.folder(self) / "mailbox.jsonl", lambda: (3, 50))
 
     def test_a_party_is_a_client_named_mailbox_something(self):
         self.assertEqual(party_of("mailbox-sqwad"), "sqwad")
@@ -65,7 +64,7 @@ class MailboxLimitsTests(unittest.TestCase):
     """How many messages are kept and how long one may be: Settings → Security values."""
 
     def setUp(self):
-        self.security = SecuritySettings(Path(tempfile.mkdtemp()) / "security.json")
+        self.security = SecuritySettings(temporary.folder(self) / "security.json")
 
     def test_the_defaults_and_their_change(self):
         self.assertEqual(self.security.mailbox_limits(), (2000, 20000))
@@ -80,7 +79,7 @@ class MailboxLimitsTests(unittest.TestCase):
             self.security.update({"mailbox_max_chars": 10 ** 9})
 
     def test_the_mailbox_reads_the_limits_at_each_post(self):
-        box = Mailbox(Path(tempfile.mkdtemp()) / "m.jsonl", self.security.mailbox_limits)
+        box = Mailbox(temporary.folder(self) / "m.jsonl", self.security.mailbox_limits)
         box.post("a", "b", "x" * 600)
         self.security.update({"mailbox_max_chars": 500})
         with self.assertRaises(ValueError):

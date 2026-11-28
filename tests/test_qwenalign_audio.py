@@ -28,5 +28,5 @@ class QwenAlignRequestTests(unittest.TestCase):
             self.backend.align('/tmp/example.wav', 'Hello', 'Romanian')
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

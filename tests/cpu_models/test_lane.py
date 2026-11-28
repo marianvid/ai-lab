@@ -1,16 +1,15 @@
 """The processor lane: its own queue, start on demand, idle stop, and the server's answer."""
 
 import json
-import tempfile
 import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any, cast
 
 from ai_lab.cpu_models import EMBEDDINGS_PATH, CpuLane, CpuModelsConfig
 from ai_lab.cpu_models.lane import LaneTools, _post
+from tests.support import temporary
 
 RAW = {"binary": "/bin/llama-server",
        "models": {"bge-m3": {"path": "/m/bge.gguf", "port": 8390, "parallel": 2}}}
@@ -59,7 +58,7 @@ class CpuLaneTests(unittest.TestCase):
     def make(self, raw, poster=None):
         tools = LaneTools(poster=poster or self.post, server_factory=cast(Any, FakeServer),
                           card_free_mb=lambda: self.free, clock=lambda: 10.0)
-        return CpuLane(CpuModelsConfig.from_mapping(raw), Path(tempfile.mkdtemp()), tools)
+        return CpuLane(CpuModelsConfig.from_mapping(raw), temporary.folder(self), tools)
 
     def post(self, port, payload):
         self.posted.append((port, payload))
@@ -88,12 +87,15 @@ class CpuLaneTests(unittest.TestCase):
 
     def test_at_most_parallel_requests_reach_the_server(self):
         inside, peak, release = [0], [0], threading.Event()
+        counting = threading.Lock()
 
         def slow(_port, _payload):
-            inside[0] += 1
-            peak[0] = max(peak[0], inside[0])
+            with counting:
+                inside[0] += 1
+                peak[0] = max(peak[0], inside[0])
             release.wait(2)
-            inside[0] -= 1
+            with counting:
+                inside[0] -= 1
             return {"data": []}
         self.lane = self.make(RAW, slow)
         threads = [threading.Thread(target=self.lane.embed, args=(EMBEDDINGS_PATH, REQUEST))
@@ -132,7 +134,7 @@ class CpuLaneTests(unittest.TestCase):
         self.assertFalse(self.lane.serves("qwen36-nvfp4"))
 
     def test_built_from_configuration(self):
-        lane = CpuLane.from_config(RAW, Path(tempfile.mkdtemp()))
+        lane = CpuLane.from_config(RAW, temporary.folder(self))
         self.assertEqual(list(lane.placements), ["bge-m3"])
         self.assertEqual(lane.reclaimable_mb(), 0.0)
 

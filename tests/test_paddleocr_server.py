@@ -36,7 +36,6 @@ class PaddleOcrModelPairTests(unittest.TestCase):
             PaddleOcrBackend.model_directories(detection)
 
 
-
 class Page:
     """One page as PaddleOCR answers it: an object whose `json` is a property or a method."""
 

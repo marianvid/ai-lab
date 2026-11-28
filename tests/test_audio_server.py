@@ -58,7 +58,6 @@ class VadAudioTests(unittest.TestCase):
             _vad_samples(np.array([], dtype='float32'), 16000)
 
 
-
 def bare(kind, **answers):
     """A backend of this kind with no model, answering with `answers`."""
     backend = kind.__new__(kind)

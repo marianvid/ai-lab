@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import { installDom, settle } from './support/dom.js';
 
 const ANSWERS = {
@@ -13,10 +13,6 @@ const ANSWERS = {
 };
 
 describe('the Storage page', () => {
-  let dom;
-  before(() => { dom = installDom({}); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   it('shows reclaimable non-model files', async () => {
     const context = installDom(ANSWERS);

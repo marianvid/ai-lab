@@ -83,7 +83,6 @@ def soundfile() -> types.ModuleType:
 class Pipeline:
     """A music pipeline: records how it was built and called, and writes a WAV where asked."""
 
-    built: dict = {}
 
     def __init__(self, **built):
         self.built = built

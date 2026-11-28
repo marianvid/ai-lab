@@ -18,5 +18,5 @@ class SpeechRequestTests(unittest.TestCase):
             validate_payload({'text': 'Hello', 'command': 'run'})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

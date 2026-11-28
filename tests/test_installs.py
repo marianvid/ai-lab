@@ -20,6 +20,7 @@ from unittest.mock import patch
 from ai_lab.events import EventBus
 from ai_lab.builds.installs import Installs
 from ai_lab.builds.package_install import CURRENT, InstallTools, PackageInstall, PackageOptions
+from tests.support.temporary import ABSENT
 
 
 def finish(install):
@@ -98,7 +99,7 @@ class WhatIsInstalled(unittest.TestCase):
                          ["0.27.1"])
 
     def test_a_directory_that_does_not_exist_is_empty_not_an_error(self):
-        install = PackageInstall("vllm", "/nowhere/at/all", "vllm", EventBus())
+        install = PackageInstall("vllm", str(ABSENT), "vllm", EventBus())
         self.assertEqual(install.environments(), [])
         self.assertIsNone(install.active())
 
@@ -357,10 +358,6 @@ class WhichEnginesHaveOne(unittest.TestCase):
         self.assertEqual(str(installs.get("vllm").root), "/opt/ai/vllm")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheOneThatWasAlreadyThere(unittest.TestCase):
     """A plain `.venv`, from before any of this existed.
 
@@ -476,3 +473,7 @@ class WhatIsWaiting(unittest.TestCase):
         _environment(self.root, "0.27.1")
         self.install.point_at(self.root / ".venv-0.27.1")
         self.assertEqual(self.install.installed_now(), "0.27.1")
+
+
+if __name__ == "__main__":
+    unittest.main()

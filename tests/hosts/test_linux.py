@@ -153,10 +153,6 @@ class BatchStatusTests(unittest.TestCase):
         self.assertEqual(snapshot.kind, "none")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class EngineDetectionTests(unittest.TestCase):
     """vLLM is installed in a virtual environment, so PATH does not see it."""
 
@@ -260,3 +256,7 @@ class ProcessMemoryTests(unittest.TestCase):
     def test_a_failed_or_unreadable_listing_is_nothing_held(self):
         self.assertEqual(self.held(4321, result(returncode=9)), 0.0)
         self.assertEqual(self.held(4321, result("4321, [N/A]\n")), 0.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

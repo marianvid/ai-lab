@@ -14,8 +14,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const VIEWS = 'ai_lab/web/js';
+// From this file, so the tests run from any working folder, not only the repository's root.
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const VIEWS = `${ROOT}ai_lab/web/js`;
 
 function everyScript(directory = VIEWS) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -38,7 +41,7 @@ describe('the page does not narrate itself', () => {
   });
 
   it('leaves no footer in the page for one to be attached to', () => {
-    const page = readFileSync('ai_lab/web/index.html', 'utf8');
+    const page = readFileSync(`${ROOT}ai_lab/web/index.html`, 'utf8');
     assert.equal(/<footer/.test(page), false);
     assert.equal(/id="status"/.test(page), false);
   });
@@ -49,7 +52,7 @@ describe('the page does not narrate itself', () => {
     // written, so the label carries a faint mark too — the same one a setting
     // with an explanation behind it already had.
     const css = ['app.css', 'pages.css']
-      .map((name) => readFileSync(`ai_lab/web/css/${name}`, 'utf8')).join('\n');
+      .map((name) => readFileSync(`${ROOT}ai_lab/web/css/${name}`, 'utf8')).join('\n');
     assert.match(css, /\[title\][^{]*\{[^}]*cursor:\s*help/s,
                  'nothing gives a tooltip its own cursor');
     assert.match(css, /underline dotted/,
@@ -60,8 +63,8 @@ describe('the page does not narrate itself', () => {
     // Deleting the bar without these would lose real information: a failure
     // nobody sees, and a button that looks like it did nothing.
     const scripts = everyScript();
-    assert.ok(scripts.includes('ai_lab/web/js/confirm.js'), 'no modal to fail into');
-    assert.ok(scripts.includes('ai_lab/web/js/working.js'),
+    assert.ok(scripts.includes(`${VIEWS}/confirm.js`), 'no modal to fail into');
+    assert.ok(scripts.includes(`${VIEWS}/working.js`),
               'no way for a button to show it is working');
   });
 });

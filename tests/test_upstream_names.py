@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from ai_lab.music.servers.heartmula_server import (HEARTMUSE_NAMES, check_heartmuse,
                                                    launch_heartmuse, missing_heartmuse_names)
@@ -51,8 +52,11 @@ class HeartMuseNamesTests(unittest.TestCase):
             "PLAYLIST_JS = ''\nLAUNCHED = []\nclass _App:\n"
             "    def queue(self, **k):\n        return self\n"
             "    def launch(self, **k):\n        LAUNCHED.append(k)\napp = _App()\n")
-        self.addCleanup(lambda: [sys.modules.pop(name, None)
-                                 for name in ("config", "generator", "app")])
+        # Whatever sys.modules held before (a `config` of someone else's
+        # included) is put back exactly, not popped by name.
+        modules = mock.patch.dict(sys.modules)
+        modules.start()
+        self.addCleanup(modules.stop)
         self.addCleanup(lambda: sys.path.remove(str(folder)) if str(folder) in sys.path else None)
         backend = SimpleNamespace(pipeline="resident", lock=__import__("threading").Lock())
         args = argparse.Namespace(heartmuse_root=folder, bundle_root=folder,

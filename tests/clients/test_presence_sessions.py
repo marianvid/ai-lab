@@ -1,13 +1,12 @@
 """When clients were last heard from; web sessions; Settings → Security."""
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.clients.errors import AccessDeniedError
 from ai_lab.clients.presence import Presence
 from ai_lab.clients.security import SecuritySettings
 from ai_lab.clients.sessions import COOKIE, SessionBook, cookie_header, digest, session_of
+from tests.support import temporary
 
 
 class Clock:
@@ -48,7 +47,7 @@ class SessionsTest(unittest.TestCase):
         self.assertFalse(book.valid(None))
 
     def test_a_session_survives_a_restart_and_only_its_digest_is_on_disk(self):
-        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        path = temporary.folder(self) / "sessions.json"
         clock = Clock()
         session = SessionBook(clock, lifetime_s=60, path=path).start()
         self.assertNotIn(session, path.read_text())
@@ -59,7 +58,7 @@ class SessionsTest(unittest.TestCase):
         self.assertFalse(SessionBook(clock, lifetime_s=60, path=path).valid(session))
 
     def test_ending_sessions_removes_them_from_disk(self):
-        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        path = temporary.folder(self) / "sessions.json"
         book = SessionBook(path=path)
         first, second = book.start(), book.start()
         book.end(first)
@@ -69,7 +68,7 @@ class SessionsTest(unittest.TestCase):
         self.assertFalse(SessionBook(path=path).valid(second))
 
     def test_an_unreadable_book_starts_empty(self):
-        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        path = temporary.folder(self) / "sessions.json"
         for text in ("{not json", "[1, 2]", '{"k": "soon"}'):
             path.write_text(text)
             with self.subTest(text=text):
@@ -87,7 +86,7 @@ class SessionsTest(unittest.TestCase):
 
     def test_page_sessions_live_a_day_in_memory_and_are_capped(self):
         from unittest import mock
-        path = Path(tempfile.mkdtemp()) / "sessions.json"
+        path = temporary.folder(self) / "sessions.json"
         clock = Clock()
         book = SessionBook(clock, path=path)
         with mock.patch("ai_lab.clients.sessions.PAGE_SESSIONS_MAX", 3):
@@ -119,7 +118,7 @@ class SessionsTest(unittest.TestCase):
 
 class SecurityTest(unittest.TestCase):
     def setUp(self):
-        self.path = Path(tempfile.mkdtemp()) / "security.json"
+        self.path = temporary.folder(self) / "security.json"
 
     def test_defaults_let_everything_in(self):
         security = SecuritySettings(self.path)

@@ -1,21 +1,19 @@
 """The door: tokens, the web session, the open routes, log mode and require mode."""
 
 import json
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.clients.access import Access
 from ai_lab.clients.door import ANONYMOUS, WEB, bearer, route_key
 from ai_lab.clients.errors import (AccessDeniedError, ManagementNeedsLoginError, TokenInvalidError,
                                    TokenMissingError)
 from ai_lab.clients.sessions import COOKIE
+from tests.support import temporary
 
 
 def cookie(header: str | None) -> dict:
     assert header is not None
     return {"Cookie": header.split(";")[0]}
-
 
 
 def require_token(access):
@@ -26,7 +24,7 @@ def require_token(access):
 class DoorTest(unittest.TestCase):
     def setUp(self):
         self.lines: list[str] = []
-        self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=self.lines.append)
+        self.access = Access.in_folder(temporary.folder(self), log=self.lines.append)
         self.token = self.access.register("scheduler-linux")["token"]
         self.door = self.access.door
 
@@ -62,10 +60,10 @@ class DoorTest(unittest.TestCase):
         self.door.admit("GET", "/v1/models", {"Authorization": "Bearer wrong"})
         self.assertEqual(len(self.lines), 2)
         self.assertIn("/v1/models", self.lines[0])
-        self.door.admit("GET", "/v1/models", {}, "192.168.50.143")
-        self.door.admit("GET", "/v1/models", {}, "192.168.50.143")
+        self.door.admit("GET", "/v1/models", {}, "192.0.2.10")
+        self.door.admit("GET", "/v1/models", {}, "192.0.2.10")
         self.assertEqual(len(self.lines), 3, "a new address is a new line, once")
-        self.assertIn("from 192.168.50.143", self.lines[2])
+        self.assertIn("from 192.0.2.10", self.lines[2])
 
     def test_require_mode_refuses_with_the_code(self):
         require_token(self.access)
@@ -83,7 +81,7 @@ class DoorTest(unittest.TestCase):
 
     def test_while_the_token_does_not_hold_a_page_session_call_is_said_once(self):
         # Before login goes on, the log names who gets in by a page cookie.
-        folder = Path(tempfile.mkdtemp())
+        folder = temporary.folder(self)
         (folder / "security.json").write_text('{"require_token": true}')
         lines: list[str] = []
         access = Access.in_folder(folder, log=lines.append)
@@ -111,7 +109,7 @@ class DoorTest(unittest.TestCase):
 
 class AccessTest(unittest.TestCase):
     def setUp(self):
-        self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
+        self.access = Access.in_folder(temporary.folder(self), log=lambda _line: None)
 
     def test_the_heartbeat_is_noted_and_a_map_is_not_kept(self):
         token = self.access.register("scheduler-mac")["token"]
@@ -153,7 +151,7 @@ class AccessTest(unittest.TestCase):
     def test_a_login_holds_through_a_restart_and_its_cookie_for_the_days_set(self):
         # The owner's "remember me": closing the browser keeps the cookie
         # (Max-Age), and a restart (a new Access on the same folder) keeps it.
-        folder = Path(tempfile.mkdtemp())
+        folder = temporary.folder(self)
         access = Access.in_folder(folder, log=lambda _line: None)
         access.set_password("a long password", None)
         access.update_security({"login_required": True, "session_days": 7})
@@ -168,7 +166,7 @@ class AccessTest(unittest.TestCase):
     def test_page_sessions_with_login_off_are_never_written_to_disk(self):
         # The reviewer's FIX FIRST: every cookie-less GET / wrote a 30-day
         # session; a check a minute grew the file for a month.
-        folder = Path(tempfile.mkdtemp())
+        folder = temporary.folder(self)
         access = Access.in_folder(folder, log=lambda _line: None)
         pages = [access.page_cookie({}) for _ in range(100)]
         self.assertFalse((folder / "sessions.json").exists())

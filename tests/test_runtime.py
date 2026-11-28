@@ -151,10 +151,6 @@ class EventTests(unittest.TestCase):
         self.assertTrue(last["ok"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StrangerOnThePortTests(unittest.TestCase):
     """Something else answering the port must not be reported as a load.
 
@@ -651,3 +647,7 @@ class EditorPortTests(unittest.TestCase):
         from ai_lab.engines.images.comfyui import ComfyUiEngine
         self.assertTrue(self.row(ComfyUiEngine())["has_page"])
         self.assertFalse(self.row(FakeEngine(host=FakeHost()))["has_page"])
+
+
+if __name__ == "__main__":
+    unittest.main()

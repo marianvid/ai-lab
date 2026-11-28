@@ -60,5 +60,5 @@ class HiggsLocalEngineTests(unittest.TestCase):
         self.assertGreaterEqual(frame_limit(''), 64)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

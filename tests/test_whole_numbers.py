@@ -1,12 +1,11 @@
 """A whole number is never a bool or a fraction cut down (audit L35, L52)."""
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.clients.security import SecuritySettings
 from ai_lab.gpu_health.settings import GpuHealthSettings
 from ai_lab.shared.numbers import whole_number
+from tests.support import temporary
 
 
 class WholeNumberTests(unittest.TestCase):
@@ -17,7 +16,7 @@ class WholeNumberTests(unittest.TestCase):
                 whole_number(wrong, "x")
 
     def test_the_security_numbers_refuse_a_fraction_and_a_bool(self):
-        security = SecuritySettings(Path(tempfile.mkdtemp()) / "security.json")
+        security = SecuritySettings(temporary.folder(self) / "security.json")
         for wrong in (3.9, True):
             with self.subTest(wrong=wrong), self.assertRaises(ValueError):
                 security.update({"session_days": wrong})

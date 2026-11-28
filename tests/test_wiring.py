@@ -1,16 +1,15 @@
 """What the composition root works out from the configuration before building anything."""
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.config.store import Config, Instance
 from ai_lab.wiring import CONFIG_SECTIONS, engine_settings_of, gateway_limits
+from tests.support import temporary
 
 
 class EngineSettingsTests(unittest.TestCase):
     def test_comfyui_is_told_each_image_model_s_workflow(self):
-        root = Path(tempfile.mkdtemp())
+        root = temporary.folder(self)
         config = Config(
             engines={"comfyui": {"binary": "/opt/python"}, "llamacpp": {"binary": "x"}},
             instances=[Instance(id="flux", engine="comfyui", model_id="comfy/flux", port=8200)],
@@ -24,7 +23,7 @@ class EngineSettingsTests(unittest.TestCase):
                          {"comfy/flux": str((root / "flux.json").resolve())})
 
     def test_a_workflow_outside_the_workflow_root_is_ignored(self):
-        root = Path(tempfile.mkdtemp())
+        root = temporary.folder(self)
         config = Config(
             instances=[Instance(id="flux", engine="comfyui", model_id="comfy/flux", port=8200)],
             images={"workflow_root": str(root),

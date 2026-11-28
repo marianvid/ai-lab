@@ -43,6 +43,7 @@ class ProbeTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
 
     def test_ok_means_answering_and_not_still_loading(self):
         self.assertTrue(http_ok(self.port))
@@ -67,7 +68,23 @@ class ProbeTests(unittest.TestCase):
         self.assertTrue(http_ok(self.port, "/list"))
 
 
-class TextTests(ProbeTests):
+class TextTests(unittest.TestCase):
+    """The text reader, against the same stand-in engine (run once, not with ProbeTests' tests again)."""
+
+    server: ThreadingHTTPServer
+    port: int
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Engine)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.port = cls.server.server_port
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
     def test_text_is_the_body_answered_or_nothing(self):
         self.assertEqual(http_text(self.port, "/plain"), "OK")
         self.assertEqual(http_text(self.port, "/down"), "")

@@ -79,6 +79,7 @@ class GenerationHostTests(unittest.TestCase):
         handler = type("Bound", (GenerationHost,), {"backend": Echo(), "noun": "speech",
                                                     "request_path": "/v1/speak"})
         self.server = started(handler)
+        self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
 
     def test_health_and_unknown_paths(self):
@@ -105,6 +106,7 @@ class UploadHostTests(unittest.TestCase):
     def setUp(self):
         handler = type("Bound", (EchoUpload,), {"backend": Recorder(), "model_name": "ocr-1"})
         self.server = started(handler)
+        self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
 
     def test_the_listing_names_the_one_model(self):

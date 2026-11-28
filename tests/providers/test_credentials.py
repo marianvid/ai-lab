@@ -1,10 +1,12 @@
 """The vendor's private environment file: read for the CLI, described for the page."""
 
+import contextlib
 import os
 import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from ai_lab.providers import credentials
 
@@ -98,12 +100,17 @@ class CredentialFileTests(unittest.TestCase):
 
     def test_a_file_that_cannot_be_read_falls_back_to_the_login(self):
         path = self.write(f"CLAUDE_CODE_OAUTH_TOKEN={SECRET}\n")
-        if os.geteuid() == 0:
-            self.skipTest("root reads any file")
         self.path.chmod(0)
         self.addCleanup(self.path.chmod, 0o600)
-        self.assertEqual(credentials.read(path), {})
-        state = describe(path)
+        refused: contextlib.AbstractContextManager = contextlib.nullcontext()
+        if os.geteuid() == 0:
+            # Root reads any file (CT 102 runs the tests as root): the refusal
+            # the mode gives anyone else is given here instead.
+            refused = mock.patch.object(Path, "read_text", side_effect=PermissionError(13, "denied"))
+        with refused:
+            read = credentials.read(path)
+            state = describe(path)
+        self.assertEqual(read, {})
         self.assertEqual(state["credential"], "login")
         self.assertIn("cannot be read", state["warning"])
 

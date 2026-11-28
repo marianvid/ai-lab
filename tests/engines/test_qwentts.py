@@ -50,5 +50,5 @@ class QwenTtsEngineTests(unittest.TestCase):
                              root)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

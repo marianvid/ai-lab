@@ -1,4 +1,5 @@
-// A tab click must feel like a click even when its API takes seconds.
+// The frame around every page: the warning under the header, and a tab click that
+// feels like a click even when its API takes seconds.
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';

@@ -50,5 +50,5 @@ class HeartMulaEngineTests(unittest.TestCase):
             self.engine.plan(replace(self.model, task=Task.TRANSCRIPTION), 8123, {})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

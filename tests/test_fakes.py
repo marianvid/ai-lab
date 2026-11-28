@@ -1,5 +1,6 @@
 """The shared stand-ins behave like the parts they replace (the reviewer's items 12-13)."""
 
+import gc
 import unittest
 from pathlib import Path
 
@@ -33,8 +34,13 @@ class FakeEngineTests(unittest.TestCase):
         host.stop("other")
         self.assertFalse(engine.ready(8081), "a stopped process still answered")
 
-    def test_the_host_keeps_its_state_in_a_folder_of_its_own(self):
-        self.assertTrue(Path(FakeHost().state_dir()).is_dir())
+    def test_the_host_keeps_its_state_in_a_folder_of_its_own_and_takes_it_away(self):
+        host = FakeHost()
+        folder = Path(host.state_dir())
+        self.assertTrue(folder.is_dir())
+        del host
+        gc.collect()
+        self.assertFalse(folder.exists(), "the host's folder outlived it")
 
 
 if __name__ == "__main__":

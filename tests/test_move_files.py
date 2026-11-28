@@ -2,6 +2,7 @@ import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 from types import SimpleNamespace
 
 from ai_lab.application.move_files import (
@@ -37,14 +38,19 @@ class MoveFilesTests(unittest.TestCase):
         reject_unfit_destination(self.plan([destination]))
         self.assertFalse(destination.exists())                # checking writes nothing
 
-    @unittest.skipIf(os.geteuid() == 0, "root can write anywhere")
     def test_a_source_in_a_read_only_directory_is_refused(self):
         folder = self.root / "locked"
         folder.mkdir()
         (folder / "model.gguf").write_bytes(b"x")
         folder.chmod(0o500)
         self.addCleanup(folder.chmod, 0o700)
-        with self.assertRaisesRegex(ValueError, "cannot remove files from"):
+        def as_the_manager(path, mode):
+            # Root may write anywhere (CT 102 runs the tests as root); the manager
+            # does not, so the folder's mode is answered as it would answer it.
+            return not (mode & os.W_OK and Path(path) == folder)
+        access = as_the_manager if os.geteuid() == 0 else os.access
+        with mock.patch("ai_lab.application.move_files.os.access", access), \
+                self.assertRaisesRegex(ValueError, "cannot remove files from"):
             reject_unremovable_sources([folder / "model.gguf"])
 
     def test_only_empty_directories_under_a_root_are_removed(self):

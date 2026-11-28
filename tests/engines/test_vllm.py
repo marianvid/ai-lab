@@ -143,10 +143,6 @@ class ParamTests(unittest.TestCase):
         self.assertTrue(all(spec.group == "memory" for spec in engine.params()))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ToolCallingTests(unittest.TestCase):
     """Letting a model call tools, which needs two flags that go together.
 
@@ -386,7 +382,6 @@ class MemorySettingsTests(unittest.TestCase):
             self.assertTrue(spec.help.strip(), f"{spec.key} has no explanation")
 
 
-
 class CacheBitsTests(unittest.TestCase):
     """The visible 16/8-bit switch, and what an 8-bit cache needs on this card.
 
@@ -480,3 +475,7 @@ class CacheBitsTests(unittest.TestCase):
         self.assertAlmostEqual(need, 900)
         need = self.engine.needs_mb(None, {"gpu_memory_fraction": 0.93}, 1000)
         self.assertAlmostEqual(need, 930)
+
+
+if __name__ == "__main__":
+    unittest.main()

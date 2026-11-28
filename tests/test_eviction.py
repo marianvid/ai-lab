@@ -52,5 +52,5 @@ class EvictionPlannerTests(unittest.TestCase):
                          ['idle-old', 'idle-new', 'busy'])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

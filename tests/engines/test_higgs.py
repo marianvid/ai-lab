@@ -55,5 +55,5 @@ class HiggsEngineTests(unittest.TestCase):
             self.engine.plan(self.model, 8121, {})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

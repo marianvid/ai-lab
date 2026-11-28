@@ -1,12 +1,11 @@
 """A request turned into the ComfyUI graph of its profile."""
 
 import json
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.media.image_workflows import INPUT_MARKER, read_request, render
 from ai_lab.multipart import MultipartBody
+from tests.support import temporary
 
 GRAPH = {"1": {"class_type": "Prompt", "inputs": {"text": "", "seed": 0}},
          "2": {"class_type": "LoadImage", "inputs": {"image": ""}}}
@@ -16,7 +15,7 @@ PROFILE = {"workflow": "edit.json",
 
 class RenderTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp())
+        self.root = temporary.folder(self)
         (self.root / "edit.json").write_text(json.dumps(GRAPH))
 
     def test_mapped_values_and_the_image_marker_reach_their_inputs(self):

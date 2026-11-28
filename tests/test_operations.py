@@ -23,7 +23,8 @@ from ai_lab.settings import Settings
 from ai_lab.engines.text.llamacpp import LlamaCppEngine
 
 from ai_lab.runtime.lastloaded import LastLoaded
-from tests.support import FakeHost, make_files
+from tests.support import FakeHost, make_files, temporary
+from tests.support.temporary import ABSENT
 
 
 class InstantEngine(LlamaCppEngine):
@@ -55,14 +56,13 @@ def offline_huggingface():
     ])
 
 
-def parts_with_instances(count, last_loaded=None):
+def parts_with_instances(test, count, last_loaded=None):
     """The parts of an Operations with `count` configured entries, and the host behind them.
 
     Built by hand rather than through the interface, because what is under test
     is how the list is drawn, not how entries are created.
     """
-    import tempfile
-    directory = Path(tempfile.mkdtemp())
+    directory = temporary.folder(test)
     # The layout every machine has: one root, a folder in it per weight
     # format. See `MODEL_STORAGE.md`.
     (directory / "models" / "gguf").mkdir(parents=True)
@@ -98,9 +98,9 @@ def parts_with_instances(count, last_loaded=None):
     ), host
 
 
-def operations_with_instances(count, last_loaded=None):
+def operations_with_instances(test, count, last_loaded=None):
     """An Operations with `count` configured entries, and the host behind it."""
-    parts, host = parts_with_instances(count, last_loaded)
+    parts, host = parts_with_instances(test, count, last_loaded)
     return Operations.assemble(parts), host
 
 
@@ -327,10 +327,6 @@ class OperationsTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             self.operations.download("org/model", "whatever", "gguf")
         self.assertIn("read-only", str(caught.exception))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class EffectiveSettingsTests(unittest.TestCase):
@@ -981,7 +977,7 @@ class WritabilityTests(unittest.TestCase):
         @contextmanager
         def build():
             self.path.write_text(json.dumps({
-                "repositories": [{"id": "gone", "name": "Gone", "path": "/nowhere",
+                "repositories": [{"id": "gone", "name": "Gone", "path": str(ABSENT),
                                   "format": "gguf"}],
                 "instances": [],
             }))
@@ -1328,7 +1324,7 @@ class RepositoryEditingTests(unittest.TestCase):
     def test_a_root_that_does_not_exist_is_refused_before_saving(self):
         """Saying so while the field is still on screen beats a broken screen."""
         with self.assertRaises(ValueError) as caught:
-            self.operations.update_models_root("/nowhere/at/all")
+            self.operations.update_models_root(str(ABSENT))
         self.assertIn("not a directory", str(caught.exception))
         self.assertEqual(self.store.load().models_root, str(self.root / "old"))
 
@@ -1408,21 +1404,21 @@ class DrawingTheListTests(unittest.TestCase):
     """
 
     def test_one_question_covers_every_entry(self):
-        operations, host = operations_with_instances(3)
+        operations, host = operations_with_instances(self, 3)
         host.status_calls = 0
         rows = operations.instances()
         self.assertEqual(len(rows), 3)
         self.assertEqual(host.status_calls, 1,
                          "one command for the list, however long it is")
 
-    def test_an_empty_list_asks_nothing_at_all(self):
-        operations, host = operations_with_instances(0)
+    def test_an_empty_list_is_still_one_question_never_one_per_entry(self):
+        operations, host = operations_with_instances(self, 0)
         host.status_calls = 0
         self.assertEqual(operations.instances(), [])
         self.assertEqual(host.status_calls, 1)
 
     def test_each_entry_still_gets_its_own_answer(self):
-        operations, host = operations_with_instances(3)
+        operations, host = operations_with_instances(self, 3)
         host.running.add("model-1")
         rows = {row["id"]: row for row in operations.instances()}
         self.assertTrue(rows["model-1"]["running"])
@@ -1438,7 +1434,7 @@ class EngineOutputTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.operations, self.host = operations_with_instances(2)
+        self.operations, self.host = operations_with_instances(self, 2)
         self.host.log_lines = ["INFO listening on 8100", "INFO slot released"]
 
     def test_a_running_model_hands_over_what_it_printed(self):
@@ -1482,7 +1478,7 @@ class RestoringTests(unittest.TestCase):
         self._temporary = TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.memory = LastLoaded(Path(self._temporary.name))
-        self.parts, self.host = parts_with_instances(2, last_loaded=self.memory)
+        self.parts, self.host = parts_with_instances(self, 2, last_loaded=self.memory)
         self.operations = Operations.assemble(self.parts)
 
     def remembered(self) -> dict:
@@ -1580,7 +1576,7 @@ class GatewaySettingsTests(unittest.TestCase):
     """How long the front door waits, and how many requests it holds."""
 
     def setUp(self):
-        self.operations, self.host = operations_with_instances(1)
+        self.operations, self.host = operations_with_instances(self, 1)
 
     def test_nothing_is_set_to_begin_with(self):
         # Absent means the built-in default applies. Writing the defaults into
@@ -1652,7 +1648,7 @@ class NamingAnEntryTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.operations, self.host = operations_with_instances(2)
+        self.operations, self.host = operations_with_instances(self, 2)
 
     def add(self, identifier):
         return self.operations.create_instance({
@@ -1779,7 +1775,7 @@ class PointingAnEngineSomewhereElse(unittest.TestCase):
 
     def test_something_that_is_not_there_is_refused_before_saving(self):
         with self.assertRaises(ValueError):
-            self.operations.update_engine_binary("llamacpp", "/nowhere/at/all")
+            self.operations.update_engine_binary("llamacpp", str(ABSENT))
         self.assertEqual(self.store.load().engines["llamacpp"]["binary"], "/bin/true")
 
     def test_an_unknown_engine_is_a_missing_thing(self):
@@ -1791,9 +1787,7 @@ class FacadeHandOffTests(unittest.TestCase):
     """What the façade joins itself: the settings screen with the source builds, and storage."""
 
     def setUp(self):
-        self._temporary = TemporaryDirectory()
-        self.addCleanup(self._temporary.cleanup)
-        self.parts, self.host = parts_with_instances(1)
+        self.parts, self.host = parts_with_instances(self, 1)
 
     def test_the_settings_screen_names_each_engine_s_source_build_beside_it(self):
         class Builds:
@@ -1826,3 +1820,7 @@ class FacadeHandOffTests(unittest.TestCase):
         operations = Operations.assemble(self.parts)
         budget = operations.machine_budget()
         self.assertTrue(any(pool.reserve_mb == operations.reserve_mb() for pool in budget.pools))
+
+
+if __name__ == "__main__":
+    unittest.main()

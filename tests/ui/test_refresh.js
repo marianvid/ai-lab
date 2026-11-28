@@ -92,10 +92,7 @@ describe('refreshing', () => {
     const context = await boot();
     let called = 0;
     context.onChange(() => { called += 1; });
-    assert.doesNotThrow(() => {
-      global.EventSource.prototype.onmessage;
-      context.send({ kind: 'nonsense' });
-    });
+    assert.doesNotThrow(() => context.send({ kind: 'nonsense' }));
     await settle();
     assert.equal(called, 0);
   });

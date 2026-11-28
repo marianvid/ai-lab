@@ -1,15 +1,14 @@
 """The On/Off switch: what it refuses, what it runs, and that it survives a restart."""
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.clients.power import Power, uses_a_model
+from tests.support import temporary
 
 
 class PowerTest(unittest.TestCase):
     def setUp(self):
-        self.path = Path(tempfile.mkdtemp()) / "power.json"
+        self.path = temporary.folder(self) / "power.json"
 
     def test_on_by_default_and_off_survives_a_restart(self):
         power = Power(self.path, clock=lambda: 5.0)

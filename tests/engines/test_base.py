@@ -67,10 +67,6 @@ class ValidateTests(unittest.TestCase):
         self.assertIn("turbo", str(caught.exception))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class AdvertisedPathsTests(unittest.TestCase):
     """Only what works with the engine started as it is."""
 
@@ -95,3 +91,7 @@ class AdvertisedPathsTests(unittest.TestCase):
                          ("/v1/chat/completions", "/v1/completions"))
         self.assertEqual(ANTHROPIC_PATHS,
                          ("/v1/messages", "/v1/messages/count_tokens"))
+
+
+if __name__ == "__main__":
+    unittest.main()

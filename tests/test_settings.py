@@ -15,11 +15,10 @@ class SettingsTests(unittest.TestCase):
         self._temporary = TemporaryDirectory()
         self.root = Path(self._temporary.name)
         self.addCleanup(self._temporary.cleanup)
-        (self.root / "gguf").mkdir()
         path = self.root / "config.json"
         # One root, and only one of its two format folders was ever created.
         # A machine set up on another disk looks exactly like this.
-        (self.root / "gguf").mkdir(parents=True, exist_ok=True)
+        (self.root / "gguf").mkdir()
         path.write_text(json.dumps({
             "models_root": str(self.root),
             "repositories": [
@@ -54,10 +53,6 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.settings.view()["host"]["operating_system"], "Test OS")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class WhenTheRootIsNotSet(unittest.TestCase):
     """A configuration whose repositories never shared a directory.
 
@@ -88,3 +83,7 @@ class WhenTheRootIsNotSet(unittest.TestCase):
 
     def test_the_root_is_reported_empty_rather_than_guessed(self):
         self.assertEqual(self.settings.view()["models_root"], "")
+
+
+if __name__ == "__main__":
+    unittest.main()

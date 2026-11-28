@@ -2,14 +2,13 @@
 
 import json
 import socket
-import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 from ai_lab.hosts import ready
 from ai_lab.network import LOOPBACK
+from tests.support import temporary
 
 
 class Session(BaseHTTPRequestHandler):
@@ -60,7 +59,7 @@ class ReadyTests(unittest.TestCase):
     def test_main_reads_the_port_from_the_configuration(self):
         server = self.serve()
         self.addCleanup(server.shutdown)
-        config = Path(tempfile.mkdtemp()) / "config.json"
+        config = temporary.folder(self) / "config.json"
         config.write_text(json.dumps({"port": server.server_port}))
         self.assertEqual(ready.main(["--config", str(config), "--within", "2", "--settle", "0"]), 0)
         config.write_text(json.dumps({"port": free_port()}))

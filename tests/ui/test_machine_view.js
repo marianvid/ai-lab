@@ -7,7 +7,7 @@
 // question, and these tests hold that line.
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { installDom, settle } from './support/dom.js';
 
@@ -67,10 +67,6 @@ const rows = (view) => [...view.querySelectorAll('.row')].map((r) => ({
 }));
 
 describe('the machine', () => {
-  let dom;
-  before(() => { dom = installDom({}); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   it('is one card about one subject', async () => {
     const { view } = await draw(LINUX);
@@ -102,18 +98,12 @@ describe('the machine', () => {
   });
 
   it('lists VRAM and RAM on a machine with a card', async () => {
+    // RAM is 49152 less the 8192 held back on the line below: the subtraction
+    // is done, every figure is on screen and they check against each other.
     const { view } = await draw(LINUX);
     const listed = rows(view);
     assert.deepEqual(listed[1], { label: 'VRAM', value: '32623 MB' });
     assert.deepEqual(listed[2], { label: 'RAM', value: '40960 / 49152 MB' });
-  });
-
-  it('does the subtraction for you where something is held back', async () => {
-    // 49152 less the 8192 on the line below. Every figure is on screen and
-    // they check against each other, so nothing has to be worked out and
-    // nothing has to be believed.
-    const { view } = await draw(LINUX);
-    assert.equal(rows(view)[2].value, '40960 / 49152 MB');
   });
 
   it('shows one figure where nothing is held back', async () => {
@@ -125,22 +115,14 @@ describe('the machine', () => {
   });
 
   it('neither figure moves when a model loads', async () => {
-    // This card is what the machine is. 28.9 GB of that card is held right
-    // now, and that belongs on the Gateway page.
+    // This card is what the machine is: the card whole, not what is left of
+    // it. 28.9 GB of that card is held right now, and that belongs on the
+    // Gateway page.
     const { view } = await draw(LINUX);
     assert.equal(view.textContent.includes('3677'), false,
                  'showing what is free right now');
     assert.equal(view.textContent.includes('35803'), false,
                  'showing what is free right now');
-  });
-
-  it('lists the card whole, not what is left of it', async () => {
-    // 28.9 GB of this card is held by a running model. That is a fact about
-    // now and belongs on the Gateway page; this line says how big the card is.
-    const { view } = await draw(LINUX);
-    assert.match(rows(view)[1].value, /32623/);
-    assert.equal(view.textContent.includes('3677'), false,
-                 'this card is showing what is free rather than what there is');
   });
 
   it('puts the reserve last, where it explains the gap above it', async () => {

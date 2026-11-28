@@ -5,11 +5,11 @@ offer each one. Read from the page's own source, so a new Security setting
 without a field fails here.
 """
 
-import tempfile
 import unittest
 from pathlib import Path
 
 from ai_lab.clients.security import NUMBERS, SWITCHES, SecuritySettings
+from tests.support import temporary
 
 ACCESS_PAGE = Path(__file__).resolve().parent.parent / "ai_lab" / "web" / "js" / "views" / "access.js"
 SHOWN_NOT_SET = {"password_set", "token_holds", "password_hash"}
@@ -26,7 +26,7 @@ class OutsideTheFileTests(unittest.TestCase):
                 self.assertIn(f"key: '{key}'", page)
 
     def test_the_view_holds_nothing_the_page_does_not_know(self):
-        view = SecuritySettings(Path(tempfile.mkdtemp()) / "security.json").view()
+        view = SecuritySettings(temporary.folder(self) / "security.json").view()
         self.assertEqual(set(view) - set(SWITCHES) - set(NUMBERS), SHOWN_NOT_SET)
 
 

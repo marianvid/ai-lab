@@ -30,5 +30,5 @@ class MulaCoverEngineTests(unittest.TestCase):
         self.assertTrue(engine.music_form(model.name)['reference_audio_required'])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -180,7 +180,7 @@ class LinuxTests(unittest.TestCase):
         # MLX runs only on Apple silicon. The Linux host names every engine it
         # supports in its own file, so this one must not appear there.
         from ai_lab.hosts import linux
-        self.assertNotIn("mlxlm", Path(linux.__file__).read_text())
+        self.assertNotIn("mlxlm", linux.SUPPORTED_ENGINES)
 
 
 if __name__ == "__main__":

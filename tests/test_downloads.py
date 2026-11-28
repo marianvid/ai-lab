@@ -27,7 +27,9 @@ def remote_set(complete=True, sizes=(("a.gguf", 8),), repo="org/model",
     )
 
 
-class DownloadTests(unittest.TestCase):
+class DownloadSetUp(unittest.TestCase):
+    """A destination, a stand-in opener and a wait: shared, with no tests of its own."""
+
     def setUp(self):
         self._temporary = TemporaryDirectory()
         self.destination = Path(self._temporary.name) / "gguf"
@@ -48,6 +50,8 @@ class DownloadTests(unittest.TestCase):
             time.sleep(0.01)
         return transfer
 
+
+class DownloadTests(DownloadSetUp):
     def test_a_whole_set_lands_on_disk(self):
         manager = DownloadManager(opener=self.opener())
         transfer = manager.enqueue(remote_set(sizes=(("a.gguf", 8), ("tokenizer.json", 8))),
@@ -171,10 +175,13 @@ class DownloadTests(unittest.TestCase):
         release.set()
         self.wait(manager, first)
         self.wait(manager, again)
-        deadline = time.monotonic() + 1
+        deadline = time.monotonic() + 2
         while time.monotonic() < deadline and len(arrived) < 2:
             time.sleep(0.01)
-        time.sleep(0.2)
+        # The one asked for again took the cancelled one's place (same id), so
+        # two transfers exist, both done: a third arrival has nothing to come from.
+        states = sorted(item["state"] for item in manager.list())
+        self.assertEqual(states, ["done", "done"])
         self.assertEqual(len(arrived), 2, "the model asked for again ran twice, or not at all")
 
     def test_two_models_never_share_a_transfer_id(self):
@@ -251,11 +258,7 @@ class DownloadTests(unittest.TestCase):
                          "the worker changed a cancellation into a failure")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-class AfterItArrives(DownloadTests):
+class AfterItArrives(DownloadSetUp):
     """A model that has landed is read straight away, on this thread."""
 
     def test_a_finished_download_says_so(self):
@@ -296,3 +299,7 @@ class AfterItArrives(DownloadTests):
                                  self.destination)
         self.wait(manager, second)
         self.assertEqual(second.state, State.DONE)
+
+
+if __name__ == "__main__":
+    unittest.main()

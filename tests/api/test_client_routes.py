@@ -1,13 +1,11 @@
 """The access routes and the door, over a real socket."""
 
 import json
-import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 
 from ai_lab.api.passthrough import Passthrough
 from ai_lab.api.router import Router
@@ -18,7 +16,7 @@ from ai_lab.clients.errors import ModelReplacedError
 from ai_lab.clients.route_classes import model_api
 from ai_lab.clients.sessions import COOKIE
 from ai_lab.events import EventBus
-
+from tests.support import temporary
 
 
 def require_token(access):
@@ -28,7 +26,7 @@ def require_token(access):
 
 class ClientRoutesTest(unittest.TestCase):
     def setUp(self):
-        self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
+        self.access = Access.in_folder(temporary.folder(self), log=lambda _line: None)
         router = Router()
         self.router = router
         client_routes.register(router, self.access)

@@ -12,15 +12,7 @@ class Host:
 
 
 class RuntimeDiagnosticsTests(unittest.TestCase):
-    def test_first_real_exception_wins_over_later_generic_summary(self):
-        reader = RuntimeDiagnostics(Host([
-            'Started ai-lab-engine@coder.service',
-            '(EngineCore pid=123) ERROR 08-21 20:42:04 [core.py:1] '
-            'ValueError: context needs more cache',
-            'RuntimeError: Engine core initialization failed. See root cause above.',
-        ]))
-        self.assertIn('ValueError: context needs more cache', reader.why('coder'))
-
+    # The rules themselves are pinned in test_failure_reason; these read them through the host.
     def test_previous_run_is_excluded(self):
         reader = RuntimeDiagnostics(Host([
             'Started ai-lab-engine@coder.service',

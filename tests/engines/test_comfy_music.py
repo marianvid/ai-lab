@@ -34,5 +34,5 @@ class ComfyMusicTests(unittest.TestCase):
         self.assertEqual(plan.argv[plan.argv.index('--ui-port') + 1], '18125')
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

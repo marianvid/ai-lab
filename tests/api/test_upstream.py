@@ -70,7 +70,9 @@ class UpstreamTests(unittest.TestCase):
     def test_a_reading_thread_nobody_reads_from_stops_when_told(self):
         many = tuple(b"x" * 10 for _ in range(400))
         upstream = Upstream(self.serve(pieces=many), b"{}", "application/json", 5.0)
-        time.sleep(0.3)
+        deadline = time.monotonic() + 5
+        while not upstream.events.full() and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertTrue(upstream.events.full(), "the queue should fill and pause the reader")
         upstream.stop()
         self.assertTrue(upstream.ended(5.0), "a paused reader must notice it was stopped")

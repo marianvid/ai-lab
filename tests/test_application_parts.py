@@ -27,6 +27,7 @@ from ai_lab.builds.source_checkout import GitCheckout
 from ai_lab.builds.source_compiled import CompiledVersions
 from ai_lab.builds.source_versions import Version, mark_version
 from ai_lab.types import AcceleratorSnapshot, Change, Interests, Phase
+from tests.support.temporary import ABSENT
 
 
 def repository(format_name, root_id="core", task="", name="r"):
@@ -222,7 +223,7 @@ class OneAnswer:
 
 
 def checkout_answering(answer):
-    return GitCheckout(Path("/nowhere"), OneAnswer(answer))
+    return GitCheckout(ABSENT, OneAnswer(answer))
 
 
 class CheckoutTests(unittest.TestCase):
@@ -233,7 +234,7 @@ class CheckoutTests(unittest.TestCase):
 
 
 def compiled_under(root):
-    return CompiledVersions(root, None, GitCheckout(Path("/nowhere"), OneAnswer("")))
+    return CompiledVersions(root, None, GitCheckout(ABSENT, OneAnswer("")))
 
 
 class CompiledTests(unittest.TestCase):

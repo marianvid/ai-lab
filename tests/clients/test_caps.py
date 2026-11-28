@@ -1,13 +1,11 @@
 """Caps on one client's calls: tokens in flight and calls at once (clients/caps.py)."""
 
 import json
-import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
@@ -25,6 +23,7 @@ from ai_lab.config.policy import CHARS_PER_TOKEN
 from ai_lab.events import EventBus
 from ai_lab.gateway.admission.replaced import Replacements
 from ai_lab.gateway.limits import Patience
+from tests.support import temporary
 
 CHAT = "/v1/chat/completions"
 
@@ -38,7 +37,7 @@ def call(prompt_chars: int, max_tokens: int | None = 100) -> dict:
 
 class CapsTest(unittest.TestCase):
     def setUp(self):
-        self.path = Path(tempfile.mkdtemp()) / "client_caps.json"
+        self.path = temporary.folder(self) / "client_caps.json"
         self.caps = ClientCaps(self.path)
 
     def test_a_client_without_caps_is_not_counted(self):
@@ -175,7 +174,7 @@ class ForwarderTest(unittest.TestCase):
     """The front door counts a capped client's call before it takes a place, and gives it back after."""
 
     def setUp(self):
-        self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
+        self.access = Access.in_folder(temporary.folder(self), log=lambda _line: None)
         self.token = self.access.register("vm-sqwad")["token"]
         self.access.set_caps("vm-sqwad", {"max_calls_at_once": 1})
         self.headers = {"Authorization": f"Bearer {self.token}"}
@@ -235,7 +234,7 @@ class CapRoutesTest(unittest.TestCase):
     """The owner's routes, and a refusal as a client sees it."""
 
     def setUp(self):
-        self.access = Access.in_folder(Path(tempfile.mkdtemp()), log=lambda _line: None)
+        self.access = Access.in_folder(temporary.folder(self), log=lambda _line: None)
         router = Router()
         client_routes.register(router, self.access)
 

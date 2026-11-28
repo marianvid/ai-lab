@@ -36,5 +36,5 @@ class KokoroEngineTests(unittest.TestCase):
             self.engine.plan(self.model, 8117, {})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

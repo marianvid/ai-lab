@@ -6,7 +6,7 @@
 // running model will not keep, which is worse than no icon at all.
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { installDom, settle } from './support/dom.js';
 
@@ -68,10 +68,6 @@ function icons(view) {
 }
 
 describe('what a model can do, on the Models page', () => {
-  let dom;
-  before(() => { dom = installDom(responses()); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   it('shows one picture per capability, and labels each of them', async () => {
     const { view } = await renderModels();
@@ -129,10 +125,6 @@ describe('what a model can do, on the Models page', () => {
 });
 
 describe('what a model can do, in Library', () => {
-  let dom;
-  before(() => { dom = installDom(responses()); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   it('shows the weights own capabilities, since a file on disk has no settings', async () => {
     const context = installDom({
@@ -151,10 +143,6 @@ describe('what a model can do, in Library', () => {
 });
 
 describe('saving a setting without touching the card', () => {
-  let dom;
-  before(() => { dom = installDom(responses()); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   function find(view, label) {
     return [...view.querySelectorAll('button')]
@@ -210,10 +198,6 @@ describe('saving a setting without touching the card', () => {
 });
 
 describe('where the icons sit', () => {
-  let dom;
-  before(() => { dom = installDom(responses()); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   it('puts them on the right, immediately before the format', async () => {
     const { view } = await renderModels();

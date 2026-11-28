@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from ai_lab.providers.dialects import (
     CLAUDE_NO_SELF_UPDATE,
@@ -133,10 +134,10 @@ wait
 """
         vendor = Vendor(id="v", dialect="claude", binary=self.script("claude", busy),
                         limits=VendorLimits(timeout_s=30, client_check_s=0.05, stop_grace_s=2))
-        answers = iter([True] * 10)  # half a second: the CLI has started its child
+        # The client leaves once the CLI has started its child, not after a guess at how long.
         started = time.monotonic()
         outcome = run_ask(ClaudeCli(), vendor,
-                          Ask("opus", "x", still_wanted=lambda: next(answers, False)))
+                          Ask("opus", "x", still_wanted=lambda: not marker.exists()))
         self.assertTrue(outcome.cancelled)
         self.assertFalse(outcome.succeeded)
         self.assertLess(time.monotonic() - started, 5)
@@ -204,11 +205,10 @@ echo hi
         self.assertEqual(set(filled), {"USER", "LOGNAME"})
         self.assertTrue(filled["USER"])
         script = self.script("who", "#!/bin/sh\ncat > /dev/null\necho \"user=$USER\"\n")
-        saved = {key: os.environ.pop(key, None) for key in ("USER", "LOGNAME")}
-        try:
+        with mock.patch.dict(os.environ):
+            for key in ("USER", "LOGNAME"):
+                os.environ.pop(key, None)
             outcome = run(ClaudeCli(), self.vendor(script), "opus", "x")
-        finally:
-            os.environ.update({key: value for key, value in saved.items() if value})
         self.assertNotEqual(outcome.answer, "user=")
 
     def test_the_yearly_token_reaches_claude_and_an_api_key_does_not(self):
@@ -221,16 +221,8 @@ echo hi
                              "auth=$ANTHROPIC_AUTH_TOKEN\"\n")
         vendor = Vendor(id="anthropic", dialect="claude", binary=script,
                         env_file=str(token_file))
-        saved = {key: os.environ.get(key) for key in CLAUDE_NOT_THE_PLAN}
-        os.environ.update(dict.fromkeys(CLAUDE_NOT_THE_PLAN, "left-by-accident"))
-        try:
+        with mock.patch.dict(os.environ, dict.fromkeys(CLAUDE_NOT_THE_PLAN, "left-by-accident")):
             outcome = run(ClaudeCli(), vendor, "opus", "x")
-        finally:
-            for key, value in saved.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
         self.assertEqual(outcome.answer, "token=stand-in-token key= auth=")
 
     def test_a_token_written_later_counts_from_the_next_call(self):

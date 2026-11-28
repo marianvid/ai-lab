@@ -268,7 +268,5 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(installed_version(str(venv), "vllm"), "")
 
 
-
-
 if __name__ == "__main__":
     unittest.main()

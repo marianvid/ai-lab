@@ -151,7 +151,6 @@ class ConfigurationValidationTests(unittest.TestCase):
         self.assertIn('workflow file is absent', str(error.exception))
 
 
-
 def _owned(raw):
     """A section another package would own: an object with a `port`."""
     if not isinstance(raw, dict) or "port" not in raw:
@@ -195,5 +194,5 @@ class SectionTests(unittest.TestCase):
             validate_configuration(self.base(), {'comfyui'})  # type: ignore[call-arg]
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

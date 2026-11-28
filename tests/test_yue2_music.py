@@ -68,5 +68,5 @@ class Yue2RequestTests(unittest.TestCase):
         self.assertTrue(was_truncated(True))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

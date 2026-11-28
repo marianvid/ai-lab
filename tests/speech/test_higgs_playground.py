@@ -163,5 +163,5 @@ class PerLineSamplingTests(unittest.TestCase):
         self.assertTrue(torch.allclose(probs, expected))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

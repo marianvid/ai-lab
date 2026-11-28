@@ -2,16 +2,15 @@
 
 import json
 import stat
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.clients.registry import ClientRegistry, digest
+from tests.support import temporary
 
 
 class RegistryTest(unittest.TestCase):
     def setUp(self):
-        self.folder = Path(tempfile.mkdtemp())
+        self.folder = temporary.folder(self)
         self.path = self.folder / "clients.json"
 
     def test_a_token_identifies_its_client_and_is_never_stored(self):
@@ -28,10 +27,10 @@ class RegistryTest(unittest.TestCase):
 
     def test_registering_again_replaces_the_token(self):
         registry = ClientRegistry(self.path)
-        first = registry.register("marian-tests")
-        second = registry.register("marian-tests")
+        first = registry.register("owner-tests")
+        second = registry.register("owner-tests")
         self.assertIsNone(registry.identify(first))
-        self.assertEqual(registry.identify(second), "marian-tests")
+        self.assertEqual(registry.identify(second), "owner-tests")
 
     def test_clients_survive_a_restart(self):
         token = ClientRegistry(self.path).register("scheduler-mac")

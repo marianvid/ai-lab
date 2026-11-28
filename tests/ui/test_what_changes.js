@@ -5,7 +5,7 @@
 // or showing a version bump without saying that eight packages go backwards.
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { installDom, settle } from './support/dom.js';
 
@@ -58,10 +58,6 @@ function buttons(dialog) {
 }
 
 describe('reading an update before taking it', () => {
-  let dom;
-  before(() => { dom = installDom({}); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   it('says what is installed and what it would become', async () => {
     const { dialog } = await review(FOUND);

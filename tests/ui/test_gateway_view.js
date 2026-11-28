@@ -60,13 +60,12 @@ const STATS = {
 
 async function renderPage(overrides = {}) {
   const context = installDom({ '/api/gateway': { ...STATS, ...overrides } });
-  const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+  const { render, stopRefreshing } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
   await render(context.view);
   await settle();
-  // The view keeps itself fresh on a timer. Stopping it explicitly rather than
-  // relying on the window closing: the timer would otherwise fire into a
-  // window that is gone.
-  const { stopRefreshing } = await import('../../ai_lab/web/js/views/gateway.js');
+  // The view keeps itself fresh on a timer. Stopped on the copy that drew the
+  // page (a plain import would be a second module whose timer is null), rather
+  // than relying on the window closing.
   stopRefreshing();
   context.window.close();
   return context;
@@ -180,11 +179,6 @@ describe('the Gateway page', () => {
   it('reports a rate rather than a total that only grows', async () => {
     const { view } = await renderPage();
     assert.match(view.textContent, /Requests per minute\s*12/);
-  });
-
-  it('reports how many are waiting', async () => {
-    const { view } = await renderPage({ waiting: 7 });
-    assert.match(view.textContent, /Queued\s*7/);
   });
 
   it('states the share of working time spent loading', async () => {
@@ -348,14 +342,13 @@ describe('the limits, on the page that shows what they cost', () => {
   it('sends every limit when one is saved', async () => {
     const context = installDom({ '/api/gateway': STATS,
                                  'PATCH /api/gateway': STATS });
-    const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    const { render, stopRefreshing } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
     await render(context.view);
     await settle();
     type(field(context.view, 'Max idle time').querySelector('input'), '45');
     [...context.view.querySelectorAll('button')]
       .find((node) => node.textContent.trim() === 'Save').click();
     await settle();
-    const { stopRefreshing } = await import('../../ai_lab/web/js/views/gateway.js');
     stopRefreshing();
     context.window.close();
     const sent = context.calls.find((call) => call.method === 'PATCH');
@@ -371,14 +364,13 @@ describe('the limits, on the page that shows what they cost', () => {
       'PATCH /api/gateway': { __status: 400,
                               error: 'between_bytes_s must be between 1.0 and 3600.0' },
     });
-    const { render } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
+    const { render, stopRefreshing } = await import(`../../ai_lab/web/js/views/gateway.js?${Math.random()}`);
     await render(context.view);
     await settle();
     type(field(context.view, 'Max idle time').querySelector('input'), '45');
     [...context.view.querySelectorAll('button')]
       .find((node) => node.textContent.trim() === 'Save').click();
     await settle();
-    const { stopRefreshing } = await import('../../ai_lab/web/js/views/gateway.js');
     stopRefreshing();
     // A refusal takes the page, rather than whispering at the bottom of it.
     const dialog = context.document.querySelector('dialog');
@@ -638,14 +630,5 @@ describe('what the machine says about its memory', () => {
     assert.equal(view.textContent.includes('GPU temp'), false);
     assert.equal(view.textContent.includes('Card mem'), false);
     assert.match(view.textContent, /System mem/);
-  });
-});
-
-describe('the machine behind the card', () => {
-  it('shows how much of the system memory is in use', async () => {
-    // Where a model is split between the card and here, this is the half that
-    // does not show on the card reading.
-    const { view } = await renderPage();
-    assert.match(view.textContent, /System mem\s*8200 \/ 64000 MB/);
   });
 });

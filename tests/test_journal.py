@@ -1,18 +1,17 @@
 """The operation log (A9): newest lines on screen, every line in a rotating file."""
 
-import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 
 from ai_lab.events import EventBus
 from ai_lab.runtime.journal import LOG_NAME, OperationJournal, PhaseFollower
 from ai_lab.types import Phase
+from tests.support import temporary
 
 
 class JournalTest(unittest.TestCase):
     def test_lines_since_an_id_and_on_disk(self):
-        folder = Path(tempfile.mkdtemp())
+        folder = temporary.folder(self)
         journal = OperationJournal(folder, clock=lambda: 0.0)
         journal.write("first")
         journal.write("second")

@@ -60,10 +60,6 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(self.engine.tasks(), frozenset({Task.TEXT_GENERATION}))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class SplitAcrossCpuTests(unittest.TestCase):
     """Running a model larger than the card, with part of it in system memory."""
 
@@ -195,3 +191,7 @@ class ReasoningTests(unittest.TestCase):
     def test_effort_name_cannot_be_a_path(self):
         with self.assertRaises(ValueError):
             self.argv({"reasoning_effort": "../level"})
+
+
+if __name__ == "__main__":
+    unittest.main()

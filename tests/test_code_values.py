@@ -1,15 +1,14 @@
 """The values still fixed in code, shown read-only (audit L19, L26, L34, L57, L59, L60, L61, m26)."""
 
 import json
-import tempfile
 import unittest
-from pathlib import Path
 from typing import cast
 
 from ai_lab.application import code_values
 from ai_lab.application.setting_fields import SettingFields
 from ai_lab.builds import package_install
 from ai_lab.config.store import ConfigStore
+from tests.support import temporary
 
 
 class CodeValuesTests(unittest.TestCase):
@@ -35,7 +34,7 @@ class CodeValuesTests(unittest.TestCase):
         self.assertEqual(code_values.value_of("songs/studio.py", "STUDIO_JOBS_LOOKED_AT"), 50)
 
     def test_the_page_shows_them_and_refuses_to_change_them(self):
-        path = Path(tempfile.mkdtemp()) / "config.json"
+        path = temporary.folder(self) / "config.json"
         path.write_text(json.dumps({}))
         fields = SettingFields(ConfigStore(path), lambda _topic: None)
         shown = [item for item in fields.view()["fields"] if item["group"] == code_values.GROUP]

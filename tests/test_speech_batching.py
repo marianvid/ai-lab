@@ -14,8 +14,15 @@ class BatchQueueTests(unittest.TestCase):
             groups.append(list(items))
             return [item * 10 for item in items]
         queue = BatchQueue(run, 8, 0.3)
+        # All four start at the same moment, so the 0.3 s window is not a race
+        # against how fast the pool happens to start its threads.
+        together = threading.Barrier(4)
+
+        def submit(item):
+            together.wait(2)
+            return queue.submit(item)
         with ThreadPoolExecutor(4) as pool:
-            results = list(pool.map(queue.submit, [1, 2, 3, 4]))
+            results = list(pool.map(submit, [1, 2, 3, 4]))
         self.assertEqual(results, [10, 20, 30, 40])
         self.assertEqual(len(groups), 1)
         self.assertEqual(sorted(groups[0]), [1, 2, 3, 4])
@@ -72,5 +79,5 @@ class BatchQueueTests(unittest.TestCase):
                 BatchQueue(lambda items: items, size, window)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

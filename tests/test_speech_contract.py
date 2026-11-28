@@ -101,5 +101,5 @@ class VoxCpmReferenceTests(unittest.TestCase):
         self.assertEqual(calls['prompt_text'], 'Bună ziua.')
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

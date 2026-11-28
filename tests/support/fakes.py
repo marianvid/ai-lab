@@ -8,7 +8,9 @@ deterministically instead of waited for.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
+import weakref
 from pathlib import Path
 
 from ai_lab.types import (AcceleratorSnapshot, Capabilities, ProcessSpec,
@@ -36,6 +38,8 @@ class FakeHost:
         # write move-job records or history into whatever machine happens to
         # run it.
         self._state_dir = Path(tempfile.mkdtemp(prefix="ai-lab-fakehost-"))
+        # Removed with the host (or at exit): a host does not know its test.
+        weakref.finalize(self, shutil.rmtree, self._state_dir, True)
 
     def state_dir(self) -> Path:
         return self._state_dir

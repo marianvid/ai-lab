@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import struct
-import tempfile
 import unittest
 from pathlib import Path
 
 from ai_lab.catalog.capabilities import FILE_NAME, Known
 from ai_lab.types import IMAGES, TOOLS
+from tests.support import temporary
 
 
 def _gguf(path: Path, metadata: dict[str, str]) -> None:
@@ -34,8 +34,8 @@ def _gguf(path: Path, metadata: dict[str, str]) -> None:
 
 class ReadingWeights(unittest.TestCase):
     def setUp(self) -> None:
-        self.dir = Path(tempfile.mkdtemp())
-        self.state = Path(tempfile.mkdtemp())
+        self.dir = temporary.folder(self)
+        self.state = temporary.folder(self)
         self.known = Known(self.state)
 
     # -- GGUF, one file with its metadata at the head ----------------------
@@ -74,8 +74,8 @@ class ReadingWeights(unittest.TestCase):
 
         (self.dir / "config.json").write_text(json.dumps(
             {"vision_config": {"hidden_size": 1}, "image_token_id": 7}))
-        Known(Path(tempfile.mkdtemp()))     # a fresh memory, so it reads again
-        self.assertIn(IMAGES, Known(Path(tempfile.mkdtemp())).of(
+        # A fresh memory, so it reads the file again.
+        self.assertIn(IMAGES, Known(temporary.folder(self)).of(
             str(self.dir), False, ["config.json"]))
 
     def test_gemma_and_llava_name_the_image_token_otherwise(self):
@@ -123,15 +123,15 @@ class Remembering(unittest.TestCase):
     """Reading a GGUF model costs about a quarter of a second. Once."""
 
     def setUp(self) -> None:
-        self.dir = Path(tempfile.mkdtemp())
-        self.state = Path(tempfile.mkdtemp())
+        self.dir = temporary.folder(self)
+        self.state = temporary.folder(self)
         self.weights = self.dir / "model.gguf"
         _gguf(self.weights, {"tokenizer.chat_template": "{{ tools }}"})
 
     def test_a_directory_keeps_one_answer_not_one_per_change(self):
         # The reviewer's note on L45: older keys of the same model go.
         import os as _os
-        model = Path(tempfile.mkdtemp())
+        model = temporary.folder(self)
         (self.state / FILE_NAME).write_text(json.dumps({f"dir:{model}": []}))
         known = Known(self.state)
         for step in range(3):

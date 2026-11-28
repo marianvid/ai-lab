@@ -11,6 +11,7 @@ from ai_lab.builds.source_versions import Version, mark_version
 from ai_lab.config.policy import BuildLimits
 from ai_lab.events import EventBus
 from ai_lab.types import LogEvent
+from tests.support.temporary import ABSENT
 
 
 def finish(build):
@@ -82,7 +83,7 @@ class SourceBuildTests(unittest.TestCase):
         return build_with(self.path, self.bus, git, stream, options)
 
     def test_a_directory_without_git_is_reported_not_crashed(self):
-        build = SourceBuild("llamacpp", "/nowhere", self.bus)
+        build = SourceBuild("llamacpp", str(ABSENT), self.bus)
         self.assertFalse(build.exists)
         self.assertEqual(build.status()["installed"], "")
         with self.assertRaises(ValueError):
@@ -425,7 +426,7 @@ class UnknownVersionTests(unittest.TestCase):
         self.assertIn("shallow", self.build.status()["note"])
 
     def test_a_missing_checkout_says_so(self):
-        build = SourceBuild("llamacpp", "/nowhere", EventBus())
+        build = SourceBuild("llamacpp", str(ABSENT), EventBus())
         self.assertIn("No git checkout", build.status()["note"])
 
     def test_a_healthy_checkout_has_nothing_to_report(self):
@@ -462,10 +463,17 @@ class WatchTests(unittest.TestCase):
         builds = self.builds(BuildLimits(builds_first_check_s=0.01))
         self.addCleanup(builds.stop)
         checked = []
+        asked = threading.Event()
+
+        def running(_job):
+            # The watcher asked whether the update runs: it has looked, and skipped.
+            asked.set()
+            return "running"
         with patch.object(SourceBuild, "check", lambda self: checked.append(self.engine_id)), \
-                patch.object(BackgroundJob, "state", new=property(lambda self: "running")):
+                patch.object(BackgroundJob, "state", new=property(running)):
             builds.watch(interval_s=0.05)
-            __import__("time").sleep(0.3)
+            self.assertTrue(asked.wait(3), "the watcher never looked")
+            builds.stop()
         self.assertEqual(checked, [])
 
     def test_a_failure_is_swallowed_rather_than_shouted_about(self):

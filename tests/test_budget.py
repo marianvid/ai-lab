@@ -150,10 +150,6 @@ class WhenTheMachineWillNotAnswer(unittest.TestCase):
         self.assertEqual(found.available_mb, 32623)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TwoDifferentQuestions(unittest.TestCase):
     """How big this machine is, and how much is free right now.
 
@@ -203,3 +199,7 @@ class TwoDifferentQuestions(unittest.TestCase):
             FakeHost(card=card(total=131072, used=21000, kind="unified"),
                      machine=(34600.0, 131072.0)), reserve_mb=16384)
         self.assertEqual(unified.reserve_mb, 16384)
+
+
+if __name__ == "__main__":
+    unittest.main()

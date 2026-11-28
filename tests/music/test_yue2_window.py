@@ -177,7 +177,8 @@ class WindowBackendTests(unittest.TestCase):
                 raise StudioRefusedError(404, "no such item")
             return studio(method, path, payload)
         answer = backend(refuse_deletes).generate_window(body())
-        self.assertTrue(answer["cancelled"] is False and answer["candidates"] == [])
+        self.assertIs(answer["cancelled"], False)
+        self.assertEqual(answer["candidates"], [])
 
     def test_without_settings_windows_are_refused(self):
         made = Yue2WebBackend("http://studio", "yue2", SongDefaults("full"), studio=FakeStudio())

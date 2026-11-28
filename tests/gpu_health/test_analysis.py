@@ -10,7 +10,11 @@ from .fakes import settings, temporary_store
 
 
 def noon(day: str) -> float:
-    return time.mktime(time.strptime(day + " 12:00", "%Y-%m-%d %H:%M"))
+    """Local noon of `day`: a window's day is local (analysis/windows.py), and noon is
+    hours from any midnight, so the month across the October DST change keeps one
+    window a day in every zone (the reviewer's L). `tm_isdst=-1` lets mktime decide."""
+    fields = time.strptime(day + " 12:00", "%Y-%m-%d %H:%M")
+    return time.mktime((*fields[:8], -1))
 
 
 class Month(unittest.TestCase):

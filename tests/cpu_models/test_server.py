@@ -1,13 +1,12 @@
 """Starting and stopping one processor model, with a stand-in process and clock."""
 
 import subprocess
-import tempfile
 import unittest
-from pathlib import Path
 
 from ai_lab.cpu_models import CpuModel
 from ai_lab.cpu_models.server import CARD, CpuServer, ProcessTools, command
 from ai_lab.cpu_models.settings import CardUse
+from tests.support import temporary
 
 MODEL = CpuModel(name="bge-m3", path="/m/bge.gguf", port=8390, idle_stop_s=60.0)
 SHARED = CpuModel(name="bge-m3", path="/m/bge.gguf", port=8390,
@@ -51,7 +50,7 @@ class Clock:
 
 class CpuServerTests(unittest.TestCase):
     def setUp(self):
-        self.folder = Path(tempfile.mkdtemp())
+        self.folder = temporary.folder(self)
         self.clock = Clock()
         self.launched = []
         self.process = FakeProcess()
@@ -145,7 +144,12 @@ class CpuServerTests(unittest.TestCase):
         server.stop()
 
     def test_the_real_launcher_logs_to_the_folder(self):
-        server = CpuServer("/bin/sleep", MODEL, self.folder,
+        # A server that stays up until it is stopped, so a probe saying "ready"
+        # is true (`/bin/sleep` given the server's arguments exits at once).
+        binary = self.folder / "stays-up"
+        binary.write_text("#!/bin/sh\necho started\nexec sleep 30\n")
+        binary.chmod(0o755)
+        server = CpuServer(str(binary), MODEL, self.folder,
                            ProcessTools(probe=lambda _port: True))
         server.ensure_started()
         server.stop()

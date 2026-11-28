@@ -1,4 +1,3 @@
-import tempfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +8,7 @@ from ai_lab.config.store import Repository
 from ai_lab.types import Format, Task
 
 from tests.support import make_files, repository
+from tests.support import temporary
 
 
 class ShardNameTests(unittest.TestCase):
@@ -231,10 +231,6 @@ class CatalogTests(unittest.TestCase):
             Catalog().find(repositories, "repo/nope")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class DirectoryIsTheModelTests(unittest.TestCase):
     """Safetensors spreads one model over a directory; GGUF puts one in a file."""
 
@@ -361,7 +357,7 @@ class CarryingCapabilities(unittest.TestCase):
         return Repository(id="r", name="r", path=str(root), format="gguf")
 
     def test_the_answer_reaches_the_model(self):
-        root = Path(tempfile.mkdtemp())
+        root = temporary.folder(self)
         answers = self.Answers()
         found = Catalog(answers).scan([self._repository(root)])
         self.assertEqual(len(found), 1)
@@ -373,7 +369,11 @@ class CarryingCapabilities(unittest.TestCase):
         self.assertTrue(answers.asked[0][1])
 
     def test_a_catalog_with_nobody_to_ask_still_scans(self):
-        root = Path(tempfile.mkdtemp())
+        root = temporary.folder(self)
         found = Catalog().scan([self._repository(root)])
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].capabilities, frozenset())
+
+
+if __name__ == "__main__":
+    unittest.main()

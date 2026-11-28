@@ -5,7 +5,7 @@
 // when somebody decides it can.
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { installDom, settle } from './support/dom.js';
 
@@ -40,10 +40,6 @@ function buttonsIn(row) {
 }
 
 describe('choosing between installed versions', () => {
-  let dom;
-  before(() => { dom = installDom({}); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   it('marks the one in use and leaves it alone', async () => {
     const { view } = await draw();

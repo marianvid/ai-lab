@@ -45,6 +45,20 @@ def scheduler(card, **kwargs):
     return Scheduler(card.switch, card.places, **kwargs)
 
 
+def until(condition, timeout=3.0):
+    """Wait for `condition()`, polling; fail if it never holds. In place of a sleep
+    whose length was a guess at how fast the threads arrive (the reviewer's L)."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("the expected state never came")
+        time.sleep(0.005)
+
+
+def waiting(s) -> int:
+    return len(s.state()["waiting"])
+
+
 def run(target, *args):
     thread = threading.Thread(target=target, args=args, daemon=True)
     thread.start()
@@ -404,10 +418,6 @@ def _swallow(function, *args, **kwargs):
         function(*args, **kwargs)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class OverflowTests(unittest.TestCase):
     """More waiting for a shape than the shape has places.
 
@@ -424,11 +434,11 @@ class OverflowTests(unittest.TestCase):
         s.enter("a")
         for _ in range(4):
             run(_hold, s, "b", 0.15)
-        time.sleep(0.05)
+        until(lambda: waiting(s) == 4)
         run(_hold, s, "c", 0.05)                # newer than all four
-        time.sleep(0.05)
+        until(lambda: waiting(s) == 5)
         s.leave("a")
-        time.sleep(1.2)
+        until(lambda: "c" in card.switches and s.state()["in_flight"] == 0 and waiting(s) == 0)
         self.assertEqual(card.switches, ["a", "b", "c"],
                          "it swapped away mid-round and back again")
 
@@ -438,14 +448,13 @@ class OverflowTests(unittest.TestCase):
         s.enter("a")
         for _ in range(5):
             run(lambda: _swallow(s.enter, "b"))
-        time.sleep(0.05)
+        until(lambda: waiting(s) == 5)
         s.leave("a")
-        time.sleep(0.1)
-        self.assertEqual(s.state()["in_flight"], 2)
-        self.assertEqual(len(s.state()["waiting"]), 3)
+        until(lambda: s.state()["in_flight"] == 2)
+        self.assertEqual(waiting(s), 3)
         s.leave("b")
-        time.sleep(0.1)
-        self.assertEqual(len(s.state()["waiting"]), 2, "nobody took the free place")
+        until(lambda: waiting(s) == 2)
+        self.assertEqual(s.state()["in_flight"], 2, "nobody took the free place")
 
     def test_they_keep_the_order_they_arrived_in(self):
         card = Card(places=1)
@@ -454,11 +463,10 @@ class OverflowTests(unittest.TestCase):
         served: list[int] = []
         for index in range(3):
             run(_record, s, "b", served, index)
-            time.sleep(0.02)
-        time.sleep(0.05)
+            until(lambda index=index: waiting(s) == index + 1)    # arrived in this order
         s.leave("a")
-        for _ in range(4):
-            time.sleep(0.15)
+        for count in range(1, 4):
+            until(lambda count=count: len(served) == count)
             s.leave("b")
         self.assertEqual(served, [0, 1, 2])
 
@@ -523,12 +531,11 @@ class InOrderTests(unittest.TestCase):
         card = Card(places=4)
         s = scheduler(card)
         s.enter("a")
-        for shape in ("b", "b", "c", "b", "b"):
+        for count, shape in enumerate(("b", "b", "c", "b", "b"), start=1):
             run(_hold, s, shape, 0.4)
-            time.sleep(0.03)
-        time.sleep(0.05)
+            until(lambda count=count: waiting(s) == count)        # arrived in this order
         s.leave("a")
-        time.sleep(0.25)
+        until(lambda: "b" in card.switches and s.state()["in_flight"] == 2)
         self.assertEqual(s.state()["in_flight"], 2,
                          "it swept up the two behind the request for c")
         self.assertEqual([w["shape"] for w in s.state()["waiting"]],
@@ -655,7 +662,7 @@ class SeveralAtOnce(unittest.TestCase):
         s.enter("c")
         self.assertEqual(self.card.switches, ["a", "b", "c"])
         self.assertEqual(self.card.taken_off[-1], ("a",),
-                         "took off the one used most recently")
+                         "did not take off the one used longest ago")
         loaded = {item["shape"] for item in s.state()["loaded"]}
         self.assertEqual(loaded, {"b", "c"})
 
@@ -746,3 +753,7 @@ class SeveralAtOnce(unittest.TestCase):
         rows = {item["shape"]: item for item in s.state()["loaded"]}
         self.assertEqual(rows["a"]["in_flight"], 1)
         self.assertEqual(s.state()["waiting"].__len__(), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

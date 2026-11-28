@@ -81,10 +81,6 @@ class DarwinHostTests(unittest.TestCase):
         self.assertFalse(self.host.status("never-started").running)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 @unittest.skipUnless(sys.platform == "darwin", "macOS only")
 class ShutdownTests(unittest.TestCase):
     """Engines must not outlive the manager.
@@ -111,3 +107,7 @@ class ShutdownTests(unittest.TestCase):
         pid = host.status("grouped").pid
         assert pid is not None
         self.assertEqual(os.getpgid(pid), os.getpgid(0))
+
+
+if __name__ == "__main__":
+    unittest.main()

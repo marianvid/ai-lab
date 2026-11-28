@@ -16,7 +16,7 @@
 // machine.
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { installDom, settle } from './support/dom.js';
 
@@ -47,10 +47,6 @@ const EMPTY = {
 const VIEWS = ['runtime', 'library', 'settings', 'gateway', 'lanes', 'storage'];
 
 describe('words that are never an answer', () => {
-  let dom;
-  before(() => { dom = installDom({}); });
-  after(() => dom.restore && dom.restore());
-  beforeEach(() => { document.body.innerHTML = ''; });
 
   for (const name of VIEWS) {
     it(`${name} says none of them when everything is missing`, async () => {

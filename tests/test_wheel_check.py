@@ -1,16 +1,15 @@
 """The wheel check finds a missing application file and a private one."""
 
-import tempfile
 import unittest
-from pathlib import Path
 from zipfile import ZipFile
 
 from ai_lab.wheel_check import application_files, differences
+from tests.support import temporary
 
 
 class WheelCheckTests(unittest.TestCase):
     def setUp(self):
-        self.source = Path(tempfile.mkdtemp())
+        self.source = temporary.folder(self)
         (self.source / "ai_lab" / "web").mkdir(parents=True)
         (self.source / "ai_lab" / "main.py").write_text("")
         (self.source / "ai_lab" / "web" / "app.js").write_text("")

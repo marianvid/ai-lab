@@ -1,11 +1,11 @@
 """What YuE2 Studio decides about a song, in `songs/studio.py` (audit L61)."""
 
-import tempfile
 import unittest
 from pathlib import Path
 
 from ai_lab.gateway.errors import ModelNotLoadedError, WindowCallActiveError
 from ai_lab.songs.studio import SongFolders
+from tests.support import temporary
 
 
 class Engine:
@@ -44,7 +44,7 @@ class Gateway:
 
 class SongFoldersTests(unittest.TestCase):
     def setUp(self):
-        self.here = Path(tempfile.mkdtemp())
+        self.here = temporary.folder(self)
         (self.here / "song-1").mkdir()
         self.edited: dict[str, str] = {}
         self.songs = SongFolders(Gateway(), Operations(Engine(self.here)), self.edited.get)

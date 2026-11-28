@@ -30,7 +30,6 @@ from ai_lab.runtime.core import Operation
 from ai_lab.types import AcceleratorSnapshot, Task
 
 
-
 def loaded_names(gateway) -> list:
     """What is on the machine, as the page reads it.
 
@@ -39,6 +38,15 @@ def loaded_names(gateway) -> list:
     would have to be rewritten when the set can hold two.
     """
     return [item["instance_id"] for item in gateway.stats()["loaded"]]
+
+
+def until(condition, timeout=3.0):
+    """Wait for `condition()`, polling; fail if it never holds (in place of a guessed sleep)."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError("the expected state never came")
+        time.sleep(0.005)
 
 
 def places(gateway) -> int:
@@ -692,16 +700,17 @@ class SequenceTests(unittest.TestCase):
 
         thread = threading.Thread(target=switch)
         thread.start()
-        time.sleep(0.05)
+        until(lambda: gateway.stats()["waiting"] == 1)       # the switch is queued
         order.append("first request still going")
         lease.__exit__()
         thread.join(timeout=5)
 
         self.assertEqual(order, ["first request still going", "switched"])
 
-    def test_two_requests_for_the_same_model_still_take_turns(self):
-        # This is the deliberate consequence of the design: sequential means
-        # sequential, even when no switch is needed.
+    def test_with_one_place_two_requests_for_the_same_model_take_turns(self):
+        # The entry serves one request at a time (`parallel` is 1, so the
+        # engine has one place): the second waits for the first, even though
+        # no switch is needed.
         operations = two_models(coder=True)
         gateway = quick(operations)
         order = []
@@ -713,7 +722,7 @@ class SequenceTests(unittest.TestCase):
 
         thread = threading.Thread(target=second)
         thread.start()
-        time.sleep(0.05)
+        until(lambda: gateway.stats()["waiting"] == 1)       # the second is queued
         order.append("first")
         first.__exit__()
         thread.join(timeout=5)
@@ -871,7 +880,7 @@ class ReportingTests(unittest.TestCase):
 
         thread = threading.Thread(target=ask)
         thread.start()
-        time.sleep(0.05)
+        until(lambda: operations.loads == ["coder"])         # the load has begun
         seen.append(gateway.stats()["busy"])
         thread.join(timeout=5)
         self.assertEqual(seen, [True])
@@ -882,10 +891,6 @@ class ReportingTests(unittest.TestCase):
         with gateway.acquire("coder"):
             self.assertTrue(gateway.stats()["busy"])
         self.assertFalse(gateway.stats()["busy"])
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TakingUpWhatIsAlreadyThere(unittest.TestCase):
@@ -1356,7 +1361,7 @@ class TogetherTests(unittest.TestCase):
         blocked = threading.Thread(
             target=lambda: gateway.acquire("coder").release(), daemon=True)
         blocked.start()
-        time.sleep(0.05)
+        until(lambda: gateway.stats()["waiting"] == 1)
         self.assertEqual(gateway.stats()["in_flight"], 1)
         self.assertEqual(gateway.stats()["waiting"], 1)
         first.release()
@@ -1369,14 +1374,12 @@ class TogetherTests(unittest.TestCase):
         waiting = threading.Thread(
             target=lambda: gateway.acquire("reviewer").release(), daemon=True)
         waiting.start()
-        time.sleep(0.05)
-        self.assertEqual(gateway.stats()["waiting"], 1)
+        until(lambda: gateway.stats()["waiting"] == 1)
         # Now one for the loaded model, which would have walked in a moment ago.
         later = threading.Thread(
             target=lambda: gateway.acquire("coder").release(), daemon=True)
         later.start()
-        time.sleep(0.05)
-        self.assertEqual(gateway.stats()["waiting"], 2)
+        until(lambda: gateway.stats()["waiting"] == 2)
         held.release()
         waiting.join(timeout=3)
         later.join(timeout=3)
@@ -1386,11 +1389,12 @@ class TogetherTests(unittest.TestCase):
         operations = busy_models(coder=True)
         gateway = quick(operations)
         held = gateway.acquire("coder")
+        self.addCleanup(gateway.reset, "the test is over")      # turns the waiters away
         for _ in range(2):
             threading.Thread(
                 target=lambda: _ignore(gateway.acquire, "reviewer"),
                 daemon=True).start()
-        time.sleep(0.05)
+        until(lambda: gateway.stats()["waiting"] == 2)
         summary = gateway.stats()["waiting_for"]
         self.assertEqual([row["instance_id"] for row in summary], ["reviewer"])
         self.assertEqual(summary[0]["waiting"], 2)
@@ -1402,10 +1406,11 @@ class TogetherTests(unittest.TestCase):
         operations = busy_models(coder=True)
         gateway = quick(operations)
         held = gateway.acquire("coder", settings={"context_size": 65536})
+        self.addCleanup(gateway.reset, "the test is over")
         other = threading.Thread(
             target=lambda: _ignore(gateway.acquire, "coder"), daemon=True)
         other.start()
-        time.sleep(0.05)
+        until(lambda: gateway.stats()["waiting"] == 1 or gateway.stats()["in_flight"] == 2)
         self.assertEqual(gateway.stats()["waiting"], 1,
                          "it shared a card with a different context size")
         held.release()
@@ -1416,8 +1421,8 @@ class BusyMessageTests(unittest.TestCase):
 
     def test_it_counts_the_answers_in_progress(self):
         gateway = quick(busy_models(coder=True))
-        gateway.acquire("coder")
-        gateway.acquire("coder")
+        for lease in (gateway.acquire("coder"), gateway.acquire("coder")):
+            self.addCleanup(lease.release)
         with self.assertRaises(CardBusyError) as caught:
             gateway.guard("unload", "coder")
         self.assertIn("2 requests", str(caught.exception))
@@ -1426,11 +1431,12 @@ class BusyMessageTests(unittest.TestCase):
         # One answer being written is a different thing from forty requests
         # waiting for a model, and the difference decides whether to go ahead.
         gateway = quick(two_models(coder=True))          # one place
-        gateway.acquire("coder")
+        self.addCleanup(gateway.reset, "the test is over")
+        self.addCleanup(gateway.acquire("coder").release)
         for _ in range(3):
             threading.Thread(target=lambda: _ignore(gateway.acquire, "reviewer"),
                              daemon=True).start()
-        time.sleep(0.05)
+        until(lambda: gateway.stats()["waiting"] == 3)
         with self.assertRaises(CardBusyError) as caught:
             gateway.guard("unload", "coder")
         self.assertIn("3 more are waiting", str(caught.exception))
@@ -1454,10 +1460,9 @@ class ForcedResetTests(unittest.TestCase):
             threading.Thread(
                 target=lambda: refused.append(_ignore(gateway.acquire, "reviewer")),
                 daemon=True).start()
-        time.sleep(0.05)
+        until(lambda: gateway.stats()["waiting"] == 3)
         self.assertEqual(gateway.reset("stopped by hand"), 3)
-        time.sleep(0.05)
-        self.assertEqual(len(refused), 3)
+        until(lambda: len(refused) == 3)
         held.release()
 
     def test_nothing_is_running_or_waiting_afterwards(self):
@@ -1758,3 +1763,7 @@ class TaskTimeoutTests(unittest.TestCase):
         gateway.apply_settings({"task_timeouts": {"ocr": {"first_byte_s": 45.0,
                                                            "between_bytes_s": 20.0}}})
         self.assertEqual(gateway.timeouts_for(Task.OCR), (45.0, 20.0))
+
+
+if __name__ == "__main__":
+    unittest.main()

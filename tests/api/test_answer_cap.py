@@ -12,12 +12,20 @@ TOO_LONG = {"error": {"message": "too long"},
 
 
 class Released:
-    """A stand-in for `Lease.release`: gives the place back once, as the real one does."""
+    """A stand-in for `Lease.release`, as the real one behaves: the place is given back
+    on the first call and a second call does nothing (`gateway/state.Lease`).
+
+    `count` is what was given back (0 or 1); `calls` counts every call. The close
+    path here calls it twice (the answer's own close, then the keeper), which the
+    real lease absorbs; the reviewer's L wanted that visible, so it is counted.
+    """
 
     def __init__(self):
         self.count = 0
+        self.calls = 0
 
     def __call__(self):
+        self.calls += 1
         self.count = 1
 
 
@@ -67,6 +75,7 @@ class SendCappedTests(unittest.TestCase):
         self.assertEqual(released.count, 0, "the place is held until the answer closes")
         result.close()
         self.assertEqual(released.count, 1)
+        self.assertEqual(released.calls, 2, "the answer's close and the keeper; the lease absorbs the second")
 
     def test_a_refusal_caused_by_the_cap_is_sent_again_without_it(self):
         released = Released()

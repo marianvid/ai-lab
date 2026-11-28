@@ -225,7 +225,13 @@ class CardOperationsTests(unittest.TestCase):
     def test_operations_offers_everything_the_gateway_asks_of_it(self):
         from ai_lab.gateway.card_operations import CardOperations
         from ai_lab.operations import Operations
+        import inspect
         asked = [name for name, value in vars(CardOperations).items()
                  if callable(value) and not name.startswith("_")]
         self.assertGreater(len(asked), 5)
         self.assertEqual([name for name in asked if not callable(getattr(Operations, name, None))], [])
+        # The same parameters too, by name, not only the same method names.
+        differ = [name for name in asked
+                  if list(inspect.signature(getattr(CardOperations, name)).parameters)
+                  != list(inspect.signature(getattr(Operations, name)).parameters)]
+        self.assertEqual(differ, [])

@@ -2,7 +2,6 @@
 
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +11,8 @@ from ai_lab.application import paths
 from ai_lab.application.model_listing import ModelListing, _note
 from ai_lab.application.settings_changes import SettingsChanges
 from ai_lab.config.store import ConfigStore
+from tests.support import temporary
+from tests.support.temporary import ABSENT
 
 
 def store_at(directory: Path) -> ConfigStore:
@@ -22,7 +23,7 @@ def store_at(directory: Path) -> ConfigStore:
 
 class PathsTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp())
+        self.root = temporary.folder(self)
 
     def test_folders_always_programs_only_when_asked_libraries_never(self):
         (self.root / "models").mkdir()
@@ -44,8 +45,8 @@ class PathsTests(unittest.TestCase):
     def test_it_starts_beside_the_first_repository_that_exists(self):
         repository = self.root / "gguf"
         repository.mkdir()
-        self.assertEqual(paths.browse_root(["/nowhere", str(repository)]), self.root)
-        self.assertEqual(paths.browse_root(["/nowhere"]), Path.home())
+        self.assertEqual(paths.browse_root([str(ABSENT), str(repository)]), self.root)
+        self.assertEqual(paths.browse_root([str(ABSENT)]), Path.home())
 
     def test_making_a_directory_says_whether_it_was_new(self):
         target = self.root / "a" / "b"
@@ -58,7 +59,7 @@ class PathsTests(unittest.TestCase):
 
 class SettingsChangesTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp())
+        self.root = temporary.folder(self)
         self.store = store_at(self.root)
         self.topics: list[str] = []
         self.changes = SettingsChanges(self.store, cast(Any, SimpleNamespace()), cast(Any, SimpleNamespace()),

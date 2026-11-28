@@ -86,5 +86,5 @@ class Yue2EngineTests(unittest.TestCase):
             self.assertEqual(studio_env('cuda'), {'HF_HUB_OFFLINE': '1'})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
