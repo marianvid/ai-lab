@@ -351,6 +351,29 @@ class FailedLoadTests(unittest.TestCase):
         self.assertFalse(host.status("qwen").running)
         self.assertNotIn("qwen", runtime._active)  # noqa: SLF001
 
+    def test_an_engine_that_exits_during_the_readiness_wait_leaves_nothing_behind(self):
+        # The reviewer's item 20: only the timeout branch was checked for this.
+        class DiesWhileLoading(FakeHost):
+            def __init__(self):
+                super().__init__()
+                self.checks = 0
+
+            def status(self, instance_id):
+                self.checks += 1
+                if self.checks > 2:
+                    self.running.discard(instance_id)     # the process exits on its own
+                return super().status(instance_id)
+
+        host = DiesWhileLoading()
+        host.log_lines = ["error loading model"]
+        runtime = Runtime(host, EventBus(), sample_interval_s=0)
+        operation = runtime.load(instance(), model(), FakeEngine(ready_after=10**12, host=host))
+        self.assertFalse(operation.ok)
+        self.assertIn("error loading model", operation.error)
+        self.assertEqual(host.stopped, ["qwen"], "its unit was not stopped after it exited")
+        self.assertFalse(host.status("qwen").running)
+        self.assertNotIn("qwen", runtime._active)  # noqa: SLF001
+
     def test_a_refused_load_claims_no_settings(self):
         host = FakeHost()
         runtime = Runtime(host, EventBus(), sample_interval_s=0)
